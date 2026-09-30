@@ -76,23 +76,26 @@ public static class PartyPrintEndpoints
                     $"/api/party/{enc}/print/media/{i.FileItemId}/preview"))
                 .ToList();
 
+            // Only what this printer, with the paper it has in, can make — the
+            // matrix applied here, so a guest never has to know which
+            // combination is valid. Each in the order the studio offers them.
+            var offered = PartyPrintProducts.All
+                .Select(p => (Id: p, State: access.Product(p)))
+                .Where(p => p.State is not null)
+                .Select(p => new PartyPrintFormatDto(
+                    p.Id, p.State!.Enabled, p.State.Remaining,
+                    PartyPrintProducts.RequiredPhotos(p.Id),
+                    YoursLeft(p.State.PerGuest, used.Used(p.Id)),
+                    access.CutByPrinter(p.Id),
+                    access.Paper))
+                .ToList();
+
             return Results.Ok(new PartyPrintManifestDto(
                 access.PartyName,
                 access.FooterText,
-                [
-                    new PartyPrintFormatDto(
-                        PartyPrintProducts.Photo, access.Photo.Enabled,
-                        access.Photo.Remaining,
-                        PartyPrintProducts.RequiredPhotos(PartyPrintProducts.Photo),
-                        YoursLeft(access.Photo.PerGuest, used.UsedPhotos)),
-                    new PartyPrintFormatDto(
-                        PartyPrintProducts.Strip4, access.Strip.Enabled,
-                        access.Strip.Remaining,
-                        PartyPrintProducts.RequiredPhotos(PartyPrintProducts.Strip4),
-                        YoursLeft(access.Strip.PerGuest, used.UsedStrips),
-                        access.CutByPrinter(PartyPrintProducts.Strip4)),
-                ],
-                photos));
+                offered,
+                photos,
+                access.Paper));
         }).WithName("GetPartyPrintManifest").RequireRateLimiting(PartyPublicRateLimitPolicy);
 
         // Compose it for real.
@@ -133,7 +136,8 @@ public static class PartyPrintEndpoints
                         s.ItemId, s.CropX, s.CropY, s.CropWidth, s.CropHeight)).ToList(),
                     body.Orientation,
                     body.OverlayText,
-                    body.OverlayLogo),
+                    body.OverlayLogo,
+                    body.PaperSize),
                 key,
                 participantId,
                 cancellationToken);
@@ -165,6 +169,10 @@ public static class PartyPrintEndpoints
                     Results.BadRequest(new { error = "invalid_source" }),
                 PartyPrintRefusal.RenderFailed =>
                     Results.Json(new { error = "render_failed" }, statusCode: 503),
+                // The operator changed the paper: the studio reloads and offers
+                // what the new paper can make. Nothing was spent.
+                PartyPrintRefusal.PaperChanged =>
+                    Results.Conflict(new { error = "paper_changed" }),
                 _ => Results.BadRequest(new { error = "invalid" }),
             };
         }).WithName("SubmitPartyPrint").RequireRateLimiting(PartyPrintSubmitRateLimitPolicy);
@@ -222,9 +230,12 @@ public static class PartyPrintEndpoints
                 jobId,
                 GuestState(job.State),
                 job.PublicSequence ?? 0,
-                job.Kind == PrintJobKinds.PartyStrip4
-                    ? PartyPrintProducts.Strip4
-                    : PartyPrintProducts.Photo));
+                job.Kind switch
+                {
+                    PrintJobKinds.PartyStrip4 => PartyPrintProducts.TwinStrip4,
+                    PrintJobKinds.PartyGrid4 => PartyPrintProducts.Grid4,
+                    _ => PartyPrintProducts.Photo,
+                }));
         }).WithName("GetPartyPrintStatus").RequireRateLimiting(PartyPublicRateLimitPolicy);
     }
 
@@ -257,7 +268,9 @@ public sealed record PartyPrintManifestDto(
     string PartyName,
     string? FooterText,
     IReadOnlyList<PartyPrintFormatDto> Formats,
-    IReadOnlyList<PartyPrintPhotoDto> Photos);
+    IReadOnlyList<PartyPrintPhotoDto> Photos,
+    /// <summary>The paper the printer has in: every offered product is a sheet of it.</summary>
+    string PaperSize);
 
 public sealed record PartyPrintFormatDto(
     string Type, bool Enabled, int Remaining, int RequiredPhotos,
@@ -268,17 +281,20 @@ public sealed record PartyPrintFormatDto(
     /// </summary>
     int? RemainingForYou,
     /// <summary>
-    /// The printer cuts this sheet itself, so the preview draws no cut marks —
-    /// because the printed sheet has none.
+    /// The printer cuts this sheet itself — the twin strip, always — so the
+    /// preview draws no cut marks, because the printed sheet has none.
     /// </summary>
-    bool CutByPrinter = false);
+    bool CutByPrinter = false,
+    /// <summary>The paper this product is printed on.</summary>
+    string PaperSize = PrintPapers.Photo10x15);
 
 /// <summary>A choosable photograph: safe derived URLs only, never an original.</summary>
 public sealed record PartyPrintPhotoDto(Guid Id, string ThumbnailUrl, string PreviewUrl);
 
 public sealed record PartyPrintSubmitBody(
     string? Product, string? Theme, List<PartyPrintSlotBody>? Slots,
-    string? Orientation = null, string? OverlayText = null, string? OverlayLogo = null);
+    string? Orientation = null, string? OverlayText = null, string? OverlayLogo = null,
+    string? PaperSize = null);
 
 public sealed record PartyPrintSlotBody(
     Guid ItemId, double CropX, double CropY, double CropWidth, double CropHeight);

@@ -14,7 +14,14 @@ public sealed record PartyPrintSubmitRequest(
     /// <summary>"white", "black" or "red": the words of an "On the photo" print.</summary>
     string? OverlayText = null,
     /// <summary>"light" or "dark": its NubArca symbol, independent of the words.</summary>
-    string? OverlayLogo = null);
+    string? OverlayLogo = null,
+    /// <summary>
+    /// The paper the guest composed for, as the manifest named it. It must be
+    /// the paper still loaded: a sheet composed for 10x15 is not printed on
+    /// 20x15 because the operator changed rolls in between. Absent (a page from
+    /// before papers) means 10x15, the only paper there was.
+    /// </summary>
+    string? PaperSize = null);
 
 public sealed record PartyPrintSlotRequest(
     Guid ItemId, double CropX, double CropY, double CropWidth, double CropHeight);
@@ -37,6 +44,11 @@ public enum PartyPrintRefusal
     PrinterUnavailable,
     /// <summary>Composing the sheet failed. Costs nothing.</summary>
     RenderFailed,
+    /// <summary>
+    /// The printer has other paper in than the sheet was composed for. Costs
+    /// nothing; the studio reloads and offers what the new paper can make.
+    /// </summary>
+    PaperChanged,
 }
 
 /// <summary>What the guest is told after a successful submission.</summary>

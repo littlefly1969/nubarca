@@ -176,6 +176,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Adds four non-null double columns to printer_devices (CalibrationBrightness, CalibrationContrast, CalibrationGamma, CalibrationSaturation), each with a database default of 1.0, so every existing row becomes neutral and a row the previous application inserts without naming them is neutral too. Nothing is dropped, altered, backfilled or constrained beyond the defaults. The previously pinned application neither reads nor writes these columns, so rolling the image back leaves it printing exactly as before against the upgraded schema."
+    },
+    "20260930014342_AddPartyPrintPapersAndGrid": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds non-null columns with database defaults and nothing else. printer_devices.LoadedPaperSize is varchar(8) with default '10x15', the only paper the previous application ever printed, so every existing printer and every printer it registers stays on 10x15. party_print_profiles gains GridEnabled (default false) and GridMaxPrints, GridAcceptedCount and GridPrintsPerGuest (default 0), so no party gains a product. party_participants gains AcceptedGridPrintCount (default 0). Nothing is dropped, altered, backfilled or constrained beyond the defaults. The previously pinned application neither reads nor writes these columns, so rolling the image back leaves it printing exactly as before against the upgraded schema."
     }
   }
 }

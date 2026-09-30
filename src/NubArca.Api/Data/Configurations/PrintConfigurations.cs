@@ -69,6 +69,10 @@ public sealed class PrinterDeviceConfiguration : IEntityTypeConfiguration<Printe
         builder.Property(x => x.CalibrationContrast).HasDefaultValue(1.0);
         builder.Property(x => x.CalibrationGamma).HasDefaultValue(1.0);
         builder.Property(x => x.CalibrationSaturation).HasDefaultValue(1.0);
+        // The paper most parties print on, so a device the previous application
+        // registers is on the paper it always assumed.
+        builder.Property(x => x.LoadedPaperSize).IsRequired().HasMaxLength(8)
+            .HasDefaultValue(PrintPapers.Photo10x15);
         builder.HasIndex(x => new { x.PrintStationId, x.DeviceKey }).IsUnique()
             .HasDatabaseName("ux_printer_devices_station_device_key");
         builder.HasOne<PrintStation>().WithMany().HasForeignKey(x => x.PrintStationId)

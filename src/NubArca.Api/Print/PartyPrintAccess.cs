@@ -23,30 +23,54 @@ public sealed record PartyPrintAccess(
     string PartyName,
     string? FooterText,
     PartyPrintProductState Photo,
+    /// <summary>The twin strip.</summary>
     PartyPrintProductState Strip,
     /// <summary>
-    /// The printer cuts the strip sheet into its two strips itself, so the
-    /// sheet is sent as 2x6x2 and carries no marks to cut along.
+    /// The printer cuts a 10x15 sheet into its two strips itself — sent as
+    /// 2x6x2. The twin strip exists only when it does.
     /// </summary>
     bool StripCutByPrinter = false,
     /// <summary>The printer's tone compensation. Null is neutral.</summary>
-    PrintCalibration? Calibration = null)
+    PrintCalibration? Calibration = null,
+    /// <summary>Four photographs on one sheet. Null is off.</summary>
+    PartyPrintProductState? Grid = null,
+    /// <summary>The paper the operator says is loaded, which the printer reports it can print.</summary>
+    string Paper = PrintPapers.Photo10x15)
 {
+    private static readonly PartyPrintProductState Off = new(false, 0);
+
+    /// <summary>
+    /// Whether this printer, with its paper, can make the product at all — the
+    /// matrix, and for the twin strip the printer's own cut. Whether the host
+    /// turned it on and has sheets left is the product state's business.
+    /// </summary>
+    public bool Offers(string product) =>
+        PartyPrintProducts.Allowed(Paper, product)
+        && (product != PartyPrintProducts.TwinStrip4 || StripCutByPrinter);
+
     /// <summary>True when the printer, not the guest, cuts this product's sheet.</summary>
     public bool CutByPrinter(string product) =>
-        product == Domain.Print.PartyPrintProducts.Strip4 && StripCutByPrinter;
+        product == PartyPrintProducts.TwinStrip4 && StripCutByPrinter;
 
-    /// <summary>The job format this product's sheet is printed as.</summary>
+    /// <summary>The job format this product's sheet is printed as: the paper, or the cut 10x15.</summary>
     public string PrintFormat(string product) =>
-        CutByPrinter(product) ? PrintFormats.Strip2x6Pair : PrintFormats.Photo10x15;
+        product == PartyPrintProducts.TwinStrip4 ? PrintFormats.Strip2x6Pair : Paper;
 
-    /// <summary>This party's state for one product, or null if there is no such product.</summary>
-    public PartyPrintProductState? Product(string product) => product switch
+    /// <summary>
+    /// This party's state for one product — null when there is no such
+    /// product, or this printer and paper cannot make it.
+    /// </summary>
+    public PartyPrintProductState? Product(string product)
     {
-        Domain.Print.PartyPrintProducts.Photo => Photo,
-        Domain.Print.PartyPrintProducts.Strip4 => Strip,
-        _ => null,
-    };
+        if (!Offers(product)) return null;
+        return product switch
+        {
+            PartyPrintProducts.Photo => Photo,
+            PartyPrintProducts.Grid4 => Grid ?? Off,
+            PartyPrintProducts.TwinStrip4 => Strip,
+            _ => null,
+        };
+    }
 }
 
 /// <summary>One product's live state, as the guest is allowed to see it.</summary>

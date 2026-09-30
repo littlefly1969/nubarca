@@ -1080,7 +1080,10 @@ public static class PartyCrewEndpoints
                         body.StripEnabled,
                         body.StripMaxPrints,
                         body.StripPrintsPerGuest,
-                        body.FooterText),
+                        body.FooterText,
+                        body.GridEnabled,
+                        body.GridMaxPrints,
+                        body.GridPrintsPerGuest),
                     Ip(http), ct);
 
                 // The answer goes back through the same projection, or the

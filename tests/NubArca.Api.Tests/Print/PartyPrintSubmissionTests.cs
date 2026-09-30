@@ -58,6 +58,7 @@ public sealed class PartyPrintSubmissionTests : IDisposable
             Enabled = true,
             PhotoEnabled = photoEnabled, PhotoMaxPrints = photoMax,
             StripEnabled = stripEnabled, StripMaxPrints = stripMax,
+            GridEnabled = true, GridMaxPrints = 5,
             PublicSequenceNext = 1,
             CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
         });
@@ -77,7 +78,8 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         {
             Id = deviceId, PrintStationId = stationId, DeviceKey = "dev-1",
             DisplayName = "DNP DS620", AdapterKind = "fake",
-            CapabilitiesJson = "{\"formats\":[\"10x15\"]}",
+            // A DNP with its cut queue: 10x15, and the twin strip cut in two.
+            CapabilitiesJson = "{\"formats\":[\"10x15\",\"2x6x2\"]}",
             LastObservedState = PrintDeviceStates.Ready, LastSeenAt = DateTime.UtcNow,
         });
 
@@ -106,7 +108,9 @@ public sealed class PartyPrintSubmissionTests : IDisposable
             linkId, albumId, ownerId, stationId, deviceId,
             "Giulia & Matteo", "Una notte da ricordare",
             new PartyPrintProductState(photoEnabled, photoMax),
-            new PartyPrintProductState(stripEnabled, stripMax)), albumId);
+            new PartyPrintProductState(stripEnabled, stripMax),
+            StripCutByPrinter: true,
+            Grid: new PartyPrintProductState(true, 5)), albumId);
     }
 
     private IPartyPrintSubmissionService Service(IServiceScope scope) =>
@@ -133,6 +137,22 @@ public sealed class PartyPrintSubmissionTests : IDisposable
     {
         using var scope = _factory.Services.CreateScope();
         return await Service(scope).SubmitAsync(access, request, key, participantId, default);
+    }
+
+    private static PartyPrintSubmitRequest OnPaper(string paper, string product, params Guid[] ids) =>
+        Request(product, ids) with { PaperSize = paper };
+
+    /// <summary>A job as the queue stores it: kind, format, its sources in order, and its specification.</summary>
+    private async Task<(string Kind, string Format, Guid[] Sources, System.Text.Json.JsonElement Spec)> JobAsync(Guid jobId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var job = await db.PrintJobs.AsNoTracking().SingleAsync(j => j.Id == jobId);
+        var sources = await db.PrintJobSources.AsNoTracking()
+            .Where(s => s.PrintJobId == jobId).OrderBy(s => s.SlotIndex)
+            .Select(s => s.FileItemId).ToArrayAsync();
+        return (job.Kind, job.Format, sources,
+            System.Text.Json.JsonDocument.Parse(job.RenderSpecificationJson).RootElement.Clone());
     }
 
     private async Task<PartyPrintProfile> ProfileAsync(Guid albumId)
@@ -173,7 +193,7 @@ public sealed class PartyPrintSubmissionTests : IDisposable
     {
         var (access, albumId) = await SeedAsync();
         var result = await SubmitAsync(access,
-            Request(PartyPrintProducts.Strip4, Eight()), "k1");
+            Request(PartyPrintProducts.TwinStrip4, Eight()), "k1");
         Assert.True(result.Ok);
 
         using var scope = _factory.Services.CreateScope();
@@ -195,18 +215,160 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         Assert.Equal(0, profile.PhotoAcceptedCount);
     }
 
+    // --- Papers, the matrix, four photographs ---------------------------------
+
+    [Theory]
+    [InlineData(PrintPapers.Photo10x15, "portrait")]
+    [InlineData(PrintPapers.Photo13x18, "portrait")]
+    [InlineData(PrintPapers.Photo20x15, "landscape")]
+    public async Task Four_Photographs_Make_One_Sheet_Of_The_Loaded_Paper(string paper, string orientation)
+    {
+        var (access, albumId) = await SeedAsync();
+        var four = _photos.Take(4).ToArray();
+        var result = await SubmitAsync(access with { Paper = paper },
+            OnPaper(paper, PartyPrintProducts.Grid4, four), $"g-{paper}");
+        Assert.True(result.Ok);
+        Assert.Equal(PartyPrintProducts.Grid4, result.Accepted!.Product);
+
+        var job = await JobAsync(result.Accepted.JobId);
+        Assert.Equal(PrintJobKinds.PartyGrid4, job.Kind);
+        // The sheet goes to the agent as the paper it is printed on.
+        Assert.Equal(paper, job.Format);
+        // Top left, top right, bottom left, bottom right: the order chosen.
+        Assert.Equal(four, job.Sources);
+        // The specification says, on its own, what came out of the printer.
+        Assert.Equal(paper, job.Spec.GetProperty("paperSize").GetString());
+        Assert.Equal("grid4", job.Spec.GetProperty("product").GetString());
+        Assert.Equal("grid4", job.Spec.GetProperty("layout").GetString());
+        Assert.Equal(orientation, job.Spec.GetProperty("orientation").GetString());
+        Assert.False(job.Spec.GetProperty("cutByPrinter").GetBoolean());
+
+        // One sheet is one unit of the four-photo budget, and of nothing else.
+        var profile = await ProfileAsync(albumId);
+        Assert.Equal(1, profile.GridAcceptedCount);
+        Assert.Equal(0, profile.PhotoAcceptedCount);
+        Assert.Equal(0, profile.StripAcceptedCount);
+    }
+
     [Fact]
-    public async Task On_A_Printer_That_Cuts_A_Strip_Is_Sent_As_2x6x2_And_A_Photo_Is_Not()
+    public async Task Four_Photographs_Are_Exactly_Four_Different_Ones()
+    {
+        var (access, albumId) = await SeedAsync();
+        var p = _photos;
+        foreach (var (ids, key) in new[]
+        {
+            (new[] { p[0], p[1], p[2] }, "three"),
+            (new[] { p[0], p[1], p[2], p[3], p[4] }, "five"),
+            (new[] { p[0], p[1], p[2], p[0] }, "twice"),
+        })
+        {
+            var refused = await SubmitAsync(access, OnPaper(PrintPapers.Photo10x15, PartyPrintProducts.Grid4, ids), key);
+            Assert.Equal(PartyPrintRefusal.Invalid, refused.Refusal);
+        }
+        Assert.Equal(0, (await ProfileAsync(albumId)).GridAcceptedCount);
+    }
+
+    [Theory]
+    [InlineData(PrintPapers.Photo13x18)]
+    [InlineData(PrintPapers.Photo20x15)]
+    public async Task The_Twin_Strip_Exists_Only_On_10x15(string paper)
+    {
+        // Two strips are the printer's cut of a 10x15; no other paper has them,
+        // however the request is dressed up.
+        var (access, albumId) = await SeedAsync();
+        var onPaper = access with { Paper = paper };
+        Assert.False(onPaper.Offers(PartyPrintProducts.TwinStrip4));
+        var refused = await SubmitAsync(onPaper,
+            OnPaper(paper, PartyPrintProducts.TwinStrip4, Eight()), $"t-{paper}");
+        Assert.Equal(PartyPrintRefusal.Unavailable, refused.Refusal);
+        Assert.Equal(0, (await ProfileAsync(albumId)).StripAcceptedCount);
+    }
+
+    [Fact]
+    public async Task A_Sheet_Prints_On_The_Paper_It_Was_Composed_For_Or_Not_At_All()
+    {
+        // The operator swapped to 20x15 while a guest composed a 10x15 sheet.
+        var (access, albumId) = await SeedAsync();
+        var swapped = access with { Paper = PrintPapers.Photo20x15 };
+        var old = await SubmitAsync(swapped,
+            OnPaper(PrintPapers.Photo10x15, PartyPrintProducts.Photo, _photos[0]), "old");
+        Assert.Equal(PartyPrintRefusal.PaperChanged, old.Refusal);
+        // A page from before papers composed 10x15, the only paper there was.
+        var unsaid = await SubmitAsync(swapped, Request(PartyPrintProducts.Photo, _photos[0]), "unsaid");
+        Assert.Equal(PartyPrintRefusal.PaperChanged, unsaid.Refusal);
+        // A paper nobody knows is not a paper.
+        var unknown = await SubmitAsync(swapped,
+            OnPaper("a4", PartyPrintProducts.Photo, _photos[0]), "a4");
+        Assert.Equal(PartyPrintRefusal.Invalid, unknown.Refusal);
+        // Nothing was spent by any of them.
+        Assert.Equal(0, (await ProfileAsync(albumId)).PhotoAcceptedCount);
+
+        var right = await SubmitAsync(swapped,
+            OnPaper(PrintPapers.Photo20x15, PartyPrintProducts.Photo, _photos[0]), "right");
+        Assert.True(right.Ok);
+        Assert.Equal(PrintPapers.Photo20x15, (await JobAsync(right.Accepted!.JobId)).Format);
+        // And on the paper there always was, saying nothing still works.
+        var plain = await SubmitAsync(access, Request(PartyPrintProducts.Photo, _photos[1]), "plain");
+        Assert.True(plain.Ok);
+    }
+
+    [Fact]
+    public async Task A_Page_From_Before_The_Rename_Still_Prints_Its_Twin_Strip()
+    {
+        var (access, albumId) = await SeedAsync();
+        var legacy = await SubmitAsync(access, Request(PartyPrintProducts.LegacyStrip4, Eight()), "legacy");
+        Assert.True(legacy.Ok);
+        Assert.Equal(PartyPrintProducts.TwinStrip4, legacy.Accepted!.Product);
+        // The retry under the new name is the same print, not a second one.
+        var retry = await SubmitAsync(access, Request(PartyPrintProducts.TwinStrip4, Eight()), "legacy");
+        Assert.Equal(legacy.Accepted.JobId, retry.Accepted!.JobId);
+        Assert.Equal(1, (await ProfileAsync(albumId)).StripAcceptedCount);
+
+        var job = await JobAsync(legacy.Accepted.JobId);
+        Assert.Equal(PrintJobKinds.PartyStrip4, job.Kind);
+        Assert.Equal(PrintFormats.Strip2x6Pair, job.Format);
+        Assert.Equal(PrintPapers.Photo10x15, job.Spec.GetProperty("paperSize").GetString());
+        Assert.Equal("twinStrip4", job.Spec.GetProperty("product").GetString());
+        Assert.Equal("twinStrip4", job.Spec.GetProperty("layout").GetString());
+        Assert.Equal("portrait", job.Spec.GetProperty("orientation").GetString());
+        Assert.True(job.Spec.GetProperty("cutByPrinter").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData(PrintPapers.Photo10x15, "portrait")]
+    [InlineData(PrintPapers.Photo10x15, "landscape")]
+    [InlineData(PrintPapers.Photo13x18, "portrait")]
+    [InlineData(PrintPapers.Photo13x18, "landscape")]
+    [InlineData(PrintPapers.Photo20x15, "portrait")]
+    [InlineData(PrintPapers.Photo20x15, "landscape")]
+    public async Task A_Photo_Is_A_Sheet_Of_The_Loaded_Paper_Either_Way_Up(string paper, string orientation)
     {
         var (access, _) = await SeedAsync();
-        var cutting = access with { StripCutByPrinter = true };
+        var result = await SubmitAsync(access with { Paper = paper },
+            OnPaper(paper, PartyPrintProducts.Photo, _photos[0]) with { Orientation = orientation },
+            $"p-{paper}-{orientation}");
+        Assert.True(result.Ok);
+        var job = await JobAsync(result.Accepted!.JobId);
+        Assert.Equal(paper, job.Format);
+        Assert.Equal(paper, job.Spec.GetProperty("paperSize").GetString());
+        Assert.Equal("photo", job.Spec.GetProperty("layout").GetString());
+        Assert.Equal(orientation, job.Spec.GetProperty("orientation").GetString());
+    }
 
-        var strip = await SubmitAsync(cutting,
-            Request(PartyPrintProducts.Strip4, Eight()), "s1");
-        var photo = await SubmitAsync(cutting, Request(PartyPrintProducts.Photo, _photos[0]), "p1");
-        var uncut = await SubmitAsync(access,
-            Request(PartyPrintProducts.Strip4, Eight()), "s2");
-        Assert.True(strip.Ok && photo.Ok && uncut.Ok);
+    [Fact]
+    public async Task A_Twin_Strip_Is_Sent_As_2x6x2_And_Needs_The_Printers_Cut()
+    {
+        var (access, _) = await SeedAsync();
+
+        var strip = await SubmitAsync(access,
+            Request(PartyPrintProducts.TwinStrip4, Eight()), "s1");
+        var photo = await SubmitAsync(access, Request(PartyPrintProducts.Photo, _photos[0]), "p1");
+        // The two strips are the printer's cut; without it there is no twin
+        // strip at all — never a sheet for scissors.
+        var uncut = await SubmitAsync(access with { StripCutByPrinter = false },
+            Request(PartyPrintProducts.TwinStrip4, Eight()), "s2");
+        Assert.True(strip.Ok && photo.Ok);
+        Assert.Equal(PartyPrintRefusal.Unavailable, uncut.Refusal);
 
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -216,8 +378,6 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         // Still the same 10x15 sheet; the format is what tells the agent to cut it.
         Assert.Equal(PrintFormats.Strip2x6Pair, await FormatOf(strip));
         Assert.Equal(PrintFormats.Photo10x15, await FormatOf(photo));
-        // A printer that cannot cut still prints the strip, as one sheet.
-        Assert.Equal(PrintFormats.Photo10x15, await FormatOf(uncut));
     }
 
     [Fact]
@@ -230,7 +390,7 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         var plain = await SubmitAsync(access,
             Request(PartyPrintProducts.Photo, _photos[0]) with { Theme = "overlay" }, "o2");
         var strip = await SubmitAsync(access,
-            Request(PartyPrintProducts.Strip4, Eight())
+            Request(PartyPrintProducts.TwinStrip4, Eight())
                 with { Theme = "overlay", OverlayText = "red", OverlayLogo = "dark" }, "o3");
         var framed = await SubmitAsync(access,
             Request(PartyPrintProducts.Photo, _photos[0])
@@ -297,14 +457,14 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         // Too few — the old four included, which would print two copies — too
         // many, and a repeated picture are all refused.
         Assert.Equal(PartyPrintRefusal.Invalid,
-            (await SubmitAsync(access, Request(PartyPrintProducts.Strip4, _photos[0]), "a")).Refusal);
+            (await SubmitAsync(access, Request(PartyPrintProducts.TwinStrip4, _photos[0]), "a")).Refusal);
         Assert.Equal(PartyPrintRefusal.Invalid,
-            (await SubmitAsync(access, Request(PartyPrintProducts.Strip4,
+            (await SubmitAsync(access, Request(PartyPrintProducts.TwinStrip4,
                 _photos[0], _photos[1], _photos[2], _photos[3]), "four")).Refusal);
         Assert.Equal(PartyPrintRefusal.Invalid,
-            (await SubmitAsync(access, Request(PartyPrintProducts.Strip4, _photos.Take(9).ToArray()), "b")).Refusal);
+            (await SubmitAsync(access, Request(PartyPrintProducts.TwinStrip4, _photos.Take(9).ToArray()), "b")).Refusal);
         Assert.Equal(PartyPrintRefusal.Invalid,
-            (await SubmitAsync(access, Request(PartyPrintProducts.Strip4,
+            (await SubmitAsync(access, Request(PartyPrintProducts.TwinStrip4,
                 [.. _photos.Take(7), _photos[0]]), "c")).Refusal);
 
         // None of them cost anything.
@@ -351,7 +511,7 @@ public sealed class PartyPrintSubmissionTests : IDisposable
 
         // Photos are gone; strips are untouched.
         var strip = await SubmitAsync(access,
-            Request(PartyPrintProducts.Strip4, Eight()), "s1");
+            Request(PartyPrintProducts.TwinStrip4, Eight()), "s1");
         Assert.True(strip.Ok);
 
         var profile = await ProfileAsync(albumId);

@@ -165,7 +165,10 @@ public sealed record PartyCrewPrintProfileRequest(
     bool? StripEnabled,
     int? StripMaxPrints,
     int? StripPrintsPerGuest,
-    string? FooterText);
+    string? FooterText,
+    bool? GridEnabled = null,
+    int? GridMaxPrints = null,
+    int? GridPrintsPerGuest = null);
 
 /// <summary>
 /// The party's print profile, as a COLLABORATOR may read it.
@@ -182,6 +185,7 @@ public sealed record PartyCrewPrintProfileDto(
     /// <summary>A printer is configured. Which one is the host's business.</summary>
     bool PrinterConfigured,
     PartyPrintProductSettingsDto Photo,
+    PartyPrintProductSettingsDto Grid,
     PartyPrintProductSettingsDto Strip,
     string? FooterText,
     int FooterMaxLength,
@@ -192,6 +196,7 @@ public sealed record PartyCrewPrintProfileDto(
         profile.Enabled,
         profile.PrintStationId is not null && profile.PrinterDeviceId is not null,
         profile.Photo,
+        profile.Grid,
         profile.Strip,
         profile.FooterText,
         profile.FooterMaxLength,

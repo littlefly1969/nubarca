@@ -30,19 +30,25 @@ public static class PrintJobKinds
     public const string Diagnostic = "diagnostic";
     public const string OwnerPhoto = "owner-photo";
 
-    // Guest prints from a party. Both compose a 10x15 sheet: the strip is a
-    // COMPOSITION, not a second paper size, so the printer requirement is
-    // unchanged. A printer that can also cut that sheet in two receives the
-    // strip as PrintFormats.Strip2x6Pair; one that cannot receives it as 10x15.
+    // Guest prints from a party. A photo and four photos compose one sheet of
+    // the printer's loaded paper; the twin strip composes a 10x15 sheet that
+    // the printer cuts in two, sent as PrintFormats.Strip2x6Pair. The kind is
+    // what the sheet IS, and stays as it was first stored: "party-strip4" is
+    // the twin strip, both strips of it.
     public const string PartyPhoto = "party-photo";
+    public const string PartyGrid4 = "party-grid4";
     public const string PartyStrip4 = "party-strip4";
 
-    public static bool IsParty(string value) => value is PartyPhoto or PartyStrip4;
+    public static bool IsParty(string value) => value is PartyPhoto or PartyGrid4 or PartyStrip4;
 }
 
 public static class PrintFormats
 {
-    public const string Photo10x15 = "10x15";
+    // One sheet of each paper, as the Print Agent is asked for it. The same
+    // strings as PrintPapers: a paper's format is its own name.
+    public const string Photo10x15 = PrintPapers.Photo10x15;
+    public const string Photo13x18 = PrintPapers.Photo13x18;
+    public const string Photo20x15 = PrintPapers.Photo20x15;
 
     /// <summary>
     /// The same 10x15 sheet, cut down the middle by the printer into two 2x6

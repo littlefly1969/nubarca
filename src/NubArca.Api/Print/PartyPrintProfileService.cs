@@ -38,6 +38,9 @@ public sealed record PartyPrintProfileDto(
     Guid? PrintStationId,
     Guid? PrinterDeviceId,
     PartyPrintProductSettingsDto Photo,
+    /// <summary>Four photographs on one sheet.</summary>
+    PartyPrintProductSettingsDto Grid,
+    /// <summary>The twin strip: two strips of four on one 10x15 sheet.</summary>
     PartyPrintProductSettingsDto Strip,
     string? FooterText,
     int FooterMaxLength,
@@ -60,7 +63,10 @@ public sealed record PartyPrintProfileRequest(
     bool? StripEnabled,
     int? StripMaxPrints,
     int? StripPrintsPerGuest,
-    string? FooterText);
+    string? FooterText,
+    bool? GridEnabled = null,
+    int? GridMaxPrints = null,
+    int? GridPrintsPerGuest = null);
 
 /// <summary>A saved profile, or the one reason it was refused.</summary>
 public sealed record PartyPrintProfileResult(PartyPrintProfileDto? Profile, string? Error)
@@ -115,6 +121,7 @@ public sealed class PartyPrintProfileService : IPartyPrintProfileService
                 PartyAlbumId = albumId,
                 OwnerUserId = ownerUserId,
                 PhotoMaxPrints = 0,
+                GridMaxPrints = 0,
                 StripMaxPrints = 0,
                 CreatedAt = now,
                 UpdatedAt = now,
@@ -131,6 +138,9 @@ public sealed class PartyPrintProfileService : IPartyPrintProfileService
         var photoEnabled = request.PhotoEnabled ?? profile.PhotoEnabled;
         var photoMax = request.PhotoMaxPrints ?? profile.PhotoMaxPrints;
         var photoPerGuest = request.PhotoPrintsPerGuest ?? profile.PhotoPrintsPerGuest;
+        var gridEnabled = request.GridEnabled ?? profile.GridEnabled;
+        var gridMax = request.GridMaxPrints ?? profile.GridMaxPrints;
+        var gridPerGuest = request.GridPrintsPerGuest ?? profile.GridPrintsPerGuest;
         var stripEnabled = request.StripEnabled ?? profile.StripEnabled;
         var stripMax = request.StripMaxPrints ?? profile.StripMaxPrints;
         var stripPerGuest = request.StripPrintsPerGuest ?? profile.StripPrintsPerGuest;
@@ -149,6 +159,12 @@ public sealed class PartyPrintProfileService : IPartyPrintProfileService
                 ?? ValidatePerGuest(photoPerGuest, photoMax, "photo");
             if (error is not null) return PartyPrintProfileResult.Refused(error);
         }
+        if (gridEnabled)
+        {
+            var error = ValidateBudget(gridMax, profile.GridAcceptedCount, "grid")
+                ?? ValidatePerGuest(gridPerGuest, gridMax, "grid");
+            if (error is not null) return PartyPrintProfileResult.Refused(error);
+        }
         if (stripEnabled)
         {
             var error = ValidateBudget(stripMax, profile.StripAcceptedCount, "strip")
@@ -159,7 +175,7 @@ public sealed class PartyPrintProfileService : IPartyPrintProfileService
         // Turning printing ON is a promise the guest hub will make on this
         // host's behalf, so what it promises is checked at the moment it is
         // made rather than by the first guest who tries.
-        if (request.Enabled == true && !photoEnabled && !stripEnabled)
+        if (request.Enabled == true && !photoEnabled && !gridEnabled && !stripEnabled)
         {
             return PartyPrintProfileResult.Refused("product_required");
         }
@@ -180,7 +196,7 @@ public sealed class PartyPrintProfileService : IPartyPrintProfileService
 
             var device = await _db.PrinterDevices.AsNoTracking()
                 .Where(d => d.Id == deviceId.Value && d.PrintStationId == stationId.Value)
-                .Select(d => new { d.CapabilitiesJson })
+                .Select(d => new { d.CapabilitiesJson, d.LoadedPaperSize })
                 .FirstOrDefaultAsync(cancellationToken);
             if (device is null) return PartyPrintProfileResult.Refused("printer_not_found");
 
@@ -194,10 +210,11 @@ public sealed class PartyPrintProfileService : IPartyPrintProfileService
             if (!stationOk) return PartyPrintProfileResult.Refused("station_unavailable");
 
             if (!PrintCapabilityMatcher.SupportsFormat(
-                    device.CapabilitiesJson, PrintFormats.Photo10x15))
+                    device.CapabilitiesJson,
+                    PrintPapers.IsKnown(device.LoadedPaperSize) ? device.LoadedPaperSize : PrintPapers.Photo10x15))
             {
-                // Both products compose a 10x15 sheet. A printer that cannot do
-                // that size cannot print either of them.
+                // Every product is a sheet of the paper the operator loaded. A
+                // printer that does not report that paper cannot print any of them.
                 return PartyPrintProfileResult.Refused("format_unsupported");
             }
         }
@@ -208,6 +225,9 @@ public sealed class PartyPrintProfileService : IPartyPrintProfileService
         profile.PhotoEnabled = photoEnabled;
         profile.PhotoMaxPrints = photoMax;
         profile.PhotoPrintsPerGuest = photoPerGuest;
+        profile.GridEnabled = gridEnabled;
+        profile.GridMaxPrints = gridMax;
+        profile.GridPrintsPerGuest = gridPerGuest;
         profile.StripEnabled = stripEnabled;
         profile.StripMaxPrints = stripMax;
         profile.StripPrintsPerGuest = stripPerGuest;
@@ -252,6 +272,12 @@ public sealed class PartyPrintProfileService : IPartyPrintProfileService
                 profile?.PhotoAcceptedCount ?? 0,
                 Math.Max(0, (profile?.PhotoMaxPrints ?? 0) - (profile?.PhotoAcceptedCount ?? 0)),
                 profile?.PhotoPrintsPerGuest ?? 0),
+            new PartyPrintProductSettingsDto(
+                profile?.GridEnabled ?? false,
+                profile?.GridMaxPrints ?? 0,
+                profile?.GridAcceptedCount ?? 0,
+                Math.Max(0, (profile?.GridMaxPrints ?? 0) - (profile?.GridAcceptedCount ?? 0)),
+                profile?.GridPrintsPerGuest ?? 0),
             new PartyPrintProductSettingsDto(
                 profile?.StripEnabled ?? false,
                 profile?.StripMaxPrints ?? 0,

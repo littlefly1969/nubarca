@@ -36,7 +36,8 @@ public sealed class PartyPrintCapabilityMatrixTests : IDisposable
 
     /// <summary>A party with printing configured and one photograph carrying EXIF.</summary>
     private async Task<Party> SeedPartyAsync(
-        bool enablePrinting = true, string capabilities = "{\"formats\":[\"10x15\"]}")
+        bool enablePrinting = true, string capabilities = "{\"formats\":[\"10x15\",\"2x6x2\"]}",
+        string paper = "10x15")
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync(
             $"host{Interlocked.Increment(ref _parties)}@example.com");
@@ -67,6 +68,7 @@ public sealed class PartyPrintCapabilityMatrixTests : IDisposable
                     Id = deviceId, PrintStationId = stationId, DeviceKey = "d1",
                     DisplayName = "DS620", AdapterKind = "fake",
                     CapabilitiesJson = capabilities,
+                    LoadedPaperSize = paper,
                     LastObservedState = PrintDeviceStates.Ready, LastSeenAt = DateTime.UtcNow,
                 });
                 db.PartyPrintProfiles.Add(new PartyPrintProfile
@@ -75,6 +77,7 @@ public sealed class PartyPrintCapabilityMatrixTests : IDisposable
                     Enabled = true, PrintStationId = stationId, PrinterDeviceId = deviceId,
                     PhotoEnabled = true, PhotoMaxPrints = 5,
                     StripEnabled = true, StripMaxPrints = 5,
+                    GridEnabled = true, GridMaxPrints = 5,
                     PublicSequenceNext = 1,
                     CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
                 });
@@ -109,26 +112,64 @@ public sealed class PartyPrintCapabilityMatrixTests : IDisposable
     public async Task The_Manifest_Says_When_The_Printer_Cuts_The_Strips()
     {
         var anon = _factory.CreateClient();
-        async Task<(bool Photo, bool Strip)> CutByPrinter(Party party)
+        async Task<Dictionary<string, bool>> CutByPrinter(Party party)
         {
             var manifest = await anon.GetFromJsonAsync<JsonElement>(
                 $"/api/party/{party.PrintToken}/print");
-            bool Of(string type) => manifest.GetProperty("formats").EnumerateArray()
-                .Single(f => f.GetProperty("type").GetString() == type)
-                .GetProperty("cutByPrinter").GetBoolean();
-            return (Of("photo"), Of("strip4"));
+            return manifest.GetProperty("formats").EnumerateArray().ToDictionary(
+                f => f.GetProperty("type").GetString()!,
+                f => f.GetProperty("cutByPrinter").GetBoolean());
         }
 
-        // A printer that only prints 10x15: the strip is one sheet, cut by hand.
-        Assert.Equal((false, false), await CutByPrinter(await SeedPartyAsync()));
+        // A printer that cuts the 10x15 in two: the twin strip, cut by it.
+        var cutting = await CutByPrinter(await SeedPartyAsync());
+        Assert.False(cutting["photo"]);
+        Assert.True(cutting["twinStrip4"]);
 
-        // One that can also cut it in two: the strip arrives as two strips.
-        Assert.Equal((false, true), await CutByPrinter(await SeedPartyAsync(
-            capabilities: "{\"formats\":[\"10x15\",\"2x6x2\"]}")));
+        // One that only prints 10x15 has no twin strip at all: the two strips
+        // are the printer's cut, never a sheet for scissors.
+        var plain = await CutByPrinter(await SeedPartyAsync(
+            capabilities: "{\"formats\":[\"10x15\"]}"));
+        Assert.False(plain.ContainsKey("twinStrip4"));
+        Assert.False(plain.ContainsKey("strip4"));
 
         // Cutting is an extra ON TOP of 10x15, never a way around it.
         var cutOnly = await SeedPartyAsync(capabilities: "{\"formats\":[\"2x6x2\"]}");
         Assert.Equal(string.Empty, cutOnly.PrintToken);
+    }
+
+    [Theory]
+    [InlineData("10x15", "{\"formats\":[\"10x15\",\"2x6x2\"]}", "photo,grid4,twinStrip4")]
+    [InlineData("13x18", "{\"formats\":[\"10x15\",\"13x18\",\"2x6x2\"]}", "photo,grid4")]
+    [InlineData("20x15", "{\"formats\":[\"10x15\",\"20x15\",\"2x6x2\"]}", "photo,grid4")]
+    public async Task A_Guest_Is_Offered_What_The_Loaded_Paper_Can_Make(
+        string paper, string capabilities, string expected)
+    {
+        // The paper is a fact about the printer, not a guest's choice: the
+        // studio lists the products that paper makes, and nothing else.
+        var party = await SeedPartyAsync(capabilities: capabilities, paper: paper);
+        var manifest = await _factory.CreateClient().GetFromJsonAsync<JsonElement>(
+            $"/api/party/{party.PrintToken}/print");
+        Assert.Equal(paper, manifest.GetProperty("paperSize").GetString());
+        var formats = manifest.GetProperty("formats").EnumerateArray().ToList();
+        Assert.Equal(expected, string.Join(",", formats.Select(f => f.GetProperty("type").GetString())));
+        foreach (var format in formats)
+            Assert.Equal(paper, format.GetProperty("paperSize").GetString());
+        var required = formats.ToDictionary(
+            f => f.GetProperty("type").GetString()!, f => f.GetProperty("requiredPhotos").GetInt32());
+        Assert.Equal(1, required["photo"]);
+        Assert.Equal(4, required["grid4"]);
+        if (required.TryGetValue("twinStrip4", out var eight)) Assert.Equal(8, eight);
+    }
+
+    [Fact]
+    public async Task A_Paper_The_Printer_Cannot_Print_Opens_Nothing()
+    {
+        // The operator says 13x18 is in, but the Print Agent reports only 10x15
+        // (an older agent, or a driver without the size): nothing is printed
+        // rather than something on the wrong paper.
+        var party = await SeedPartyAsync(paper: "13x18");
+        Assert.Equal(string.Empty, party.PrintToken);
     }
 
     [Fact]
@@ -162,7 +203,7 @@ public sealed class PartyPrintCapabilityMatrixTests : IDisposable
         // With no per-guest ceiling it is null, which is NOT zero: it means the
         // limit does not exist.
         var strip = manifest.GetProperty("formats").EnumerateArray()
-            .Single(f => f.GetProperty("type").GetString() == "strip4");
+            .Single(f => f.GetProperty("type").GetString() == "twinStrip4");
         Assert.Equal(JsonValueKind.Null, strip.GetProperty("remainingForYou").ValueKind);
     }
 

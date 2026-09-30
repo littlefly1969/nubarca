@@ -87,17 +87,22 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
                 cancellationToken);
         if (device is null) return null;
 
-        // The strip is a COMPOSITION on the same paper, so both products need
-        // exactly one hardware capability, checked once.
-        if (!PrintCapabilityMatcher.SupportsFormat(device.CapabilitiesJson, PrintFormats.Photo10x15))
+        // The paper the operator loaded, which the printer must be able to
+        // print: every product is a sheet of it. A printer that does not report
+        // that paper — an older Print Agent, a driver without the size — prints
+        // nothing rather than something else.
+        var paper = PrintPapers.IsKnown(device.LoadedPaperSize)
+            ? device.LoadedPaperSize
+            : PrintPapers.Photo10x15;
+        if (!PrintCapabilityMatcher.SupportsFormat(device.CapabilitiesJson, paper))
         {
             return null;
         }
 
-        // Cutting that sheet in two is an extra a printer MAY have. Without it
-        // the strip still prints, as one sheet with marks to cut along.
-        var stripCutByPrinter = PrintCapabilityMatcher.SupportsFormat(
-            device.CapabilitiesJson, PrintFormats.Strip2x6Pair);
+        // The twin strip is two strips the PRINTER cuts from a 10x15 sheet; a
+        // printer that cannot cut it, or has other paper in, has no twin strip.
+        var stripCutByPrinter = paper == PrintPapers.Photo10x15
+            && PrintCapabilityMatcher.SupportsFormat(device.CapabilitiesJson, PrintFormats.Strip2x6Pair);
 
         var photo = new PartyPrintProductState(
             profile.PhotoEnabled,
@@ -107,19 +112,24 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
             profile.StripEnabled,
             Math.Max(0, profile.StripMaxPrints - profile.StripAcceptedCount),
             profile.StripPrintsPerGuest);
-
-        // Nothing left to offer is the same as printing being closed: the guest
-        // hub must not show a card that leads to two exhausted products.
-        if (!photo.Available && !strip.Available) return null;
+        var grid = new PartyPrintProductState(
+            profile.GridEnabled,
+            Math.Max(0, profile.GridMaxPrints - profile.GridAcceptedCount),
+            profile.GridPrintsPerGuest);
 
         var partyName = await _db.Albums.AsNoTracking()
             .Where(a => a.Id == link.AlbumId)
             .Select(a => a.Name)
             .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
 
-        return new PartyPrintAccess(
+        var access = new PartyPrintAccess(
             link.Id, link.AlbumId, link.OwnerUserId, station.Id, device.Id,
             partyName, profile.FooterText, photo, strip, stripCutByPrinter,
-            PrintCalibration.Of(device));
+            PrintCalibration.Of(device), grid, paper);
+
+        // Nothing left to offer is the same as printing being closed: the guest
+        // hub must not show a card that leads only to exhausted products, or to
+        // products this paper cannot make.
+        return PartyPrintProducts.All.Any(p => access.Product(p)?.Available == true) ? access : null;
     }
 }

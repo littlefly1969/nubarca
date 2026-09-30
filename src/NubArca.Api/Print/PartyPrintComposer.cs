@@ -74,16 +74,12 @@ public sealed record PartyPrintComposition(
     /// destroy the product.
     /// </summary>
     PartyPrintOrientation Orientation = PartyPrintOrientation.FollowPhoto,
-    /// <summary>
-    /// The printer cuts the strip sheet itself. The ticks that show a pair of
-    /// scissors where to go would then sit exactly under the blade, and a cut a
-    /// fraction of a millimetre off leaves one of them on a strip's edge.
-    /// </summary>
-    bool CutByPrinter = false,
     /// <summary>The printer's tone compensation, applied to the whole sheet. Null is neutral.</summary>
     PrintCalibration? Calibration = null,
     /// <summary>Text and symbol colours of the "On the photo" look. Null is its default.</summary>
-    PartyPrintOverlay? Overlay = null);
+    PartyPrintOverlay? Overlay = null,
+    /// <summary>The paper the sheet is for (a PrintPapers id). The twin strip is always 10x15.</summary>
+    string Paper = Domain.Print.PrintPapers.Photo10x15);
 
 /// <summary>
 /// Draws the sheet that is actually printed.
@@ -132,9 +128,12 @@ public sealed class PartyPrintComposer
     public async Task<byte[]> RenderAsync(
         PartyPrintComposition composition, CancellationToken cancellationToken)
     {
-        using var sheet = composition.Product == Domain.Print.PartyPrintProducts.Strip4
-            ? RenderStrip(composition)
-            : RenderPhoto(composition);
+        using var sheet = composition.Product switch
+        {
+            Domain.Print.PartyPrintProducts.TwinStrip4 => RenderStrip(composition),
+            Domain.Print.PartyPrintProducts.Grid4 => RenderGrid4(composition),
+            _ => RenderPhoto(composition),
+        };
 
         // The printer's compensation, not a filter: the whole sheet, paper and
         // photographs, so that this printer's output matches what was composed.
@@ -173,28 +172,71 @@ public sealed class PartyPrintComposer
             PartyPrintOrientation.Landscape => false,
             _ => source.Height >= source.Width,
         };
-        var (w, h) = portrait
-            ? (PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight)
-            : (PartyPrintGeometry.LandscapeWidth, PartyPrintGeometry.LandscapeHeight);
+        var (w, h) = PartyPrintGeometry.Sheet(composition.Paper, portrait);
 
         var sheet = new Image<Rgba32>(w, h);
         var palette = Palette(composition.Theme);
         sheet.Mutate(x => x.Fill(palette.Background));
 
-        var margin = (int)Math.Round(PartyPrintGeometry.PhotoMarginFraction * Math.Min(w, h));
         // Short edge, not height: see PhotoFooterFraction. The sheet turns; the
         // strip of paper under the photograph must not.
-        var footer = (int)Math.Round(PartyPrintGeometry.PhotoFooterFraction * Math.Min(w, h));
-        var slot = new Rectangle(margin, margin, w - (2 * margin), h - (2 * margin) - footer);
-
-        DrawFramed(sheet, source, photo, slot, composition.Theme, palette);
+        DrawFramed(sheet, source, photo,
+            ToPixels(PartyPrintGeometry.PhotoSlot(composition.Paper, portrait), w, h),
+            composition.Theme, palette);
         DrawFooter(sheet, composition, palette,
-            new Rectangle(margin, slot.Bottom, slot.Width, footer));
+            ToPixels(PartyPrintGeometry.PhotoFooter(composition.Paper, portrait), w, h));
         return sheet;
     }
 
-    // --- Four-photo strip, twice ------------------------------------------
+    /// <summary>A rectangle of sheet fractions, in the sheet's pixels.</summary>
+    private static Rectangle ToPixels((double X, double Y, double Width, double Height) fraction, int w, int h) =>
+        new((int)Math.Round(fraction.X * w), (int)Math.Round(fraction.Y * h),
+            (int)Math.Round(fraction.Width * w), (int)Math.Round(fraction.Height * h));
 
+    // --- Four photographs on one sheet -------------------------------------
+
+    /// <summary>
+    /// Four photographs, two by two, on the loaded paper as it is named: the
+    /// first top left, the second top right, the third and fourth under them —
+    /// the order the guest arranged. Each keeps its own crop. One footer signs
+    /// the sheet. No cut marks: nothing here is meant to be cut.
+    /// </summary>
+    private Image<Rgba32> RenderGrid4(PartyPrintComposition composition)
+    {
+        var paper = composition.Paper;
+        var (w, h) = PartyPrintGeometry.Sheet(paper, PartyPrintGeometry.GridPortrait(paper));
+        var sheet = new Image<Rgba32>(w, h);
+        var palette = Palette(composition.Theme);
+        sheet.Mutate(x => x.Fill(palette.Background));
+
+        var sources = composition.Photos
+            .Select(p => (Photo: p, Image: LoadOriented(p.Bytes)))
+            .ToList();
+        try
+        {
+            for (var index = 0; index < 4; index++)
+            {
+                var (photo, image) = sources[index % sources.Count];
+                DrawFramed(sheet, image, photo,
+                    ToPixels(PartyPrintGeometry.GridSlot(paper, index), w, h), composition.Theme, palette);
+            }
+            DrawFooter(sheet, composition, palette, ToPixels(PartyPrintGeometry.GridFooter(paper), w, h));
+            return sheet;
+        }
+        finally
+        {
+            foreach (var (_, image) in sources) image.Dispose();
+        }
+    }
+
+    // --- Two strips of four, cut apart by the printer -------------------------
+
+    /// <summary>
+    /// The twin strip: two strips of four on one portrait 10x15, photographs
+    /// 1–4 on the left and 5–8 on the right. The printer cuts the sheet in two,
+    /// so it carries no marks to cut along — a tick would sit exactly under the
+    /// blade, and a cut a fraction of a millimetre off would leave it on a strip.
+    /// </summary>
     private Image<Rgba32> RenderStrip(PartyPrintComposition composition)
     {
         const int w = PartyPrintGeometry.PortraitWidth;
@@ -235,7 +277,6 @@ public sealed class PartyPrintComposer
                     (int)Math.Round(PartyPrintGeometry.StripFooterFraction * h)), strip: true);
             }
 
-            if (!composition.CutByPrinter) DrawCutMarks(sheet, palette);
             return sheet;
         }
         finally
@@ -263,9 +304,7 @@ public sealed class PartyPrintComposer
             PartyPrintOrientation.Landscape => false,
             _ => source.Height >= source.Width,
         };
-        var (w, h) = portrait
-            ? (PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight)
-            : (PartyPrintGeometry.LandscapeWidth, PartyPrintGeometry.LandscapeHeight);
+        var (w, h) = PartyPrintGeometry.Sheet(composition.Paper, portrait);
 
         var overlay = composition.Overlay ?? PartyPrintOverlay.Default;
         var ink = TextInk(overlay.Text);
@@ -640,24 +679,6 @@ public sealed class PartyPrintComposer
             $"#{sequence}", palette.Muted));
     }
 
-    /// <summary>
-    /// Ticks at the ends of the gutter only. A dashed line down the middle
-    /// would cross the photographs, which is what makes a strip look printed
-    /// rather than made.
-    /// </summary>
-    private static void DrawCutMarks(Image<Rgba32> sheet, ThemePalette palette)
-    {
-        const int w = PartyPrintGeometry.PortraitWidth;
-        const int h = PartyPrintGeometry.PortraitHeight;
-        var centre = w / 2f;
-        var length = (float)(PartyPrintGeometry.CutMarkLengthFraction * h);
-
-        sheet.Mutate(x =>
-        {
-            x.DrawLine(palette.Muted, 2f, new PointF(centre, 0), new PointF(centre, length));
-            x.DrawLine(palette.Muted, 2f, new PointF(centre, h - length), new PointF(centre, h));
-        });
-    }
 
     private static Image<Rgba32> LoadOriented(byte[] bytes)
     {

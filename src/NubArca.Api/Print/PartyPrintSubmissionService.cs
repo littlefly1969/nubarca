@@ -75,16 +75,19 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         Guid? participantId,
         CancellationToken cancellationToken)
     {
-        // 1. Shape.
-        if (!PartyPrintProducts.IsKnown(request.Product))
+        // 1. Shape. The product under its current name: a page opened before
+        // the twin strip was renamed still asks for "strip4".
+        var productId = PartyPrintProducts.Normalize(request.Product);
+        if (productId.Length == 0)
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
         if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 200)
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
 
-        var required = PartyPrintProducts.RequiredPhotos(request.Product);
+        var required = PartyPrintProducts.RequiredPhotos(productId);
         if (request.Slots.Count != required)
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
-        // A strip of the same photograph four times is not a strip.
+        // Four photographs are four DIFFERENT photographs, and so are a twin
+        // strip's eight: the same picture twice is not what was asked for.
         if (request.Slots.Select(s => s.ItemId).Distinct().Count() != required)
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
         if (request.Slots.Any(s => !PrintJobSource.IsValidCrop(
@@ -93,7 +96,18 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
         }
 
-        var product = access.Product(request.Product);
+        // The sheet was composed for one paper; it prints on that paper or not
+        // at all. Checked before the product, because a product the new paper
+        // cannot make is the same situation seen from the other side.
+        var paper = request.PaperSize ?? PrintPapers.Photo10x15;
+        if (!PrintPapers.IsKnown(paper))
+            return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
+        if (paper != access.Paper)
+            return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.PaperChanged);
+
+        // Null when this printer and paper cannot make the product at all —
+        // the matrix is checked here, never trusted from the page.
+        var product = access.Product(productId);
         if (product is null || !product.Enabled)
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Unavailable);
 
@@ -118,15 +132,16 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         if (existing is not null)
         {
             // A key belongs to one submission; reusing it for a different
-            // product is a client bug, not a second print.
-            if (existing.Product != request.Product)
+            // product is a client bug, not a second print. (A key stored as
+            // "strip4" is the twin strip.)
+            if (PartyPrintProducts.Normalize(existing.Product) != productId)
                 return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
             var seq = await _db.PrintJobs.AsNoTracking()
                 .Where(j => j.Id == existing.PrintJobId)
                 .Select(j => j.PublicSequence)
                 .FirstOrDefaultAsync(cancellationToken);
             return PartyPrintSubmitResult.Accept(new PartyPrintAccepted(
-                existing.PrintJobId, seq ?? 0, request.Product, product.Remaining,
+                existing.PrintJobId, seq ?? 0, productId, product.Remaining,
                 await QueueAheadAsync(
                     access.PrintStationId, existing.PrintJobId, cancellationToken)));
         }
@@ -137,12 +152,11 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         // not consume one of the party's remaining sheets on the way to being
         // told no. Both ceilings apply, and this is the one that makes the paper
         // last the evening.
-        var isStrip = request.Product == PartyPrintProducts.Strip4;
-        var perGuest = access.Product(request.Product)?.PerGuest ?? 0;
+        var perGuest = product.PerGuest;
         if (participantId is Guid guest && perGuest > 0)
         {
             if (!await _participants.TryClaimPrintAsync(
-                    guest, isStrip, perGuest, cancellationToken))
+                    guest, productId, perGuest, cancellationToken))
             {
                 return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.GuestBudgetExhausted);
             }
@@ -151,7 +165,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         // 4b. One unit of the party's, atomically. Losing here means someone
         // else took the last.
         var reservation = await _budget.TryReserveAsync(
-            access.PartyAlbumId, request.Product, cancellationToken);
+            access.PartyAlbumId, productId, cancellationToken);
         if (reservation is null)
         {
             // The guest's slot was claimed a moment ago and this sheet will not
@@ -160,7 +174,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             if (participantId is Guid held && perGuest > 0)
             {
                 await _participants.ReleasePrintAsync(
-                    held, isStrip, perGuest, CancellationToken.None);
+                    held, productId, perGuest, CancellationToken.None);
             }
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.BudgetExhausted);
         }
@@ -178,7 +192,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 if (bytes is null)
                 {
                     await _budget.ReleaseAsync(
-                        access.PartyAlbumId, request.Product, CancellationToken.None);
+                        access.PartyAlbumId, productId, CancellationToken.None);
                     return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.InvalidSource);
                 }
                 photos.Add(new PartyPrintPhoto(
@@ -188,17 +202,26 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             // The number is reserved before the sheet is drawn, so it can be
             // printed ON it: the guest reads the same number off their phone and
             // off the paper.
-            var theme = ThemeFor(request.Product, request.Theme);
+            var theme = ThemeFor(productId, request.Theme);
             // The words' and the symbol's colours belong to the title on the photo only.
             var overlay = theme == PartyPrintTheme.Overlay ? ParseOverlay(request) : null;
+            // Only a single photograph turns: four photographs sit as the paper
+            // is named, and the twin strip is the one geometry the cut expects.
+            var orientation = productId == PartyPrintProducts.Photo
+                ? ParseOrientation(request.Orientation)
+                : PartyPrintOrientation.FollowPhoto;
             var artifact = await _composer.RenderAsync(new PartyPrintComposition(
-                request.Product, theme, photos,
+                productId, theme, photos,
                 access.PartyName, access.FooterText,
                 reservation.PublicSequence,
-                ParseOrientation(request.Orientation),
-                access.CutByPrinter(request.Product),
+                orientation,
                 access.Calibration,
-                overlay), cancellationToken);
+                overlay,
+                paper), cancellationToken);
+            // What was actually printed, read off the sheet itself rather than
+            // re-derived: a photograph that followed its own shape says so here.
+            var drawn = SixLabors.ImageSharp.Image.Identify(artifact);
+            var sheetOrientation = drawn.Height >= drawn.Width ? "portrait" : "landscape";
 
             await using var stream = new MemoryStream(artifact, writable: false);
             // Stage outside the lock; publish and claim in one protected step.
@@ -226,15 +249,24 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                     // single FK the pipeline expects; all of them are in the child
                     // table below.
                     FileItemId = request.Slots[0].ItemId,
-                    Kind = request.Product == PartyPrintProducts.Strip4
-                        ? PrintJobKinds.PartyStrip4
-                        : PrintJobKinds.PartyPhoto,
-                    Format = access.PrintFormat(request.Product),
+                    Kind = productId switch
+                    {
+                        PartyPrintProducts.Grid4 => PrintJobKinds.PartyGrid4,
+                        PartyPrintProducts.TwinStrip4 => PrintJobKinds.PartyStrip4,
+                        _ => PrintJobKinds.PartyPhoto,
+                    },
+                    Format = access.PrintFormat(productId),
                     State = PrintJobStates.Ready,
                     PublicSequence = reservation.PublicSequence,
+                    // Enough to say, without the artifact, what this sheet is:
+                    // which paper, which composition, which way up, who cuts it.
                     RenderSpecificationJson = JsonSerializer.Serialize(new
                     {
-                        product = request.Product,
+                        paperSize = paper,
+                        product = productId,
+                        layout = productId,
+                        orientation = sheetOrientation,
+                        cutByPrinter = access.CutByPrinter(productId),
                         theme = theme.ToString().ToLowerInvariant(),
                         overlayText = overlay?.Text.ToString().ToLowerInvariant(),
                         overlayLogo = overlay?.Logo.ToString().ToLowerInvariant(),
@@ -265,7 +297,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                     Id = Guid.NewGuid(),
                     PartyAlbumId = access.PartyAlbumId,
                     IdempotencyKeyHash = keyHash,
-                    Product = request.Product,
+                    Product = productId,
                     PrintJobId = jobId,
                     CreatedAt = now,
                 });
@@ -274,7 +306,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 cancellationToken);
 
             return PartyPrintSubmitResult.Accept(new PartyPrintAccepted(
-                jobId, reservation.PublicSequence, request.Product,
+                jobId, reservation.PublicSequence, productId,
                 Math.Max(0, reservation.RemainingAfter),
                 await QueueAheadAsync(access.PrintStationId, jobId, cancellationToken)));
         }
@@ -284,7 +316,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             // Give the unit back and answer with the job that did win, so a
             // retry never becomes a second sheet.
             await _budget.ReleaseAsync(
-                access.PartyAlbumId, request.Product, CancellationToken.None);
+                access.PartyAlbumId, productId, CancellationToken.None);
             _db.ChangeTracker.Clear();
             var winner = await _db.PartyPrintRequests.AsNoTracking()
                 .Where(r => r.PartyAlbumId == access.PartyAlbumId
@@ -297,14 +329,14 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 .Where(j => j.Id == winner).Select(j => j.PublicSequence)
                 .FirstOrDefaultAsync(CancellationToken.None);
             return PartyPrintSubmitResult.Accept(new PartyPrintAccepted(
-                winner, seq ?? 0, request.Product, product.Remaining,
+                winner, seq ?? 0, productId, product.Remaining,
                 await QueueAheadAsync(access.PrintStationId, winner, CancellationToken.None)));
         }
         catch when (!cancellationToken.IsCancellationRequested)
         {
             // Nothing was accepted, so nothing was spent.
             await _budget.ReleaseAsync(
-                access.PartyAlbumId, request.Product, CancellationToken.None);
+                access.PartyAlbumId, productId, CancellationToken.None);
             _db.ChangeTracker.Clear();
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.RenderFailed);
         }
@@ -330,11 +362,14 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             ? PartyPrintOverlayLogo.Dark
             : PartyPrintOverlayLogo.Light);
 
-    /// <summary>The title on the photograph is a single-photograph look; a strip keeps its frame.</summary>
+    /// <summary>
+    /// The title on the photograph is a single-photograph look; four photos and
+    /// the twin strip keep their frame.
+    /// </summary>
     private static PartyPrintTheme ThemeFor(string product, string? value)
     {
         var theme = ParseTheme(value);
-        return product == PartyPrintProducts.Strip4
+        return product != PartyPrintProducts.Photo
             && theme == PartyPrintTheme.Overlay
             ? PartyPrintTheme.Pure
             : theme;
