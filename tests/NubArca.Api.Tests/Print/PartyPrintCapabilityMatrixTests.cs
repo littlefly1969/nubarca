@@ -173,6 +173,108 @@ public sealed class PartyPrintCapabilityMatrixTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Host_Prints_On_A_Printer_Lent_To_Them_Until_The_Loan_Ends()
+    {
+        // The party's own printer is swapped for one another account lends the
+        // host: a station and printer that are NOT the host's.
+        var party = await SeedPartyAsync();
+        var lender = await _factory.SeedUserAsync("lender@example.com");
+        Guid shareId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var station = new PrintStation
+            {
+                Id = Guid.NewGuid(), OwnerUserId = lender, Name = "Studio di Stefano", Enabled = true,
+                CreatedAt = DateTime.UtcNow,
+            };
+            var device = new PrinterDevice
+            {
+                Id = Guid.NewGuid(), PrintStationId = station.Id, DeviceKey = "dnp", DisplayName = "DNP",
+                AdapterKind = "fake", CapabilitiesJson = "{\"formats\":[\"10x15\",\"2x6x2\"]}",
+                LastObservedState = PrintDeviceStates.Ready, LastSeenAt = DateTime.UtcNow,
+            };
+            db.PrintStations.Add(station);
+            db.PrinterDevices.Add(device);
+            var profile = await db.PartyPrintProfiles.SingleAsync(p => p.PartyAlbumId == party.AlbumId);
+            profile.PrintStationId = station.Id;
+            profile.PrinterDeviceId = device.Id;
+            await db.SaveChangesAsync();
+            var share = new PrinterShare
+            {
+                Id = Guid.NewGuid(), PrinterDeviceId = device.Id, OwnerUserId = lender,
+                GranteeUserId = party.OwnerId, MaxSheets = 3, CreatedAt = DateTime.UtcNow,
+            };
+            db.PrinterShares.Add(share);
+            await db.SaveChangesAsync();
+            shareId = share.Id;
+        }
+
+        var anon = _factory.CreateClient();
+        async Task<bool> Printing() =>
+            (await anon.GetFromJsonAsync<JsonElement>($"/api/party/{party.ViewToken}"))
+                .GetProperty("capabilities").GetProperty("printUrl").ValueKind != JsonValueKind.Null;
+        async Task Change(Action<PrinterShare> change)
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            change(await db.PrinterShares.SingleAsync(s => s.Id == shareId));
+            await db.SaveChangesAsync();
+        }
+
+        Assert.True(await Printing());
+        // Its sheets spent: the party's card goes away, like an empty budget.
+        await Change(s => s.UsedSheets = 3);
+        Assert.False(await Printing());
+        await Change(s => s.MaxSheets = 10);
+        Assert.True(await Printing());
+        // Ended: the next request prints nothing.
+        await Change(s => s.RevokedAt = DateTime.UtcNow);
+        Assert.False(await Printing());
+    }
+
+    [Fact]
+    public async Task A_Guest_Whose_Sheet_Waits_For_Its_Paper_Is_Told_So()
+    {
+        // The printer prints both papers; a 10x15 sheet is queued and 20x15 is
+        // then put in. The guest at the desk is told why nothing is coming out.
+        var party = await SeedPartyAsync(capabilities: "{\"formats\":[\"10x15\",\"20x15\",\"2x6x2\"]}");
+        Guid jobId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var profile = await db.PartyPrintProfiles.SingleAsync(p => p.PartyAlbumId == party.AlbumId);
+            var job = new PrintJob
+            {
+                Id = Guid.NewGuid(), OwnerUserId = party.OwnerId, PrintStationId = profile.PrintStationId!.Value,
+                PrinterDeviceId = profile.PrinterDeviceId!.Value, FileItemId = party.PhotoId,
+                Kind = PrintJobKinds.PartyPhoto, Format = PrintFormats.Photo10x15, State = PrintJobStates.Ready,
+                PublicSequence = 7, RenderSpecificationJson = "{}", ArtifactStorageKey = "artifact",
+                ArtifactContentType = "image/jpeg", ArtifactByteLength = 1,
+                CreatedAt = DateTime.UtcNow, RenderedAt = DateTime.UtcNow,
+            };
+            db.PrintJobs.Add(job);
+            (await db.PrinterDevices.SingleAsync(d => d.Id == profile.PrinterDeviceId)).LoadedPaperSize = "20x15";
+            await db.SaveChangesAsync();
+            jobId = job.Id;
+        }
+        var anon = _factory.CreateClient();
+        async Task<string> State() => (await anon.GetFromJsonAsync<JsonElement>(
+            $"/api/party/{party.PrintToken}/print/{jobId}")).GetProperty("state").GetString()!;
+        Assert.Equal("waiting_paper", await State());
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.PrinterDevices.SingleAsync(d => d.PrintStationId != Guid.Empty
+                && db.PartyPrintProfiles.Any(p => p.PartyAlbumId == party.AlbumId && p.PrinterDeviceId == d.Id)))
+                .LoadedPaperSize = "10x15";
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal("queued", await State());
+    }
+
+    [Fact]
     public async Task The_Manifest_Tells_A_Guest_THEIR_Remaining_Prints()
     {
         // A guest bounded to two on a party of forty was being told forty, and

@@ -39,6 +39,9 @@ public static class PrintJobKinds
     public const string PartyGrid4 = "party-grid4";
     public const string PartyStrip4 = "party-strip4";
 
+    /// <summary>Every guest print kind — as a list, so a database query can ask it too.</summary>
+    public static readonly string[] Party = [PartyPhoto, PartyGrid4, PartyStrip4];
+
     public static bool IsParty(string value) => value is PartyPhoto or PartyGrid4 or PartyStrip4;
 }
 

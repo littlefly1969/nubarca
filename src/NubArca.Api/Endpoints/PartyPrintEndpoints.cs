@@ -225,7 +225,9 @@ public static class PartyPrintEndpoints
             var job = await db.PrintJobs.AsNoTracking()
                 .Where(j => j.Id == jobId
                     && j.OwnerUserId == access.OwnerUserId
-                    && PrintJobKinds.IsParty(j.Kind))
+                    // A list, not a method: the query runs in the database,
+                    // which cannot call C#.
+                    && PrintJobKinds.Party.Contains(j.Kind))
                 .Select(j => new
                 {
                     j.State, j.PublicSequence, j.Kind, j.Format,
