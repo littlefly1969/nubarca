@@ -211,6 +211,9 @@ public sealed class PartyCrewHardeningTests : IDisposable
         Assert.NotEqual(HttpStatusCode.OK, stations.StatusCode);
         var created = await director.PostAsJsonAsync("/api/print/stations", new { name = "Mia" });
         Assert.NotEqual(HttpStatusCode.Created, created.StatusCode);
+        // Nor the printers lent to the host: a loan is theirs, not the evening's.
+        var lent = await director.GetAsync("/api/print/shared-printers");
+        Assert.NotEqual(HttpStatusCode.OK, lent.StatusCode);
     }
 
     // ── Rotating a link ─────────────────────────────────────────────────────
