@@ -559,9 +559,12 @@ export interface PartyPrintSettings {
   printerDeviceId?: string | null;
   /** Party-safe stand-in for the pair above: printing IS set up. */
   printerConfigured?: boolean;
-  // Photo and strip are NEVER summed: they cost different things and the host
-  // set them separately.
+  // The products are NEVER summed: they cost different things and the host set
+  // them separately.
   photo: PartyPrintProductSettings;
+  /** Four photographs on one sheet. */
+  grid: PartyPrintProductSettings;
+  /** The twin strip: two strips of four on one 10x15 sheet. */
   strip: PartyPrintProductSettings;
   footerText: string | null;
   footerMaxLength: number;
@@ -580,6 +583,9 @@ export interface PartyPrintSettingsPatch {
   stripEnabled?: boolean;
   stripMaxPrints?: number;
   stripPrintsPerGuest?: number;
+  gridEnabled?: boolean;
+  gridMaxPrints?: number;
+  gridPrintsPerGuest?: number;
   footerText?: string;
 }
 
@@ -754,7 +760,16 @@ export type PartyGuestContentKind = (typeof PARTY_GUEST_CONTENT_KINDS)[number];
 
 // --- Party print studio (anonymous, print-token scoped) ---
 
-export type PartyPrintProduct = 'photo' | 'strip4';
+/**
+ * A composition: one photograph, four on one sheet, or two strips of four the
+ * printer cuts apart. Independent of the paper, which is the printer's.
+ */
+export type PartyPrintProduct = 'photo' | 'grid4' | 'twinStrip4';
+/**
+ * The paper the printer has loaded, as the operator set it: the photo trade
+ * names of DNP's 4x6, 5x7 and 6x8 inch media. 20x15 lies as it is named.
+ */
+export type PartyPrintPaperSize = '10x15' | '13x18' | '20x15';
 /** 'overlay' prints the party's name on a single photograph, which stays untouched. */
 export type PartyPrintTheme = 'pure' | 'midnight' | 'event' | 'overlay';
 /** The words of an 'overlay' print: name, host's line and number. */
@@ -776,10 +791,12 @@ export interface PartyPrintFormat {
    */
   remainingForYou: number | null;
   /**
-   * The printer cuts this sheet itself (a strip arrives as two 2x6 strips), so
-   * the printed sheet — and therefore the preview — carries no cut marks.
+   * The printer cuts this sheet itself — the twin strip, always — so the
+   * printed sheet, and therefore the preview, carries no cut marks.
    */
   cutByPrinter?: boolean;
+  /** The paper this product prints on: the printer's loaded paper. */
+  paperSize?: PartyPrintPaperSize;
 }
 
 /** A choosable photograph: safe derived URLs only, never an original. */
@@ -792,8 +809,11 @@ export interface PartyPrintPhoto {
 export interface PartyPrintManifest {
   partyName: string;
   footerText: string | null;
+  /** Only what the loaded paper can make, in the order they are offered. */
   formats: PartyPrintFormat[];
   photos: PartyPrintPhoto[];
+  /** The paper in the printer. Absent from a server before papers: 10x15. */
+  paperSize?: PartyPrintPaperSize;
 }
 
 /** A crop, normalised to the auto-oriented source so the server reads it the same. */
@@ -849,6 +869,8 @@ export function submitPartyPrint(
     /** Only with theme 'overlay'. */
     overlayText?: PartyPrintOverlayText;
     overlayLogo?: PartyPrintOverlayLogo;
+    /** The paper the sheet was composed for; refused as paper_changed if the printer's is not. */
+    paperSize?: PartyPrintPaperSize;
   },
   idempotencyKey: string,
   signal?: AbortSignal,

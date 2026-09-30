@@ -16,7 +16,15 @@ export interface PrintDevice {
   cutsStrips?: boolean;
   /** The owner's tone compensation for this printer; every factor 1 when neutral. */
   calibration?: PrintCalibration;
+  /** The paper the operator says is loaded; guests are offered what it can make. */
+  loadedPaperSize?: PrintPaperSize;
+  /** The papers the Print Agent reports this printer can print. */
+  papers?: PrintPaperSize[];
 }
+
+/** DNP's 4x6, 5x7 and 6x8 inch media, under their photo trade names. */
+export type PrintPaperSize = '10x15' | '13x18' | '20x15';
+export const PRINT_PAPER_SIZES: readonly PrintPaperSize[] = ['10x15', '13x18', '20x15'] as const;
 
 export interface PrintCalibration {
   brightness: number;
@@ -86,6 +94,14 @@ export function setPrinterCalibration(
 ): Promise<PrintDevice> {
   return api(`/api/print/stations/${encodeURIComponent(stationId)}/devices/${encodeURIComponent(deviceId)}/calibration`, {
     method: 'PUT', json: calibration,
+  });
+}
+/** Record which paper is now in the printer. */
+export function setPrinterPaper(
+  stationId: string, deviceId: string, paperSize: PrintPaperSize,
+): Promise<PrintDevice> {
+  return api(`/api/print/stations/${encodeURIComponent(stationId)}/devices/${encodeURIComponent(deviceId)}/paper`, {
+    method: 'PUT', json: { paperSize },
   });
 }
 export function cancelPrintJob(jobId: string): Promise<void> {

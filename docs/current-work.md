@@ -13,14 +13,18 @@ is built is described by `ARCHITECTURE.md`.
 - Frontend: React, TypeScript, Vite
 - Runtime: Docker Compose with separate API, worker and frontend services
 - Print foundation: server-owned stations/devices/jobs plus a separately
-  packaged headless Print Agent `0.3.1`: a Windows service (spooler), a Linux
+  packaged headless Print Agent `0.4.0`: a Windows service (spooler), a Linux
   fake simulator (systemd instances, protocol acceptance) and a headless Linux
   Print Box on Ubuntu Server 24.04+ or Debian 12+ (`cups` adapter over
   CUPS/Gutenprint with queues created by the installer, NetworkManager Wi-Fi
   setup network and local setup page). DNP printers still require hardware acceptance
   on each path
-- Party printing: guests compose a 10x15 photo or a four-photo strip (printed as
-  two strips of four different photos on one sheet, eight in all) on their own print-capability token. Per-product
+- Party printing: the operator sets the printer's loaded paper (10x15, 13x18,
+  20x15) and guests compose what that paper can make — a photo or four photos
+  two by two on any of them, the twin strip (two strips of four different
+  photos, eight in all, cut by the printer) only on 10x15 — on their own
+  print-capability token. The paper/product matrix is the server's
+  (`PartyPrintProducts.Allowed`), and the manifest lists only what it allows. Per-product
   budgets are independent and server-authoritative, reservation and per-party
   numbering are one atomic update, and submission is idempotent by contract. To
   the Print Agent these are ordinary `10x15` jobs, except that a strip goes out

@@ -184,7 +184,8 @@ describe('PartyPrintSettings (owner panel)', () => {
     view();
     const card = await screen.findByTestId('party-print-option-dev-1-card');
     expect(within(card).getByText('DS620')).toBeInTheDocument();
-    expect(within(card).getByText('Postazione: Sala')).toBeInTheDocument();
+    // Where it is, and which paper is in it: that decides what guests can print.
+    expect(within(card).getByText('Postazione: Sala · carta 10×15')).toBeInTheDocument();
   });
 
   it('saves the whole draft to the print endpoint, and to nothing else', async () => {
@@ -201,7 +202,7 @@ describe('PartyPrintSettings (owner panel)', () => {
     await user.click(await screen.findByTestId('party-print-enabled'));
     await user.click(screen.getByTestId('party-print-option-dev-1'));
     await user.click(screen.getByTestId('party-print-photo-enabled'));
-    await user.type(screen.getByLabelText(/Foto 10×15 — Stampe massime/), '25');
+    await user.type(screen.getByLabelText(/Foto singola — Stampe massime/), '25');
     await user.type(screen.getByLabelText('Cosa scrivere sul foglio'), 'Auguri Anna');
     await user.click(screen.getByTestId('party-print-save'));
 
@@ -224,9 +225,9 @@ describe('PartyPrintSettings (owner panel)', () => {
     view();
     // A party budget alone is spent by whoever reaches the studio first; this
     // is the number that makes the paper last the evening.
-    expect(await screen.findByLabelText(/Foto 10×15 — Stampe per partecipante/))
+    expect(await screen.findByLabelText(/Foto singola — Stampe per partecipante/))
       .toHaveValue(2);
-    expect(screen.getByLabelText(/Foto 10×15 — Stampe massime/)).toHaveValue(40);
+    expect(screen.getByLabelText(/Foto singola — Stampe massime/)).toHaveValue(40);
   });
 
   it('refuses to promise each guest more than the party has', async () => {
@@ -271,6 +272,43 @@ describe('PartyPrintSettings (owner panel)', () => {
     await user.click(await screen.findByTestId('party-print-save'));
     expect(await screen.findByRole('alert'))
       .toHaveTextContent('Le stampe foto devono essere tra 1 e 500.');
+  });
+
+  it('sets four photos on a sheet with its own budget, beside the other two', async () => {
+    const saved = settings({
+      enabled: true, printStationId: 'st-1', printerDeviceId: 'dev-1',
+      grid: { enabled: true, maxPrints: 12, used: 0, remaining: 12, perGuest: 2 },
+    });
+    const mock = mount(settings({
+      enabled: true, printStationId: 'st-1', printerDeviceId: 'dev-1',
+    }), [station()], () => jsonResponse(saved));
+    const user = userEvent.setup();
+    view();
+    // Three products, each its own switch and numbers.
+    expect(await screen.findByTestId('party-print-grid')).toHaveTextContent('4 foto su un foglio');
+    expect(screen.getByTestId('party-print-strip')).toHaveTextContent('Due strisce da 4 foto');
+    await user.click(screen.getByTestId('party-print-grid-enabled'));
+    await user.type(screen.getByLabelText(/4 foto su un foglio — Stampe massime/), '12');
+    await user.type(screen.getByLabelText(/4 foto su un foglio — Stampe per partecipante/), '2');
+    await user.click(screen.getByTestId('party-print-save'));
+    await screen.findByTestId('party-print-saved');
+    expect(JSON.parse(mock.calls.find((c) => c.method === 'PATCH')!.body!)).toMatchObject({
+      gridEnabled: true, gridMaxPrints: 12, gridPrintsPerGuest: 2,
+    });
+  });
+
+  it('offers only a printer that prints the paper loaded in it', async () => {
+    mount(settings(), [station({
+      devices: [
+        device({ id: 'dev-1', displayName: 'Con 20x15', loadedPaperSize: '20x15', papers: ['10x15', '20x15'] }),
+        // The operator put 13x18 in, but the agent cannot print it (yet).
+        device({ id: 'dev-2', displayName: 'Senza 13x18', loadedPaperSize: '13x18', papers: ['10x15'] }),
+      ],
+    })]);
+    view();
+    const card = await screen.findByTestId('party-print-option-dev-1-card');
+    expect(within(card).getByText('Postazione: Postazione sala · carta 20×15')).toBeInTheDocument();
+    expect(screen.queryByTestId('party-print-option-dev-2-card')).not.toBeInTheDocument();
   });
 
   it('never shows a server code it was not given a translation for', async () => {

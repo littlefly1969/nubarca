@@ -6,6 +6,27 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Three papers, four photos on a sheet, and the twin strip
+
+- **The printer's paper is chosen on the Print stations page:** 10×15, 13×18
+  or 20×15, whichever roll is in the printer. Guests are offered only what that
+  paper can make, so nobody has to know which combination is valid. If the
+  Print Agent cannot print the loaded paper yet, the page says so.
+- **Four photos on one sheet**, two by two, on any of the three papers. The
+  first goes top left, the second top right, then the two below. Each photo is
+  framed on its own. It is lying on 20×15 and standing on the other two. It has
+  its own switch and budget in the party's print settings, beside the single
+  photo and the strips.
+- **The twin strip is two strips of four photos**, cut apart by the printer.
+  It exists only on 10×15 and only on a printer that cuts. The guest now sees
+  the eight photos as the two strips they will be, and no sheet carries marks
+  to cut along.
+- **Print Agent 0.4.0 learns 13×18 and 20×15.** It prints them on the same queue
+  with the right page size, and 10×15 goes out exactly as before. Until an
+  installation's agent is updated, it keeps printing 10×15 as it always has.
+- If the paper is changed while a guest is composing, nothing is printed or
+  spent. The guest is shown what the new paper can make.
+
 ### Framing on a phone, and a clearer signature on the prints
 
 - **Framing a photo works on a phone.** The frame now fits the visible
