@@ -91,6 +91,69 @@ public sealed class CupsPrinterAdapterTests
         finally { File.Delete(artifact); }
     }
 
+    /// <summary>The Gutenprint DS-RX1 page sizes as <c>lpoptions -l</c> prints them.</summary>
+    private const string RxOptions = """
+        PageSize/Media Size: *w288h432 w288h432-div2 w360h504 w432h576 w432h576-div2 Custom.WIDTHxHEIGHT
+        Resolution/Resolution: *300x300dpi
+        """;
+
+    private static (CupsPrinterAdapter Adapter, FakeProcessRunner Runner) WithOptions(string? lpoptions)
+    {
+        var runner = new FakeProcessRunner((file, args) => file switch
+        {
+            "lpstat" when args.SequenceEqual(["-r"]) => FakeProcessRunner.Ok("scheduler is running\n"),
+            "lpstat" => FakeProcessRunner.Ok(BothIdle),
+            "lpoptions" when lpoptions is not null => FakeProcessRunner.Ok(lpoptions),
+            "lp" => FakeProcessRunner.Ok("request id is NubArca-RX1HS-42 (1 file(s))\n"),
+            _ => ProcessResult.Missing(file),
+        });
+        return (new CupsPrinterAdapter(Photo, Strip, runner, NullLogger<CupsPrinterAdapter>.Instance), runner);
+    }
+
+    [Fact]
+    public async Task The_Larger_Papers_Are_Offered_When_The_Driver_Lists_Their_Sizes()
+    {
+        // 5x7 and 6x8 in the driver: 13x18 and 20x15, beside 10x15 and its cut.
+        var (rx, _) = WithOptions(RxOptions);
+        Assert.Equal(["10x15", "13x18", "20x15", "2x6x2"],
+            (await rx.GetCapabilitiesAsync(Device(), default)).Formats);
+
+        // A driver without them is a 10x15 printer, as it always was.
+        var (plain, _) = WithOptions("PageSize/Media Size: *w288h432 w288h432-div2\n");
+        Assert.Equal(["10x15", "2x6x2"], (await plain.GetCapabilitiesAsync(Device(), default)).Formats);
+
+        // And one that cannot be asked at all is, too.
+        var (silent, _) = WithOptions(null);
+        Assert.Equal(["10x15", "2x6x2"], (await silent.GetCapabilitiesAsync(Device(), default)).Formats);
+    }
+
+    [Fact]
+    public async Task The_Drivers_Sizes_Are_Asked_Once_Not_On_Every_Heartbeat()
+    {
+        var (rx, runner) = WithOptions(RxOptions);
+        for (var i = 0; i < 5; i++) await rx.GetCapabilitiesAsync(Device(), default);
+        Assert.Single(runner.Calls, c => c.File == "lpoptions");
+    }
+
+    [Theory]
+    [InlineData("13x18", "w360h504")]
+    [InlineData("20x15", "w432h576")]
+    public async Task A_Larger_Paper_Goes_To_The_Photo_Queue_Naming_Its_Size(string format, string pageSize)
+    {
+        var (adapter, runner) = WithOptions(RxOptions);
+        var artifact = Path.GetTempFileName();
+        try
+        {
+            var jobId = Guid.Parse("0d99a1b2-0000-0000-0000-000000000000");
+            var result = await adapter.SubmitAsync(new PrintSubmission(jobId, Photo, artifact, "image/jpeg", format), default);
+            Assert.True(result.Accepted);
+            var lp = Assert.Single(runner.Calls, c => c.File == "lp");
+            Assert.Equal(["-d", Photo, "-t", "NubArca-0d99a1b2", "-o", $"PageSize={pageSize}", "-o", "fit-to-page", artifact],
+                lp.Args);
+        }
+        finally { File.Delete(artifact); }
+    }
+
     [Fact]
     public async Task A_Strip_Without_Its_Queue_Is_Refused_Before_CUPS_Is_Asked()
     {
