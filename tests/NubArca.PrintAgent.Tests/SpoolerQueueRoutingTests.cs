@@ -106,4 +106,29 @@ public sealed class SpoolerQueueRoutingTests
         PrinterName = printer,
         StripPrinterName = strip,
     };
+
+    [Fact]
+    public void Each_Paper_The_Queue_Prints_Is_Reported_And_Goes_To_The_Printer()
+    {
+        var formats = SpoolerQueueRouting.Formats("DNP", ["20x15", "10x15", "13x18"], "DNP", "DNP-STRIP", true);
+        // In the one order, and the cut only on top of 10x15.
+        Assert.Equal(["10x15", "13x18", "20x15", "2x6x2"], formats);
+        Assert.Equal(["20x15"], SpoolerQueueRouting.Formats("DNP", ["20x15"], "DNP", "DNP-STRIP", true));
+        foreach (var paper in new[] { "10x15", "13x18", "20x15" })
+            Assert.Equal("DNP", SpoolerQueueRouting.TargetQueue(paper, "DNP", "DNP", "DNP-STRIP"));
+        Assert.Null(SpoolerQueueRouting.TargetQueue("a4", "DNP", "DNP", "DNP-STRIP"));
+    }
+
+    [Theory]
+    [InlineData("10x15", 400, 600, true)]
+    [InlineData("10x15", 600, 400, true)]
+    [InlineData("13x18", 500, 700, true)]
+    [InlineData("13x18", 700, 500, true)]
+    [InlineData("20x15", 600, 800, true)]
+    [InlineData("20x15", 800, 600, true)]
+    [InlineData("10x15", 500, 700, false)]
+    [InlineData("20x15", 400, 600, false)]
+    [InlineData("13x18", 600, 800, false)]
+    public void A_Spooler_Paper_Is_Matched_By_Its_Size_Either_Way_Up(string paper, int w, int h, bool expected) =>
+        Assert.Equal(expected, SpoolerQueueRouting.IsPaper(paper, w, h));
 }

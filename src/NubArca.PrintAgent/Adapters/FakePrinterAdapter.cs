@@ -35,7 +35,9 @@ public sealed class FakePrinterAdapter : IPrinterAdapter
 
     public Task<PrinterCapabilities> GetCapabilitiesAsync(DiscoveredPrinter printer,
         CancellationToken cancellationToken) =>
-        Task.FromResult(new PrinterCapabilities(["10x15"], Color: true));
+        // Every paper, and the 10x15 cut in two: a simulator lets every
+        // product be tried without the printer that makes it.
+        Task.FromResult(new PrinterCapabilities(["10x15", "13x18", "20x15", "2x6x2"], Color: true));
 
     public Task<PrinterObservedStatus> GetStatusAsync(DiscoveredPrinter printer,
         CancellationToken cancellationToken) =>

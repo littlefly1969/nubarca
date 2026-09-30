@@ -45,7 +45,8 @@ public sealed class WindowsSpoolerPrinterAdapter : IPrinterAdapter
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         var settings = new PrinterSettings { PrinterName = printer.DeviceKey };
         if (!settings.IsValid) return Task.FromResult(new PrinterCapabilities([], false));
-        var formats = SpoolerQueueRouting.Formats(printer.DeviceKey, PaperFor(settings) is not null,
+        var papers = SpoolerQueueRouting.Papers.Where(p => PaperFor(settings, p) is not null).ToList();
+        var formats = SpoolerQueueRouting.Formats(printer.DeviceKey, papers,
             _configuredPrinter, _stripPrinter, StripQueueReady());
         return Task.FromResult(new PrinterCapabilities(formats, settings.SupportsColor));
     }
@@ -78,7 +79,12 @@ public sealed class WindowsSpoolerPrinterAdapter : IPrinterAdapter
         document.PrinterSettings.PrinterName = queue;
         if (!document.PrinterSettings.IsValid)
             return Task.FromResult(new PrintSubmissionResult(false, null, "printer_unavailable"));
-        var paper = PaperFor(document.PrinterSettings);
+        // The strip is the 10x15 sheet on the cutting queue; every other format
+        // is its own paper.
+        var paper = PaperFor(document.PrinterSettings,
+            submission.Format == SpoolerQueueRouting.Strip2x6Pair
+                ? SpoolerQueueRouting.Photo10x15
+                : submission.Format);
         if (paper is null)
             return Task.FromResult(new PrintSubmissionResult(false, null, "format_unsupported"));
         document.DefaultPageSettings.PaperSize = paper;
@@ -111,27 +117,21 @@ public sealed class WindowsSpoolerPrinterAdapter : IPrinterAdapter
     {
         if (string.IsNullOrWhiteSpace(_stripPrinter)) return false;
         var settings = new PrinterSettings { PrinterName = _stripPrinter };
-        return settings.IsValid && PaperFor(settings) is not null;
+        return settings.IsValid && PaperFor(settings, SpoolerQueueRouting.Photo10x15) is not null;
     }
 
     /// <summary>
-    /// The queue's own default paper when it is 10x15, else its first 10x15
-    /// entry. Whatever the operator set on a queue travels in its defaults, and
-    /// choosing a different entry of the same size must not quietly undo it.
+    /// The queue's own default paper when it is <paramref name="format"/>'s
+    /// size, else its first entry of that size. Whatever the operator set on a
+    /// queue travels in its defaults, and choosing a different entry of the
+    /// same size must not quietly undo it.
     /// </summary>
-    private static PaperSize? PaperFor(PrinterSettings settings)
+    private static PaperSize? PaperFor(PrinterSettings settings, string format)
     {
         var preferred = settings.DefaultPageSettings.PaperSize;
-        if (IsPhoto10x15(preferred.Width, preferred.Height)) return preferred;
+        if (SpoolerQueueRouting.IsPaper(format, preferred.Width, preferred.Height)) return preferred;
         return settings.PaperSizes.Cast<PaperSize>()
-            .FirstOrDefault(x => IsPhoto10x15(x.Width, x.Height));
-    }
-
-    private static bool IsPhoto10x15(int width, int height)
-    {
-        var shortEdge = Math.Min(width, height);
-        var longEdge = Math.Max(width, height);
-        return Math.Abs(shortEdge - 400) <= 20 && Math.Abs(longEdge - 600) <= 25;
+            .FirstOrDefault(x => SpoolerQueueRouting.IsPaper(format, x.Width, x.Height));
     }
 
     private static string? Manufacturer(string name) =>

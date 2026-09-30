@@ -20,8 +20,9 @@ public interface IPrintSystemHealth
 ///
 /// Capabilities are deliberately conservative: a configured queue that CUPS
 /// lists is a 10x15 printer, and 2x6x2 is advertised only while the strip
-/// queue is listed too. No IPP capability parsing, no option names of any one
-/// driver: the queues carry their settings.
+/// queue is listed too. 13x18 and 20x15 are advertised when the queue's driver
+/// lists the 5x7 and 6x8 page sizes (<c>lpoptions -l</c>), and only those
+/// jobs carry a PageSize: a 10x15 goes out exactly as it always has.
 /// </summary>
 public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
 {
@@ -41,6 +42,19 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
     private bool? _cupsAvailable;
     private readonly HashSet<string> _announced = new(StringComparer.OrdinalIgnoreCase);
     private const string MissingMarker = "missing:";
+
+    /// <summary>The driver's page sizes change only when a queue is set up again.</summary>
+    private static readonly TimeSpan PageSizeLifetime = TimeSpan.FromMinutes(10);
+    private readonly Dictionary<string, (long At, IReadOnlyList<string> Papers)> _papers =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The Gutenprint page size each paper beyond 10x15 is sent as.</summary>
+    public static string? PageSizeFor(string format) => format switch
+    {
+        SpoolerQueueRouting.Photo13x18 => "w360h504",
+        SpoolerQueueRouting.Photo20x15 => "w432h576",
+        _ => null,
+    };
 
     public CupsPrinterAdapter(string? configuredPrinter, string? stripPrinter,
         IProcessRunner runner, ILogger<CupsPrinterAdapter> logger)
@@ -92,9 +106,36 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
         var queues = await QueuesAsync(cancellationToken);
         var present = queues?.ContainsKey(printer.DeviceKey) == true;
         var stripReady = _stripPrinter is not null && queues?.ContainsKey(_stripPrinter) == true;
-        var formats = SpoolerQueueRouting.Formats(printer.DeviceKey, present,
+        var papers = present ? await PapersAsync(printer.DeviceKey, cancellationToken) : [];
+        var formats = SpoolerQueueRouting.Formats(printer.DeviceKey, papers,
             _configuredPrinter, _stripPrinter, stripReady);
         return new PrinterCapabilities(formats, Color: true);
+    }
+
+    /// <summary>
+    /// The papers a present queue prints: always 10x15, which is what the
+    /// queue was set up for, plus each larger paper whose page size its driver
+    /// lists. A driver that cannot be asked is a 10x15 printer, as before.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> PapersAsync(string queue, CancellationToken cancellationToken)
+    {
+        var now = Environment.TickCount64;
+        lock (_papers)
+        {
+            if (_papers.TryGetValue(queue, out var cached)
+                && now - cached.At < PageSizeLifetime.TotalMilliseconds)
+                return cached.Papers;
+        }
+        var papers = new List<string> { SpoolerQueueRouting.Photo10x15 };
+        var options = await _runner.RunAsync("lpoptions", ["-p", queue, "-l"], QueryTimeout, cancellationToken);
+        if (options.Succeeded)
+        {
+            var sizes = CupsQueueSetup.PageSizes(options.StdOut);
+            papers.AddRange(SpoolerQueueRouting.Papers
+                .Where(p => PageSizeFor(p) is { } size && sizes.Contains(size, StringComparer.Ordinal)));
+        }
+        lock (_papers) _papers[queue] = (now, papers);
+        return papers;
     }
 
     public async Task<PrinterObservedStatus> GetStatusAsync(DiscoveredPrinter printer,
@@ -120,9 +161,11 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
         // fit-to-page: the artifact is exactly the sheet's shape, so fitting it
         // fills the page; without it CUPS would print the JPEG at an assumed
         // pixel density and the photograph would come out the wrong size.
-        var result = await _runner.RunAsync("lp",
-            ["-d", queue, "-t", title, "-o", "fit-to-page", submission.ArtifactPath],
-            SubmitTimeout, cancellationToken);
+        // A larger paper names its page size; a 10x15 keeps the queue's own.
+        string[] arguments = PageSizeFor(submission.Format) is { } pageSize
+            ? ["-d", queue, "-t", title, "-o", $"PageSize={pageSize}", "-o", "fit-to-page", submission.ArtifactPath]
+            : ["-d", queue, "-t", title, "-o", "fit-to-page", submission.ArtifactPath];
+        var result = await _runner.RunAsync("lp", arguments, SubmitTimeout, cancellationToken);
         Invalidate();
         if (result.Succeeded)
         {
