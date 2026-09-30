@@ -29,7 +29,8 @@ is built is described by `ARCHITECTURE.md`.
   A single photo also has the *On the photo* look: the untouched photograph
   runs full bleed, with the words in white, black or red. A faint support sits
   behind them, from just above the measured ink of the words to the foot. The
-  flat symbol, light or dark, is chosen separately. The number's measured width
+  symbol, chosen separately, is the brand's own light or dark flat mark in its
+  approved colours. The number's measured width
   is reserved, so the host's line never meets it. The preview cuts the name as
   the renderer does and keeps room for `#9999`
 - CI: GitHub Actions verifies identity, backend, frontend, TV and mobile on pull

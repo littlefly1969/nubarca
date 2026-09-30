@@ -389,6 +389,43 @@ async function printOverlay(
   await capture(file, 'party-print-overlay-support');
 }
 
+// The framing step, where the bottom of a 10x15 frame was out of a phone's
+// reach: the framed look's crop, and the whole-sheet crop of "On the photo".
+async function printCrop(file: string, overlay: boolean) {
+  const { fireEvent } = await import('@testing-library/react');
+  const PRINT = 'print-token';
+  installFetchMock({
+    [`GET /api/party/${PRINT}/print`]: () => jsonResponse({
+      partyName: 'Giulia & Matteo',
+      footerText: 'Una notte da ricordare',
+      formats: [
+        { type: 'photo', enabled: true, remaining: 12, requiredPhotos: 1, remainingForYou: null },
+      ],
+      photos: Array.from({ length: 3 }, (_, i) => ({
+        id: `f${i + 1}`,
+        thumbnailUrl: `/api/party/${PRINT}/print/media/f${i + 1}/thumbnail`,
+        previewUrl: `/api/party/${PRINT}/print/media/f${i + 1}/preview`,
+      })),
+    }),
+  });
+  const { PartyPrintPage } = await import('../../pages/PartyPrintPage');
+  mount(`/party/${PRINT}/print`, '/party/:token/print', <PartyPrintPage />);
+  fireEvent.click(await screen.findByTestId('party-print-format-photo'));
+  fireEvent.click(screen.getAllByRole('button', { name: /Scegli questa foto/ })[0]);
+  fireEvent.click(screen.getByRole('button', { name: 'Continua' }));
+  if (overlay) {
+    fireEvent.click(screen.getByRole('button', { name: 'Continua' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Sulla foto' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Indietro' }));
+  }
+  await capture(file, 'party-print-crop');
+}
+
+it('print studio — framing a photograph', () => printCrop('print-crop', false));
+
+it('print studio — framing a photograph for the title on the photo', () =>
+  printCrop('print-crop-overlay', true));
+
 it('print studio — the title on the photo', () =>
   printOverlay('print-overlay', 'Giulia & Matteo', 'Una notte da ricordare', false));
 

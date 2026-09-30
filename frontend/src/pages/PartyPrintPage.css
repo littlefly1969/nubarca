@@ -310,6 +310,23 @@
   user-select: none;
 }
 
+/* The framing step on a phone. A finger on the frame moves the photograph,
+   not the page, so a frame taller than the screen had a bottom no one could
+   reach. The frame is sized to the visible screen as well as to the column —
+   keeping its shape — with room below it for the hint and the zoom, and the
+   rest of the page scrolls around it. 100vh first, for a browser without the
+   dynamic viewport. */
+.party-print-crop-stage {
+  display: flex;
+  justify-content: center;
+  scroll-margin-top: 0.75rem;
+}
+
+.party-print-crop-stage .photo-crop {
+  width: min(100%, 22rem, max(10rem, calc((100vh - 9rem) * var(--crop-aspect))));
+  width: min(100%, 22rem, max(10rem, calc((100dvh - 9rem) * var(--crop-aspect))));
+}
+
 .party-print-zoom {
   display: flex;
   align-items: center;
@@ -319,6 +336,8 @@
 
 .party-print-zoom input {
   flex: 1;
+  /* The track stays a line; the thumb's target is as tall as a thumb. */
+  min-height: 2.75rem;
   accent-color: var(--brand-cyan-glow);
 }
 
@@ -484,10 +503,12 @@
    the renderer's, value for value. */
 .party-print-sheet-overlay { container-type: inline-size; }
 .party-print-overlay-support { position: absolute; inset-inline: 0; bottom: 0; pointer-events: none; }
+/* The brand's own flat mark in the chosen treatment, placed and scaled —
+   never refilled — as the renderer draws it. */
 .party-print-overlay-symbol {
   position: absolute;
-  -webkit-mask: url('/brand/nubarca-mark-flat-on-dark-256.png') center / contain no-repeat;
-  mask: url('/brand/nubarca-mark-flat-on-dark-256.png') center / contain no-repeat;
+  object-fit: contain;
+  pointer-events: none;
 }
 .party-print-overlay-text {
   display: flex;
@@ -553,6 +574,13 @@
   width: 20%;
   min-width: 3rem;
   height: auto;
+}
+
+/* A strip's wordmark: the renderer's share of the strip's width, and no floor
+   of its own — the preview's strip is small, and a floor made it look larger
+   than it prints. */
+.party-print-sheet-mark-strip {
+  min-width: 0;
 }
 
 .party-print-cut {
@@ -651,11 +679,10 @@
   background: linear-gradient(135deg, #7a808c, #4a505c);
 }
 
-.party-print-swatch-mark > span {
+.party-print-swatch-mark > img {
   width: 80%;
   height: 80%;
-  -webkit-mask: url('/brand/nubarca-mark-flat-on-dark-64.png') center / contain no-repeat;
-  mask: url('/brand/nubarca-mark-flat-on-dark-64.png') center / contain no-repeat;
+  object-fit: contain;
 }
 
 /* Sent ------------------------------------------------------------------- */

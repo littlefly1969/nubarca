@@ -62,11 +62,14 @@ public static class PartyPrintGeometry
     /// </summary>
     public const double OverlayMarginFraction = 0.06;
 
-    /// <summary>Height of the NubArca symbol, top-left, short-edge fraction.</summary>
-    public const double OverlaySymbolFraction = 0.12;
+    /// <summary>
+    /// Height of the NubArca symbol, top-left, short-edge fraction. A quiet
+    /// signature: the photograph is the subject (it was 0.12).
+    /// </summary>
+    public const double OverlaySymbolFraction = 0.105;
 
-    /// <summary>Type size of the party's name, bottom-left, short-edge fraction.</summary>
-    public const double OverlayTitleFraction = 0.085;
+    /// <summary>Type size of the party's name, bottom-left, short-edge fraction (it was 0.085).</summary>
+    public const double OverlayTitleFraction = 0.077;
 
     /// <summary>Type size of the host's line under the name.</summary>
     public const double OverlayLineFraction = 0.036;
@@ -138,6 +141,14 @@ public static class PartyPrintGeometry
 
     /// <summary>Room at the foot of each strip for the party line and wordmark.</summary>
     public const double StripFooterFraction = 0.075;
+
+    /// <summary>
+    /// Width of the wordmark on a strip, as a fraction of the strip's width —
+    /// as large as its signature row lets it stand. At the brand's 120px
+    /// minimum the symbol inside the lockup was ~37px, too small for the ark to
+    /// resolve on paper, and the mark printed as a smudge.
+    /// </summary>
+    public const double StripWordmarkWidthFraction = 0.27;
 
     /// <summary>
     /// Cut marks: short ticks at the very top and bottom of the gutter only.

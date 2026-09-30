@@ -28,6 +28,7 @@ import {
   DEFAULT_CROP_VIEW, MAX_ZOOM, SLOTS_PER_STRIP, STRIPS_PER_SHEET,
   CUT_MARK_LENGTH_FRACTION, PORTRAIT_HEIGHT, PORTRAIT_WIDTH,
   type CropView, cropFor, photoLayout, photoSlotAspect, stripFooter, stripSlot,
+  STRIP_WORDMARK_WIDTH_FRACTION,
   OVERLAY_LINE_FRACTION, OVERLAY_MARGIN_FRACTION, OVERLAY_SYMBOL_FRACTION, OVERLAY_TITLE_FRACTION,
   OVERLAY_NUMBER_FRACTION, OVERLAY_TEXT_SUPPORT_PADDING_FRACTION, OVERLAY_HALO_BLUR_FRACTION,
   OVERLAY_HALO_OPACITY, OVERLAY_NUMBER_ROOM, PARTY_NAME_MAX_LENGTH, FOOTER_MAX_LENGTH,
@@ -86,11 +87,21 @@ const OVERLAY_TEXT: Record<PartyPrintOverlayText, { ink: string; support: string
   black: { ink: '#0a0f1a', support: '245 247 251' },
   red: { ink: '#d11f2e', support: '10 15 26' },
 };
-/** The symbol's two treatments: the approved flat mark in one solid colour. */
+/**
+ * The symbol's two treatments: the brand's own flat marks, in their approved
+ * colours — Cloud White, Cyan and Electric Blue for the light one, Midnight
+ * Navy and Electric Blue for the dark — the very files the renderer draws.
+ */
 const OVERLAY_LOGOS: readonly PartyPrintOverlayLogo[] = ['light', 'dark'] as const;
-const OVERLAY_LOGO: Record<PartyPrintOverlayLogo, string> = {
-  light: '#f5f7fb',
-  dark: '#0a0f1a',
+const OVERLAY_LOGO: Record<PartyPrintOverlayLogo, { mark: string; swatch: string }> = {
+  light: {
+    mark: '/brand/nubarca-mark-flat-on-dark-256.png',
+    swatch: '/brand/nubarca-mark-flat-on-dark-64.png',
+  },
+  dark: {
+    mark: '/brand/nubarca-mark-flat-on-light-256.png',
+    swatch: '/brand/nubarca-mark-flat-on-light-64.png',
+  },
 };
 
 function isOverlay(theme: PartyPrintTheme): theme is 'overlay' {
@@ -212,11 +223,13 @@ function FramedPhoto({
 
 /** The party line and the wordmark, in the band the renderer reserves. */
 function SheetFooter({
-  partyName, footerText, theme,
+  partyName, footerText, theme, strip = false,
 }: {
   partyName: string;
   footerText: string | null;
   theme: PartyPrintTheme;
+  /** A strip's wordmark stands as wide as its narrow row allows, as on paper. */
+  strip?: boolean;
 }) {
   const dark = DARK_THEMES.includes(theme);
   return (
@@ -230,9 +243,10 @@ function SheetFooter({
           print is accepted, and a preview does not invent one. */}
       <span className="party-print-sheet-sign">
         <img
-          className="party-print-sheet-mark"
+          className={strip ? 'party-print-sheet-mark party-print-sheet-mark-strip' : 'party-print-sheet-mark'}
           src={dark ? PARTY_WORDMARK_DARK : PARTY_WORDMARK_LIGHT}
           alt={PRODUCT_NAME}
+          style={strip ? { width: pct(STRIP_WORDMARK_WIDTH_FRACTION) } : undefined}
         />
       </span>
     </div>
@@ -359,14 +373,15 @@ function SheetPreview(props: SheetProps) {
             onAspect={(width, height) => onAspect(id, width, height)}
           />
         </div>
-        <span
+        <img
           className="party-print-overlay-symbol"
           data-testid="party-print-overlay-symbol"
+          src={OVERLAY_LOGO[props.overlayLogo].mark}
+          alt=""
           aria-hidden="true"
           style={{
             left: ofWidth(OVERLAY_MARGIN_FRACTION), top: ofHeight(OVERLAY_MARGIN_FRACTION),
             width: ofWidth(OVERLAY_SYMBOL_FRACTION), height: ofHeight(OVERLAY_SYMBOL_FRACTION),
-            backgroundColor: OVERLAY_LOGO[props.overlayLogo],
           }}
         />
         {/* The support is the words' own box: anchored to the foot, it begins
@@ -491,7 +506,7 @@ function SheetPreview(props: SheetProps) {
               width: pct(stripFooter(strip).width), height: pct(stripFooter(strip).height),
             }}
           >
-            <SheetFooter {...props} />
+            <SheetFooter {...props} strip />
           </div>
         </div>
       ))}
@@ -539,6 +554,17 @@ export function PartyPrintPage() {
   // Null is not "unset waiting for a value" — it IS the default: follow the
   // photograph. Only a guest who deliberately turns the sheet leaves it.
   const [orientation, setOrientation] = useState<PartyPrintOrientation | null>(null);
+  // On a phone a whole 10x15 frame can reach below the fold, and a finger on
+  // it moves the photograph rather than the page. When a photograph opens for
+  // framing and its frame does not end on screen, bring the frame into view.
+  const cropStageRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (step !== 'crop') return;
+    const stage = cropStageRef.current;
+    if (stage && stage.getBoundingClientRect().bottom > window.innerHeight) {
+      stage.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+    }
+  }, [step, cropIndex]);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<MessageKey | null>(null);
@@ -1009,15 +1035,22 @@ export function PartyPrintPage() {
               </p>
             )}
             {photo && (
-              <PhotoCropFrame
-                src={photo.previewUrl}
-                aspect={aspectOf(id)}
-                slotAspect={slotAspectFor(id)}
-                view={view}
-                label={t('partyPrint.cropHelp')}
-                onChange={(next) => setView(id, next)}
-                testId="party-print-crop"
-              />
+              /* Sized to the screen as well as the column: see the CSS. */
+              <div
+                ref={cropStageRef}
+                className="party-print-crop-stage"
+                style={{ ['--crop-aspect' as string]: slotAspectFor(id) }}
+              >
+                <PhotoCropFrame
+                  src={photo.previewUrl}
+                  aspect={aspectOf(id)}
+                  slotAspect={slotAspectFor(id)}
+                  view={view}
+                  label={t('partyPrint.cropHelp')}
+                  onChange={(next) => setView(id, next)}
+                  testId="party-print-crop"
+                />
+              </div>
             )}
             <p className="party-print-hint">{t('partyPrint.cropHelp')}</p>
             <label className="party-print-zoom">
@@ -1165,7 +1198,7 @@ export function PartyPrintPage() {
                         onChange={() => setOverlayLogo(option)}
                       />
                       <span className="party-print-swatch party-print-swatch-mark" aria-hidden="true">
-                        <span style={{ backgroundColor: OVERLAY_LOGO[option] }} />
+                        <img src={OVERLAY_LOGO[option].swatch} alt="" />
                       </span>
                       <span>{t(`partyPrint.overlayLogo.${option}`)}</span>
                     </label>

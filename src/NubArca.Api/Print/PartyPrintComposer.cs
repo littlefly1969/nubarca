@@ -232,7 +232,7 @@ public sealed class PartyPrintComposer
                 DrawFooter(sheet, composition, palette, new Rectangle(
                     (int)Math.Round(footX * w), (int)Math.Round(footTop * h),
                     (int)Math.Round(stripW * w),
-                    (int)Math.Round(PartyPrintGeometry.StripFooterFraction * h)));
+                    (int)Math.Round(PartyPrintGeometry.StripFooterFraction * h)), strip: true);
             }
 
             if (!composition.CutByPrinter) DrawCutMarks(sheet, palette);
@@ -282,8 +282,7 @@ public sealed class PartyPrintComposer
 
         var shortEdge = Math.Min(w, h);
         var margin = (int)Math.Round(PartyPrintGeometry.OverlayMarginFraction * shortEdge);
-        DrawSymbol(sheet, overlay.Logo == PartyPrintOverlayLogo.Dark ? Ink : CloudWhite,
-            new Point(margin, margin),
+        DrawSymbol(sheet, overlay.Logo, new Point(margin, margin),
             (int)Math.Round(PartyPrintGeometry.OverlaySymbolFraction * shortEdge));
         DrawOverlayText(sheet, layout, ink, support);
         return sheet;
@@ -325,25 +324,27 @@ public sealed class PartyPrintComposer
         sheet.Mutate(x => x.Fill(brush, new RectangleF(0, top, sheet.Width, sheet.Height - top)));
     }
 
+    /// <summary>The approved flat mark for each treatment, exactly as the brand ships it.</summary>
+    internal static string SymbolFile(PartyPrintOverlayLogo logo) => logo == PartyPrintOverlayLogo.Dark
+        // Midnight Navy and Electric Blue, the brand's mark for light grounds.
+        ? "nubarca-mark-flat-on-light-512.png"
+        // Cloud White, Cyan and Electric Blue, the brand's mark for dark grounds.
+        : "nubarca-mark-flat-on-dark-512.png";
+
     /// <summary>
-    /// The approved flat symbol in ONE solid colour — the brand's flat mark is
-    /// exactly that geometry in solid colours — sized to <paramref name="size"/>.
-    /// Nothing is drawn under it: the photograph is not altered for the mark.
+    /// The approved flat mark in the chosen treatment, in its own colours —
+    /// never refilled — scaled once, with a sharp filter, to
+    /// <paramref name="size"/>. Nothing is drawn under it: the photograph is
+    /// not altered for the mark.
     /// </summary>
-    private void DrawSymbol(Image<Rgba32> sheet, Rgba32 colour, Point at, int size)
+    private void DrawSymbol(Image<Rgba32> sheet, PartyPrintOverlayLogo logo, Point at, int size)
     {
-        using var mark = Image.Load<Rgba32>(
-            Path.Combine(_assetRoot, "Assets", "brand", "nubarca-mark-flat-on-dark-512.png"));
-        mark.ProcessPixelRows(rows =>
+        using var mark = Image.Load<Rgba32>(Path.Combine(_assetRoot, "Assets", "brand", SymbolFile(logo)));
+        mark.Mutate(x => x.Resize(new ResizeOptions
         {
-            for (var y = 0; y < rows.Height; y++)
-            {
-                var row = rows.GetRowSpan(y);
-                for (var x = 0; x < row.Length; x++)
-                    row[x] = new Rgba32(colour.R, colour.G, colour.B, row[x].A);
-            }
-        });
-        mark.Mutate(x => x.Resize(size, size));
+            Size = new Size(size, size),
+            Sampler = KnownResamplers.Lanczos3,
+        }));
         sheet.Mutate(x => x.DrawImage(mark, at, 1f));
     }
 
@@ -509,7 +510,7 @@ public sealed class PartyPrintComposer
 
     private void DrawFooter(
         Image<Rgba32> sheet, PartyPrintComposition composition,
-        ThemePalette palette, Rectangle area)
+        ThemePalette palette, Rectangle area, bool strip = false)
     {
         // Only three things may ever appear on the paper: the party's name, the
         // line the HOST configured, and the wordmark. A guest writes nothing —
@@ -557,8 +558,12 @@ public sealed class PartyPrintComposer
         // things that happen to be near each other.
         var markRow = new Rectangle(
             area.X, area.Y + (int)textBand, area.Width, (int)markBand);
-        DrawWordmark(sheet, palette, markRow);
-        DrawSequence(sheet, palette, markRow, composition.PublicSequence);
+        // A strip's row is a third as wide as a photograph's, so there the
+        // wordmark stands as tall as the row allows and the number is set a
+        // size up: at the photograph's proportions both came out too small to
+        // read — the symbol a smudge, the number squinted at.
+        DrawWordmark(sheet, palette, markRow, strip ? PartyPrintGeometry.StripWordmarkWidthFraction : 0.20);
+        DrawSequence(sheet, palette, markRow, composition.PublicSequence, strip ? 0.39f : 0.34f);
     }
 
     /// <summary>
@@ -566,7 +571,7 @@ public sealed class PartyPrintComposer
     /// stretched. The on-light artwork goes on light paper and the on-dark on
     /// dark, which is the whole reason both are shipped.
     /// </summary>
-    private void DrawWordmark(Image<Rgba32> sheet, ThemePalette palette, Rectangle area)
+    private void DrawWordmark(Image<Rgba32> sheet, ThemePalette palette, Rectangle area, double widthFraction)
     {
         // BOTH files are the same lockup at the same proportions. That matters:
         // `nubarca-wordmark-on-light.png` is a DIFFERENT artwork — 1516x1024,
@@ -595,12 +600,18 @@ public sealed class PartyPrintComposer
         // A quiet signature, not a headline. At 0.42 of the band it was the
         // loudest thing on a keepsake whose subject is the photograph; the
         // brand's 120px minimum rendered width is the floor it never goes below.
-        var maxWidth = Math.Max(BrandMinWordmarkWidth, area.Width * 0.20);
+        var maxWidth = Math.Max(BrandMinWordmarkWidth, area.Width * widthFraction);
         var maxHeight = Math.Max(24, area.Height * 0.80);
         var scale = Math.Min(maxWidth / wordmark.Width, maxHeight / wordmark.Height);
         var targetWidth = Math.Max(1, (int)Math.Round(wordmark.Width * scale));
         var targetHeight = Math.Max(1, (int)Math.Round(wordmark.Height * scale));
-        wordmark.Mutate(x => x.Resize(targetWidth, targetHeight));
+        // One scale, with a sharp filter: the lockup's small symbol is where a
+        // softer one shows first.
+        wordmark.Mutate(x => x.Resize(new ResizeOptions
+        {
+            Size = new Size(targetWidth, targetHeight),
+            Sampler = KnownResamplers.Lanczos3,
+        }));
 
         // Bottom-left, on the same baseline the number sits on at the right.
         var y0 = area.Y + area.Height - targetHeight;
@@ -615,10 +626,10 @@ public sealed class PartyPrintComposer
     /// waiting for them without anybody reading a name off the paper.
     /// </summary>
     private void DrawSequence(
-        Image<Rgba32> sheet, ThemePalette palette, Rectangle area, long sequence)
+        Image<Rgba32> sheet, ThemePalette palette, Rectangle area, long sequence, float scale)
     {
         if (sequence <= 0) return;
-        var font = _display.CreateFont(Math.Max(10f, area.Height * 0.34f), FontStyle.Bold);
+        var font = _display.CreateFont(Math.Max(10f, area.Height * scale), FontStyle.Bold);
         sheet.Mutate(x => x.DrawText(
             new RichTextOptions(font)
             {

@@ -6,6 +6,20 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Framing on a phone, and a clearer signature on the prints
+
+- **Framing a photo works on a phone.** The frame now fits the visible
+  screen. It scrolls into view when you open a photo, so its bottom edge can
+  be seen and worked on. The zoom slider below it is easier to hit with a
+  thumb.
+- **In *On the photo*, the logo is in the brand's colours.** *Light* is the
+  mark in Cloud White, cyan and blue; *Dark* is the mark in navy and blue.
+  Before, both were a single flat colour. The logo and the party's name are
+  also a little smaller, so the photo stands out more.
+- **On strips, the NubArca logo prints sharp.** It is larger and scaled more
+  carefully, so the ark in the symbol can be seen instead of a smudge. The
+  guest's number is a size larger too.
+
 ### *On the photo* keeps the photograph
 
 - **The photograph is printed as it is.** *On the photo* no longer lays the
