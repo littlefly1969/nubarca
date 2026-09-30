@@ -20,7 +20,67 @@ export interface PrintDevice {
   loadedPaperSize?: PrintPaperSize;
   /** The papers the Print Agent reports this printer can print. */
   papers?: PrintPaperSize[];
+  /** Who last set the loaded paper — the owner or the person it is lent to — and when. */
+  loadedPaperChangedBy?: string | null;
+  loadedPaperChangedAt?: string | null;
+  /** The owner's view only: whom this printer is lent to now. */
+  shares?: PrinterShare[] | null;
+  /** The owner's view only: sheets per person, across the whole history. */
+  usage?: PrinterUsage[] | null;
 }
+
+/** A live loan of a printer, as its owner sees it. */
+export interface PrinterShare {
+  id: string;
+  granteeName: string;
+  granteeEmail: string;
+  /** The sheets this loan may take; null is no ceiling. */
+  maxSheets: number | null;
+  usedSheets: number;
+  createdAt: string;
+}
+
+/** One person's sheets on one printer; never what was on them. */
+export interface PrinterUsage {
+  /** Null when that account no longer has a name to show. */
+  name: string | null;
+  isYou: boolean;
+  /** Sheets accepted — what a ceiling counts. */
+  sheets: number;
+  /** Sheets the printer finished. */
+  completed: number;
+  byPaper: Record<string, number>;
+  parties: number;
+  album: number;
+  tests: number;
+}
+
+/** A printer lent to the reader, and nothing else of its owner's. */
+export interface SharedPrinter {
+  shareId: string;
+  stationId: string;
+  stationName: string;
+  stationStatus: PrintStationStatus;
+  deviceId: string;
+  displayName: string;
+  observedState: string;
+  ownerName: string;
+  loadedPaperSize: PrintPaperSize;
+  papers: PrintPaperSize[];
+  supportsPhoto10x15: boolean;
+  cutsStrips: boolean;
+  loadedPaperChangedBy: string | null;
+  loadedPaperChangedAt: string | null;
+  maxSheets: number | null;
+  usedSheets: number;
+}
+
+/** Share refusals the server names. */
+export type PrinterShareError =
+  | 'recipient_not_found' | 'recipient_is_owner' | 'already_shared'
+  | 'invalid_ceiling' | 'ceiling_below_used';
+/** Bounds of a loan's sheet ceiling, as the server enforces them. */
+export const PRINTER_SHARE_MAX_SHEETS = 5000;
 
 /** DNP's 4x6, 5x7 and 6x8 inch media, under their photo trade names. */
 export type PrintPaperSize = '10x15' | '13x18' | '20x15';
@@ -42,6 +102,10 @@ export interface PrintJobSummary {
   state: string;
   createdAt: string;
   failureCode: string | null;
+  /** The paper a ready job waits for, when its printer has another in. */
+  waitingForPaper?: PrintPaperSize | null;
+  /** Who sent it, when that is not the printer's owner — a job from a loan. */
+  ownerName?: string | null;
 }
 
 export interface PrintStation {
@@ -58,6 +122,8 @@ export interface PrintStation {
   queueCount: number;
   currentJob: PrintJobSummary | null;
   lastError: string | null;
+  /** What is waiting, oldest first, whoever sent it. */
+  queue?: PrintJobSummary[] | null;
 }
 
 export interface PrintStationEnrollment {
@@ -109,4 +175,24 @@ export function cancelPrintJob(jobId: string): Promise<void> {
 }
 export function retryPrintJob(jobId: string): Promise<void> {
   return api(`/api/print/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' });
+}
+
+/** Printers other people lend to you. */
+export function listSharedPrinters(signal?: AbortSignal): Promise<SharedPrinter[]> {
+  return api('/api/print/shared-printers', { signal });
+}
+/** Lend a printer to one person, by the email of their account. */
+export function sharePrinter(
+  stationId: string, deviceId: string, email: string, maxSheets: number | null,
+): Promise<PrinterShare> {
+  return api(`/api/print/stations/${encodeURIComponent(stationId)}/devices/${encodeURIComponent(deviceId)}/shares`, {
+    method: 'POST', json: { email, maxSheets },
+  });
+}
+export function updatePrinterShare(shareId: string, maxSheets: number | null): Promise<PrinterShare> {
+  return api(`/api/print/shares/${encodeURIComponent(shareId)}`, { method: 'PUT', json: { maxSheets } });
+}
+/** End a loan: what is queued still prints, nothing new is accepted. */
+export function revokePrinterShare(shareId: string): Promise<void> {
+  return api(`/api/print/shares/${encodeURIComponent(shareId)}`, { method: 'DELETE' });
 }

@@ -1,19 +1,26 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
   ApiError,
+  cancelPrintJob,
   createPrintStation,
   createPrintTestJob,
   listPrintStations,
+  listSharedPrinters,
   renewPrintStationEnrollment,
   revokePrintStation,
   setPrintStationDesiredState,
+  type PrintJobSummary,
   type PrintStation,
   type PrintStationEnrollment,
+  type SharedPrinter,
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
 import { PrinterCalibrationControls } from './PrinterCalibrationControls';
-import { PrinterPaperControl } from './PrinterPaperControl';
+import { paperLabel, PrinterPaperControl } from './PrinterPaperControl';
+import { PrinterSharingControls } from './PrinterSharingControls';
+import { PrinterUsageSummary } from './PrinterUsageSummary';
+import { SharedPrintersList } from './SharedPrintersList';
 
 const STATUS_KEYS: Record<PrintStation['status'], MessageKey> = {
   online: 'print.statusOnline',
@@ -22,10 +29,31 @@ const STATUS_KEYS: Record<PrintStation['status'], MessageKey> = {
   revoked: 'print.statusRevoked',
 };
 
+const KIND_KEYS: Record<string, MessageKey> = {
+  diagnostic: 'print.kind.diagnostic',
+  'owner-photo': 'print.kind.ownerPhoto',
+  'party-photo': 'print.kind.partyPhoto',
+  'party-grid4': 'print.kind.partyGrid4',
+  'party-strip4': 'print.kind.partyStrip4',
+};
+
+const STATE_KEYS: Record<string, MessageKey> = {
+  requested: 'print.job.preparing',
+  rendering: 'print.job.preparing',
+  ready: 'print.job.ready',
+  claimed: 'print.job.printing',
+  submitting: 'print.job.printing',
+  submitted: 'print.job.submitted',
+};
+
+/** Only what has not reached the printer can be taken back. */
+const CANCELLABLE = new Set(['requested', 'rendering', 'ready']);
+
 export function PrintStationsPanel() {
   const { state, invalidateAuth } = useAuth();
   const { t, formatDate } = useI18n();
   const [stations, setStations] = useState<PrintStation[] | null>(null);
+  const [shared, setShared] = useState<SharedPrinter[]>([]);
   const [name, setName] = useState('');
   const [enrollment, setEnrollment] = useState<PrintStationEnrollment | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -33,7 +61,11 @@ export function PrintStationsPanel() {
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
-      setStations(await listPrintStations(signal));
+      // Your stations, and the printers lent to you: the second is its own
+      // list, so a person with no station of their own still finds theirs.
+      const [own, lent] = await Promise.all([listPrintStations(signal), listSharedPrinters(signal)]);
+      setStations(own);
+      setShared(lent);
       setError(null);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -104,7 +136,9 @@ export function PrintStationsPanel() {
 
       {error && <p className="folder-error" role="alert">{error}</p>}
       {stations === null && <p className="muted" role="status">{t('print.loading')}</p>}
-      {stations?.length === 0 && <p className="muted" data-testid="print-empty">{t('print.empty')}</p>}
+      {stations?.length === 0 && shared.length === 0 && (
+        <p className="muted" data-testid="print-empty">{t('print.empty')}</p>
+      )}
 
       <ul className="print-station-list" aria-label={t('print.listLabel')}>
         {stations?.map((station) => {
@@ -139,13 +173,22 @@ export function PrintStationsPanel() {
                 <div><dt>{t('print.currentJob')}</dt><dd>{station.currentJob ? `${station.currentJob.shortCode} · ${station.currentJob.state}` : '—'}</dd></div>
                 <div><dt>{t('print.lastError')}</dt><dd>{station.lastError ?? '—'}</dd></div>
               </dl>
+              {(station.queue?.length ?? 0) > 0 && (
+                <PrintQueueList jobs={station.queue ?? []} busy={busy === station.id}
+                  onCancel={(job) => void action(station.id, () => cancelPrintJob(job.id), 'print.job.cancelError')} />
+              )}
               {station.revokedAt === null && observedPrinter && (
                 <PrinterPaperControl stationId={station.id} device={observedPrinter}
                   onSaved={() => load()} />
               )}
+              {observedPrinter && <PrinterUsageSummary usage={observedPrinter.usage ?? []} />}
               {station.revokedAt === null && observedPrinter && (
                 <PrinterCalibrationControls stationId={station.id} device={observedPrinter}
                   onSaved={() => load()} />
+              )}
+              {station.revokedAt === null && observedPrinter && (
+                <PrinterSharingControls stationId={station.id} device={observedPrinter}
+                  onChanged={() => load()} />
               )}
               {station.revokedAt === null && (
                 <div className="print-station-actions">
@@ -181,6 +224,48 @@ export function PrintStationsPanel() {
           );
         })}
       </ul>
+
+      <SharedPrintersList printers={shared} onChanged={() => load()} />
+    </section>
+  );
+}
+
+/**
+ * What is waiting on a station, oldest first, whoever sent it: a sheet made
+ * for another paper says which, and anything not yet at the printer can be
+ * taken back — by the printer's owner too, when it came from a loan.
+ */
+function PrintQueueList({ jobs, busy, onCancel }: {
+  jobs: PrintJobSummary[];
+  busy: boolean;
+  onCancel: (job: PrintJobSummary) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <section className="print-queue" data-testid="print-queue">
+      <h4>{t('print.queueTitle')}</h4>
+      <ol>
+        {jobs.map((job) => (
+          <li key={job.id} className="print-queue-row" data-testid="print-queue-row">
+            <code>{job.shortCode}</code>
+            <span>
+              {KIND_KEYS[job.kind] ? t(KIND_KEYS[job.kind]) : job.kind}
+              {' · '}{job.format === '2x6x2' ? '2×6' : paperLabel(job.format)}
+              {job.ownerName && <span className="muted">{' · '}{t('print.job.from', { name: job.ownerName })}</span>}
+            </span>
+            <span className={job.waitingForPaper ? 'print-queue-waiting' : 'muted'}>
+              {job.waitingForPaper
+                ? t('print.job.waitingPaper', { paper: paperLabel(job.waitingForPaper) })
+                : STATE_KEYS[job.state] ? t(STATE_KEYS[job.state]) : job.state}
+            </span>
+            {CANCELLABLE.has(job.state) && (
+              <button type="button" disabled={busy} onClick={() => onCancel(job)}>
+                {t('print.job.cancel')}
+              </button>
+            )}
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }

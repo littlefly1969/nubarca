@@ -43,6 +43,7 @@ function toolHandlers(): Parameters<typeof installFetchMock>[0] {
     'GET /api/uploads/staging/sessions': () => jsonResponse({ sessions: [], total: 0 }),
     'GET /api/tv-devices': () => jsonResponse([TV_DEVICE]),
     'GET /api/print/stations': () => jsonResponse([]),
+    'GET /api/print/shared-printers': () => jsonResponse([]),
     'GET /api/tv-personal/pin': () => jsonResponse({ configured: true, updatedAt: '2026-07-01T10:00:00Z' }),
     '* /api/photo-organizer/date-taken/dry-run': () => jsonResponse({
       summary: {

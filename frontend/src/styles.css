@@ -8689,3 +8689,27 @@ video.lightbox-image {
 .print-calibration-row { display: grid; grid-template-columns: 8rem 1fr 3.5rem; align-items: center; gap: .6rem; }
 .print-calibration-row output { text-align: right; font-variant-numeric: tabular-nums; }
 @media (max-width: 480px) { .print-calibration-row { grid-template-columns: 1fr 3.5rem; } .print-calibration-row label { grid-column: 1 / -1; } }
+.print-queue, .print-usage { margin: 0 0 1rem; }
+.print-queue h4, .print-usage h4 { margin: 0 0 .4rem; font-size: .85rem; color: var(--muted); font-weight: 600; }
+.print-queue ol, .print-usage ul { margin: 0; padding: 0; list-style: none; display: grid; gap: .35rem; }
+.print-queue-row { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .75rem; min-width: 0; }
+.print-queue-row > span { min-width: 0; overflow-wrap: anywhere; }
+.print-queue-row button { padding: .2rem .6rem; margin-left: auto; }
+.print-queue-waiting { color: var(--warning, #b45309); font-weight: 600; }
+.print-usage li { overflow-wrap: anywhere; }
+.print-share { margin: 0 0 1rem; }
+.print-share-body { margin-top: .75rem; display: grid; gap: .75rem; max-width: 40rem; }
+.print-share-body p { margin: 0; }
+.print-share-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
+.print-share-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem .75rem; padding: .6rem .7rem; border: 1px solid var(--border); border-radius: 8px; }
+.print-share-row > div { min-width: 0; overflow-wrap: anywhere; }
+.print-share-row p { margin: .2rem 0 0; font-size: .85rem; }
+.print-share-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.print-share-row-actions input { width: 7rem; padding: .4rem .5rem; }
+.print-share-form { display: flex; flex-wrap: wrap; align-items: end; gap: .6rem; }
+.print-share-form label { display: grid; gap: .3rem; min-width: 0; }
+.print-share-form label:first-child { flex: 1 1 16rem; }
+.print-share-form input { padding: .5rem .6rem; min-width: 0; }
+.print-share-form input[type="number"] { width: 9rem; }
+.print-shared { margin-top: 1.5rem; }
+.print-shared > h3 { margin: 0 0 .75rem; }

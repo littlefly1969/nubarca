@@ -317,7 +317,7 @@ import type {
 } from './party';
 import type { AlbumDetail, AlbumItemSummary } from './albums';
 import type { PartyGameCommand, PartyGamePlanAction, PartyGameSnapshot } from './partyGame';
-import type { PrintStation } from './printStations';
+import type { PrintStation, SharedPrinter } from './printStations';
 
 /**
  * `Prefer: return=minimal` on every guest-list and attendance mutation, exactly
@@ -468,6 +468,9 @@ export function partyCrewRoutes(partyId: string) {
      * this resolves empty; the panel renders without a station picker.
      */
     listPrintStations: (_signal?: AbortSignal): Promise<PrintStation[]> =>
+      Promise.resolve([]),
+    /* The printers other people lend to the host: the host's, the same way. */
+    listSharedPrinters: (_signal?: AbortSignal): Promise<SharedPrinter[]> =>
       Promise.resolve([]),
 
     /* What the party tells its guests. */
