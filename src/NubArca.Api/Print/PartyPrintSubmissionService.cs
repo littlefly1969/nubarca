@@ -202,6 +202,28 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         }
 
         var jobId = Guid.NewGuid();
+
+        // From here three things are held for this sheet: the guest's slot, the
+        // party's unit and, on a lent printer, the loan's sheet. A sheet that is
+        // never accepted — its source gone, its render failed, a racing twin
+        // that won, the guest gone mid-compose — gives ALL THREE back, and only
+        // then: accepted is the job's row existing, read from the database, so
+        // a failure after the commit never refunds a sheet that will print.
+        async Task<bool> ReleaseUnlessAcceptedAsync()
+        {
+            _db.ChangeTracker.Clear();
+            if (await _db.PrintJobs.AsNoTracking().AnyAsync(j => j.Id == jobId, CancellationToken.None))
+                return false;
+            if (participantId is Guid holder && perGuest > 0)
+            {
+                await _participants.ReleasePrintAsync(
+                    holder, productId, perGuest, CancellationToken.None);
+            }
+            await _budget.ReleaseAsync(access.PartyAlbumId, productId, CancellationToken.None);
+            await _printers.ReturnSheetAsync(access.PrinterShareId, CancellationToken.None);
+            return true;
+        }
+
         try
         {
             // 5. Compose. Reading the originals is a server-side act: their
@@ -213,9 +235,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                     access.OwnerUserId, slot.ItemId, cancellationToken);
                 if (bytes is null)
                 {
-                    await _budget.ReleaseAsync(
-                        access.PartyAlbumId, productId, CancellationToken.None);
-                    await _printers.ReturnSheetAsync(access.PrinterShareId, CancellationToken.None);
+                    await ReleaseUnlessAcceptedAsync();
                     return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.InvalidSource);
                 }
                 photos.Add(new PartyPrintPhoto(
@@ -336,12 +356,9 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         catch (DbUpdateException)
         {
             // Two requests raced on the same key: the index refused the second.
-            // Give the unit back and answer with the job that did win, so a
-            // retry never becomes a second sheet.
-            await _budget.ReleaseAsync(
-                access.PartyAlbumId, productId, CancellationToken.None);
-            await _printers.ReturnSheetAsync(access.PrinterShareId, CancellationToken.None);
-            _db.ChangeTracker.Clear();
+            // Give its reservations back and answer with the job that did win,
+            // so a retry never becomes a second sheet.
+            await ReleaseUnlessAcceptedAsync();
             var winner = await _db.PartyPrintRequests.AsNoTracking()
                 .Where(r => r.PartyAlbumId == access.PartyAlbumId
                     && r.IdempotencyKeyHash == keyHash)
@@ -356,13 +373,19 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 winner, seq ?? 0, productId, product.Remaining,
                 await QueueAheadAsync(access.PrintStationId, winner, CancellationToken.None)));
         }
-        catch when (!cancellationToken.IsCancellationRequested)
+        catch when (cancellationToken.IsCancellationRequested)
         {
-            // Nothing was accepted, so nothing was spent.
-            await _budget.ReleaseAsync(
-                access.PartyAlbumId, productId, CancellationToken.None);
-            await _printers.ReturnSheetAsync(access.PrinterShareId, CancellationToken.None);
-            _db.ChangeTracker.Clear();
+            // The guest went away mid-compose: not a failure to record, and not
+            // a sheet to charge anyone for.
+            await ReleaseUnlessAcceptedAsync();
+            throw;
+        }
+        catch
+        {
+            // Nothing was accepted, so nothing was spent. Had the sheet been
+            // accepted before this, it stands: the failure is the server's,
+            // and a retry with the same key is answered with that job.
+            if (!await ReleaseUnlessAcceptedAsync()) throw;
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.RenderFailed);
         }
     }
