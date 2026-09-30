@@ -6,6 +6,34 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Lending a printer, and paper that cannot be wrong
+
+- **A printer can be lent to another NubArca account**, by email, from the
+  *Sharing* section under it on the Print stations page. The person sees only
+  that printer, under *Printers shared with you*. They can change its paper,
+  print a test page and choose it for their parties, where it shows as
+  "shared by …". Colours, pause and sharing stay with the owner. Several people
+  can borrow the same printer.
+- **Each loan can have a sheet ceiling**, one number from 1 to 5000. It counts
+  every sheet accepted for that loan, test pages included. When it is used up,
+  that person's parties stop accepting prints and say why. Lending the printer
+  again starts a new count.
+- **Ending a loan** stops new prints at once. What is already queued still
+  prints.
+- **A sheet made for another paper waits for it.** If the roll is changed while
+  sheets are queued, the printer skips the ones for the old paper. They print
+  as soon as that paper is back in. The Print stations page shows them as
+  waiting for that paper, and the guest's phone says the staff need to change
+  it.
+- **The Print stations page shows the queue**: what is waiting, who sent it,
+  and a button to cancel anything not yet at the printer. It also shows who last
+  changed the paper and when, and **sheets per person** under each printer, for
+  its whole history.
+- In the party's print settings, a printer that is no longer available (a loan
+  that ended, a station removed) is now reported, instead of the list simply
+  showing nothing chosen. A party with only *four photos on a sheet* turned on
+  is now shown as ready, not as having no format.
+
 ### Three papers, four photos on a sheet, and the twin strip
 
 - **The printer's paper is chosen on the Print stations page:** 10×15, 13×18

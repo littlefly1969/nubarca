@@ -128,10 +128,16 @@ make, and only if the agent reports that paper:
 | 13×18 | yes | yes | no |
 | 20×15 | yes | yes | no |
 
-A sheet is sent as its paper's format, so an agent that does not know a paper
-refuses its job with `format_unsupported` and prints nothing else instead. A
-guest who composed for one paper while the operator loaded another is told so,
-and nothing is printed or spent.
+A sheet is sent as its paper's format, and **the server hands a printer only
+the sheets its loaded paper can take**: a claim skips a job made for another
+paper (`2x6x2` counts as 10×15), which stays `ready` in the queue until that
+paper is loaded again, then prints in its turn. The Print stations page lists it
+as *waiting for 13×18 paper* (or whichever), and the guest's phone says the
+staff need to change the paper, so a roll changed mid-queue never prints a
+sheet on the wrong media. An agent that does not know a paper still refuses its
+job with `format_unsupported` and prints nothing else instead — the last line of
+defence, not the first. A guest who composed for one paper while the operator
+loaded another is told so, and nothing is printed or spent.
 
 Three job kinds distinguish the compositions:
 
@@ -157,6 +163,53 @@ paper selector.
 Party artifacts are rendered by the server from the owner's originals and are
 subject to the same bounded-artifact and retention rules as any other job; the
 agent stores no party state and holds no party token.
+
+## Lending a printer
+
+A printer's owner can lend **one printer** — not the whole station — to another
+NubArca account, by that account's email, from the *Sharing* section under the
+printer on the Print stations page. Several people can borrow the same printer
+at once. Nothing changes on the agent: a lent printer is the same queue, and no
+agent update is needed.
+
+What the borrower gets, under *Printers shared with you*: that printer and
+nothing else of the owner's — its name, its station's name and status, the
+paper in it, whose it is ("shared by …") and how many of the loan's sheets they
+have used. They may:
+
+- **set the loaded paper**, because they are the one standing at the printer
+  when they change the roll. Every change records who and when; the paper
+  selector shows it to both, and it is audited (`print.printer.paper.set`);
+- **print a test page**, which counts against the loan's ceiling;
+- **choose it for their parties**, where it is offered beside their own
+  printers as "shared by …". Their guests print on it under their party's own
+  budgets, as on any printer.
+
+Colours, pause and resume, enrolment, revoking the station and the loans
+themselves stay the owner's.
+
+**The ceiling** is optional, from 1 to 5000 sheets, one number per loan (not
+per party or per paper). It counts every sheet the printer accepted for this
+loan: guest prints and test pages, whether or not they have come out yet. It
+can be raised or lowered, never below what is already used. When it is reached,
+the borrower's parties stop accepting new prints (the guest is told the printer
+has no sheets left, not that the party has run out) and the test page is
+disabled. Lending the printer again later starts a new loan and a new count.
+
+**Ending a loan** accepts nothing new from that moment, including a guest who
+was composing: what is already in the queue still prints. A loan also ends when
+the owner's account is disabled or the station is revoked. The owner sees the
+whole queue with who sent each sheet, and can cancel any sheet that has not
+reached the printer, a borrower's included. A borrower can resend a failed sheet
+of theirs only while the loan is live; the owner always can.
+
+**Sheets per person**, under each printer, is the owner's summary across the
+printer's whole history and across every loan: sheets accepted and sheets
+printed per person, per paper, and whether they were party prints, album prints
+or test pages. It counts sheets, never shows what was on them, and is meant to
+settle up with whoever borrowed the printer.
+
+Loans are audited as `print.printer.share.create`, `.update` and `.revoke`.
 
 ## DNP DS-RX1HS: strips cut by the printer
 
