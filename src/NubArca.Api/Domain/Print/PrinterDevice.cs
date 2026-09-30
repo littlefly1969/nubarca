@@ -26,6 +26,14 @@ public sealed class PrinterDevice
     /// Guests are offered only what this paper can make.
     /// </summary>
     public string LoadedPaperSize { get; set; } = PrintPapers.Photo10x15;
+
+    /// <summary>
+    /// When the loaded paper was last set, and by whom — the owner, or the
+    /// person the printer is lent to, who is the one changing rolls. Shown
+    /// beside the paper so nobody has to guess who changed it.
+    /// </summary>
+    public DateTime? LoadedPaperChangedAt { get; set; }
+    public Guid? LoadedPaperChangedByUserId { get; set; }
 }
 
 public static class PrintDeviceStates

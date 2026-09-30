@@ -19,11 +19,13 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
 {
     private readonly AppDbContext _db;
     private readonly IPartyCapabilityPolicy _capabilities;
+    private readonly IPrinterAccess _printers;
 
-    public PartyPrintAccessResolver(AppDbContext db, IPartyCapabilityPolicy capabilities)
+    public PartyPrintAccessResolver(AppDbContext db, IPartyCapabilityPolicy capabilities, IPrinterAccess printers)
     {
         _db = db;
         _capabilities = capabilities;
+        _printers = printers;
     }
 
     public async Task<PartyPrintAccess?> ResolveAsync(
@@ -74,17 +76,14 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
         // The station must still be the owner's and still be usable, and the
         // printer must still belong to that station: an operator who revoked a
         // station has revoked printing on it, whatever a guest is holding.
-        var station = await _db.PrintStations.AsNoTracking()
-            .FirstOrDefaultAsync(s => s.Id == profile.PrintStationId
-                && s.OwnerUserId == link.OwnerUserId
-                && s.RevokedAt == null,
-                cancellationToken);
-        if (station is null) return null;
+        // The printer must be the host's, or lent to them and still lent — with
+        // sheets left on the loan. The same answer every print path gets.
+        var use = await _printers.ForUserAsync(
+            link.OwnerUserId, profile.PrintStationId.Value, profile.PrinterDeviceId.Value, cancellationToken);
+        if (use is null || !use.HasSheets) return null;
 
         var device = await _db.PrinterDevices.AsNoTracking()
-            .FirstOrDefaultAsync(d => d.Id == profile.PrinterDeviceId
-                && d.PrintStationId == station.Id,
-                cancellationToken);
+            .FirstOrDefaultAsync(d => d.Id == use.DeviceId, cancellationToken);
         if (device is null) return null;
 
         // The paper the operator loaded, which the printer must be able to
@@ -123,9 +122,9 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
             .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
 
         var access = new PartyPrintAccess(
-            link.Id, link.AlbumId, link.OwnerUserId, station.Id, device.Id,
+            link.Id, link.AlbumId, link.OwnerUserId, use.StationId, device.Id,
             partyName, profile.FooterText, photo, strip, stripCutByPrinter,
-            PrintCalibration.Of(device), grid, paper);
+            PrintCalibration.Of(device), grid, paper, use.ShareId);
 
         // Nothing left to offer is the same as printing being closed: the guest
         // hub must not show a card that leads only to exhausted products, or to

@@ -60,6 +60,7 @@ public class AppDbContext : DbContext
     public DbSet<PrintStation> PrintStations => Set<PrintStation>();
     public DbSet<PrintStationEnrollment> PrintStationEnrollments => Set<PrintStationEnrollment>();
     public DbSet<PrinterDevice> PrinterDevices => Set<PrinterDevice>();
+    public DbSet<PrinterShare> PrinterShares => Set<PrinterShare>();
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
     public DbSet<PrintJobSource> PrintJobSources => Set<PrintJobSource>();
     public DbSet<PartyPrintProfile> PartyPrintProfiles => Set<PartyPrintProfile>();

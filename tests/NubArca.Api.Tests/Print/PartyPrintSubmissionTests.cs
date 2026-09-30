@@ -122,7 +122,8 @@ public sealed class PartyPrintSubmissionTests : IDisposable
             new PartyPrintComposer(),
             new FakeSources(),
             scope.ServiceProvider
-                .GetRequiredService<NubArca.Api.Party.IPartyParticipantService>());
+                .GetRequiredService<NubArca.Api.Party.IPartyParticipantService>(),
+            new PrinterAccess(scope.ServiceProvider.GetRequiredService<AppDbContext>()));
 
     /// <summary>A strip's eight photographs: four for each of its two strips.</summary>
     private Guid[] Eight() => _photos.Take(8).ToArray();
@@ -642,7 +643,8 @@ public sealed class PartyPrintSubmissionTests : IDisposable
             // Bytes that are not an image: composing them throws.
             new BrokenSources(),
             scope.ServiceProvider
-                .GetRequiredService<NubArca.Api.Party.IPartyParticipantService>());
+                .GetRequiredService<NubArca.Api.Party.IPartyParticipantService>(),
+            new PrinterAccess(db));
 
         var result = await service.SubmitAsync(
             access, Request(PartyPrintProducts.Photo, _photos[0]), "k", null, default);

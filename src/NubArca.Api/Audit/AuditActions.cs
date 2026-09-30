@@ -278,6 +278,15 @@ public static class AuditActions
     // spends real consumables and puts the host's own line on paper — but never
     // the footer TEXT, which is content rather than a security decision.
     public const string PartyPrintConfigure = "party.print.configure";
+    // A printer LENT by its owner to another user, and every change to that
+    // loan: who, the ceiling on sheets, and its end. The line carries the
+    // printer, the share and the two account ids — never what was printed.
+    public const string PrinterShareCreate = "print.printer.share.create";
+    public const string PrinterShareUpdate = "print.printer.share.update";
+    public const string PrinterShareRevoke = "print.printer.share.revoke";
+    // The paper said to be loaded, by the owner or by the person the printer
+    // is lent to — the one fact about the machine they may set.
+    public const string PrinterPaperSet = "print.printer.paper.set";
     public const string PartyGameStart = "party.game.start";
     public const string PartyGameFinish = "party.game.finish";
     // Playing the same party again. Recorded beside start and finish because it
@@ -447,6 +456,7 @@ public static class AuditEntityTypes
     // album a party's capability was scoped to, not the event itself.
     public const string Party = "party";
     public const string PartyAlbum = "party_album";
+    public const string PrinterDevice = "printer_device";
     public const string PartyMessage = "party_message";
     public const string PartyGuestbookEntry = "party_guestbook_entry";
     public const string Plate = "plate";

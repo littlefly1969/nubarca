@@ -1058,6 +1058,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<NubArca.Api.Party.IPartyLinkService, NubArca.Api.Party.PartyLinkService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyMediaService, NubArca.Api.Party.PartyMediaService>();
     builder.Services.AddScoped<NubArca.Api.Print.IPartyPrintBudget, NubArca.Api.Print.PartyPrintBudget>();
+    builder.Services.AddScoped<NubArca.Api.Print.IPrinterAccess, NubArca.Api.Print.PrinterAccess>();
     builder.Services.AddScoped<
         NubArca.Api.Print.IPartyPrintSourceReader, NubArca.Api.Print.PartyPrintSourceReader>();
     builder.Services.AddScoped<

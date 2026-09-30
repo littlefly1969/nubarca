@@ -57,9 +57,11 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         AppDbContext db, IPartyPrintBudget budget, IPartyMediaService media,
         IDerivedBlobStorage artifacts, PartyPrintComposer composer,
         IPartyPrintSourceReader sources,
-        NubArca.Api.Party.IPartyParticipantService participants)
+        NubArca.Api.Party.IPartyParticipantService participants,
+        IPrinterAccess printers)
     {
         _participants = participants;
+        _printers = printers;
         _db = db;
         _budget = budget;
         _media = media;
@@ -67,6 +69,8 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         _composer = composer;
         _sources = sources;
     }
+
+    private readonly IPrinterAccess _printers;
 
     public async Task<PartyPrintSubmitResult> SubmitAsync(
         PartyPrintAccess access,
@@ -162,20 +166,38 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             }
         }
 
-        // 4b. One unit of the party's, atomically. Losing here means someone
+        // 4b. On a LENT printer, one sheet of the loan's ceiling — and the
+        // proof, taken in the same statement, that the loan is still live: a
+        // share revoked while this guest composed stops the print here, and the
+        // queue behind it simply finishes.
+        var sheet = await _printers.TryTakeSheetAsync(access.PrinterShareId, cancellationToken);
+        if (sheet != PrinterSheetResult.Taken)
+        {
+            if (participantId is Guid returned && perGuest > 0)
+            {
+                await _participants.ReleasePrintAsync(
+                    returned, productId, perGuest, CancellationToken.None);
+            }
+            return PartyPrintSubmitResult.Refuse(sheet == PrinterSheetResult.Revoked
+                ? PartyPrintRefusal.Unavailable
+                : PartyPrintRefusal.ShareExhausted);
+        }
+
+        // 4c. One unit of the party's, atomically. Losing here means someone
         // else took the last.
         var reservation = await _budget.TryReserveAsync(
             access.PartyAlbumId, productId, cancellationToken);
         if (reservation is null)
         {
-            // The guest's slot was claimed a moment ago and this sheet will not
-            // happen, so it goes back: their allowance is not spent by the
-            // party running out.
+            // The guest's slot and the loan's sheet were taken a moment ago and
+            // this sheet will not happen, so they go back: neither is spent by
+            // the party running out.
             if (participantId is Guid held && perGuest > 0)
             {
                 await _participants.ReleasePrintAsync(
                     held, productId, perGuest, CancellationToken.None);
             }
+            await _printers.ReturnSheetAsync(access.PrinterShareId, CancellationToken.None);
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.BudgetExhausted);
         }
 
@@ -193,6 +215,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 {
                     await _budget.ReleaseAsync(
                         access.PartyAlbumId, productId, CancellationToken.None);
+                    await _printers.ReturnSheetAsync(access.PrinterShareId, CancellationToken.None);
                     return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.InvalidSource);
                 }
                 photos.Add(new PartyPrintPhoto(
@@ -317,6 +340,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             // retry never becomes a second sheet.
             await _budget.ReleaseAsync(
                 access.PartyAlbumId, productId, CancellationToken.None);
+            await _printers.ReturnSheetAsync(access.PrinterShareId, CancellationToken.None);
             _db.ChangeTracker.Clear();
             var winner = await _db.PartyPrintRequests.AsNoTracking()
                 .Where(r => r.PartyAlbumId == access.PartyAlbumId
@@ -337,6 +361,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             // Nothing was accepted, so nothing was spent.
             await _budget.ReleaseAsync(
                 access.PartyAlbumId, productId, CancellationToken.None);
+            await _printers.ReturnSheetAsync(access.PrinterShareId, CancellationToken.None);
             _db.ChangeTracker.Clear();
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.RenderFailed);
         }

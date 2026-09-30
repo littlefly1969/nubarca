@@ -35,7 +35,13 @@ public sealed record PartyPrintAccess(
     /// <summary>Four photographs on one sheet. Null is off.</summary>
     PartyPrintProductState? Grid = null,
     /// <summary>The paper the operator says is loaded, which the printer reports it can print.</summary>
-    string Paper = PrintPapers.Photo10x15)
+    string Paper = PrintPapers.Photo10x15,
+    /// <summary>
+    /// The share the host prints under when the printer is lent to them —
+    /// null on their own printer. Every accepted sheet takes one of its
+    /// ceiling, atomically with the job.
+    /// </summary>
+    Guid? PrinterShareId = null)
 {
     private static readonly PartyPrintProductState Off = new(false, 0);
 
