@@ -3,6 +3,7 @@ import {
   type PartyPrintSettings as Settings,
   type PrintStation,
   type PrintPaperSize,
+  type SharedPrinter,
 } from '@nubarca/api-client';
 import { usePartyApi } from '../party/workspace/partyApi';
 import { useI18n, type MessageKey } from '../i18n';
@@ -107,6 +108,10 @@ interface PrinterOption {
   /** Whether a sheet would come out of it right now. */
   reachable: boolean;
   stationStatus: PrintStation['status'];
+  /** Set for a printer lent to the host: whose it is. */
+  sharedBy?: string;
+  /** A lent printer's sheets still allowed; null is no ceiling. */
+  sheetsLeft?: number | null;
 }
 
 const OPTION_KEY = (stationId: string, deviceId: string) => `${stationId}:${deviceId}`;
@@ -143,11 +148,33 @@ export function printerOptions(stations: readonly PrintStation[]): PrinterOption
       })));
 }
 
+/**
+ * The printers lent to the host, as the same kind of choice as their own: one
+ * printer, where it is, whose it is, and how many of the loan's sheets are left.
+ */
+export function sharedPrinterOptions(printers: readonly SharedPrinter[]): PrinterOption[] {
+  return printers
+    .filter((printer) => printer.papers.includes(printer.loadedPaperSize))
+    .map((printer) => ({
+      key: OPTION_KEY(printer.stationId, printer.deviceId),
+      stationId: printer.stationId,
+      stationName: printer.stationName,
+      deviceId: printer.deviceId,
+      deviceName: printer.displayName,
+      paper: printer.loadedPaperSize,
+      reachable: printer.stationStatus === 'online',
+      stationStatus: printer.stationStatus,
+      sharedBy: printer.ownerName,
+      sheetsLeft: printer.maxSheets === null ? null : Math.max(0, printer.maxSheets - printer.usedSheets),
+    }));
+}
+
 export function PartyPrintSettings({ albumId }: { albumId: string }) {
-  const { t } = useI18n();
+  const { t, tn } = useI18n();
   const api = usePartyApi();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [stations, setStations] = useState<PrintStation[]>([]);
+  const [shared, setShared] = useState<SharedPrinter[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<MessageKey | null>(null);
@@ -166,17 +193,23 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
       // installation's hardware, and asking for one would be the request this
       // boundary exists to prevent.
       api.listPrintStations(controller.signal),
-    ]).then(([loaded, allStations]) => {
+      // The printers other people lend to the host — empty for a collaborator,
+      // for the same reason.
+      api.listSharedPrinters(controller.signal),
+    ]).then(([loaded, allStations, lent]) => {
       if (controller.signal.aborted) return;
       setSettings(loaded);
       setDraft(toDraft(loaded));
       setStations(allStations);
+      setShared(lent);
       setLoad('ready');
     }).catch(() => { if (!controller.signal.aborted) setLoad('failed'); });
     return () => controller.abort();
   }, [albumId, attempt, api]);
 
-  const options = useMemo(() => printerOptions(stations), [stations]);
+  const options = useMemo(
+    () => [...printerOptions(stations), ...sharedPrinterOptions(shared)],
+    [stations, shared]);
 
   if (load === 'failed') {
     return (
@@ -208,6 +241,10 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
     ? OPTION_KEY(draft.stationId, draft.deviceId)
     : '';
   const chosenOption = options.find((option) => option.key === chosen) ?? null;
+  // The party still names a printer that is no longer among the host's: a
+  // loan that ended, a station taken away. Said, rather than left as a list
+  // with nothing ticked.
+  const chosenGone = api.isOwner && chosen !== '' && chosenOption === null;
 
   const update = (patch: Partial<Draft>) => {
     setDraft((prev) => (prev ? { ...prev, ...patch } : prev));
@@ -264,9 +301,11 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
         ? { kind: 'blocked', key: 'partyPrintOwner.state.noPrinter' }
         : !chosenOption.reachable
           ? { kind: 'blocked', key: 'partyPrintOwner.state.printerOffline' }
-          : !draft.photoEnabled && !draft.stripEnabled
-            ? { kind: 'blocked', key: 'partyPrintOwner.state.noProduct' }
-            : { kind: 'ready', key: 'partyPrintOwner.state.ready' };
+          : chosenOption.sheetsLeft === 0
+            ? { kind: 'blocked', key: 'partyPrintOwner.state.shareExhausted' }
+            : !draft.photoEnabled && !draft.gridEnabled && !draft.stripEnabled
+              ? { kind: 'blocked', key: 'partyPrintOwner.state.noProduct' }
+              : { kind: 'ready', key: 'partyPrintOwner.state.ready' };
 
   return (
     <div className="pw-panels" data-testid="party-print-settings">
@@ -312,6 +351,12 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
             <p>{t('partyPrintOwner.noPrintersAnywhere')}</p>
           </Notice>
         ) : (
+          <>
+          {chosenGone && (
+            <Notice tone="warn" testId="party-print-printer-gone">
+              <p>{t('partyPrintOwner.printerGone')}</p>
+            </Notice>
+          )}
           <ChoiceGroup
             label={t('partyPrintOwner.chooseLabel')}
             hint={t('partyPrintOwner.chooseHint')}
@@ -326,8 +371,18 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
                 disabled={status === 'saving'}
                 testId={`party-print-option-${option.deviceId}`}
                 title={option.deviceName}
-                meta={`${t('partyPrintOwner.atStation', { station: option.stationName })} \u00b7 ${t('partyPrintOwner.paper', { paper: option.paper.replace('x', '\u00d7') })}`}
-                note={option.reachable ? undefined : t('partyPrintOwner.offlineNote')}
+                meta={[
+                  t('partyPrintOwner.atStation', { station: option.stationName }),
+                  t('partyPrintOwner.paper', { paper: option.paper.replace('x', '\u00d7') }),
+                  ...(option.sharedBy ? [t('partyPrintOwner.sharedBy', { name: option.sharedBy })] : []),
+                ].join(' \u00b7 ')}
+                note={!option.reachable
+                  ? t('partyPrintOwner.offlineNote')
+                  : option.sheetsLeft === 0
+                    ? t('partyPrintOwner.shareExhaustedNote')
+                    : typeof option.sheetsLeft === 'number'
+                      ? tn(option.sheetsLeft, 'partyPrintOwner.sheetsLeft')
+                      : undefined}
                 status={(
                   <Badge kind={option.reachable ? 'ok' : 'warn'}>
                     {t(option.reachable
@@ -341,6 +396,7 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
               />
             ))}
           </ChoiceGroup>
+          </>
         )}
       </Panel>
 

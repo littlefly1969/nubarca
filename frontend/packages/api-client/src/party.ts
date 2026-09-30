@@ -835,8 +835,9 @@ export interface PartyPrintAccepted {
 }
 
 /** The pipeline's states, reduced to what a guest can act on. */
+/** 'waiting_paper': queued, but the printer has another paper in than this sheet's. */
 export type PartyPrintState =
-  | 'preparing' | 'queued' | 'printing' | 'completed' | 'failed' | 'unknown';
+  | 'preparing' | 'queued' | 'waiting_paper' | 'printing' | 'completed' | 'failed' | 'unknown';
 
 export interface PartyPrintStatus {
   jobId: string;

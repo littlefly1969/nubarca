@@ -996,6 +996,44 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(screen.getByText('In stampa')).toBeInTheDocument();
   });
 
+  it('says the sheet waits for the staff to change the paper', async () => {
+    vi.useFakeTimers();
+    mount(manifest(), {
+      [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
+      [`GET /api/party/${TOKEN}/print/job-1`]: () => jsonResponse({
+        jobId: 'job-1', state: 'waiting_paper', publicSequence: 12, product: 'photo',
+      }),
+    });
+    const tick = async (ms = 1) => {
+      await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+    };
+    render(wrapper());
+    await tick();
+    fireEvent.click(screen.getByTestId('party-print-format-photo'));
+    fireEvent.click(screen.getAllByRole('button', { name: /Scegli questa foto/ })[0]);
+    fireEvent.click(next());
+    fireEvent.click(next());
+    fireEvent.click(screen.getByRole('button', { name: 'Stampa' }));
+    await tick();
+    await tick(4_500);
+    // Not "in the queue" with no end: the printer has another paper in.
+    expect(screen.getByText('In coda: lo staff deve cambiare la carta')).toBeInTheDocument();
+  });
+
+  it('says the printer has no sheets left for the party when a loan is used up', async () => {
+    const user = setup();
+    mount(manifest(), {
+      [`POST /api/party/${TOKEN}/print`]: () => errorResponse(409, { error: 'share_exhausted' }),
+    });
+    render(wrapper());
+    await compose(user, 'photo');
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    // Neither the guest's share nor the party's: the printer's.
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Questa stampante ha finito i fogli a disposizione. Chiedi allo staff.');
+    expect(alert).not.toHaveTextContent(/tuoi ricordi|questo formato/);
+  });
+
   it('says which refusal it was, in words a guest can act on', async () => {
     const user = setup();
     mount(manifest(), {

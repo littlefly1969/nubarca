@@ -162,6 +162,7 @@ function base(extra: Record<string, () => Response> = {}) {
       footerText: '',
     }),
     'GET /api/print/stations': () => jsonResponse([]),
+    'GET /api/print/shared-printers': () => jsonResponse([]),
     [`GET /api/albums/${ALBUM_ID}/party-challenges`]: () => jsonResponse({ albumId: ALBUM_ID, challenges: [] }),
     'GET /api/albums': () => jsonResponse([]),
     ...extra,

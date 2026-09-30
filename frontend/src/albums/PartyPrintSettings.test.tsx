@@ -47,14 +47,27 @@ function station(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** A printer somebody else lends to the host. */
+function lent(overrides: Record<string, unknown> = {}) {
+  return {
+    shareId: 'sh-1', stationId: 'st-9', stationName: 'Casa di Stefano', stationStatus: 'online',
+    deviceId: 'dev-9', displayName: 'DS-RX1HS', observedState: 'ready', ownerName: 'Stefano',
+    loadedPaperSize: '10x15', papers: ['10x15'], supportsPhoto10x15: true, cutsStrips: true,
+    loadedPaperChangedBy: null, loadedPaperChangedAt: null, maxSheets: null, usedSheets: 0,
+    ...overrides,
+  };
+}
+
 function mount(
   loaded: unknown = settings(),
   stations: unknown[] = [station()],
   save?: () => Response,
+  shared: unknown[] = [],
 ) {
   return installFetchMock({
     [`GET /api/albums/${ALBUM}/party-print-settings`]: () => jsonResponse(loaded),
     'GET /api/print/stations': () => jsonResponse(stations),
+    'GET /api/print/shared-printers': () => jsonResponse(shared),
     ...(save ? { [`PATCH /api/albums/${ALBUM}/party-print-settings`]: save } : {}),
   });
 }
@@ -334,6 +347,7 @@ describe('PartyPrintSettings (owner panel)', () => {
       [`GET /api/albums/${ALBUM}/party-print-settings`]: () =>
         (fail ? errorResponse(500) : jsonResponse(settings())),
       'GET /api/print/stations': () => jsonResponse([]),
+      'GET /api/print/shared-printers': () => jsonResponse([]),
     });
     view();
 
@@ -356,6 +370,7 @@ describe('PartyPrintSettings (owner panel)', () => {
       // a request would SUCCEED — so if one appears, the assertion below is
       // about a real call and not about a missing mock.
       'GET /api/print/stations': () => jsonResponse([station()]),
+      'GET /api/print/shared-printers': () => jsonResponse([lent()]),
     });
     render(
       <I18nProvider>
@@ -377,5 +392,56 @@ describe('PartyPrintSettings (owner panel)', () => {
     // And the listing was never even asked for: the crew client answers it
     // with an empty list instead of reaching for an owner route.
     expect(fetchMock.calls.map((c) => c.url)).not.toContain('/api/print/stations');
+    expect(fetchMock.calls.map((c) => c.url)).not.toContain('/api/print/shared-printers');
+    expect(text).not.toMatch(/Stefano|DS-RX1HS/);
+  });
+
+  // --- Printers lent to the host ------------------------------------------
+
+  it('offers a printer lent to the host beside their own, saying whose it is', async () => {
+    const saved = settings({ enabled: true, printStationId: 'st-9', printerDeviceId: 'dev-9' });
+    const mock = mount(settings(), [station()], () => jsonResponse(saved), [lent({ maxSheets: 50, usedSheets: 8 })]);
+    const user = userEvent.setup();
+    view();
+    const card = await screen.findByTestId('party-print-option-dev-9-card');
+    expect(within(card).getByText('Postazione: Casa di Stefano · carta 10×15 · condivisa da Stefano'))
+      .toBeInTheDocument();
+    expect(card).toHaveTextContent('Condivisa con un tetto: restano 42 fogli.');
+    expect(screen.getByTestId('party-print-option-dev-1-card')).toBeInTheDocument();
+
+    await user.click(within(card).getByRole('radio'));
+    await user.click(screen.getByTestId('party-print-save'));
+    await screen.findByTestId('party-print-saved');
+    expect(JSON.parse(mock.calls.find((c) => c.method === 'PATCH')!.body!)).toMatchObject({
+      printStationId: 'st-9', printerDeviceId: 'dev-9',
+    });
+  });
+
+  it('says the party cannot print when the loan’s sheets are used up', async () => {
+    mount(settings({
+      enabled: true, printStationId: 'st-9', printerDeviceId: 'dev-9',
+      photo: { enabled: true, maxPrints: 10, used: 0, remaining: 10, perGuest: 0 },
+    }), [], undefined, [lent({ maxSheets: 20, usedSheets: 20 })]);
+    view();
+    expect(await screen.findByTestId('party-print-readiness')).toHaveTextContent('Fogli della condivisione finiti');
+    expect(screen.getByTestId('party-print-option-dev-9-card'))
+      .toHaveTextContent('I fogli concessi per questa stampante sono finiti');
+  });
+
+  it('says so when the printer the party names is no longer the host’s to use', async () => {
+    // The loan ended: the party still names that printer, the list no longer has it.
+    mount(settings({ enabled: true, printStationId: 'st-9', printerDeviceId: 'dev-9' }), [station()]);
+    view();
+    expect(await screen.findByTestId('party-print-printer-gone')).toHaveTextContent('non è più disponibile');
+    expect(screen.getByTestId('party-print-readiness')).toHaveTextContent('Manca la stampante');
+  });
+
+  it('counts four photos on a sheet as a product the party can print', async () => {
+    mount(settings({
+      enabled: true, printStationId: 'st-1', printerDeviceId: 'dev-1',
+      grid: { enabled: true, maxPrints: 12, used: 0, remaining: 12, perGuest: 0 },
+    }), [station()]);
+    view();
+    expect(await screen.findByTestId('party-print-readiness')).toHaveTextContent('Pronta');
   });
 });

@@ -21,6 +21,7 @@ import {
   listPartyMessages,
   listPartyUploads,
   listPrintStations,
+  listSharedPrinters,
   moderatePartyGuestbookEntry,
   moderatePartyMessage,
   moderatePartyUpload,
@@ -97,6 +98,7 @@ const owner = {
   getPartyPrintSettings,
   setPartyPrintSettings,
   listPrintStations,
+  listSharedPrinters,
 
   listPartyGuestContent,
   setPartyGuestContent,

@@ -113,6 +113,7 @@ const DARK_THEMES: readonly PartyPrintTheme[] = ['midnight', 'event'] as const;
 const STATE_LABEL: Record<PartyPrintState, MessageKey> = {
   preparing: 'partyPrint.state.preparing',
   queued: 'partyPrint.state.queued',
+  waiting_paper: 'partyPrint.state.waitingPaper',
   printing: 'partyPrint.state.printing',
   completed: 'partyPrint.state.completed',
   failed: 'partyPrint.state.failed',
@@ -151,6 +152,9 @@ function refusalKey(err: unknown): MessageKey {
     // when it is their own share that is spent is a lie they can see through
     // the moment somebody else collects a print.
     case 'guest_budget_exhausted': return 'partyPrint.error.guestBudget';
+    // A lent printer whose owner's ceiling is used up: not this guest's
+    // share, not the party's — the printer has no more sheets for it.
+    case 'share_exhausted': return 'partyPrint.error.shareExhausted';
     case 'printer_unavailable': return 'partyPrint.error.printer';
     case 'render_failed': return 'partyPrint.error.render';
     case 'invalid_source': return 'partyPrint.error.source';
