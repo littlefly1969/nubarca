@@ -15,14 +15,17 @@ public sealed class PrintStationService
     private readonly IDerivedBlobStorage _artifacts;
     private readonly PrintArtifactRenderer _renderer;
 
+    private readonly IPrinterAccess _printers;
+
     public PrintStationService(AppDbContext db, TimeProvider clock, IOptions<PrintOptions> options,
-        IDerivedBlobStorage artifacts, PrintArtifactRenderer renderer)
+        IDerivedBlobStorage artifacts, PrintArtifactRenderer renderer, IPrinterAccess printers)
     {
         _db = db;
         _clock = clock;
         _options = options.Value;
         _artifacts = artifacts;
         _renderer = renderer;
+        _printers = printers;
     }
 
     public async Task<CreatePrintStationResponse> CreateAsync(
@@ -104,6 +107,18 @@ public sealed class PrintStationService
         var jobs = await _db.PrintJobs.AsNoTracking()
             .Where(x => stationIds.Contains(x.PrintStationId))
             .OrderByDescending(x => x.CreatedAt).ToListAsync(cancellationToken);
+        var deviceIds = devices.Select(x => x.Id).ToArray();
+        var shares = await _db.PrinterShares.AsNoTracking()
+            .Where(x => deviceIds.Contains(x.PrinterDeviceId) && x.RevokedAt == null)
+            .OrderBy(x => x.CreatedAt).ToListAsync(cancellationToken);
+        // Names for everyone who appears: whoever the printers are lent to, who
+        // sent a job, and who last set a paper. Nothing else about them.
+        var people = await NamesAsync(
+            shares.Select(x => x.GranteeUserId)
+                .Concat(jobs.Select(x => x.OwnerUserId))
+                .Concat(devices.Where(x => x.LoadedPaperChangedByUserId != null)
+                    .Select(x => x.LoadedPaperChangedByUserId!.Value)),
+            cancellationToken);
         var now = Now;
 
         return stations.Select(station =>
@@ -112,16 +127,166 @@ public sealed class PrintStationService
             var stationJobs = jobs.Where(x => x.PrintStationId == station.Id).ToArray();
             var current = stationJobs.FirstOrDefault(x => !PrintJobStates.IsTerminal(x.State));
             var lastError = stationJobs.FirstOrDefault(x => x.FailureCode != null)?.FailureCode;
+            PrintJobSummaryDto Job(PrintJob job) => ToJobDto(job,
+                WaitingFor(job, stationDevices),
+                job.OwnerUserId == station.OwnerUserId ? null : people.GetValueOrDefault(job.OwnerUserId)?.Name);
             return new PrintStationDto(
                 station.Id, station.Name, station.Enabled, station.DesiredState,
                 PrintStationStatus.Calculate(station.LastSeenAt, now, station.RevokedAt != null,
                     station.Enabled, stationDevices.Select(x => x.LastObservedState),
                     _options.HeartbeatOnlineSeconds, _options.HeartbeatOfflineSeconds),
                 station.LastSeenAt, station.AgentVersion, station.CreatedAt, station.RevokedAt,
-                stationDevices.Select(ToDeviceDto).ToArray(),
+                stationDevices.Select(device => ToDeviceDto(device, people) with
+                {
+                    Shares = shares.Where(x => x.PrinterDeviceId == device.Id)
+                        .Select(x => new PrinterShareDto(x.Id,
+                            people.GetValueOrDefault(x.GranteeUserId)?.Name ?? string.Empty,
+                            people.GetValueOrDefault(x.GranteeUserId)?.Email ?? string.Empty,
+                            x.MaxSheets, x.UsedSheets, x.CreatedAt))
+                        .ToArray(),
+                    Usage = Usage(stationJobs.Where(x => x.PrinterDeviceId == device.Id),
+                        station.OwnerUserId, people),
+                }).ToArray(),
                 stationJobs.Count(x => !PrintJobStates.IsTerminal(x.State)),
-                current is null ? null : ToJobDto(current), lastError);
+                current is null ? null : Job(current), lastError,
+                // The queue, oldest first: what is waiting, for which paper, and
+                // whose — so the owner can see and clear a lent printer's work.
+                stationJobs.Where(x => !PrintJobStates.IsTerminal(x.State))
+                    .OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).Take(25).Select(Job).ToArray());
         }).ToArray();
+    }
+
+    /// <summary>
+    /// The printers other users have lent to <paramref name="userId"/>: what
+    /// they may print on, and the two things they may set — nothing about the
+    /// owner's other printers, stations or work.
+    /// </summary>
+    public async Task<IReadOnlyList<SharedPrinterDto>> ListSharedAsync(
+        Guid userId, CancellationToken cancellationToken)
+    {
+        var shares = await _db.PrinterShares.AsNoTracking()
+            .Where(s => s.GranteeUserId == userId && s.RevokedAt == null
+                && _db.Users.Any(u => u.Id == s.OwnerUserId && u.DisabledAt == null))
+            .ToListAsync(cancellationToken);
+        var deviceIds = shares.Select(x => x.PrinterDeviceId).ToArray();
+        var devices = await _db.PrinterDevices.AsNoTracking()
+            .Where(d => deviceIds.Contains(d.Id)).ToListAsync(cancellationToken);
+        var stationIds = devices.Select(d => d.PrintStationId).ToArray();
+        var stations = await _db.PrintStations.AsNoTracking()
+            .Where(s => stationIds.Contains(s.Id) && s.RevokedAt == null).ToListAsync(cancellationToken);
+        var stationDevices = await _db.PrinterDevices.AsNoTracking()
+            .Where(d => stationIds.Contains(d.PrintStationId))
+            .Select(d => new { d.PrintStationId, d.LastObservedState }).ToListAsync(cancellationToken);
+        var people = await NamesAsync(
+            shares.Select(x => x.OwnerUserId).Concat(devices.Where(d => d.LoadedPaperChangedByUserId != null)
+                .Select(d => d.LoadedPaperChangedByUserId!.Value)), cancellationToken);
+        var now = Now;
+
+        return shares.Select(share =>
+        {
+            var device = devices.FirstOrDefault(d => d.Id == share.PrinterDeviceId);
+            var station = device is null ? null : stations.FirstOrDefault(s => s.Id == device.PrintStationId);
+            // A station its owner revoked, or one that changed hands, lends nothing.
+            if (device is null || station is null || station.OwnerUserId != share.OwnerUserId) return null;
+            return new SharedPrinterDto(
+                share.Id, station.Id, station.Name,
+                PrintStationStatus.Calculate(station.LastSeenAt, now, false, station.Enabled,
+                    stationDevices.Where(d => d.PrintStationId == station.Id).Select(d => d.LastObservedState),
+                    _options.HeartbeatOnlineSeconds, _options.HeartbeatOfflineSeconds),
+                device.Id, device.DisplayName, device.LastObservedState,
+                people.GetValueOrDefault(share.OwnerUserId)?.Name ?? string.Empty,
+                PaperOf(device), Papers(device),
+                PrintCapabilityMatcher.SupportsFormat(device.CapabilitiesJson, PrintFormats.Photo10x15),
+                PrintCapabilityMatcher.SupportsFormat(device.CapabilitiesJson, PrintFormats.Strip2x6Pair),
+                device.LoadedPaperChangedByUserId is Guid by ? people.GetValueOrDefault(by)?.Name : null,
+                device.LoadedPaperChangedAt,
+                share.MaxSheets, share.UsedSheets);
+        }).Where(x => x is not null).Cast<SharedPrinterDto>()
+            .OrderBy(x => x.OwnerName).ThenBy(x => x.DisplayName).ToArray();
+    }
+
+    // --- Lending a printer ----------------------------------------------------
+
+    /// <summary>
+    /// Lends one of the owner's printers to the account with <paramref name="email"/>.
+    /// Refusals are codes the owner's page can speak: not_found, recipient_not_found,
+    /// recipient_is_owner, already_shared, invalid_ceiling.
+    /// </summary>
+    public async Task<(PrinterShareDto? Share, string? Error)> ShareAsync(
+        Guid ownerId, Guid stationId, Guid printerId, string? email, int? maxSheets,
+        CancellationToken cancellationToken)
+    {
+        if (!PrinterShareLimits.IsValidCeiling(maxSheets)) return (null, "invalid_ceiling");
+        var owned = await _db.PrintStations.AnyAsync(
+            x => x.Id == stationId && x.OwnerUserId == ownerId && x.RevokedAt == null, cancellationToken);
+        var onStation = owned && await _db.PrinterDevices.AnyAsync(
+            x => x.Id == printerId && x.PrintStationId == stationId, cancellationToken);
+        if (!onStation) return (null, "not_found");
+
+        // The same lookup an album transfer makes: the exact address of an
+        // active account, nothing that lists or suggests the others.
+        var normalized = (email ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalized.Length is 0 or > 320) return (null, "recipient_not_found");
+        var grantee = await _db.Users.AsNoTracking()
+            .Where(u => u.Email.ToLower() == normalized && u.DisabledAt == null)
+            .Select(u => new { u.Id, u.DisplayName, u.Email })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (grantee is null) return (null, "recipient_not_found");
+        if (grantee.Id == ownerId) return (null, "recipient_is_owner");
+
+        var share = new PrinterShare
+        {
+            Id = Guid.NewGuid(), PrinterDeviceId = printerId, OwnerUserId = ownerId,
+            GranteeUserId = grantee.Id, MaxSheets = maxSheets, UsedSheets = 0, CreatedAt = Now,
+        };
+        _db.PrinterShares.Add(share);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // The index allows one live loan per printer and person.
+            _db.ChangeTracker.Clear();
+            return (null, "already_shared");
+        }
+        return (new PrinterShareDto(share.Id, Name(grantee.DisplayName, grantee.Email), grantee.Email,
+            share.MaxSheets, 0, share.CreatedAt), null);
+    }
+
+    /// <summary>
+    /// Changes a loan's ceiling. Refusals: not_found, invalid_ceiling, and
+    /// ceiling_below_used — the sheets already taken are history.
+    /// </summary>
+    public async Task<(PrinterShareDto? Share, string? Error)> UpdateShareAsync(
+        Guid ownerId, Guid shareId, int? maxSheets, CancellationToken cancellationToken)
+    {
+        if (!PrinterShareLimits.IsValidCeiling(maxSheets)) return (null, "invalid_ceiling");
+        var share = await _db.PrinterShares.SingleOrDefaultAsync(
+            x => x.Id == shareId && x.OwnerUserId == ownerId && x.RevokedAt == null, cancellationToken);
+        if (share is null) return (null, "not_found");
+        if (maxSheets is int max && max < share.UsedSheets) return (null, "ceiling_below_used");
+        share.MaxSheets = maxSheets;
+        await _db.SaveChangesAsync(cancellationToken);
+        var grantee = (await NamesAsync([share.GranteeUserId], cancellationToken))
+            .GetValueOrDefault(share.GranteeUserId);
+        return (new PrinterShareDto(share.Id, grantee?.Name ?? string.Empty, grantee?.Email ?? string.Empty,
+            share.MaxSheets, share.UsedSheets, share.CreatedAt), null);
+    }
+
+    /// <summary>
+    /// Ends a loan. From the next request nothing new is accepted for its
+    /// user on this printer; what is already in the queue still prints.
+    /// </summary>
+    public async Task<PrinterShare?> RevokeShareAsync(Guid ownerId, Guid shareId, CancellationToken cancellationToken)
+    {
+        var share = await _db.PrinterShares.SingleOrDefaultAsync(
+            x => x.Id == shareId && x.OwnerUserId == ownerId && x.RevokedAt == null, cancellationToken);
+        if (share is null) return null;
+        share.RevokedAt = Now;
+        share.RevokedByUserId = ownerId;
+        await _db.SaveChangesAsync(cancellationToken);
+        return share;
     }
 
     public async Task<bool> SetDesiredStateAsync(Guid ownerId, Guid stationId, string desiredState,
@@ -166,20 +331,22 @@ public sealed class PrintStationService
     /// A paper the agent does not report is still recorded — it is what is in
     /// the printer — and simply offers guests nothing until the agent can print it.
     /// </summary>
-    public async Task<PrintDeviceDto?> SetLoadedPaperAsync(Guid ownerId, Guid stationId, Guid printerId,
+    public async Task<PrintDeviceDto?> SetLoadedPaperAsync(Guid userId, Guid stationId, Guid printerId,
         string? paperSize, CancellationToken cancellationToken)
     {
         if (!PrintPapers.IsKnown(paperSize)) throw new ArgumentException("invalid_paper");
-        var owned = await _db.PrintStations.AnyAsync(
-            x => x.Id == stationId && x.OwnerUserId == ownerId && x.RevokedAt == null, cancellationToken);
-        var printer = owned
-            ? await _db.PrinterDevices.SingleOrDefaultAsync(
-                x => x.Id == printerId && x.PrintStationId == stationId, cancellationToken)
-            : null;
+        // The owner, or the person the printer is lent to: whoever changes the
+        // roll is the one who knows what is in it.
+        var use = await _printers.ForUserAsync(userId, stationId, printerId, cancellationToken);
+        var printer = use is null
+            ? null
+            : await _db.PrinterDevices.SingleOrDefaultAsync(x => x.Id == printerId, cancellationToken);
         if (printer is null) return null;
         printer.LoadedPaperSize = paperSize!;
+        printer.LoadedPaperChangedAt = Now;
+        printer.LoadedPaperChangedByUserId = userId;
         await _db.SaveChangesAsync(cancellationToken);
-        return ToDeviceDto(printer);
+        return ToDeviceDto(printer, await NamesAsync([userId], cancellationToken));
     }
 
     public async Task<bool> RevokeAsync(Guid ownerId, Guid stationId, CancellationToken cancellationToken)
@@ -232,12 +399,14 @@ public sealed class PrintStationService
         return new(station.DesiredState, now);
     }
 
-    public async Task<PrintJobSummaryDto?> CreateTestPrintAsync(Guid ownerId, Guid stationId,
+    public async Task<(PrintJobSummaryDto? Job, string? Error)> CreateTestPrintAsync(Guid ownerId, Guid stationId,
         Guid printerId, CancellationToken cancellationToken)
     {
-        var station = await _db.PrintStations.SingleOrDefaultAsync(
-            x => x.Id == stationId && x.OwnerUserId == ownerId && x.Enabled && x.RevokedAt == null,
-            cancellationToken);
+        // The owner, or the person the printer is lent to — who wants to see
+        // the paper they just loaded — and then a sheet of their loan.
+        var use = await _printers.ForUserAsync(ownerId, stationId, printerId, cancellationToken);
+        if (use is null || !use.StationEnabled) return (null, null);
+        var station = await _db.PrintStations.SingleOrDefaultAsync(x => x.Id == stationId, cancellationToken);
         var printer = await _db.PrinterDevices.SingleOrDefaultAsync(
             x => x.Id == printerId && x.PrintStationId == stationId, cancellationToken);
         // The test page goes on the paper that is in the printer: sending a
@@ -247,7 +416,12 @@ public sealed class PrintStationService
             : PrintPapers.Photo10x15;
         if (station is null || printer is null
             || !PrintCapabilityMatcher.SupportsFormat(printer.CapabilitiesJson, paper))
-            return null;
+            return (null, null);
+        switch (await _printers.TryTakeSheetAsync(use.ShareId, cancellationToken))
+        {
+            case PrinterSheetResult.Revoked: return (null, null);
+            case PrinterSheetResult.Exhausted: return (null, "share_exhausted");
+        }
         var now = Now;
         var job = new PrintJob
         {
@@ -298,8 +472,12 @@ public sealed class PrintStationService
             job.CompletedAt = Now;
             await _db.SaveChangesAsync(CancellationToken.None);
         }
-        return ToJobDto(job);
+        return (ToJobDto(job), null);
     }
+
+    /// <summary>Every job format that names a paper, and must wait for it.</summary>
+    private static readonly string[] PaperFormats =
+        [PrintFormats.Photo10x15, PrintFormats.Photo13x18, PrintFormats.Photo20x15, PrintFormats.Strip2x6Pair];
 
     public async Task<PrintClaimResponse?> ClaimAsync(Guid stationId, string? adapterKind,
         CancellationToken cancellationToken)
@@ -319,7 +497,14 @@ public sealed class PrintStationService
                 .Where(x => _db.PrinterDevices.Any(d => d.Id == x.PrinterDeviceId
                     && d.PrintStationId == stationId
                     && (d.LastObservedState == PrintDeviceStates.Ready
-                        || d.LastObservedState == PrintDeviceStates.Busy)));
+                        || d.LastObservedState == PrintDeviceStates.Busy)
+                    // A sheet for another paper WAITS for that paper rather than
+                    // reaching a printer that would waste it or stop on it. It
+                    // prints the moment its paper is set again. A format that
+                    // names no paper is left to the agent to refuse.
+                    && (x.Format == d.LoadedPaperSize
+                        || (x.Format == PrintFormats.Strip2x6Pair && d.LoadedPaperSize == PrintPapers.Photo10x15)
+                        || !PaperFormats.Contains(x.Format))));
             if (!string.IsNullOrWhiteSpace(adapterKind))
                 query = query.Where(x => _db.PrinterDevices.Any(d => d.Id == x.PrinterDeviceId
                     && d.AdapterKind == adapterKind));
@@ -407,7 +592,11 @@ public sealed class PrintStationService
 
     public async Task<bool> CancelAsync(Guid ownerId, Guid jobId, CancellationToken cancellationToken)
     {
-        var job = await _db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.OwnerUserId == ownerId,
+        // Whoever sent it, or the owner of the printer it waits on: a lent
+        // printer's queue is still the owner's to clear.
+        var job = await _db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId
+            && (x.OwnerUserId == ownerId
+                || _db.PrintStations.Any(s => s.Id == x.PrintStationId && s.OwnerUserId == ownerId)),
             cancellationToken);
         if (job is null || job.State is not (PrintJobStates.Requested or PrintJobStates.Rendering or PrintJobStates.Ready))
             return false;
@@ -420,9 +609,16 @@ public sealed class PrintStationService
 
     public async Task<bool> RetryAsync(Guid ownerId, Guid jobId, CancellationToken cancellationToken)
     {
-        var job = await _db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.OwnerUserId == ownerId,
+        var job = await _db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId
+            && (x.OwnerUserId == ownerId
+                || _db.PrintStations.Any(s => s.Id == x.PrintStationId && s.OwnerUserId == ownerId)),
             cancellationToken);
         if (job is null || job.State != PrintJobStates.Failed || job.ArtifactStorageKey is null) return false;
+        // Sending it again puts it back on the printer: the printer's owner
+        // always may, its sender only while they may still print on it. A
+        // retry is the same sheet, so it takes nothing of a loan's ceiling.
+        if (await _printers.ForUserAsync(ownerId, job.PrintStationId, job.PrinterDeviceId, cancellationToken) is null)
+            return false;
         PrintJobStateMachine.EnsureTransition(job.State, PrintJobStates.Ready);
         job.State = PrintJobStates.Ready;
         job.FailureCode = null;
@@ -477,15 +673,74 @@ public sealed class PrintStationService
         string.IsNullOrWhiteSpace(value) ? null : value.Trim()[..Math.Min(max, value.Trim().Length)];
     private static string NormalizeFailure(string? value, string fallback) =>
         string.IsNullOrWhiteSpace(value) ? fallback : value.Trim()[..Math.Min(64, value.Trim().Length)];
-    private static PrintDeviceDto ToDeviceDto(PrinterDevice x) =>
+    private static PrintDeviceDto ToDeviceDto(PrinterDevice x, IReadOnlyDictionary<Guid, Person>? people = null) =>
         new(x.Id, x.DisplayName, x.Manufacturer, x.Model, x.AdapterKind, x.LastObservedState, x.LastSeenAt,
             PrintCapabilityMatcher.SupportsFormat(x.CapabilitiesJson, PrintFormats.Photo10x15),
             PrintCapabilityMatcher.SupportsFormat(x.CapabilitiesJson, PrintFormats.Strip2x6Pair),
             new PrintCalibrationDto(x.CalibrationBrightness, x.CalibrationContrast,
                 x.CalibrationGamma, x.CalibrationSaturation),
-            PrintPapers.IsKnown(x.LoadedPaperSize) ? x.LoadedPaperSize : PrintPapers.Photo10x15,
-            PrintPapers.All.Where(p => PrintCapabilityMatcher.SupportsFormat(x.CapabilitiesJson, p)).ToList());
-    private static PrintJobSummaryDto ToJobDto(PrintJob x) =>
-        new(x.Id, x.Id.ToString("N")[..8], x.Kind, x.Format, x.State, x.CreatedAt, x.FailureCode);
+            PaperOf(x), Papers(x),
+            x.LoadedPaperChangedByUserId is Guid by ? people?.GetValueOrDefault(by)?.Name : null,
+            x.LoadedPaperChangedAt);
+
+    private static string PaperOf(PrinterDevice x) =>
+        PrintPapers.IsKnown(x.LoadedPaperSize) ? x.LoadedPaperSize : PrintPapers.Photo10x15;
+
+    private static IReadOnlyList<string> Papers(PrinterDevice x) =>
+        PrintPapers.All.Where(p => PrintCapabilityMatcher.SupportsFormat(x.CapabilitiesJson, p)).ToList();
+
+    private static PrintJobSummaryDto ToJobDto(PrintJob x, string? waitingForPaper = null, string? ownerName = null) =>
+        new(x.Id, x.Id.ToString("N")[..8], x.Kind, x.Format, x.State, x.CreatedAt, x.FailureCode,
+            waitingForPaper, ownerName);
+
+    /// <summary>
+    /// The paper a READY job is held for, when its printer has another in — or
+    /// null when it is not waiting for paper.
+    /// </summary>
+    private static string? WaitingFor(PrintJob job, IEnumerable<PrinterDevice> devices)
+    {
+        if (job.State != PrintJobStates.Ready) return null;
+        var needed = PrintPapers.RequiredFor(job.Format);
+        var device = devices.FirstOrDefault(d => d.Id == job.PrinterDeviceId);
+        return needed is not null && device is not null && PaperOf(device) != needed ? needed : null;
+    }
+
+    /// <summary>
+    /// Per person, what one printer has been given to print: every sheet it
+    /// accepted — which is what a loan's ceiling counts too — how many came
+    /// out, on which paper, and from where. The whole history, across loans.
+    /// </summary>
+    private static IReadOnlyList<PrinterUsageDto> Usage(
+        IEnumerable<PrintJob> jobs, Guid ownerId, IReadOnlyDictionary<Guid, Person> people) =>
+        jobs.Where(j => j.RenderedAt != null && j.ArtifactStorageKey != null)
+            .GroupBy(j => j.OwnerUserId)
+            .Select(g => new PrinterUsageDto(
+                g.Key == ownerId ? null : people.GetValueOrDefault(g.Key)?.Name ?? string.Empty,
+                g.Key == ownerId,
+                g.Count(),
+                g.Count(j => j.State == PrintJobStates.Completed),
+                g.GroupBy(j => PrintPapers.RequiredFor(j.Format) ?? j.Format)
+                    .OrderBy(p => p.Key, StringComparer.Ordinal)
+                    .ToDictionary(p => p.Key, p => p.Count()),
+                g.Count(j => PrintJobKinds.IsParty(j.Kind)),
+                g.Count(j => j.Kind == PrintJobKinds.OwnerPhoto),
+                g.Count(j => j.Kind == PrintJobKinds.Diagnostic)))
+            .OrderByDescending(u => u.IsYou).ThenByDescending(u => u.Sheets)
+            .ToArray();
+
+    private sealed record Person(string Name, string Email);
+
+    private static string Name(string displayName, string email) =>
+        string.IsNullOrWhiteSpace(displayName) ? email : displayName;
+
+    private async Task<IReadOnlyDictionary<Guid, Person>> NamesAsync(
+        IEnumerable<Guid> ids, CancellationToken cancellationToken)
+    {
+        var wanted = ids.Distinct().ToArray();
+        if (wanted.Length == 0) return new Dictionary<Guid, Person>();
+        var rows = await _db.Users.AsNoTracking().Where(u => wanted.Contains(u.Id))
+            .Select(u => new { u.Id, u.DisplayName, u.Email }).ToListAsync(cancellationToken);
+        return rows.ToDictionary(u => u.Id, u => new Person(Name(u.DisplayName, u.Email), u.Email));
+    }
     private DateTime Now => _clock.GetUtcNow().UtcDateTime;
 }

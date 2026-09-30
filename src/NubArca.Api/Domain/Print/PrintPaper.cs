@@ -38,6 +38,19 @@ public static class PrintPapers
     /// <summary>True for a paper whose name reads lying down: 20x15.</summary>
     public static bool NamedLandscape(string paper) => paper == Photo20x15;
 
+    /// <summary>
+    /// The paper a job of <paramref name="format"/> needs loaded — the cut
+    /// twin strip is a 10x15 sheet — or null for a format that names no paper
+    /// (such a job is refused by the agent rather than held for a paper).
+    /// </summary>
+    public static string? RequiredFor(string format) => format switch
+    {
+        Photo10x15 or PrintFormats.Strip2x6Pair => Photo10x15,
+        Photo13x18 => Photo13x18,
+        Photo20x15 => Photo20x15,
+        _ => null,
+    };
+
     /// <summary>The sheet in pixels, standing or lying.</summary>
     public static (int Width, int Height) Pixels(string paper, bool portrait)
     {

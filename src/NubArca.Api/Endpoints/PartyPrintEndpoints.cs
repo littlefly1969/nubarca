@@ -173,6 +173,10 @@ public static class PartyPrintEndpoints
                 // what the new paper can make. Nothing was spent.
                 PartyPrintRefusal.PaperChanged =>
                     Results.Conflict(new { error = "paper_changed" }),
+                // A lent printer whose sheets are spent: the party may still
+                // have budget, but the printer's owner has given what they gave.
+                PartyPrintRefusal.ShareExhausted =>
+                    Results.Conflict(new { error = "share_exhausted" }),
                 _ => Results.BadRequest(new { error = "invalid" }),
             };
         }).WithName("SubmitPartyPrint").RequireRateLimiting(PartyPrintSubmitRateLimitPolicy);
@@ -222,13 +226,24 @@ public static class PartyPrintEndpoints
                 .Where(j => j.Id == jobId
                     && j.OwnerUserId == access.OwnerUserId
                     && PrintJobKinds.IsParty(j.Kind))
-                .Select(j => new { j.State, j.PublicSequence, j.Kind })
+                .Select(j => new
+                {
+                    j.State, j.PublicSequence, j.Kind, j.Format,
+                    Loaded = db.PrinterDevices.Where(d => d.Id == j.PrinterDeviceId)
+                        .Select(d => d.LoadedPaperSize).FirstOrDefault(),
+                })
                 .FirstOrDefaultAsync(cancellationToken);
             if (job is null) return Results.NotFound();
 
+            // A sheet in the queue whose printer has another paper in waits for
+            // that paper: the guest is told so, and asks the staff.
+            var needed = PrintPapers.RequiredFor(job.Format);
+            var waitingForPaper = job.State == PrintJobStates.Ready
+                && needed is not null && job.Loaded is not null && job.Loaded != needed;
+
             return Results.Ok(new PartyPrintStatusDto(
                 jobId,
-                GuestState(job.State),
+                waitingForPaper ? "waiting_paper" : GuestState(job.State),
                 job.PublicSequence ?? 0,
                 job.Kind switch
                 {

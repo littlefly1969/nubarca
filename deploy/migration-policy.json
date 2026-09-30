@@ -181,6 +181,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Adds non-null columns with database defaults and nothing else. printer_devices.LoadedPaperSize is varchar(8) with default '10x15', the only paper the previous application ever printed, so every existing printer and every printer it registers stays on 10x15. party_print_profiles gains GridEnabled (default false) and GridMaxPrints, GridAcceptedCount and GridPrintsPerGuest (default 0), so no party gains a product. party_participants gains AcceptedGridPrintCount (default 0). Nothing is dropped, altered, backfilled or constrained beyond the defaults. The previously pinned application neither reads nor writes these columns, so rolling the image back leaves it printing exactly as before against the upgraded schema."
+    },
+    "20260930143101_AddPrinterSharesAndPaperLog": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Purely additive. It creates the new table printer_shares (its own primary key, indexes including a unique partial index on live shares, and foreign keys FROM it TO printer_devices and users that cascade in that direction only), and adds two nullable columns to printer_devices (LoadedPaperChangedAt, LoadedPaperChangedByUserId) with no default and no backfill. Nothing existing is altered, constrained or dropped, and no delete path on an existing table gains a restriction. The previously pinned application neither reads nor writes the table or the columns, so rolling the image back leaves it printing exactly as before against the upgraded schema."
     }
   }
 }

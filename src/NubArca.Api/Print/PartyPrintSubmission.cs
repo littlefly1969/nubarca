@@ -49,6 +49,11 @@ public enum PartyPrintRefusal
     /// nothing; the studio reloads and offers what the new paper can make.
     /// </summary>
     PaperChanged,
+    /// <summary>
+    /// The printer is lent to the host and the loan's sheets are spent. Costs
+    /// nothing; the owner raises the ceiling if they want more.
+    /// </summary>
+    ShareExhausted,
 }
 
 /// <summary>What the guest is told after a successful submission.</summary>

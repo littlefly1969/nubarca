@@ -293,6 +293,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<NubArca.Api.Party.IPartyLinkService, NubArca.Api.Party.PartyLinkService>();
             services.AddScoped<NubArca.Api.Party.IPartyMediaService, NubArca.Api.Party.PartyMediaService>();
             services.AddScoped<NubArca.Api.Print.IPartyPrintBudget, NubArca.Api.Print.PartyPrintBudget>();
+            services.AddScoped<NubArca.Api.Print.IPrinterAccess, NubArca.Api.Print.PrinterAccess>();
             services.AddScoped<
                 NubArca.Api.Print.IPartyPrintSourceReader, NubArca.Api.Print.PartyPrintSourceReader>();
             services.AddScoped<

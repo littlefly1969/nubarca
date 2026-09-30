@@ -79,11 +79,13 @@ public sealed class PartyPrintProfileService : IPartyPrintProfileService
 {
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly IPrinterAccess _printers;
 
-    public PartyPrintProfileService(AppDbContext db, TimeProvider clock)
+    public PartyPrintProfileService(AppDbContext db, TimeProvider clock, IPrinterAccess printers)
     {
         _db = db;
         _clock = clock;
+        _printers = printers;
     }
 
     public async Task<PartyPrintProfileDto?> GetAsync(
@@ -200,14 +202,13 @@ public sealed class PartyPrintProfileService : IPartyPrintProfileService
                 .FirstOrDefaultAsync(cancellationToken);
             if (device is null) return PartyPrintProfileResult.Refused("printer_not_found");
 
-            var stationOk = await _db.PrintStations.AsNoTracking()
-                .AnyAsync(s => s.Id == stationId.Value
-                    && s.OwnerUserId == ownerUserId
-                    && s.Enabled
-                    && s.RevokedAt == null, cancellationToken);
-            // A station belonging to someone else is "not found" here too: a
-            // host may not aim their party at another host's printer.
-            if (!stationOk) return PartyPrintProfileResult.Refused("station_unavailable");
+            // The host's own printer, or one lent to them and still lent. Any
+            // other host's printer is "unavailable" here too: a host may not aim
+            // their party at a printer nobody lent them.
+            var use = await _printers.ForUserAsync(
+                ownerUserId, stationId.Value, deviceId.Value, cancellationToken);
+            if (use is null || !use.StationEnabled)
+                return PartyPrintProfileResult.Refused("station_unavailable");
 
             if (!PrintCapabilityMatcher.SupportsFormat(
                     device.CapabilitiesJson,

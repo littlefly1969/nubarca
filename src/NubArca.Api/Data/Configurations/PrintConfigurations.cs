@@ -73,9 +73,36 @@ public sealed class PrinterDeviceConfiguration : IEntityTypeConfiguration<Printe
         // registers is on the paper it always assumed.
         builder.Property(x => x.LoadedPaperSize).IsRequired().HasMaxLength(8)
             .HasDefaultValue(PrintPapers.Photo10x15);
+        builder.Property(x => x.LoadedPaperChangedAt).HasColumnType("timestamp with time zone");
         builder.HasIndex(x => new { x.PrintStationId, x.DeviceKey }).IsUnique()
             .HasDatabaseName("ux_printer_devices_station_device_key");
         builder.HasOne<PrintStation>().WithMany().HasForeignKey(x => x.PrintStationId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class PrinterShareConfiguration : IEntityTypeConfiguration<PrinterShare>
+{
+    public void Configure(EntityTypeBuilder<PrinterShare> builder)
+    {
+        builder.ToTable("printer_shares");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).ValueGeneratedNever();
+        builder.Property(x => x.UsedSheets).IsRequired();
+        builder.Property(x => x.CreatedAt).HasColumnType("timestamp with time zone");
+        builder.Property(x => x.RevokedAt).HasColumnType("timestamp with time zone");
+        // One LIVE share per printer and person: sharing again while one is
+        // open would be two ceilings for the same thing. A revoked one stays,
+        // as history, beside the next.
+        builder.HasIndex(x => new { x.PrinterDeviceId, x.GranteeUserId }).IsUnique()
+            .HasFilter("\"RevokedAt\" IS NULL")
+            .HasDatabaseName("ux_printer_shares_active");
+        builder.HasIndex(x => x.GranteeUserId).HasDatabaseName("ix_printer_shares_grantee");
+        builder.HasOne<PrinterDevice>().WithMany().HasForeignKey(x => x.PrinterDeviceId)
+            .OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<User>().WithMany().HasForeignKey(x => x.OwnerUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<User>().WithMany().HasForeignKey(x => x.GranteeUserId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 }
