@@ -113,14 +113,14 @@ public sealed class PartyPrintSubmissionTests : IDisposable
             Grid: new PartyPrintProductState(true, 5)), albumId);
     }
 
-    private IPartyPrintSubmissionService Service(IServiceScope scope) =>
+    private IPartyPrintSubmissionService Service(IServiceScope scope, IPartyPrintSourceReader? sources = null) =>
         new PartyPrintSubmissionService(
             scope.ServiceProvider.GetRequiredService<AppDbContext>(),
             new PartyPrintBudget(scope.ServiceProvider.GetRequiredService<AppDbContext>()),
             new FakeMedia(_photos, _videos),
             new FakeArtifacts(),
             new PartyPrintComposer(),
-            new FakeSources(),
+            sources ?? new FakeSources(),
             scope.ServiceProvider
                 .GetRequiredService<NubArca.Api.Party.IPartyParticipantService>(),
             new PrinterAccess(scope.ServiceProvider.GetRequiredService<AppDbContext>()));
@@ -738,6 +738,104 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         Assert.Equal(0, await db.PrintJobs.CountAsync());
     }
 
+    public enum NeverAccepted { SourceGone, RenderFailed, RacingTwinWon, GuestLeft }
+
+    [Theory]
+    [InlineData(NeverAccepted.SourceGone)]
+    [InlineData(NeverAccepted.RenderFailed)]
+    [InlineData(NeverAccepted.RacingTwinWon)]
+    [InlineData(NeverAccepted.GuestLeft)]
+    public async Task A_Sheet_Never_Accepted_Gives_Back_The_Guests_Slot_The_Partys_Unit_And_The_Loans_Sheet(
+        NeverAccepted how)
+    {
+        // All three reservations at once: a guest with their own share, on a
+        // party with its own budget, on a printer lent under a ceiling.
+        var (access, albumId) = await SeedAsync(photoMax: 5);
+        var guest = await SeedGuestAsync(access.PartyAlbumLinkId);
+        var shareId = await LendAsync(access, maxSheets: 5);
+        var sheet = access with { Photo = access.Photo with { PerGuest = 2 }, PrinterShareId = shareId };
+        using var cancel = new CancellationTokenSource();
+        Guid winner = Guid.Empty;
+
+        var sources = new ScriptedSources(async token => how switch
+        {
+            NeverAccepted.SourceGone => null,
+            NeverAccepted.RenderFailed => [0x00, 0x01, 0x02, 0x03],
+            NeverAccepted.RacingTwinWon => await TwinWinsAsync(),
+            _ => GoAway(),
+        });
+        async Task<byte[]?> TwinWinsAsync()
+        {
+            // The same guest's other request, with the same key, commits first.
+            winner = await AcceptedTwinAsync(sheet, albumId, "k");
+            return await new FakeSources().ReadAsync(Guid.Empty, Guid.Empty, default);
+        }
+        byte[]? GoAway()
+        {
+            cancel.Cancel();
+            throw new OperationCanceledException(cancel.Token);
+        }
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var submit = Service(scope, sources).SubmitAsync(
+                sheet, Request(PartyPrintProducts.Photo, _photos[0]), "k", guest, cancel.Token);
+            switch (how)
+            {
+                case NeverAccepted.SourceGone:
+                    Assert.Equal(PartyPrintRefusal.InvalidSource, (await submit).Refusal);
+                    break;
+                case NeverAccepted.RenderFailed:
+                    Assert.Equal(PartyPrintRefusal.RenderFailed, (await submit).Refusal);
+                    break;
+                case NeverAccepted.RacingTwinWon:
+                    // Answered with the twin's sheet: one print, not two.
+                    Assert.Equal(winner, (await submit).Accepted!.JobId);
+                    break;
+                default:
+                    await Assert.ThrowsAnyAsync<OperationCanceledException>(() => submit);
+                    break;
+            }
+        }
+
+        using var check = _factory.Services.CreateScope();
+        var db = check.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Equal(0, (await db.PartyParticipants.AsNoTracking().SingleAsync(p => p.Id == guest))
+            .AcceptedPhotoPrintCount);
+        Assert.Equal(0, (await ProfileAsync(albumId)).PhotoAcceptedCount);
+        Assert.Equal(0, (await ShareAsync(shareId)).UsedSheets);
+        Assert.Equal(how == NeverAccepted.RacingTwinWon ? 1 : 0, await db.PrintJobs.CountAsync());
+    }
+
+    /// <summary>
+    /// A sheet already accepted under <paramref name="key"/>, as a racing
+    /// request with the same key would have left it. Its own reservations are
+    /// not the point here and are not taken.
+    /// </summary>
+    private async Task<Guid> AcceptedTwinAsync(PartyPrintAccess access, Guid albumId, string key)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var jobId = Guid.NewGuid();
+        db.PrintJobs.Add(new PrintJob
+        {
+            Id = jobId, OwnerUserId = access.OwnerUserId, PrintStationId = access.PrintStationId,
+            PrinterDeviceId = access.PrinterDeviceId, FileItemId = _photos[0],
+            Kind = PrintJobKinds.PartyPhoto, Format = PrintFormats.Photo10x15, State = PrintJobStates.Ready,
+            PublicSequence = 1, RenderSpecificationJson = "{}", ArtifactStorageKey = "artifact",
+            ArtifactContentType = "image/jpeg", ArtifactByteLength = 1,
+            CreatedAt = DateTime.UtcNow, RenderedAt = DateTime.UtcNow,
+        });
+        db.PartyPrintRequests.Add(new PartyPrintRequest
+        {
+            Id = Guid.NewGuid(), PartyAlbumId = albumId,
+            IdempotencyKeyHash = PartyPrintSubmissionService.HashKey(key),
+            Product = PartyPrintProducts.Photo, PrintJobId = jobId, CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        return jobId;
+    }
+
     [Fact]
     public async Task The_Idempotency_Key_Is_Stored_Hashed()
     {
@@ -780,6 +878,11 @@ public sealed class PartyPrintSubmissionTests : IDisposable
             image.SaveAsJpeg(ms);
             return Task.FromResult<byte[]?>(ms.ToArray());
         }
+    }
+
+    private sealed class ScriptedSources(Func<CancellationToken, Task<byte[]?>> read) : IPartyPrintSourceReader
+    {
+        public Task<byte[]?> ReadAsync(Guid owner, Guid fileItemId, CancellationToken c) => read(c);
     }
 
     private sealed class BrokenSources : IPartyPrintSourceReader

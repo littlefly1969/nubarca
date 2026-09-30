@@ -23,6 +23,11 @@ originating repository and is deliberately not reproduced here.
 - **A guest keeps following a print already sent**, even after the party's
   printing closes or the loan runs out. A print's progress can be read only
   through the party that sent it.
+- **A print that is never sent costs nothing.** If a photo cannot be read, the
+  sheet cannot be composed, the same print was already sent, or the guest
+  leaves while it is being prepared, the guest's own allowance, the party's
+  budget and the lent printer's sheet all go back. Before, the guest's
+  allowance stayed spent in those cases.
 - **A sheet made for another paper waits for it.** If the roll is changed while
   sheets are queued, the printer skips the ones for the old paper. They print
   as soon as that paper is back in. The Print stations page shows them as
