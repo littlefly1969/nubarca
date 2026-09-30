@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace NubArca.Api.Print;
 
 public sealed record CreatePrintStationRequest(string Name);
@@ -46,7 +48,11 @@ public sealed record SharedPrinterDto(
     string LoadedPaperSize, IReadOnlyList<string> Papers, bool SupportsPhoto10x15, bool CutsStrips,
     string? LoadedPaperChangedBy, DateTime? LoadedPaperChangedAt, int? MaxSheets, int UsedSheets);
 public sealed record SharePrinterRequest(string? Email, int? MaxSheets);
-public sealed record UpdatePrinterShareRequest(int? MaxSheets);
+/// <summary>
+/// A loan's new ceiling. <c>maxSheets</c> must be present: null removes the
+/// ceiling, so it is never inferred from a body that left it out.
+/// </summary>
+public sealed record UpdatePrinterShareRequest([property: JsonRequired] int? MaxSheets);
 /// <summary>The paper now in the printer: one of 10x15, 13x18, 20x15.</summary>
 public sealed record SetPrinterPaperRequest(string? PaperSize);
 public sealed record PrintCalibrationDto(double Brightness, double Contrast, double Gamma, double Saturation);

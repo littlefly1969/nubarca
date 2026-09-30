@@ -197,8 +197,15 @@ has no sheets left, not that the party has run out) and the test page is
 disabled. Lending the printer again later starts a new loan and a new count.
 
 **Ending a loan** accepts nothing new from that moment, including a guest who
-was composing: what is already in the queue still prints. A loan also ends when
-the owner's account is disabled or the station is revoked. The owner sees the
+was composing: what is already in the queue still prints. Revoking the station
+ends every loan of its printers in the same step, and each is audited as a loan
+ending with `station_revoked`. While either account is disabled the loan takes
+no sheet. The loan's standing — the share, its station, both accounts, the
+ceiling — is checked by the same database statement that takes the sheet, so a
+revoke that lands while a guest is pressing *Print* is never outrun. A guest
+keeps following a sheet already accepted after the loan ends or runs out, or
+the party's printing closes, but only through their own party's print link,
+and not once that link is revoked or expired. The owner sees the
 whole queue with who sent each sheet, and can cancel any sheet that has not
 reached the printer, a borrower's included. A borrower can resend a failed sheet
 of theirs only while the loan is live; the owner always can.

@@ -28,23 +28,22 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
         _printers = printers;
     }
 
+    public async Task<PartyPrintScope?> ResolveScopeAsync(
+        string printToken, CancellationToken cancellationToken)
+    {
+        var link = await LiveLinkAsync(printToken, cancellationToken);
+        return link is null ? null : new PartyPrintScope(link.Id, link.AlbumId, link.OwnerUserId);
+    }
+
     public async Task<PartyPrintAccess?> ResolveAsync(
         string printToken, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(printToken)) return null;
-        var hash = PartyLinkService.HashToken(printToken);
         var now = DateTime.UtcNow;
 
         // The link must still be a live party: not revoked, not expired, and
         // with its master switch on. Printing rides on the party being open at
         // all — a closed party prints nothing.
-        var link = await _db.PartyAlbumLinks.AsNoTracking()
-            .Where(l => l.PrintTokenHash == hash
-                && l.Enabled
-                && l.RevokedAt == null
-                && (l.ExpiresAt == null || l.ExpiresAt > now))
-            .Select(l => new { l.Id, l.PartyId, l.AlbumId, l.OwnerUserId })
-            .FirstOrDefaultAsync(cancellationToken);
+        var link = await LiveLinkAsync(printToken, cancellationToken);
         if (link is null) return null;
 
         // THE PHASE, from the same policy the view and upload seams use. A print
@@ -130,5 +129,22 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
         // hub must not show a card that leads only to exhausted products, or to
         // products this paper cannot make.
         return PartyPrintProducts.All.Any(p => access.Product(p)?.Available == true) ? access : null;
+    }
+
+    private sealed record LiveLink(Guid Id, Guid PartyId, Guid AlbumId, Guid OwnerUserId);
+
+    /// <summary>The token's link, while the token itself is good: known, enabled, not revoked, not expired.</summary>
+    private async Task<LiveLink?> LiveLinkAsync(string printToken, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(printToken)) return null;
+        var hash = PartyLinkService.HashToken(printToken);
+        var now = DateTime.UtcNow;
+        return await _db.PartyAlbumLinks.AsNoTracking()
+            .Where(l => l.PrintTokenHash == hash
+                && l.Enabled
+                && l.RevokedAt == null
+                && (l.ExpiresAt == null || l.ExpiresAt > now))
+            .Select(l => new LiveLink(l.Id, l.PartyId, l.AlbumId, l.OwnerUserId))
+            .FirstOrDefaultAsync(cancellationToken);
     }
 }

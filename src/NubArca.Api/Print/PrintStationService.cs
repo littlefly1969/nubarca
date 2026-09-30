@@ -366,9 +366,19 @@ public sealed class PrintStationService
         return ToDeviceDto(printer, await NamesAsync([userId], cancellationToken));
     }
 
-    public async Task<bool> RevokeAsync(Guid ownerId, Guid stationId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Revokes a station, and in the same transaction every loan of a printer
+    /// on it. A lent sheet is taken on the share's row, so the loan ended here
+    /// refuses the next sheet whichever of the two commits first — the station
+    /// check in that statement is the second guard, not the only one. Null
+    /// when the station is not the owner's or is already revoked; otherwise
+    /// the loans it ended, for the audit.
+    /// </summary>
+    public async Task<IReadOnlyList<PrinterShare>?> RevokeAsync(
+        Guid ownerId, Guid stationId, CancellationToken cancellationToken)
     {
         var now = Now;
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
         var rows = await _db.PrintStations
             .Where(x => x.Id == stationId && x.OwnerUserId == ownerId && x.RevokedAt == null)
             .ExecuteUpdateAsync(setters => setters
@@ -376,7 +386,19 @@ public sealed class PrintStationService
                 .SetProperty(x => x.Enabled, false)
                 .SetProperty(x => x.DesiredState, PrintDesiredStates.Disabled)
                 .SetProperty(x => x.CredentialHash, (string?)null), cancellationToken);
-        return rows == 1;
+        if (rows != 1) return null;
+        var ended = await _db.PrinterShares
+            .Where(x => x.RevokedAt == null
+                && _db.PrinterDevices.Any(d => d.Id == x.PrinterDeviceId && d.PrintStationId == stationId))
+            .ToListAsync(cancellationToken);
+        foreach (var share in ended)
+        {
+            share.RevokedAt = now;
+            share.RevokedByUserId = ownerId;
+        }
+        await _db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return ended;
     }
 
     public async Task<PrintHeartbeatResponse?> HeartbeatAsync(Guid stationId,

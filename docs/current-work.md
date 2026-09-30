@@ -41,8 +41,12 @@ is built is described by `ARCHITECTURE.md`.
   account by email, with an optional single sheet ceiling per loan. Every
   "may this user print here?" question goes through `IPrinterAccess` (party
   profile save, guest manifest and submission, paper, test page, retry); a
-  loan's sheet is taken atomically with the proof it is still live, so a
-  revoke closes acceptance at once while the queue drains. The borrower may set
+  loan's sheet is taken by one statement that also proves the loan live (the
+  share, its station still live and the lender's, both accounts active), and
+  revoking a station ends its loans in the same transaction, so a revoke closes
+  acceptance at once while the queue drains. A guest follows an accepted sheet
+  through `ResolveScopeAsync` (the token's party only, through its
+  `PartyPrintRequest`), never through whether printing is open now. The borrower may set
   the paper and print a test page; everything else stays the owner's. A claim
   gives a printer only the sheets its loaded paper takes; the rest wait as
   `ready` (shown as waiting for that paper). The owner's station list carries

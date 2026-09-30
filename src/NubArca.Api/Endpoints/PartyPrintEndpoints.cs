@@ -217,17 +217,24 @@ public static class PartyPrintEndpoints
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
-            var access = await resolver.ResolveAsync(printToken, cancellationToken);
-            if (access is null) return Results.NotFound();
+            // Following a sheet asks only whether the token is still good — not
+            // whether printing is open: the sheet that took a loan's last sheet
+            // or the party's last print, or one queued before a loan ended,
+            // still drains, and its guest still sees it do so.
+            var scope = await resolver.ResolveScopeAsync(printToken, cancellationToken);
+            if (scope is null) return Results.NotFound();
 
-            // Scoped to the party the token belongs to: a job id from elsewhere
-            // is not found, rather than answered about.
+            // Scoped to THE PARTY the token belongs to, through the request that
+            // accepted the sheet — not merely to its host, whose other parties'
+            // sheets are not found here rather than answered about.
             var job = await db.PrintJobs.AsNoTracking()
                 .Where(j => j.Id == jobId
-                    && j.OwnerUserId == access.OwnerUserId
+                    && j.OwnerUserId == scope.OwnerUserId
                     // A list, not a method: the query runs in the database,
                     // which cannot call C#.
-                    && PrintJobKinds.Party.Contains(j.Kind))
+                    && PrintJobKinds.Party.Contains(j.Kind)
+                    && db.PartyPrintRequests.Any(r => r.PrintJobId == j.Id
+                        && r.PartyAlbumId == scope.PartyAlbumId))
                 .Select(j => new
                 {
                     j.State, j.PublicSequence, j.Kind, j.Format,
