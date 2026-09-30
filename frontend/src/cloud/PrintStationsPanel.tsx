@@ -13,6 +13,7 @@ import {
 import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
 import { PrinterCalibrationControls } from './PrinterCalibrationControls';
+import { PrinterPaperControl } from './PrinterPaperControl';
 
 const STATUS_KEYS: Record<PrintStation['status'], MessageKey> = {
   online: 'print.statusOnline',
@@ -108,7 +109,11 @@ export function PrintStationsPanel() {
       <ul className="print-station-list" aria-label={t('print.listLabel')}>
         {stations?.map((station) => {
           const observedPrinter = station.devices[0] ?? null;
-          const printPrinter = station.devices.find((device) => device.supportsPhoto10x15
+          // The test page goes on the paper in the printer, so it needs a
+          // printer that can print that paper.
+          const printPrinter = station.devices.find((device) =>
+            (device.papers ?? (device.supportsPhoto10x15 ? ['10x15'] : []))
+              .includes(device.loadedPaperSize ?? '10x15')
             && (device.observedState === 'ready' || device.observedState === 'busy')) ?? null;
           return (
             <li key={station.id} className={`print-station-card print-station-${station.status}`}>
@@ -134,6 +139,10 @@ export function PrintStationsPanel() {
                 <div><dt>{t('print.currentJob')}</dt><dd>{station.currentJob ? `${station.currentJob.shortCode} · ${station.currentJob.state}` : '—'}</dd></div>
                 <div><dt>{t('print.lastError')}</dt><dd>{station.lastError ?? '—'}</dd></div>
               </dl>
+              {station.revokedAt === null && observedPrinter && (
+                <PrinterPaperControl stationId={station.id} device={observedPrinter}
+                  onSaved={() => load()} />
+              )}
               {station.revokedAt === null && observedPrinter && (
                 <PrinterCalibrationControls stationId={station.id} device={observedPrinter}
                   onSaved={() => load()} />

@@ -157,6 +157,7 @@ function base(extra: Record<string, () => Response> = {}) {
     [`GET /api/albums/${ALBUM_ID}/party-print-settings`]: () => jsonResponse({
       albumId: ALBUM_ID, enabled: false, printStationId: null, printerDeviceId: null,
       photo: { enabled: false, maxPrints: 0, perGuest: 0, used: 0 },
+      grid: { enabled: false, maxPrints: 0, perGuest: 0, used: 0 },
       strip: { enabled: false, maxPrints: 0, perGuest: 0, used: 0 },
       footerText: '',
     }),

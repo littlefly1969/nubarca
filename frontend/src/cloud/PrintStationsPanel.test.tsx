@@ -33,8 +33,8 @@ describe('PrintStationsPanel', () => {
     expect(screen.getByText('Online')).toBeInTheDocument();
     expect(screen.getByText('DNP DS620')).toBeInTheDocument();
     expect(screen.getByText(/abc12345/)).toBeInTheDocument();
-    // A DS620 without a cutting queue: strips come out as one sheet.
-    expect(screen.getByTestId('print-strip-cut')).toHaveTextContent('Un foglio, da tagliare a mano');
+    // A DS620 without a cutting queue has no twin strips at all.
+    expect(screen.getByTestId('print-strip-cut')).toHaveTextContent('Non disponibili: serve il taglio della stampante');
   });
 
   it('adjusts the printer colours and saves them for the next sheets', async () => {
@@ -137,5 +137,30 @@ describe('PrintStationsPanel', () => {
     ]) });
     render(view());
     expect(await screen.findByRole('button', { name: 'Stampa pagina test' })).toBeDisabled();
+  });
+
+  it('records which paper is in the printer, and warns when the agent cannot print it', async () => {
+    const user = userEvent.setup();
+    const device = { ...station.devices[0], loadedPaperSize: '10x15', papers: ['10x15', '20x15'] };
+    const url = `/api/print/stations/${station.id}/devices/${device.id}/paper`;
+    let current = device;
+    const mock = installFetchMock({
+      'GET /api/print/stations': () => jsonResponse([{ ...station, devices: [current] }]),
+      [`PUT ${url}`]: () => {
+        current = { ...device, loadedPaperSize: '13x18' };
+        return jsonResponse(current);
+      },
+    });
+    render(view());
+    const select = await screen.findByLabelText('Carta caricata');
+    expect(select).toHaveValue('10x15');
+    expect(screen.queryByTestId('print-paper-unsupported')).not.toBeInTheDocument();
+
+    await user.selectOptions(select, '13x18');
+    await waitFor(() => expect(mock.calls.some((c) => c.method === 'PUT' && c.url === url)).toBe(true));
+    expect(JSON.parse(mock.calls.find((c) => c.method === 'PUT')!.body!)).toEqual({ paperSize: '13x18' });
+    // 13x18 is in, but this agent reports only 10x15 and 20x15.
+    expect(await screen.findByTestId('print-paper-unsupported'))
+      .toHaveTextContent('Il Print Agent non riporta la carta 13×18');
   });
 });

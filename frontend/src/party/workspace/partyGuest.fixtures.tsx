@@ -368,8 +368,9 @@ async function printOverlay(
       footerText,
       formats: [
         { type: 'photo', enabled: true, remaining: 12, requiredPhotos: 1, remainingForYou: null },
-        { type: 'strip4', enabled: true, remaining: 5, requiredPhotos: 8, remainingForYou: null },
+        { type: 'twinStrip4', enabled: true, remaining: 5, requiredPhotos: 8, remainingForYou: null, cutByPrinter: true },
       ],
+      paperSize: '10x15',
       photos: Array.from({ length: 6 }, (_, i) => ({
         id: `f${i + 1}`,
         thumbnailUrl: `/api/party/${PRINT}/print/media/f${i + 1}/thumbnail`,
@@ -435,3 +436,54 @@ it('print studio — the title on the photo, no host\'s line', () =>
 it('print studio — the title on the photo, landscape, a long line', () =>
   printOverlay('print-overlay-landscape', 'Giulia & Matteo',
     'Grazie a tutti di essere venuti, è stata una notte che ricorderemo', true));
+
+// The paper decides what is on offer, and four photos sit two by two: the
+// product cards on 10x15, the twin strip's two strips being put in order, and
+// a four-photo sheet lying as 20x15 is named.
+async function printStudio(paper: '10x15' | '20x15') {
+  const PRINT = 'print-token';
+  const types = paper === '10x15' ? ['photo', 'grid4', 'twinStrip4'] : ['photo', 'grid4'];
+  installFetchMock({
+    [`GET /api/party/${PRINT}/print`]: () => jsonResponse({
+      partyName: 'Giulia & Matteo',
+      footerText: 'Una notte da ricordare',
+      paperSize: paper,
+      formats: types.map((type) => ({
+        type, enabled: true, remaining: 12,
+        requiredPhotos: type === 'twinStrip4' ? 8 : type === 'grid4' ? 4 : 1,
+        remainingForYou: null, cutByPrinter: type === 'twinStrip4', paperSize: paper,
+      })),
+      photos: Array.from({ length: 10 }, (_, i) => ({
+        id: `f${i + 1}`,
+        thumbnailUrl: `/api/party/${PRINT}/print/media/f${i + 1}/thumbnail`,
+        previewUrl: `/api/party/${PRINT}/print/media/f${i + 1}/preview`,
+      })),
+    }),
+  });
+  const { PartyPrintPage } = await import('../../pages/PartyPrintPage');
+  mount(`/party/${PRINT}/print`, '/party/:token/print', <PartyPrintPage />);
+  return (await import('@testing-library/react')).fireEvent;
+}
+
+it('print studio — what 10x15 paper offers', async () => {
+  await printStudio('10x15');
+  await capture('print-products', 'party-print-format-grid4');
+});
+
+it('print studio — the twin strip, put in order', async () => {
+  const fireEvent = await printStudio('10x15');
+  fireEvent.click(await screen.findByTestId('party-print-format-twinStrip4'));
+  for (const pick of screen.getAllByRole('button', { name: /Scegli questa foto/ }).slice(0, 8)) fireEvent.click(pick);
+  fireEvent.click(screen.getByRole('button', { name: 'Continua' }));
+  await capture('print-twin-order', 'party-print-order-strip-1');
+});
+
+it('print studio — four photos on 20x15', async () => {
+  const fireEvent = await printStudio('20x15');
+  fireEvent.click(await screen.findByTestId('party-print-format-grid4'));
+  for (const pick of screen.getAllByRole('button', { name: /Scegli questa foto/ }).slice(0, 4)) fireEvent.click(pick);
+  fireEvent.click(screen.getByRole('button', { name: 'Continua' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Continua' }));
+  for (let i = 0; i < 4; i += 1) fireEvent.click(screen.getByRole('button', { name: 'Continua' }));
+  await capture('print-grid-20x15', 'party-print-grid-3');
+});

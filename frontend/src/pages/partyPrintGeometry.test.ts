@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CUT_MARK_LENGTH_FRACTION, FULL_CROP, LANDSCAPE_HEIGHT, LANDSCAPE_WIDTH,
+  FULL_CROP, LANDSCAPE_HEIGHT, LANDSCAPE_WIDTH,
+  GRID_FOOTER_FRACTION, GRID_GUTTER_FRACTION, GRID_MARGIN_FRACTION, PAPER_DPI,
+  gridLayout, photoLayout, sheet, stripFooter, type PaperSize, type Rect,
   PHOTO_FOOTER_FRACTION, PHOTO_MARGIN_FRACTION, PORTRAIT_HEIGHT, PORTRAIT_WIDTH,
   SLOTS_PER_STRIP, STRIPS_PER_SHEET, STRIP_FOOTER_FRACTION, STRIP_GUTTER_FRACTION,
   STRIP_MARGIN_FRACTION, STRIP_SLOT_GAP_FRACTION, STRIP_WORDMARK_WIDTH_FRACTION, DEFAULT_CROP_VIEW, MAX_ZOOM,
@@ -47,7 +49,11 @@ describe('party print geometry', () => {
     expect(constant('StripSlotGapFraction')).toBe(STRIP_SLOT_GAP_FRACTION);
     expect(constant('StripFooterFraction')).toBe(STRIP_FOOTER_FRACTION);
     expect(constant('StripWordmarkWidthFraction')).toBe(STRIP_WORDMARK_WIDTH_FRACTION);
-    expect(constant('CutMarkLengthFraction')).toBe(CUT_MARK_LENGTH_FRACTION);
+    expect(constant('GridMarginFraction')).toBe(GRID_MARGIN_FRACTION);
+    expect(constant('GridGutterFraction')).toBe(GRID_GUTTER_FRACTION);
+    expect(constant('GridFooterFraction')).toBe(GRID_FOOTER_FRACTION);
+    // No twin strip is cut by hand any more, so there are no marks to place.
+    expect(source).not.toContain('CutMarkLengthFraction');
     expect(constant('OverlayMarginFraction')).toBe(OVERLAY_MARGIN_FRACTION);
     expect(constant('OverlaySymbolFraction')).toBe(OVERLAY_SYMBOL_FRACTION);
     expect(constant('OverlayTitleFraction')).toBe(OVERLAY_TITLE_FRACTION);
@@ -195,5 +201,50 @@ describe('party print geometry', () => {
     const pushed = cropFor(1, 1, { zoom: 2, centerX: 99, centerY: -99 });
     expect(pushed.cropX + pushed.cropWidth).toBeLessThanOrEqual(1.0000001);
     expect(pushed.cropY).toBeGreaterThanOrEqual(0);
+  });
+
+  it('lays out every paper and product exactly as the renderer does', async () => {
+    // The renderer's own layouts, written by PartyPrintComposerTests from the
+    // geometry it draws with: one sheet, its frames and its footer, for every
+    // combination the matrix allows. Here the preview's functions must land on
+    // the same numbers — and on no combination the matrix does not allow.
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    type Layout = { sheet: [number, number]; slot?: number[]; footer?: number[]; slots?: number[][] };
+    const layouts = JSON.parse(readFileSync(
+      resolve(process.cwd(), 'src/pages/partyPrintLayouts.json'), 'utf8')) as Record<string, Record<string, Layout & Record<string, Layout>>>;
+    const near = (rect: Rect, expected: number[]) => {
+      const got = [rect.x, rect.y, rect.width, rect.height];
+      got.forEach((v, i) => expect(v).toBeCloseTo(expected[i], 5));
+    };
+
+    expect(Object.keys(layouts).sort()).toEqual(['10x15', '13x18', '20x15']);
+    for (const paper of Object.keys(layouts) as PaperSize[]) {
+      const products = layouts[paper];
+      expect(Object.keys(products).sort()).toEqual(
+        paper === '10x15' ? ['grid4', 'photo', 'twinStrip4'] : ['grid4', 'photo']);
+
+      for (const way of ['portrait', 'landscape'] as const) {
+        const expected = products.photo[way];
+        const layout = photoLayout(way === 'portrait', paper);
+        expect([layout.sheetWidth, layout.sheetHeight]).toEqual(expected.sheet);
+        expect(sheet(paper, way === 'portrait')).toEqual(expected.sheet);
+        near(layout.slot, expected.slot!);
+        near(layout.footer, expected.footer!);
+      }
+
+      const grid = gridLayout(paper);
+      expect([grid.sheetWidth, grid.sheetHeight]).toEqual(products.grid4.sheet);
+      grid.slots.forEach((slot, i) => near(slot, products.grid4.slots![i]));
+      near(grid.footer, products.grid4.footer!);
+
+      if (products.twinStrip4) {
+        const strips = [0, 1].flatMap((strip) => [0, 1, 2, 3].map((slot) => stripSlot(strip, slot)));
+        strips.forEach((slot, i) => near(slot, products.twinStrip4.slots![i]));
+      }
+    }
+    // Pixels are inches at the one resolution.
+    expect(sheet('20x15', false)).toEqual([8 * PAPER_DPI, 6 * PAPER_DPI]);
+    expect(stripFooter(1).x).toBeGreaterThan(0.5);
   });
 });

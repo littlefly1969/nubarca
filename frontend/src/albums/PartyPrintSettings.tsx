@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   type PartyPrintSettings as Settings,
   type PrintStation,
+  type PrintPaperSize,
 } from '@nubarca/api-client';
 import { usePartyApi } from '../party/workspace/partyApi';
 import { useI18n, type MessageKey } from '../i18n';
@@ -46,6 +47,9 @@ interface Draft {
   photoEnabled: boolean;
   photoMaxPrints: string;
   photoPerGuest: string;
+  gridEnabled: boolean;
+  gridMaxPrints: string;
+  gridPerGuest: string;
   stripEnabled: boolean;
   stripMaxPrints: string;
   stripPerGuest: string;
@@ -62,6 +66,9 @@ function toDraft(settings: Settings): Draft {
     // send the "1" on the way to "15", and every one is a real budget change.
     photoMaxPrints: String(settings.photo.maxPrints || ''),
     photoPerGuest: String(settings.photo.perGuest || ''),
+    gridEnabled: settings.grid?.enabled ?? false,
+    gridMaxPrints: String(settings.grid?.maxPrints || ''),
+    gridPerGuest: String(settings.grid?.perGuest || ''),
     stripEnabled: settings.strip.enabled,
     stripMaxPrints: String(settings.strip.maxPrints || ''),
     stripPerGuest: String(settings.strip.perGuest || ''),
@@ -74,17 +81,17 @@ function errorKey(code: string): MessageKey {
   const key = `partyPrintOwner.error.${code}` as MessageKey;
   const known: readonly string[] = [
     'printer_required', 'product_required', 'printer_not_found', 'station_unavailable',
-    'format_unsupported', 'photo_budget_range', 'strip_budget_range',
-    'photo_budget_below_used', 'strip_budget_below_used', 'footer_too_long',
-    'photo_per_guest_above_budget', 'strip_per_guest_above_budget',
-    'photo_per_guest_range', 'strip_per_guest_range',
+    'format_unsupported', 'photo_budget_range', 'grid_budget_range', 'strip_budget_range',
+    'photo_budget_below_used', 'grid_budget_below_used', 'strip_budget_below_used', 'footer_too_long',
+    'photo_per_guest_above_budget', 'grid_per_guest_above_budget', 'strip_per_guest_above_budget',
+    'photo_per_guest_range', 'grid_per_guest_range', 'strip_per_guest_range',
   ];
   return known.includes(code) ? key : 'partyPrintOwner.error.generic';
 }
 
 /**
- * ONE PRINTER a host can actually choose: a device that does 10x15, and the
- * station it is attached to.
+ * ONE PRINTER a host can actually choose: a device that prints the paper its
+ * operator loaded, and the station it is attached to.
  *
  * The composite key is what the radio group selects on, because a device id is
  * only unique inside its station and the party needs both.
@@ -95,6 +102,8 @@ interface PrinterOption {
   stationName: string;
   deviceId: string;
   deviceName: string;
+  /** The paper in it, which decides what guests are offered. */
+  paper: PrintPaperSize;
   /** Whether a sheet would come out of it right now. */
   reachable: boolean;
   stationStatus: PrintStation['status'];
@@ -105,23 +114,30 @@ const OPTION_KEY = (stationId: string, deviceId: string) => `${stationId}:${devi
 /**
  * Every printer the party could use, flattened out of the station tree.
  *
- * Both products compose a 10x15 sheet, so a printer that cannot do that size is
- * not offered at all rather than chosen and then refused by the server. A
- * station that contributes no such printer contributes nothing — which is why
- * an empty list is one honest sentence rather than a station picker followed by
- * a dead printer picker.
+ * Every product is a sheet of the printer's loaded paper, so a printer that
+ * cannot print its own paper is not offered at all rather than chosen and then
+ * refused by the server. A station that contributes no such printer
+ * contributes nothing — which is why an empty list is one honest sentence
+ * rather than a station picker followed by a dead printer picker.
  */
+/** The printer reports the paper its operator loaded (a server before papers: 10x15). */
+function printsItsPaper(device: PrintStation['devices'][number]): boolean {
+  const papers = device.papers ?? (device.supportsPhoto10x15 ? ['10x15'] : []);
+  return papers.includes(device.loadedPaperSize ?? '10x15');
+}
+
 export function printerOptions(stations: readonly PrintStation[]): PrinterOption[] {
   return stations
     .filter((station) => station.enabled && station.revokedAt === null)
     .flatMap((station) => station.devices
-      .filter((device) => device.supportsPhoto10x15)
+      .filter((device) => printsItsPaper(device))
       .map((device) => ({
         key: OPTION_KEY(station.id, device.id),
         stationId: station.id,
         stationName: station.name,
         deviceId: device.id,
         deviceName: device.displayName,
+        paper: device.loadedPaperSize ?? '10x15',
         reachable: station.status === 'online',
         stationStatus: station.status,
       })));
@@ -214,6 +230,9 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
         photoEnabled: draft.photoEnabled,
         photoMaxPrints: Number(draft.photoMaxPrints || 0),
         photoPrintsPerGuest: Number(draft.photoPerGuest || 0),
+        gridEnabled: draft.gridEnabled,
+        gridMaxPrints: Number(draft.gridMaxPrints || 0),
+        gridPrintsPerGuest: Number(draft.gridPerGuest || 0),
         stripEnabled: draft.stripEnabled,
         stripMaxPrints: Number(draft.stripMaxPrints || 0),
         stripPrintsPerGuest: Number(draft.stripPerGuest || 0),
@@ -307,7 +326,7 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
                 disabled={status === 'saving'}
                 testId={`party-print-option-${option.deviceId}`}
                 title={option.deviceName}
-                meta={t('partyPrintOwner.atStation', { station: option.stationName })}
+                meta={`${t('partyPrintOwner.atStation', { station: option.stationName })} \u00b7 ${t('partyPrintOwner.paper', { paper: option.paper.replace('x', '\u00d7') })}`}
                 note={option.reachable ? undefined : t('partyPrintOwner.offlineNote')}
                 status={(
                   <Badge kind={option.reachable ? 'ok' : 'warn'}>
@@ -341,6 +360,17 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
           onEnabled={(v) => update({ photoEnabled: v })}
           onMax={(v) => update({ photoMaxPrints: v })}
           onPerGuest={(v) => update({ photoPerGuest: v })}
+        />
+        <Product
+          which="grid"
+          settings={settings}
+          enabled={draft.gridEnabled}
+          max={draft.gridMaxPrints}
+          perGuest={draft.gridPerGuest}
+          busy={status === 'saving'}
+          onEnabled={(v) => update({ gridEnabled: v })}
+          onMax={(v) => update({ gridMaxPrints: v })}
+          onPerGuest={(v) => update({ gridPerGuest: v })}
         />
         <Product
           which="strip"
@@ -399,7 +429,7 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
 function Product({
   which, settings, enabled, max, perGuest, busy, onEnabled, onMax, onPerGuest,
 }: {
-  which: 'photo' | 'strip';
+  which: 'photo' | 'grid' | 'strip';
   settings: Settings;
   enabled: boolean;
   max: string;
@@ -410,7 +440,7 @@ function Product({
   onPerGuest: (value: string) => void;
 }) {
   const { t } = useI18n();
-  const usage = which === 'photo' ? settings.photo : settings.strip;
+  const usage = settings[which] ?? { enabled: false, maxPrints: 0, used: 0, remaining: 0, perGuest: 0 };
   const name = t(`partyPrintOwner.${which}` as MessageKey);
 
   return (

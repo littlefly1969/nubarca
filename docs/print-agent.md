@@ -105,7 +105,7 @@ enrollment tokens or image bytes.
 ## Party guest prints
 
 A party guest's keepsake is an ordinary print job to this agent. It arrives with
-the same `10x15` format (or `2x6x2`, below), the same claim lease, the same artifact download and
+a paper format — `10x15`, `13x18` or `20x15` — or `2x6x2` (below), the same claim lease, the same artifact download and
 the same terminal report as an owner test page; the agent neither knows nor
 needs to know that a guest composed it. Everything party-specific — which
 capability token was held, which photographs were chosen, how they were cropped,
@@ -113,21 +113,46 @@ which budget the sheet was charged to — is resolved and spent **server-side
 before the job becomes claimable**, so no agent-side change was needed to
 support the feature and none is needed to secure it.
 
-Two job kinds distinguish the compositions:
+**The paper and the product are two different things.** The paper is the one
+loaded in the printer, and the OPERATOR says which on the Print stations page:
+a dye-sublimation printer takes one roll at a time, and neither its Windows
+driver nor Gutenprint reports which in a form worth trusting. It is one of
+three, the photo trade names of DNP's media — `10x15` (4×6"), `13x18` (5×7")
+and `20x15` (6×8", which lies as it is named). The agent reports which of them
+the printer can print; the server offers guests only what the loaded paper can
+make, and only if the agent reports that paper:
+
+| Paper | Photo | 4 photos | Two strips of 4 |
+|---|---|---|---|
+| 10×15 | yes | yes | yes, when the printer cuts (`2x6x2`) |
+| 13×18 | yes | yes | no |
+| 20×15 | yes | yes | no |
+
+A sheet is sent as its paper's format, so an agent that does not know a paper
+refuses its job with `format_unsupported` and prints nothing else instead. A
+guest who composed for one paper while the operator loaded another is told so,
+and nothing is printed or spent.
+
+Three job kinds distinguish the compositions:
 
 | Kind | Sheet | What comes out |
 |---|---|---|
-| `party-photo` | 10×15, following the photograph's own orientation | one framed photograph with the party footer — or, in the *On the photo* look, the untouched photograph to the edges with the party's name, host's line and number on it in white, black or red (over a faint support that starts just above the words) and the NubArca symbol, chosen separately: the brand's light or dark flat mark in its own colours |
-| `party-strip4` | 10×15 portrait | **eight** different photographs, printed as **two strips of four** side by side, with cut ticks at the ends of the gutter — or, on a printer that reports `2x6x2`, without ticks and cut in two by the printer |
+| `party-photo` | the loaded paper, following the photograph's own orientation unless the guest turns it | one framed photograph with the party footer — or, in the *On the photo* look, the untouched photograph to the edges with the party's name, host's line and number on it in white, black or red (over a faint support that starts just above the words) and the NubArca symbol, chosen separately: the brand's light or dark flat mark in its own colours |
+| `party-grid4` | the loaded paper, as it is named: standing on 10×15 and 13×18, lying on 20×15 | **four** different photographs, two by two (1 top left, 2 top right, 3 and 4 below), each with its own crop, and one footer; nothing to cut |
+| `party-strip4` | 10×15 portrait, sent as `2x6x2` | the twin strip: **eight** different photographs as **two strips of four**, 1–4 on the left and 5–8 on the right, cut in two by the printer. It exists only on 10×15 and only on a printer that reports `2x6x2`; a printer that cannot cut has no strips at all, and no sheet carries cut marks |
 
-Both are one sheet of the same paper: the strip is a composition, not a second
-media size, so a station qualified for 10×15 is qualified for both. Cutting is
-an extra on top of 10×15, never a substitute for it: a printer reporting only
-`2x6x2` opens no party printing at all. Operators
-sizing consumables should note that the products carry **separate budgets** on
-the server — a party out of photo prints can still be printing strips — and that
+Cutting is an extra on top of 10×15, never a substitute for it: a printer
+reporting only `2x6x2` opens no party printing at all. Operators sizing
+consumables should note that the products carry **separate budgets** on the
+server — a party out of photo prints can still be printing strips — and that one
+sheet is one unit, whatever comes off it (the twin strip is one sheet), and
 each accepted job is numbered per party, which is the number a guest is shown
 and reads out at the desk.
+
+The agent learns the larger papers only from **version 0.4**. An older agent
+reports 10×15 alone, so a printer it drives offers nothing on 13×18 or 20×15
+until the agent is updated — which the Print stations page says beside the
+paper selector.
 
 Party artifacts are rendered by the server from the owner's originals and are
 subject to the same bounded-artifact and retention rules as any other job; the
@@ -274,8 +299,14 @@ time the agent only chooses a queue, the queues carry their settings.
 
 | Queue | Media | 2-inch cut | Receives |
 |---|---|---|---|
-| `NubArca-RX1HS` | 4×6 / 10×15 | **off** | photos (`10x15`) |
+| `NubArca-RX1HS` | the loaded roll | **off** | every paper (`10x15`, `13x18`, `20x15`) |
 | `NubArca-RX1HS-STRIP` | 4×6 / 10×15 | **on** | party strips (`2x6x2`) |
+
+The photo queue's default page size stays `w288h432` (4×6), and a 10×15 job
+goes out exactly as it always has. A `13x18` job names `-o PageSize=w360h504`
+(5×7) and a `20x15` job `-o PageSize=w432h576` (6×8). The agent reports those
+two papers only while the queue's driver lists those sizes (`lpoptions -l`,
+read once every ten minutes).
 
 `setup-cups` takes the printer's **Gutenprint dye-sub** device
 (`gutenprint53+usb://dnp-dsrx1/…`, plain `usb://` only as a last resort) and
@@ -289,8 +320,7 @@ neither is shared on the network.
 
 It only chooses sizes the installed driver actually lists. If the cut size is
 missing, the strip queue is removed rather than left printing strips uncut, and
-the box prints strips as one sheet with cut ticks, like any printer that cannot
-cut. `--no-cups-setup` leaves existing queues untouched; `--printer` and
+the box offers no strips, like any printer that cannot cut. `--no-cups-setup` leaves existing queues untouched; `--printer` and
 `--strip-printer` change the names (letters, digits, dot, dash, underscore).
 
 To check a queue by hand: `lp -d NubArca-RX1HS -o fit-to-page photo.jpg` prints

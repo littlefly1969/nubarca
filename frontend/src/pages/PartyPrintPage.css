@@ -246,6 +246,22 @@
   gap: 0.6rem;
 }
 
+/* The twin strip's two strips, as the two groups of four they will be. */
+.party-print-order-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.party-print-order-heading {
+  margin: 0.25rem 0 0;
+  color: var(--party-hub-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .party-print-order-row {
   display: flex;
   align-items: center;
@@ -286,6 +302,9 @@
 }
 
 .party-print-order-buttons button {
+  /* A thumb's target, like every control on a guest's page. */
+  min-width: 2.75rem;
+  min-height: 2.75rem;
   padding: 0.35rem 0.6rem;
   border: 1px solid var(--party-hub-border);
   border-radius: 0.5rem;
@@ -582,16 +601,6 @@
 .party-print-sheet-mark-strip {
   min-width: 0;
 }
-
-.party-print-cut {
-  position: absolute;
-  inset-inline-start: 50%;
-  width: 1px;
-  background: var(--sheet-muted);
-}
-
-.party-print-cut-top { inset-block-start: 0; }
-.party-print-cut-bottom { inset-block-end: 0; }
 
 /* "On the photo" options ---------------------------------------------------
    Two independent groups under the preview, in the Print Studio's own pill
