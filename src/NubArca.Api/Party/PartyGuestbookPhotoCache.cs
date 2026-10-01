@@ -134,10 +134,17 @@ public sealed class PartyGuestbookPhotoCache
         }
         catch
         {
+            // Including cancellation of the update itself: the reference the
+            // store took goes back whatever happened to the request.
             await _blobs.ReleaseAsync(derived, CancellationToken.None);
             throw;
         }
 
+        // From here on the store has happened and the compare-and-set has been
+        // decided: what is left is BOOKKEEPING, not request work. Both releases
+        // run with CancellationToken.None, so a guest closing the page at this
+        // instant cannot cancel the decrement and leave a reference nothing
+        // owns until the next repair.
         if (claimed == 1)
         {
             // The row now holds the new reference; the one it held before is
@@ -145,12 +152,12 @@ public sealed class PartyGuestbookPhotoCache
             // the very same blob, this is what undoes the second increment.
             if (previous is Guid replaced)
             {
-                await _blobs.ReleaseAsync(replaced, cancellationToken);
+                await _blobs.ReleaseAsync(replaced, CancellationToken.None);
             }
         }
         else
         {
-            await _blobs.ReleaseAsync(derived, cancellationToken);
+            await _blobs.ReleaseAsync(derived, CancellationToken.None);
         }
     }
 

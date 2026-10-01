@@ -531,6 +531,143 @@ public sealed class PartyGuestbookTests : IDisposable
         }
     }
 
+    // ── A preview's bookkeeping survives the guest leaving ───────────────────
+    //
+    // Drawing a memory's preview takes a reference (the store) and then decides
+    // who keeps it (a compare-and-set on the row). Whatever is released after
+    // that is storage bookkeeping, not request work: a guest closing the page
+    // at that instant must not cancel the decrement and leave a count that
+    // nothing owns. The decorator below cancels the request at exactly that
+    // moment and passes on whatever token it was given.
+
+    [Fact]
+    public async Task Redrawing_a_lost_preview_keeps_its_count_even_if_the_request_is_cancelled_mid_bookkeeping()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var party = await OpenPartyAsync(owner, guestbook: true);
+        var entry = await SubmitAsync(party.ViewToken, Memory(party.PhotoId, "Ada", "Ridisegnata"));
+        var entryId = entry.GetProperty("id").GetGuid();
+        await AssertServesJpegAsync(entry.GetProperty("entry").GetProperty("media").GetProperty("url").GetString()!);
+
+        // The derived bytes are lost — a wiped cache — so the next view redraws
+        // them and repoints the row, releasing the reference it held before.
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var previewId = (await db.PartyGuestbookEntries.AsNoTracking().SingleAsync()).PreviewBlobObjectId!.Value;
+            var key = await db.BlobObjects.Where(b => b.Id == previewId).Select(b => b.StorageKey).SingleAsync();
+            await scope.ServiceProvider.GetRequiredService<IBlobStorage>().DeleteAsync(key);
+        }
+
+        using var request = new CancellationTokenSource();
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var blobs = new CancelOnReleaseBlobService(scope.ServiceProvider.GetRequiredService<IBlobService>(), request);
+            await using var photo = await PhotoCacheWith(scope, blobs).OpenAsync(entryId, request.Token);
+            Assert.NotNull(photo);
+            Assert.True(blobs.Released > 0, "the redraw released the reference it replaced");
+        }
+
+        await AssertPreviewBookkeepingAsync(entryId);
+    }
+
+    [Fact]
+    public async Task Losing_the_first_drawing_race_gives_its_reference_back_even_if_the_request_is_cancelled()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var party = await OpenPartyAsync(owner, guestbook: true);
+        var entryId = (await SubmitAsync(party.ViewToken, Memory(party.PhotoId, "Ada", "Gara")))
+            .GetProperty("id").GetGuid();
+
+        using var request = new CancellationTokenSource();
+        Guid lost;
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var blobs = new CancelOnReleaseBlobService(scope.ServiceProvider.GetRequiredService<IBlobService>(), request)
+            {
+                // Another first view finishes while this one is storing: it
+                // points the row at ITS render before our compare-and-set runs.
+                AfterStoreDerived = async () =>
+                {
+                    await using var other = _factory.Services.CreateAsyncScope();
+                    var winner = await other.ServiceProvider.GetRequiredService<IBlobService>()
+                        .StoreDerivedAsync(new MemoryStream(ImageFixtures.PlainPng(8, 8)));
+                    await other.ServiceProvider.GetRequiredService<AppDbContext>().PartyGuestbookEntries
+                        .Where(e => e.Id == entryId)
+                        .ExecuteUpdateAsync(u => u.SetProperty(e => e.PreviewBlobObjectId, winner.Id));
+                },
+            };
+            await using var photo = await PhotoCacheWith(scope, blobs).OpenAsync(entryId, request.Token);
+            // The loser still serves what it drew.
+            Assert.NotNull(photo);
+            lost = blobs.StoredDerived.Single();
+        }
+
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.NotEqual(lost, (await db.PartyGuestbookEntries.AsNoTracking().SingleAsync()).PreviewBlobObjectId);
+        }
+
+        // The loser's render is held by exactly its other owners — the album
+        // file's own identical thumbnail, when content addressing made them
+        // one blob — and by nothing the race left behind.
+        await AssertOwnedExactlyAsync(lost);
+        await AssertPreviewBookkeepingAsync(entryId);
+    }
+
+    private static PartyGuestbookPhotoCacheProbe PhotoCacheWith(AsyncServiceScope scope, IBlobService blobs) =>
+        new(new NubArca.Api.Party.PartyGuestbookPhotoCache(
+            scope.ServiceProvider.GetRequiredService<AppDbContext>(),
+            blobs,
+            scope.ServiceProvider.GetRequiredService<NubArca.Api.Files.ImageDerivativeRenderer>(),
+            scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<NubArca.Api.Files.ImageProcessingOptions>>(),
+            scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<NubArca.Api.Files.MediaDerivativesOptions>>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<NubArca.Api.Party.PartyGuestbookPhotoCache>.Instance));
+
+    /// <summary>
+    /// The memory's preview is counted exactly as many times as it is owned,
+    /// and so is every other blob in the store.
+    /// </summary>
+    private async Task AssertPreviewBookkeepingAsync(Guid entryId)
+    {
+        Guid previewId;
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            previewId = (await db.PartyGuestbookEntries.AsNoTracking().SingleAsync(e => e.Id == entryId))
+                .PreviewBlobObjectId!.Value;
+        }
+
+        await AssertOwnedExactlyAsync(previewId);
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var audit = await scope.ServiceProvider.GetRequiredService<BlobReferenceAuditService>().AuditAsync();
+            Assert.Equal(audit.TotalBlobs, audit.MatchedReferenceCount);
+        }
+    }
+
+    /// <summary>
+    /// A derived blob's count equals its owners: the memories drawn with it and
+    /// the album thumbnails that are, byte for byte, the same image.
+    /// </summary>
+    private async Task AssertOwnedExactlyAsync(Guid blobId)
+    {
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var owners = await db.PartyGuestbookEntries.CountAsync(e => e.PreviewBlobObjectId == blobId)
+            + await db.FileThumbnails.CountAsync(t => t.BlobObjectId == blobId);
+        Assert.Equal(
+            (long)owners,
+            await db.BlobObjects.Where(b => b.Id == blobId).Select(b => b.ReferenceCount).SingleAsync());
+    }
+
+    private sealed class PartyGuestbookPhotoCacheProbe(NubArca.Api.Party.PartyGuestbookPhotoCache cache)
+    {
+        public Task<Stream?> OpenAsync(Guid entryId, CancellationToken cancellationToken) =>
+            cache.OpenAsync(entryId, cancellationToken);
+    }
+
     // ── What a memory may be ────────────────────────────────────────────────
 
     [Fact]
@@ -1156,6 +1293,56 @@ public sealed class PartyGuestbookTests : IDisposable
         response.EnsureSuccessStatusCode();
         var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
         return body.GetProperty("messages");
+    }
+
+    /// <summary>
+    /// The real blob service, except that the REQUEST is cancelled at the very
+    /// moment a reference is released — after the store and the compare-and-set
+    /// — and the release then runs with whatever token it was handed. A release
+    /// made with the request's token is cancelled with it; one made with
+    /// CancellationToken.None is not.
+    /// </summary>
+    private sealed class CancelOnReleaseBlobService(IBlobService inner, CancellationTokenSource request) : IBlobService
+    {
+        public Func<Task>? AfterStoreDerived { get; init; }
+        public List<Guid> StoredDerived { get; } = [];
+        public int Released { get; private set; }
+
+        public async Task ReleaseAsync(Guid blobObjectId, CancellationToken cancellationToken = default)
+        {
+            await request.CancelAsync();
+            await inner.ReleaseAsync(blobObjectId, cancellationToken);
+            Released++;
+        }
+
+        public async Task<NubArca.Api.Domain.BlobObject> StoreDerivedAsync(Stream content, CancellationToken cancellationToken = default)
+        {
+            var blob = await inner.StoreDerivedAsync(content, cancellationToken);
+            StoredDerived.Add(blob.Id);
+            if (AfterStoreDerived is not null) await AfterStoreDerived();
+            return blob;
+        }
+
+        public Task<NubArca.Api.Domain.BlobObject> AcquireExistingAsync(Guid blobObjectId, CancellationToken cancellationToken = default) =>
+            inner.AcquireExistingAsync(blobObjectId, cancellationToken);
+
+        public Task<NubArca.Api.Domain.BlobObject> StoreAsync(Stream content, CancellationToken cancellationToken = default) =>
+            inner.StoreAsync(content, cancellationToken);
+
+        public Task<BlobStoreResult> StoreMeasuredAsync(Stream content, CancellationToken cancellationToken = default) =>
+            inner.StoreMeasuredAsync(content, cancellationToken);
+
+        public Task<Stream> OpenContentAsync(Guid blobObjectId, CancellationToken cancellationToken = default) =>
+            inner.OpenContentAsync(blobObjectId, cancellationToken);
+
+        public Task<Stream?> OpenDerivedContentAsync(Guid blobObjectId, CancellationToken cancellationToken = default) =>
+            inner.OpenDerivedContentAsync(blobObjectId, cancellationToken);
+
+        public Task MarkPurgeEligibleIfUnreferencedAsync(Guid blobObjectId, CancellationToken cancellationToken = default) =>
+            inner.MarkPurgeEligibleIfUnreferencedAsync(blobObjectId, cancellationToken);
+
+        public Task<bool> TryRestoreDerivedFromOriginalAsync(Guid blobObjectId, CancellationToken cancellationToken = default) =>
+            inner.TryRestoreDerivedFromOriginalAsync(blobObjectId, cancellationToken);
     }
 
     /// <summary>

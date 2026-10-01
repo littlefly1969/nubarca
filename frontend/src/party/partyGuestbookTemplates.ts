@@ -105,6 +105,12 @@ export function publishableGuestbookTemplate(key: string): GuestbookTemplate {
  * before this page was reloaded — is drawn with the closest design it does
  * know (the same key's current one, else the default) rather than not at all:
  * a memory in a slightly older frame is still the memory.
+ *
+ * PROVISIONAL while every design is at version 1, where the fallback can never
+ * change a composition. Before the first `@2` ships, decide this explicitly:
+ * a client that falls back to a DIFFERENT version of the same key draws a
+ * memory differently from how its author saw it, which is the very thing the
+ * stored version exists to prevent.
  */
 export function guestbookTemplateFor(key: string, version: number): GuestbookTemplate {
   return BY_KEY_AND_VERSION.get(`${key}@${version}`)
