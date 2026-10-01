@@ -124,18 +124,22 @@ describe('party message text contract', () => {
   });
 });
 
-// The guest book's dedication keeps its PARAGRAPHS. Every case is the twin of
+// The guest book's dedication keeps its LINE BREAKS. Every case is the twin of
 // `Multiline_*` in PartyMessageTextTests.cs: same input, same output.
 describe('guest book dedication text contract', () => {
   it.each([
     ['Riga uno\n\nRiga due', 'Riga uno\n\nRiga due'],
     ['a\r\nb\rc\nd', 'a\nb\nc\nd'],
-    ['\n\n  uno  \n\n\n\n  due  \n\n', 'uno\n\ndue'],
+    // Every INSIDE break is kept as written — blank lines are not deduplicated…
+    ['a\n\n\nb', 'a\n\n\nb'],
+    ['a\r\n\r\n\r\nb', 'a\n\n\nb'],
+    // …and only the outside is trimmed.
+    ['\n\n  uno  \n\n\n\n  due  \n\n', 'uno\n\n\n\ndue'],
     ['a \t b\n   \nc', 'a b\n\nc'],
     ['a\n\u200B\nb', 'a\n\nb'],
     ['a\u2028b', 'a b'],
     ['auguri\u202Egnorw\nciao', 'augurignorw\nciao'],
-  ])('keeps paragraphs and applies the single-line rule to each: %j', (input, expected) => {
+  ])('keeps every inner line break and applies the single-line rule to each: %j', (input, expected) => {
     expect(normalizePartyMultilineText(input)).toBe(expected);
   });
 

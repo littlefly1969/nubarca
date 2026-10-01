@@ -180,12 +180,17 @@ public sealed class PartyMessageTextTests
     [Theory]
     [InlineData("Riga uno\n\nRiga due", "Riga uno\n\nRiga due")]
     [InlineData("a\r\nb\rc\nd", "a\nb\nc\nd")]
-    [InlineData("\n\n  uno  \n\n\n\n  due  \n\n", "uno\n\ndue")]
+    // Every INSIDE break is kept as written — blank lines are not deduplicated…
+    [InlineData("a\n\n\nb", "a\n\n\nb")]
+    [InlineData("a\r\n\r\n\r\nb", "a\n\n\nb")]
+    // …and only the outside is trimmed.
+    [InlineData("\n\n  uno  \n\n\n\n  due  \n\n", "uno\n\n\n\ndue")]
     [InlineData("a \t b\n   \nc", "a b\n\nc")]
     [InlineData("a\n\u200B\nb", "a\n\nb")]
     [InlineData("a\u2028b", "a b")]
     [InlineData("auguri\u202Egnorw\nciao", "augurignorw\nciao")]
-    public void Multiline_Keeps_Paragraphs_And_Applies_The_Single_Line_Rule_To_Each(string input, string expected)
+    public void Multiline_Keeps_Every_Inner_Line_Break_And_Applies_The_Single_Line_Rule_To_Each(
+        string input, string expected)
     {
         Assert.Equal(expected, PartyMessageText.NormalizeMultiline(input));
     }

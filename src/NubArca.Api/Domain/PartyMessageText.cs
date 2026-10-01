@@ -78,7 +78,7 @@ public static class PartyMessageText
         return builder.ToString();
     }
 
-    // The same rules for text that may keep its PARAGRAPHS — a guest book
+    // The same rules for text that keeps its LINE BREAKS — a guest book
     // dedication. It is not a second normaliser: every line goes through
     // Normalize above, so what is security-relevant (the bidi overrides, the
     // zero-width padding, the control characters) still has exactly one
@@ -86,9 +86,10 @@ public static class PartyMessageText
     //
     //   1. CRLF and a lone CR become LF, so the stored text has one ending.
     //   2. Each line is normalised on its own: trimmed, its runs collapsed.
-    //   3. Blank lines collapse to ONE between paragraphs, and none survive at
-    //      either end. A paragraph break is worth keeping; a column of empty
-    //      lines is padding, and padding is what normalisation removes.
+    //   3. Empty lines at either END are dropped — the outside of the value is
+    //      trimmed — and every line break INSIDE it is kept exactly as written,
+    //      blank lines included. How an author spaces their dedication is part
+    //      of the dedication; the length limit, not this, bounds it.
     public static string NormalizeMultiline(string? value)
     {
         if (string.IsNullOrEmpty(value))
@@ -96,27 +97,25 @@ public static class PartyMessageText
             return string.Empty;
         }
 
-        var builder = new StringBuilder(value.Length);
-        var blankLineSeen = false;
-        foreach (var raw in value.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+        var lines = value.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        for (var i = 0; i < lines.Length; i++)
         {
-            var line = Normalize(raw);
-            if (line.Length == 0)
-            {
-                blankLineSeen = builder.Length > 0;
-                continue;
-            }
-
-            if (builder.Length > 0)
-            {
-                builder.Append(blankLineSeen ? "\n\n" : "\n");
-            }
-
-            blankLineSeen = false;
-            builder.Append(line);
+            lines[i] = Normalize(lines[i]);
         }
 
-        return builder.ToString();
+        var first = 0;
+        while (first < lines.Length && lines[first].Length == 0)
+        {
+            first++;
+        }
+
+        var last = lines.Length - 1;
+        while (last >= first && lines[last].Length == 0)
+        {
+            last--;
+        }
+
+        return first > last ? string.Empty : string.Join('\n', lines, first, last - first + 1);
     }
 
     // Length in Unicode code points — the counted unit for BOTH limits.
