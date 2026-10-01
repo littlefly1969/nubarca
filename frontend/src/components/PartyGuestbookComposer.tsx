@@ -47,6 +47,25 @@ type Failure =
   | { kind: 'closed'; message: string }
   | { kind: 'rejected'; message: string };
 
+/**
+ * The memory as THIS page can draw it right now: the chosen photograph on the
+ * chooser's own preview URL, and the words as the server will store them.
+ * The composer's preview, and what the success screen shows for a memory that
+ * is not public yet — whose entry route is, deliberately, not readable.
+ */
+function draftMemory(
+  photo: PartyGuestbookPhoto, author: string, body: string, template: GuestbookTemplate, view: CropView,
+): GuestbookMemoryView {
+  return {
+    // What the server will store, so the preview never promises a blank line
+    // or a stray space the book will not keep.
+    authorDisplayName: normalizePartyMessageText(author),
+    body: normalizePartyMultilineText(body),
+    template: { key: template.key, version: template.version },
+    media: { url: photo.previewUrl, width: photo.width, height: photo.height, crop: view },
+  };
+}
+
 /** A sensible first framing: centred, nothing enlarged, a tall picture's faces kept. */
 function autoFraming(photo: PartyGuestbookPhoto): CropView {
   return { ...DEFAULT_CROP_VIEW, centerY: photo.orientation === 'portrait' ? 0.42 : 0.5 };
@@ -75,6 +94,8 @@ export function PartyGuestbookComposer({
   const [pickerNotice, setPickerNotice] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<{ author?: string; body?: string }>({});
   const [sent, setSent] = useState<PartyGuestbookSubmission | null>(null);
+  // What the success screen draws, fixed at the moment of publishing.
+  const [sentMemory, setSentMemory] = useState<GuestbookMemoryView | null>(null);
   const [left, setLeft] = useState<number | null>(remaining);
   const composeHeading = useRef<HTMLHeadingElement>(null);
   const sentHeading = useRef<HTMLHeadingElement>(null);
@@ -122,6 +143,14 @@ export function PartyGuestbookComposer({
         crop: { centerX: view.centerX, centerY: view.centerY, zoom: view.zoom },
       });
       setSent(result);
+      // A memory in the book is drawn as the book returns it. One waiting for
+      // approval is NOT readable through its public route — pending content
+      // stays private until a manager lets it in — so the guest is shown the
+      // draft they just sent, on the photograph URL the chooser already gave
+      // them.
+      setSentMemory(result.status === 'visible' && result.entry
+        ? result.entry
+        : draftMemory(photo, author, body, template, view));
       setLeft(result.remaining ?? null);
       setStep('sent');
       onPublished(result);
@@ -180,6 +209,7 @@ export function PartyGuestbookComposer({
     setTemplate(DEFAULT_GUESTBOOK_TEMPLATE);
     setBody('');
     setSent(null);
+    setSentMemory(null);
     setFailure(null);
     setStep('photo');
   };
@@ -204,8 +234,8 @@ export function PartyGuestbookComposer({
           {pending ? t('partyGuestbookComposer.sentPendingTitle') : t('partyGuestbookComposer.sentTitle')}
         </h2>
         {pending && <p className="guestbook-sent-help" role="status">{t('partyGuestbookComposer.sentPending')}</p>}
-        {sent.entry && (
-          <PartyGuestbookMemoryCard memory={sent.entry} loading="eager" testId="guestbook-sent-memory" />
+        {sentMemory && (
+          <PartyGuestbookMemoryCard memory={sentMemory} loading="eager" testId="guestbook-sent-memory" />
         )}
         <div className="guestbook-sent-actions">
           <button
@@ -234,14 +264,7 @@ export function PartyGuestbookComposer({
   if (!photo) return null;
 
   const photoAspect = photo.width > 0 && photo.height > 0 ? photo.width / photo.height : 1;
-  const preview: GuestbookMemoryView = {
-    // What the server will store, so the preview never promises a blank line
-    // or a stray space the book will not keep.
-    authorDisplayName: normalizePartyMessageText(author),
-    body: normalizePartyMultilineText(body),
-    template: { key: template.key, version: template.version },
-    media: { url: photo.previewUrl, width: photo.width, height: photo.height, crop: view },
-  };
+  const preview = draftMemory(photo, author, body, template, view);
   const bodyErrorId = `${ids}-body-error`;
   const authorErrorId = `${ids}-author-error`;
   const bodyCounterId = `${ids}-body-counter`;

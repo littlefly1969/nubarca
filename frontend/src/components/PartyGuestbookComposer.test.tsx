@@ -287,6 +287,43 @@ describe('PartyGuestbookComposer (making a memory)', () => {
     expect(sent).not.toHaveTextContent(/è nel guestbook/i);
   });
 
+  // A memory waiting for approval is NOT readable through its public photo
+  // route — the server answers 404 until a manager lets it in. The success
+  // screen must therefore draw the draft on the photograph URL the chooser
+  // already authorised, never the entry's own route.
+  it('draws a pending memory from the draft, on the chooser’s photograph, never on the entry’s route', async () => {
+    mock({ submit: (call) => jsonResponse(published(JSON.parse(call.body!), 'pending')) });
+    renderBook();
+    const user = userEvent.setup();
+
+    await openComposerAndChoose(user);
+    await user.click(screen.getByTestId('guestbook-template-polaroid'));
+    await write(user, 'Riga uno{Enter}{Enter}Riga due  ', '  Ada  ');
+    await user.click(screen.getByTestId('guestbook-publish'));
+
+    const memory = await screen.findByTestId('guestbook-sent-memory');
+    const img = within(memory).getByRole('img');
+    expect(img).toHaveAttribute('src', PHOTOS[0].previewUrl);
+    expect(img.getAttribute('src')).not.toContain('/guestbook/g-new/photo');
+    // The draft as the server will have stored it, in the design chosen.
+    expect(memory).toHaveAttribute('data-template', 'polaroid');
+    expect(within(memory).getByTestId('guestbook-sent-memory-body').textContent).toBe('Riga uno\n\nRiga due');
+    expect(within(memory).getByTestId('guestbook-sent-memory-author')).toHaveTextContent(/^— Ada$/);
+  });
+
+  it('draws a published memory as the book returns it, on the entry’s own route', async () => {
+    mock();
+    renderBook();
+    const user = userEvent.setup();
+
+    await openComposerAndChoose(user);
+    await write(user, 'Nel libro', 'Ada');
+    await user.click(screen.getByTestId('guestbook-publish'));
+
+    const memory = await screen.findByTestId('guestbook-sent-memory');
+    expect(within(memory).getByRole('img')).toHaveAttribute('src', '/api/party/tok-1/guestbook/g-new/photo');
+  });
+
   it('sends the guest back to the photographs, words intact, when the photograph was removed meanwhile', async () => {
     let attempts = 0;
     const { calls } = mock({
