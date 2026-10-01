@@ -179,15 +179,24 @@ function measure(pagePath, vp, screenshot) {
 // DevTools protocol, which wants an event loop of its own.
 const MEASURE_SCRIPT = `
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const [chrome, url, width, height, minTap, minGutter, screenshot] = process.argv.slice(2);
 const port = 9222 + (process.pid % 900);
 
+// A profile of OUR OWN, removed when this measurement ends. Left to itself,
+// Chromium creates /tmp/.org.chromium.Chromium.* for every launch and, killed
+// rather than closed, never removes it — a few megabytes per measurement and
+// hundreds of measurements per run, which is enough to fill a tmpfs /tmp.
+const profile = mkdtempSync(join(tmpdir(), 'party-layout-profile-'));
+process.on('exit', () => { try { rmSync(profile, { recursive: true, force: true }); } catch {} });
+
 const proc = spawn(chrome, [
   '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-sandbox',
+  \`--user-data-dir=\${profile}\`,
   \`--remote-debugging-port=\${port}\`,
   \`--window-size=\${width},\${height}\`,
   'about:blank',
@@ -401,8 +410,13 @@ if (screenshot) {
 }
 
 process.stdout.write(JSON.stringify(value));
+// CLOSED, not killed: a browser asked to close removes its own singleton
+// directory, and the profile can only go once Chromium has let go of it.
+send('Browser.close').catch(() => {});
+const exited = new Promise((r) => { if (proc.exitCode !== null) r(); else proc.once('exit', r); });
+await Promise.race([exited, delay(5000)]);
+if (proc.exitCode === null) { proc.kill(); await exited; }
 ws.close();
-proc.kill();
 process.exit(0);
 `;
 

@@ -25,6 +25,8 @@ originating repository and is deliberately not reproduced here.
 - **Upgrading deletes the old text-only dedications** and resets every
   guest's guest book allowance. The migration is not automatic: it needs the
   manual, backed-up path (see `deploy/migration-policy.json`).
+- The party layout check no longer leaves a browser profile in `/tmp` for
+  every measurement.
 
 ### Lending a printer, and paper that cannot be wrong
 
