@@ -132,9 +132,9 @@
 
 .guestbook-memory-body {
   margin: 0;
-  /* A dedication keeps its PARAGRAPHS — the server keeps the line breaks, at
-     most one blank line between them — so they are shown as written. Long
-     words and pasted URLs still cannot push the card past a 320px screen. */
+  /* A dedication keeps its LINE BREAKS — the server keeps every one inside
+     the text, blank lines included — so they are shown as written. Long words
+     and pasted URLs still cannot push the card past a 320px screen. */
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.55;

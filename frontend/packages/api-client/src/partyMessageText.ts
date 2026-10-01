@@ -32,27 +32,21 @@ export function normalizePartyMessageText(value: string | null | undefined): str
 }
 
 // Matches PartyMessageText.NormalizeMultiline: the text a guest book dedication
-// may keep, PARAGRAPHS included. Not a second normaliser — every line goes
+// may keep, its LINE BREAKS included. Not a second normaliser — every line goes
 // through `normalizePartyMessageText` above, so the rules about what text IS
 // stay in one place. Only the line endings are new:
 //   1. CRLF and a lone CR become LF;
 //   2. each line is normalised on its own;
-//   3. blank lines collapse to one between paragraphs, none at either end.
+//   3. empty lines at either END are dropped, and every break INSIDE the
+//      value is kept exactly as written, blank lines included.
 export function normalizePartyMultilineText(value: string | null | undefined): string {
   if (!value) return '';
-  let out = '';
-  let blankLineSeen = false;
-  for (const raw of value.replace(/\r\n?/g, '\n').split('\n')) {
-    const line = normalizePartyMessageText(raw);
-    if (line.length === 0) {
-      blankLineSeen = out.length > 0;
-      continue;
-    }
-    if (out.length > 0) out += blankLineSeen ? '\n\n' : '\n';
-    blankLineSeen = false;
-    out += line;
-  }
-  return out;
+  const lines = value.replace(/\r\n?/g, '\n').split('\n').map(normalizePartyMessageText);
+  let first = 0;
+  while (first < lines.length && lines[first].length === 0) first += 1;
+  let last = lines.length - 1;
+  while (last >= first && lines[last].length === 0) last -= 1;
+  return first > last ? '' : lines.slice(first, last + 1).join('\n');
 }
 
 // Length in Unicode code points. The spread is deliberate: `value.length` would

@@ -780,10 +780,11 @@ public sealed class PartyGuestbookTests : IDisposable
         Assert.Equal(1, (await PublicBookAsync(party.ViewToken)).GetProperty("entries").GetArrayLength());
     }
 
-    // A dedication keeps its PARAGRAPHS. Line endings become one ending, each
-    // line is tidied, and a column of blank lines is one paragraph break.
+    // A dedication keeps its LINE BREAKS. Line endings become one ending, each
+    // line is tidied, the outside is trimmed — and every break inside, blank
+    // lines included, stays exactly where its author put it.
     [Fact]
-    public async Task A_dedication_keeps_its_paragraphs_as_plain_text()
+    public async Task A_dedication_keeps_its_line_breaks_as_plain_text()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
         var party = await OpenPartyAsync(owner, guestbook: true);
@@ -794,7 +795,7 @@ public sealed class PartyGuestbookTests : IDisposable
             Memory(party.PhotoId, "Ada", "\r\n  Grazie\t\tdi   tutto.  \r\n\r\n\r\n\rA presto ‮così‬\r\n"));
 
         var entries = (await PublicBookAsync(party.ViewToken)).GetProperty("entries");
-        Assert.Equal("Grazie di tutto.\n\nA presto così", entries[0].GetProperty("body").GetString());
+        Assert.Equal("Grazie di tutto.\n\n\n\nA presto così", entries[0].GetProperty("body").GetString());
         Assert.Equal("Riga uno\n\nRiga due", entries[1].GetProperty("body").GetString());
         // The signature stays on one line.
         Assert.Equal("Ada Lovelace", entries[1].GetProperty("authorDisplayName").GetString());
