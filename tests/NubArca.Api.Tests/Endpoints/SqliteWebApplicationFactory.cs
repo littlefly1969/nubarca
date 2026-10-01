@@ -320,6 +320,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<NubArca.Api.Party.IPartyMessageService, NubArca.Api.Party.PartyMessageService>();
             services.AddScoped<
                 NubArca.Api.Party.IPartyGuestbookService, NubArca.Api.Party.PartyGuestbookService>();
+            services.AddScoped<NubArca.Api.Party.PartyGuestbookPhotoCache>();
             services.AddScoped<
                 NubArca.Api.Party.IPartyAddressShareService, NubArca.Api.Party.PartyAddressShareService>();
             // Share by link. Mirrors Program.cs: the token service holds the

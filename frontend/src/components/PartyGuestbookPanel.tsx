@@ -1,18 +1,15 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ApiError,
-  PARTY_GUESTBOOK_TEXT_LIMITS,
   getPartyGuestbook,
-  isPartyGuestbookSubmittable,
-  partyGuestbookAuthorRemaining,
-  partyGuestbookBodyRemaining,
-  submitPartyGuestbookEntry,
   type PartyGuestbookPage as GuestbookPage,
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
+import { PartyGuestbookComposer } from './PartyGuestbookComposer';
+import { PartyGuestbookMemoryCard } from './PartyGuestbookMemoryCard';
 import '../pages/PartyGuestbook.css';
 
-// THE BOOK ITSELF: what is written in it, and the form for adding to it.
+// THE BOOK ITSELF: the memories in it, and the way to add one.
 //
 // One component behind two doors. A guest reaches it from the contribution
 // page, on the upload token, beside the photographs and the greeting; anybody
@@ -21,9 +18,15 @@ import '../pages/PartyGuestbook.css';
 // the evening. Both write with the token they arrived on, and the server
 // accepts either — so this needs to know nothing about which door was used.
 //
-// Reading and writing are separate questions: `canWrite` closes the composer
-// when the party is over while the pages stay, because a form that accepted
-// nothing would be worse than no form.
+// This file only ORCHESTRATES: it reads the book and decides whether the page
+// shows the book or the composer. Drawing a memory is PartyGuestbookMemoryCard's
+// job and making one is PartyGuestbookComposer's, so either can be reused
+// without this page — a television drawing the book needs the first and none
+// of the rest.
+//
+// A book, not a feed: one memory per row at every width, no counts, no
+// reactions. Reading and writing are separate questions: `canWrite` hides the
+// call to leave a memory when the party is over while the pages stay.
 
 type Status =
   | { kind: 'loading' }
@@ -32,26 +35,30 @@ type Status =
   | { kind: 'error' };
 
 export function PartyGuestbookPanel({
-  token, partyTitle = null, remaining = null,
+  token, remaining = null,
 }: {
   token: string;
-  /** Named in the composer's heading when the caller knows it. */
-  partyTitle?: string | null;
   /**
-   * Dedications this guest has left, when the caller already knows — the
+   * Memories this guest has left, when the caller already knows — the
    * contribution page does, from its session. Null asks the book itself.
    */
   remaining?: number | null;
 }) {
   const { t } = useI18n();
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
+  const [composing, setComposing] = useState(false);
+  // What the last publish said is left, which is newer than either the
+  // caller's session or the page read before it.
+  const [leftAfterPublish, setLeftAfterPublish] = useState<number | null | undefined>(undefined);
+  const ctaRef = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef(false);
 
-  const load = useCallback((signal?: AbortSignal) => {
-    setStatus({ kind: 'loading' });
+  const load = useCallback((signal?: AbortSignal, quiet = false) => {
+    if (!quiet) setStatus({ kind: 'loading' });
     getPartyGuestbook(token, signal)
       .then((page) => { if (!signal?.aborted) setStatus({ kind: 'ready', page }); })
       .catch((err: unknown) => {
-        if (signal?.aborted) return;
+        if (signal?.aborted || quiet) return;
         // 404 is the ONE answer for an unknown token, a revoked party and a
         // party that keeps no book. The surface says the same thing to all
         // three, exactly as every other public Party surface does.
@@ -64,6 +71,14 @@ export function PartyGuestbookPanel({
     load(ctrl.signal);
     return () => ctrl.abort();
   }, [load]);
+
+  // Back from the composer, focus returns to where the guest left from.
+  useEffect(() => {
+    if (!composing && returnFocus.current) {
+      returnFocus.current = false;
+      ctaRef.current?.focus();
+    }
+  }, [composing]);
 
   if (status.kind === 'loading') {
     return <p className="party-contribution-intro" role="status">{t('common.loading')}</p>;
@@ -88,37 +103,56 @@ export function PartyGuestbookPanel({
     );
   }
 
-  // What the caller knows beats what the book last reported: the contribution
-  // page's session is read at the same moment as the rest of its quotas.
-  const left = remaining ?? status.page.remaining ?? null;
+  const left = leftAfterPublish !== undefined
+    ? leftAfterPublish
+    : remaining ?? status.page.remaining ?? null;
+  const canStart = status.page.canWrite && left !== 0;
+
+  if (composing) {
+    return (
+      <PartyGuestbookComposer
+        token={token}
+        remaining={left}
+        onPublished={(submission) => {
+          setLeftAfterPublish(submission.remaining ?? null);
+          // Quietly, behind the success screen: the book is reloaded so the
+          // new memory is there when the guest goes back to it.
+          load(undefined, true);
+        }}
+        onClose={() => { returnFocus.current = true; setComposing(false); }}
+      />
+    );
+  }
 
   return (
     <>
       {status.page.canWrite ? (
-        <>
+        <div className="guestbook-invite" data-testid="party-guestbook-invite">
+          <p className="guestbook-invite-help">{t('partyGuestbookPublic.leaveMemoryHelp')}</p>
           {left !== null && (
-            <p
-              className="party-contribution-quota"
-              data-testid="party-guestbook-remaining"
-              aria-live="polite"
-            >
+            <p className="party-contribution-quota" data-testid="party-guestbook-remaining" aria-live="polite">
               {t('partyGuestbookPublic.entriesLeft', { count: String(left) })}
             </p>
           )}
-          <GuestbookComposer
-            token={token}
-            partyTitle={partyTitle}
-            onWritten={() => load()}
-          />
-        </>
+          <button
+            ref={ctaRef}
+            type="button"
+            className="party-contribution-primary"
+            onClick={() => setComposing(true)}
+            disabled={!canStart}
+            data-testid="party-guestbook-start"
+          >
+            {t('partyGuestbookPublic.leaveMemory')}
+          </button>
+        </div>
       ) : (
         <p className="party-contribution-intro" data-testid="party-guestbook-closed">
           {t('partyGuestbookPublic.closed')}
         </p>
       )}
 
-      <section className="party-guestbook-entries" aria-live="polite">
-        <h2 className="party-guestbook-entries-title">
+      <section className="party-guestbook-entries" aria-labelledby="party-guestbook-entries-title">
+        <h2 id="party-guestbook-entries-title" className="party-guestbook-entries-title">
           {t('partyGuestbookPublic.entriesTitle')}
         </h2>
         {status.page.entries.length === 0 ? (
@@ -129,171 +163,12 @@ export function PartyGuestbookPanel({
           <ul className="party-guestbook-list" data-testid="party-guestbook-list">
             {status.page.entries.map((entry) => (
               <li key={entry.id} className="party-guestbook-entry">
-                {/* TEXT, always. Never dangerouslySetInnerHTML and never a
-                    Markdown renderer: this is what a stranger typed. */}
-                <p className="party-guestbook-body">{entry.body}</p>
-                <p className="party-guestbook-author">
-                  {entry.authorDisplayName ?? t('partyGuestbookPublic.anonymous')}
-                </p>
+                <PartyGuestbookMemoryCard memory={entry} testId={`party-guestbook-memory-${entry.id}`} />
               </li>
             ))}
           </ul>
         )}
       </section>
     </>
-  );
-}
-
-type Phase =
-  | { kind: 'writing' }
-  | { kind: 'sending' }
-  | { kind: 'sent'; pending: boolean };
-
-function GuestbookComposer({
-  token, partyTitle, onWritten,
-}: {
-  token: string;
-  partyTitle: string | null;
-  onWritten(): void;
-}) {
-  const { t } = useI18n();
-  const [author, setAuthor] = useState('');
-  const [body, setBody] = useState('');
-  const [phase, setPhase] = useState<Phase>({ kind: 'writing' });
-  const [error, setError] = useState<string | null>(null);
-
-  const bodyRemaining = partyGuestbookBodyRemaining(body);
-  const authorRemaining = partyGuestbookAuthorRemaining(author);
-  const canSend = isPartyGuestbookSubmittable(body, author);
-  const busy = phase.kind === 'sending';
-
-  const send = async () => {
-    if (!canSend) return;
-    setPhase({ kind: 'sending' });
-    setError(null);
-    try {
-      const result = await submitPartyGuestbookEntry(token, {
-        // Sent raw: the SERVER normalises and is the authority on what is
-        // stored. Trimming here too would only create a second opinion.
-        authorDisplayName: author.length > 0 ? author : null,
-        body,
-      });
-      setPhase({ kind: 'sent', pending: result.status === 'pending' });
-      setAuthor('');
-      setBody('');
-      onWritten();
-    } catch (err: unknown) {
-      setPhase({ kind: 'writing' });
-      if (err instanceof ApiError && err.status === 409) {
-        // `guestbook_disabled`: the host closed the book while this page was
-        // open. Not a mistake the guest made, and not something retrying fixes.
-        setError(t('partyGuestbookPublic.disabled'));
-      } else if (err instanceof ApiError && err.status === 400) {
-        setError(t('partyGuestbookPublic.rejected'));
-      } else if (err instanceof ApiError && err.status === 429) {
-        setError(t('partyGuestbookPublic.tooMany'));
-      } else {
-        setError(t('partyGuestbookPublic.failed'));
-      }
-    }
-  };
-
-  if (phase.kind === 'sent') {
-    return (
-      <div className="party-dedication-sent" data-testid="party-guestbook-sent" role="status">
-        <span className="party-dedication-sent-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="m6.5 12.4 3.6 3.6 7.4-7.6" /></svg>
-        </span>
-        <p className="party-dedication-sent-title">{t('partyGuestbookPublic.sentTitle')}</p>
-        <p className="party-dedication-sent-body">
-          {phase.pending
-            ? t('partyGuestbookPublic.sentPending')
-            : t('partyGuestbookPublic.sentVisible')}
-        </p>
-        <div className="party-dedication-sent-actions">
-          <button
-            type="button"
-            className="party-contribution-primary"
-            data-testid="party-guestbook-write-another"
-            onClick={() => setPhase({ kind: 'writing' })}
-          >
-            {t('partyGuestbookPublic.writeAnother')}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <form
-      className="party-dedication"
-      data-testid="party-guestbook-form"
-      onSubmit={(e) => { e.preventDefault(); void send(); }}
-    >
-      <h2 className="party-dedication-title">
-        {partyTitle
-          ? t('partyGuestbookPublic.composerFor', { party: partyTitle })
-          : t('partyGuestbookPublic.composer')}
-      </h2>
-      <p className="party-dedication-intro">{t('partyGuestbookPublic.composerHelp')}</p>
-
-      <label className="party-dedication-field">
-        <span className="party-dedication-label">{t('partyGuestbookPublic.nameLabel')}</span>
-        <input
-          type="text"
-          value={author}
-          onChange={(e) => setAuthor(e.target.value)}
-          placeholder={t('partyGuestbookPublic.namePlaceholder')}
-          disabled={busy}
-          data-testid="party-guestbook-name"
-          // No maxLength: the browser counts UTF-16 units and would cut an
-          // emoji in half at the boundary. The counter and the server agree on
-          // code points instead.
-          autoComplete="off"
-        />
-      </label>
-      {authorRemaining < 0 && (
-        <p className="party-dedication-error" role="alert">
-          {t('partyGuestbookPublic.nameOverLimit', {
-            max: String(PARTY_GUESTBOOK_TEXT_LIMITS.authorDisplayName),
-          })}
-        </p>
-      )}
-
-      <label className="party-dedication-field party-dedication-field--text">
-        <span className="party-dedication-label">{t('partyGuestbookPublic.bodyLabel')}</span>
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder={t('partyGuestbookPublic.bodyPlaceholder')}
-          rows={6}
-          disabled={busy}
-          data-testid="party-guestbook-body"
-        />
-      </label>
-
-      <p
-        className={bodyRemaining < 0 ? 'party-dedication-counter over' : 'party-dedication-counter'}
-        data-testid="party-guestbook-counter"
-        aria-live="polite"
-      >
-        {bodyRemaining >= 0
-          ? t('partyGuestbookPublic.remaining', { count: String(bodyRemaining) })
-          : t('partyGuestbookPublic.overLimit', {
-            max: String(PARTY_GUESTBOOK_TEXT_LIMITS.body),
-          })}
-      </p>
-
-      <button
-        type="submit"
-        className="party-contribution-primary party-dedication-submit"
-        data-testid="party-guestbook-submit"
-        disabled={busy || !canSend}
-      >
-        {busy ? t('partyGuestbookPublic.sending') : t('partyGuestbookPublic.send')}
-      </button>
-
-      {error && <p className="party-dedication-error" role="alert">{error}</p>}
-    </form>
   );
 }

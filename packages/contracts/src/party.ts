@@ -315,9 +315,13 @@ export function partyContributionsPatch(
 // ── The guest book ─────────────────────────────────────────────────────────
 //
 // A SEPARATE resource from the greetings above, and the types say so: nothing
-// here extends PartyMessage, and there is no field that could carry a
-// dedication onto a television. The moderation STATUS vocabulary is shared,
+// here extends PartyMessage. The moderation STATUS vocabulary is shared,
 // because "what can happen to something a guest left" has one answer.
+//
+// A memory is COMPLETE: the photograph's address and shape, its framing, and
+// the template and version it was published with. Any client — the web page
+// today, a television later — draws it from this alone. Nothing in it is a
+// pixel, and its URL is built by the server for whoever asked.
 
 /** The server's limits, quoted by the composer's counter and its validator. */
 export const PARTY_GUESTBOOK_LIMITS = {
@@ -325,38 +329,133 @@ export const PARTY_GUESTBOOK_LIMITS = {
   maxBodyLength: 1000,
 } as const;
 
-/** One dedication as a GUEST reads it. No status: a guest only ever receives
+/**
+ * The designs a memory may be published with. The client names one; the
+ * SERVER decides its version (PartyGuestbookTemplates), so a later redesign
+ * never changes a memory already in a book.
+ */
+export const PARTY_GUESTBOOK_TEMPLATE_KEYS = ['nubarca', 'polaroid', 'editorial', 'celebration'] as const;
+export type PartyGuestbookTemplateKey = (typeof PARTY_GUESTBOOK_TEMPLATE_KEYS)[number];
+
+/** The design a new memory starts with. */
+export const DEFAULT_PARTY_GUESTBOOK_TEMPLATE: PartyGuestbookTemplateKey = 'nubarca';
+
+/**
+ * The framing's limits — the party print crop editor's own: centre as
+ * fractions of the photograph, magnification from 1 to 4. The server refuses
+ * anything outside them.
+ */
+export const PARTY_GUESTBOOK_CROP_LIMITS = { minZoom: 1, maxZoom: 4 } as const;
+
+export type PartyGuestbookOrientation = 'portrait' | 'landscape' | 'square';
+
+export interface PartyGuestbookCrop {
+  centerX: number;
+  centerY: number;
+  zoom: number;
+}
+
+export interface PartyGuestbookMedia {
+  /** A derived, metadata-free preview, on the capability that asked. */
+  url: string;
+  /** The photograph's DISPLAY size, after its EXIF orientation. */
+  width: number;
+  height: number;
+  orientation: PartyGuestbookOrientation;
+  crop: PartyGuestbookCrop;
+}
+
+/** One memory as a GUEST reads it. No status: a guest only ever receives
  * entries that are in the book. */
 export interface PartyGuestbookEntry {
   id: string;
-  /** The signature the author typed, or null when they did not sign it. */
-  authorDisplayName: string | null;
-  /** PLAIN TEXT. Render as text — never through a markup or URI interpreter. */
+  /** The signature. Always present: a memory is signed. */
+  authorDisplayName: string;
+  /** PLAIN TEXT that keeps its paragraphs (LF only). Render as text — never
+   * through a markup or URI interpreter. */
   body: string;
   createdAt: string;
+  /** `version` is the one the memory was published with; draw THAT one. */
+  template: { key: string; version: number };
+  media: PartyGuestbookMedia;
 }
 
 export interface PartyGuestbookPage {
   entries: PartyGuestbookEntry[];
-  /** Whether a dedication may be ADDED right now. Reading and writing are
+  /** Whether a memory may be ADDED right now. Reading and writing are
    * different questions: the book outlives the party, and nothing new goes
    * into it once the party is over. */
   canWrite: boolean;
   maxAuthorDisplayNameLength: number;
   maxBodyLength: number;
-  /** Dedications this guest has left, or null when the host set no limit —
+  /** Memories this guest has left, or null when the host set no limit —
    * said before somebody composes one the server would refuse. */
   remaining?: number | null;
 }
 
-/** One dedication as a MANAGER reads it — with its moderation state. */
+/** A photograph a guest may choose: one of the main album's, never a video. */
+export interface PartyGuestbookPhoto {
+  id: string;
+  thumbnailUrl: string;
+  previewUrl: string;
+  width: number;
+  height: number;
+  orientation: PartyGuestbookOrientation;
+}
+
+export interface PartyGuestbookPhotos {
+  photos: PartyGuestbookPhoto[];
+}
+
+/** What a guest publishes. Everything else — the party, its album, the file,
+ * the blob, the template's version — is the server's to resolve. */
+export interface PartyGuestbookSubmissionRequest {
+  sourceMediaItemId: string;
+  authorDisplayName: string;
+  body: string;
+  templateKey: PartyGuestbookTemplateKey;
+  crop: PartyGuestbookCrop;
+}
+
+/**
+ * The refusals a composer has to tell apart, by what the guest can do next:
+ * choose another photograph, fix a field, or stop because the book will take
+ * nothing more. Anything else is transient and worth retrying.
+ */
+export const PARTY_GUESTBOOK_PHOTO_ERRORS = [
+  'guestbook_photo_unavailable',
+  'guestbook_photo_not_image',
+  'guestbook_photo_required',
+] as const;
+export const PARTY_GUESTBOOK_FIELD_ERRORS = [
+  'guestbook_invalid_author',
+  'guestbook_invalid_body',
+  'guestbook_invalid_template',
+  'guestbook_invalid_crop',
+] as const;
+export const PARTY_GUESTBOOK_CLOSED_ERRORS = ['guestbook_disabled', 'guestbook_limit_reached'] as const;
+
+export type PartyGuestbookRefusal = 'photo' | 'field' | 'closed' | 'transient';
+
+/** Which of the four a refusal is, from its stable machine code. */
+export function partyGuestbookRefusal(code: string | null | undefined): PartyGuestbookRefusal {
+  if (!code) return 'transient';
+  if ((PARTY_GUESTBOOK_PHOTO_ERRORS as readonly string[]).includes(code)) return 'photo';
+  if ((PARTY_GUESTBOOK_FIELD_ERRORS as readonly string[]).includes(code)) return 'field';
+  if ((PARTY_GUESTBOOK_CLOSED_ERRORS as readonly string[]).includes(code)) return 'closed';
+  return 'transient';
+}
+
+/** One memory as a MANAGER reads it — with its moderation state. */
 export interface PartyGuestbookManagedEntry {
   id: string;
-  authorDisplayName: string | null;
+  authorDisplayName: string;
   body: string;
   status: PartyMessageStatus;
   createdAt: string;
   moderatedAt: string | null;
+  template: { key: string; version: number };
+  media: PartyGuestbookMedia;
 }
 
 export interface PartyGuestbookManagerList {

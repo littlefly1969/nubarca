@@ -1082,22 +1082,30 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   that does not exist. Recorded at
   `IAlbumShareAuth.ChallengeAsync` so it stays a decision rather than an
   accident.
-- **The guest book is its own table, and it never reaches the wall.**
-  `PartyGuestbookEntry` is not a flag on `PartyMessage`, and the difference is
-  the point: a greeting is written to be read out during the evening, a
-  dedication is written to be kept. There is no route that promotes one, no
-  shape shared with the TV feed, and no `PartyGuestbookEntry` anywhere in a TV
-  projection — the invariant is expressed as an ABSENCE, which is also how it is
-  tested. Its scope is the PARTY and not the album (unlike a message, whose
-  scope is the link), because a book survives a QR rotation, an album change and
-  a party that has no album yet — so its routes are `/api/parties/{partyId}/
-  guestbook` and there is no album id on that page. Moderation reuses
-  `PartyMessageTransitions` and `IPartyMessageAccessResolver`: contributions are
-  one job, and a party where somebody may take a greeting down but not a
-  dedication would be a distinction nobody asked for. Reading the book rides the
-  VIEW token (a host may keep a book and accept no photographs at all), while
-  writing additionally needs `Capabilities.Contributions`, which is what lets an
-  ended party's book stay readable and closed.
+- **The guest book is a book of photograph memories, and each memory owns its
+  photograph.** `PartyGuestbookEntry` is not a flag on `PartyMessage`: a
+  greeting is read out during the evening, a memory is kept. Every entry is a
+  photograph chosen from the party's MAIN album, a dedication that keeps its
+  paragraphs, a REQUIRED signature, a template key and the version the SERVER
+  assigned, and the framing in the print crop editor's terms. At publication the
+  memory takes its OWN reference to the photograph's blob
+  (`AcquireExistingAsync`), in the same transaction as the quota claim and the
+  insert; it never names the album file, so the host may remove or delete that
+  file and the memory still shows the picture. Three things are easy to undo by
+  accident. The two blob columns (`BlobObjectId` and the regenerable medium
+  `PreviewBlobObjectId`) are counted by `BlobReferenceAuditService` — drop them
+  from there and `repair-references`, which runs on every deploy, zeroes a live
+  memory's photograph. The picture is served from the memory's own derived
+  preview (`PartyGuestbookPhotoCache`), never from the file's thumbnails and
+  never as an original. And URLs are built per request for the token or route
+  that asked, so they are not a column. Its scope is the PARTY, not the album,
+  so its routes are `/api/parties/{partyId}/guestbook` and it survives a QR
+  rotation. Moderation reuses `PartyMessageTransitions` and
+  `IPartyMessageAccessResolver`. Reading rides either guest token, and writing
+  additionally needs `Capabilities.Contributions`, which is what lets an ended
+  party's book stay readable and closed. Nothing projects it to a television
+  YET; the read model is complete precisely so that a guest book slideshow can
+  read it without touching the album. See `ARCHITECTURE.md` §14.5.1.
 - **Telling somebody WHERE the party is does not go through the guest list.**
   Until `POST /api/parties/{partyId}/address-share`, the only way to say where a
   party was, was to create an invitation group and share a personal invitation —

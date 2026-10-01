@@ -1,8 +1,23 @@
 import {
-  useRef, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent,
+  useRef, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { cropFor, type CropView } from '../pages/partyPrintGeometry';
+import { cropFor, type CropView, type NormalisedCrop } from '../pages/partyPrintGeometry';
 import './PhotoCropFrame.css';
+
+/**
+ * Where a photograph sits inside a frame to show exactly `crop` — the one
+ * placement, shared by this editor and by anything that draws the result
+ * (a guest book memory), so what was framed is what is shown.
+ */
+export function cropImageStyle(crop: NormalisedCrop): CSSProperties {
+  return {
+    width: `${100 / crop.cropWidth}%`,
+    height: `${100 / crop.cropHeight}%`,
+    left: `${(-crop.cropX * 100) / crop.cropWidth}%`,
+    top: `${(-crop.cropY * 100) / crop.cropHeight}%`,
+  };
+}
 
 // A photograph in a frame, placed by hand: drag it, or move it with the arrow
 // keys; the zoom is the caller's own control beside it.
@@ -96,12 +111,7 @@ export function PhotoCropFrame({
         draggable={false}
         onLoad={(event) => onAspect?.(
           event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
-        style={{
-          width: `${100 / crop.cropWidth}%`,
-          height: `${100 / crop.cropHeight}%`,
-          left: `${(-crop.cropX * 100) / crop.cropWidth}%`,
-          top: `${(-crop.cropY * 100) / crop.cropHeight}%`,
-        }}
+        style={cropImageStyle(crop)}
       />
     </div>
   );

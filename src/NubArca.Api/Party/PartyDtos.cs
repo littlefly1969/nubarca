@@ -516,19 +516,46 @@ public sealed record PartyPlaybackSnapshotDto(
 // --- PARTY GUEST BOOK ---
 //
 // A separate resource from the greetings above, with its own table, its own
-// switch, its own moderation queue and no path whatsoever to a television. The
-// DTOs are separate for the same reason the entity is: a shape shared with
-// PartyMessage is one refactor away from a projection that reads both.
+// switch and its own moderation queue. The DTOs are separate for the same
+// reason the entity is: a shape shared with PartyMessage is one refactor away
+// from a projection that reads both.
+//
+// The read model is COMPLETE on purpose. A memory carries everything needed to
+// draw it — the photograph's address and shape, the framing, the template and
+// its version — so the guest page renders it today and a television can render
+// the same row later, without either of them looking up the album the
+// photograph came from. Nothing in it is a pixel; the photograph's URL is built
+// for the capability that asked and is never stored.
 
-// ONE DEDICATION, as a guest reads it. The signature the author typed and the
-// text, and nothing else — never the participant, the link, the moderator, the
-// owner, or the status (a guest only ever receives entries that are public, so
-// a status field could only ever say "visible").
+// ONE MEMORY, as a guest reads it. Never the participant, the link, the
+// moderator, the owner, the blob, or the status (a guest only ever receives
+// entries that are public, so a status field could only ever say "visible").
 public sealed record PartyGuestbookEntryDto(
     Guid Id,
-    string? AuthorDisplayName,
+    string AuthorDisplayName,
     string Body,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    PartyGuestbookTemplateDto Template,
+    PartyGuestbookMediaDto Media);
+
+// Which design, and which VERSION of it, the memory was published with. The
+// version is the server's: a client draws the version it is told.
+public sealed record PartyGuestbookTemplateDto(string Key, int Version);
+
+// The memory's photograph: a derived, metadata-free preview on a URL scoped to
+// the capability that asked, its DISPLAY shape, and how it is framed.
+public sealed record PartyGuestbookMediaDto(
+    string Url,
+    int Width,
+    int Height,
+    // "portrait" | "landscape" | "square" — from the shape above, said once so
+    // every client agrees on the boundary.
+    string Orientation,
+    PartyGuestbookCropDto Crop);
+
+// The framing, in the print crop editor's terms: centre as fractions of the
+// photograph, magnification from 1.
+public sealed record PartyGuestbookCropDto(double CenterX, double CenterY, double Zoom);
 
 // THE BOOK, as a guest reads it. Newest first: the last thing written is the
 // thing somebody just wrote, and a keepsake that opens on page one of a hundred
@@ -537,44 +564,91 @@ public sealed record PartyGuestbookPageDto(
     IReadOnlyList<PartyGuestbookEntryDto> Entries,
     // Whether the guest may add to it right now. Distinct from the book
     // existing: an ended party's book may still be readable while closed to new
-    // dedications, and the surface says which.
+    // memories, and the surface says which.
     bool CanWrite,
     int MaxAuthorDisplayNameLength = PartyGuestbookLimits.MaxAuthorDisplayNameLength,
     int MaxBodyLength = PartyGuestbookLimits.MaxBodyLength,
     // What this guest has left to write, or null for no limit — so the page can
-    // say it before somebody composes a dedication it will refuse.
+    // say it before somebody composes a memory it will refuse.
     int? Remaining = null);
 
-// What the guest gets back after writing. The id so the page can key its own
-// optimistic entry, and the status so it can say "in the book" or "waiting to
-// be approved".
+// A photograph a guest may choose for a memory: one of the main album's
+// photographs, and nothing else — never a video. Safe derived URLs only, on the
+// capability that asked; the id is the logical file id the publish names.
+public sealed record PartyGuestbookPhotoDto(
+    Guid Id,
+    string ThumbnailUrl,
+    string PreviewUrl,
+    int Width,
+    int Height,
+    string Orientation);
+
+public sealed record PartyGuestbookPhotosDto(IReadOnlyList<PartyGuestbookPhotoDto> Photos);
+
+// What the guest gets back after writing: the memory as it now reads, so the
+// page can show exactly what was published, and the status so it can say "in
+// the book" or "waiting to be approved".
 public sealed record PartyGuestbookSubmissionDto(
     Guid Id,
     string Status, // "visible" | "pending"
     DateTime CreatedAt,
-    // How many dedications this guest has left, or null when the host set no
+    // How many memories this guest has left, or null when the host set no
     // limit. Same shape as a greeting's, so one surface renders both.
-    int? Remaining = null);
+    int? Remaining = null,
+    PartyGuestbookEntryDto? Entry = null);
 
-// Why a dedication was refused. The HTTP layer maps these to a status code and
-// a stable machine code; the service never formats copy of its own.
+// What a guest asks to publish. Everything that matters is resolved on the
+// server: the party, its main album, the file, the blob, the template version.
+public sealed record PartyGuestbookSubmission(
+    Guid? SourceMediaItemId,
+    string? AuthorDisplayName,
+    string? Body,
+    string? TemplateKey,
+    double? CropCenterX,
+    double? CropCenterY,
+    double? CropZoom);
+
+// Why a memory was refused. The HTTP layer maps these to a status code and a
+// stable machine code; the service never formats copy of its own.
 public enum PartyGuestbookSubmissionError
 {
     // Empty, whitespace-only, or over the limit after normalisation.
     InvalidBody,
 
-    // Present but over the limit after normalisation.
+    // Missing, or over the limit after normalisation. A memory is signed.
     InvalidAuthorDisplayName,
 
     // This party keeps no guest book. Same shape of refusal as a greeting sent
     // to a party that takes none: a hand-built request, refused by the server.
     Disabled,
 
-    // This guest has written the dedications the host allowed them. A PRODUCT
+    // This guest has written the memories the host allowed them. A PRODUCT
     // limit and deliberately not rate limiting: one says the book has a budget,
     // the other says the requests are arriving too fast, and a guest can act on
     // only one of them.
     LimitReached,
+
+    // No photograph was named. A memory always carries one.
+    PhotoRequired,
+
+    // The photograph named is not one this guest may choose NOW: it does not
+    // exist, is not in this party's main album, was removed from it, was put
+    // in the Trash, the Vault or out of the library, or is a guest upload
+    // nobody has approved. Deliberately ONE answer for all of them: a public
+    // endpoint that said "exists, but in another album" would be an oracle
+    // for file ids. To the guest it means the same thing — choose another.
+    PhotoUnavailable,
+
+    // The photograph named IS in the album, and is not a photograph the server
+    // recognised — a video, or a file only claiming to be an image. Saying so
+    // leaks nothing: the guest can already see it in the gallery.
+    PhotoNotImage,
+
+    // A template key nobody may publish with.
+    InvalidTemplate,
+
+    // A framing outside the crop editor's limits, or not a number.
+    InvalidCrop,
 }
 
 public sealed record PartyGuestbookSubmissionResult(
@@ -588,16 +662,18 @@ public sealed record PartyGuestbookSubmissionResult(
         new(null, error);
 }
 
-// Owner/delegate view of ONE dedication: the text, the signature, and the
-// moderation state. No owner id, no moderator id, no participant id and no
-// link id — the same restraint PartyMessageDto exercises, for the same reason.
+// Owner/delegate view of ONE memory: what a guest sees, and the moderation
+// state. No owner id, no moderator id, no participant id, no link id and no
+// blob — the same restraint PartyMessageDto exercises, for the same reason.
 public sealed record PartyGuestbookManagedEntryDto(
     Guid Id,
-    string? AuthorDisplayName,
+    string AuthorDisplayName,
     string Body,
     string Status,
     DateTime CreatedAt,
-    DateTime? ModeratedAt);
+    DateTime? ModeratedAt,
+    PartyGuestbookTemplateDto Template,
+    PartyGuestbookMediaDto Media);
 
 // The manager queue for a party's book. `IsOwner` is what the UI uses to decide
 // whether to render the configuration switches, exactly as on the greetings

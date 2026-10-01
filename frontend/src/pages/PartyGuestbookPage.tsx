@@ -8,6 +8,7 @@ import {
   type PartyGuestbookManagerList,
   type PartyMessageAction,
 } from '@nubarca/api-client';
+import { PartyGuestbookMemoryCard } from '../components/PartyGuestbookMemoryCard';
 import { usePartyApi } from '../party/workspace/partyApi';
 import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
@@ -22,9 +23,9 @@ import '../party/workspace/PartyWorkspace.css';
 // rotation, an album change and a party that has no album yet. So the route
 // names the party and there is no album id anywhere on this page.
 //
-// There is deliberately no Hero here, and no "show on the slideshow": a
-// dedication is written to be kept, not projected, and the absence of the
-// action is the invariant.
+// There is deliberately no Hero here: a memory is not a greeting, and
+// promoting one is a greeting's action. Each row draws the memory itself —
+// photograph and all — because that is what the manager is deciding about.
 
 type Status =
   | { kind: 'loading' }
@@ -269,12 +270,13 @@ function GuestbookRow({
   return (
     <li className="pw-mod-row pw-mod-row--message" data-testid="party-guestbook-row">
       <span className="pw-mod-text">
-        <span className="pw-mod-name">
-          {entry.authorDisplayName ?? t('partyMessages.anonymous')}
+        {/* THE MEMORY AS GUESTS WILL SEE IT — photograph, framing, design and
+            words — drawn by the same component the book uses, so whoever lets
+            it in sees exactly what they are letting in. Its words are TEXT:
+            never dangerouslySetInnerHTML, never a Markdown renderer. */}
+        <span className="pw-guestbook-memory">
+          <PartyGuestbookMemoryCard memory={entry} testId={`party-guestbook-row-memory-${entry.id}`} />
         </span>
-        {/* Rendered as TEXT. Never dangerouslySetInnerHTML, never a Markdown
-            renderer: the body is whatever a stranger typed. */}
-        <span className="pw-message-body">{entry.body}</span>
         <span className="pw-mod-meta">
           <span className="pw-mod-state" data-status={entry.status}>
             {t(STATUS_LABEL_KEY[entry.status])}

@@ -72,19 +72,9 @@ export function PartyGuestbookPublicPage() {
           </p>
         )}
 
-        {token && <PartyGuestbookPanel token={token} partyTitle={partyTitle} />}
+        {token && <PartyGuestbookPanel token={token} />}
 
       </div>
     </main>
   );
 }
-
-
-/**
- * The composer.
- *
- * Counts with the SAME rules the server validates by, so a guest never watches
- * the counter say "40 left" and the submit fail. Whitespace and zero-width
- * padding collapse before counting, which is why the number stops moving while
- * somebody keeps typing spaces.
- */

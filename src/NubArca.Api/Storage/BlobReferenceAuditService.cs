@@ -24,6 +24,11 @@ namespace NubArca.Api.Storage;
 //   * album_transfer_items.BlobObjectId (SHARE-COPY-01 detached-copy manifests;
 //                                   ONLY while the parent transfer is pending —
 //                                   accept/decline/cancel/expire release)
+//   * party_guestbook_entries.BlobObjectId (a guest book memory's own
+//                                   photograph; hard-deleted with its party,
+//                                   so every existing row owns one reference)
+//   * party_guestbook_entries.PreviewBlobObjectId (that memory's derived
+//                                   preview, once drawn; one ref per non-null)
 //
 // A hard interruption between the (auto-committed) refcount increment and the
 // owner-row commit — worker kill, OOM, crash — leaks one reference by design
@@ -253,6 +258,25 @@ public sealed class BlobReferenceAuditService
             .Select(g => new { g.Key, Count = g.Count() })
             .ToListAsync(cancellationToken);
 
+        // Guest book memories: each row owns one reference to the photograph
+        // it was published with, acquired in the publishing transaction and
+        // released only when the row is deleted (PartyStateEraser) — never
+        // through the album file it was chosen from, which keeps its own. This
+        // is what keeps a memory's photograph alive after the host removes it
+        // from the album; omitting it would let RepairAsync zero that blob and
+        // the janitor delete bytes a memory still shows.
+        var guestbookRefs = await _db.PartyGuestbookEntries.AsNoTracking()
+            .GroupBy(e => e.BlobObjectId)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+        // …and its derived preview, once somebody has asked for it: one
+        // reference per non-null column, like any other derivative row.
+        var guestbookPreviewRefs = await _db.PartyGuestbookEntries.AsNoTracking()
+            .Where(e => e.PreviewBlobObjectId != null)
+            .GroupBy(e => e.PreviewBlobObjectId!.Value)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+
         var computed = new Dictionary<Guid, int>(rows.Count);
         foreach (var r in fileRefs)
         {
@@ -287,6 +311,14 @@ public sealed class BlobReferenceAuditService
             computed[r.Key] = computed.TryGetValue(r.Key, out var v) ? v + r.Count : r.Count;
         }
         foreach (var r in pendingTransferRefs)
+        {
+            computed[r.Key] = computed.TryGetValue(r.Key, out var v) ? v + r.Count : r.Count;
+        }
+        foreach (var r in guestbookRefs)
+        {
+            computed[r.Key] = computed.TryGetValue(r.Key, out var v) ? v + r.Count : r.Count;
+        }
+        foreach (var r in guestbookPreviewRefs)
         {
             computed[r.Key] = computed.TryGetValue(r.Key, out var v) ? v + r.Count : r.Count;
         }

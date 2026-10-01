@@ -684,6 +684,8 @@ A successful `FileItem` soft delete atomically marks the logical row and release
 
 Reference counts are an accounting invariant, not an unquestioned oracle. The repository includes audit and repair services that compare persisted counts with actual live references.
 
+A `FileItem` is not the only owner. A row that keeps bytes alive independently of any file — a Plate image, an Aesthetics Lab item, a pending album transfer, a guest book memory (§14.5.1) — takes its OWN reference to the same blob through `IBlobService.AcquireExistingAsync`, in the transaction that writes the row, and releases it when the row goes. No bytes are copied. `BlobReferenceAuditService` enumerates every owner table; a new owner that is not added there is one `repair-references` would zero, and the janitor would then delete bytes it still needs.
+
 ### 9.4 Quotas and accounting
 
 Per-user quota is logical: the owner is charged for every non-purged `FileItem`, including items in Trash, even when the bytes are globally deduplicated. Permanently deleted rows stop counting; folders and derived artifacts do not count. Physical storage statistics are tracked separately. Upload/import admission uses configured request/file limits, the application upload cap, and owner quota; reverse-proxy limits must be configured consistently because they are outside the application.
@@ -1243,7 +1245,8 @@ and only if its final `PartyUploadItem.Status` is `approved`, covering both
 automatic and manual approval; `pending`, `hidden`, `rejected` and
 `removed_from_album` go through the ORDINARY `IFileItemService` deletion
 lifecycle into Trash, restorable, with the sweeper and janitor reclaiming on
-their own schedules. Nothing touches a blob.
+their own schedules. Nothing touches a blob — except the guest book's own
+references (§14.5.1), which go with its memories.
 
 The provenance rows are then deleted with everything else, and that is the
 point: afterwards the album is **self-contained**. What is visible in it is
@@ -1566,6 +1569,16 @@ Deleting an album deletes its Party state — messages, guest-upload moderation 
 The TV consumes messages through a **separate projection** (`GET /api/tv/albums/{albumId}/party-messages`) carrying only the current Party's visible messages. `TvAlbumItem.mediaType` stays `image | video`, so an older TV client simply never calls the route and keeps working. Presentation is two surfaces over one feed: the **Ribbon**, a still (never scrolling) band holding one message at a time and suspended while the MENU/QR overlay is up; and the **Hero**, a full-screen card inserted only into a genuinely autoplaying slideshow. Hero insertion holds the current media rather than moving the index, so the carousel resumes with nothing lost or repeated; it waits for the boundary a video was going to reach anyway rather than truncating it, and is suspended entirely while a Party face filter is active, because the guest asked for a specific subset of photographs and a greeting card is not an answer to that.
 
 The postponed advance is an explicit **ledger** (`BoundaryDebt` in `tv/src/lib/partyMessages.ts`), not something inferred from a card being on screen, and `settleBoundary` is the only function that can spend it. That is what makes two guarantees structural rather than remembered. A finished video can raise no further boundary, so a card withdrawn early — hidden, demoted, or its party revoked — still settles the debt instead of stranding the wall on a last frame; and a card timing out in the same tick the poll withdraws it advances once, because the second caller finds nothing owed. A merely *paused* wall keeps the debt and settles it on resume, while a change of viewing intent (a face filter, manual navigation, leaving the slideshow) discards it, since the index then belongs to whoever just chose it. A Hero raised at a video's **cap** also withholds the controlled play intent for its duration, so the clip does not keep running — audio included — behind an opaque card.
+
+### 14.5.1 The Party guest book
+
+The guest book is a book of **photograph memories**: each `PartyGuestbookEntry` is one photograph from the party's main album, framed, with a multi-paragraph dedication, a required signature and a template. It is a separate domain from guest messages (§14.5) — its own table, switch, quota and routes, sharing only the moderation vocabulary — and it is scoped to the PARTY rather than to a link, so it survives a QR rotation.
+
+**A memory owns its photograph.** The album file is only where the guest found it. At publication the server re-resolves the chosen file through the same membership rule every party surface uses (`PartyMediaService.DisplayableMembers`, narrowed to server-recognised images), claims the guest's slot, takes the memory's own reference to the file's blob (`AcquireExistingAsync`) and inserts the row — one transaction, so a failure leaves no row, no reference and no spent slot. Nothing on the row names the file and there is no foreign key to `file_items`: removing the photograph from the album, trashing it or purging it leaves the memory intact and the blob alive. Erasing the party (`PartyStateEraser`) releases each memory's references in the same unit of work, returning the blob to the ordinary janitor lifecycle. A photograph removed while a guest is composing is refused as `guestbook_photo_unavailable` (409), one answer for every reason a file is not choosable, so the endpoint is no oracle for file ids.
+
+**Its picture is drawn from its own blob.** Album derivatives belong to the file, so a memory cannot borrow them. `PartyGuestbookPhotoCache` renders a medium preview from the memory's original through the shared `ImageDerivativeRenderer` and input gates, stores it as a content-addressed derived blob held by `PreviewBlobObjectId` (one more counted reference), and regenerates it if the derived bytes are lost. It leaves the server only through the same metadata-stripping path as every party derivative; no original is ever served.
+
+**The row is complete.** It stores the photograph's display size, `TemplateKey` and `TemplateVersion` — the client names the key, the server assigns the version, so a later `polaroid` v2 never changes a published memory — and the framing as the print crop editor states it (centre and zoom, fractions, never pixels). URLs are built per request for the capability that asked (either guest token, the host's route, or the Party Crew's) and are never stored. Any surface can therefore draw a memory from the read model alone; the web renders it with one view-model component (`PartyGuestbookMemoryCard`) and a declarative template registry, which is what a television slideshow of the book would consume.
 
 ### 14.6 Party printed keepsakes
 

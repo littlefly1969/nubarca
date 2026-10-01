@@ -170,4 +170,39 @@ public sealed class PartyMessageTextTests
         Assert.True(PartyMessageText.TryNormalizeDisplayName("  Giulia\tRossi \n", out var name));
         Assert.Equal("Giulia Rossi", name);
     }
+
+    // --- paragraphs (the guest book's dedication) ---
+    //
+    // The SAME cases are pinned in frontend/src/components/partyMessageText.test.ts
+    // against normalizePartyMultilineText: the composer's counter and the
+    // server have to agree on what a dedication with paragraphs IS.
+
+    [Theory]
+    [InlineData("Riga uno\n\nRiga due", "Riga uno\n\nRiga due")]
+    [InlineData("a\r\nb\rc\nd", "a\nb\nc\nd")]
+    [InlineData("\n\n  uno  \n\n\n\n  due  \n\n", "uno\n\ndue")]
+    [InlineData("a \t b\n   \nc", "a b\n\nc")]
+    [InlineData("a\n\u200B\nb", "a\n\nb")]
+    [InlineData("a\u2028b", "a b")]
+    [InlineData("auguri\u202Egnorw\nciao", "augurignorw\nciao")]
+    public void Multiline_Keeps_Paragraphs_And_Applies_The_Single_Line_Rule_To_Each(string input, string expected)
+    {
+        Assert.Equal(expected, PartyMessageText.NormalizeMultiline(input));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("\r\n\r\n")]
+    [InlineData(" \n \t \n\u200B ")]
+    public void Multiline_Text_With_Nothing_In_It_Is_Empty(string? input)
+    {
+        Assert.Equal(string.Empty, PartyMessageText.NormalizeMultiline(input));
+    }
+
+    [Fact]
+    public void A_Line_Break_Costs_One_Code_Point_Like_Any_Other_Character()
+    {
+        Assert.Equal(5, PartyMessageText.Length(PartyMessageText.NormalizeMultiline("ab\r\n\r\nc")));
+    }
 }

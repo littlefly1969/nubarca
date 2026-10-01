@@ -1,13 +1,14 @@
-/* THE GUEST BOOK's own surface.
+/* THE GUEST BOOK's own surface: the book of memories, and the composer.
  *
  * It sits inside the contribution shell (`PartyContribution.css`) and adds only
- * what a book needs that a form does not: the pages under the composer. Every
- * colour, radius and font comes from the shell, so the book reads as the same
- * party rather than as a different site.
+ * what a book needs that a form does not. Every surface colour, radius and font
+ * of the PAGE comes from the shell, so the book reads as the same party rather
+ * than as a different site.
  *
- * Mobile first and single-column at every width. A dedication is a paragraph
- * somebody wrote; two of them side by side at 1440px would be a feed, and a
- * feed is what this surface exists not to be. */
+ * Mobile first and ONE MEMORY PER ROW at every width. A memory is a photograph
+ * and a paragraph somebody wrote; two of them side by side at 1440px would be a
+ * feed, and a feed is what this surface exists not to be. The shell already
+ * caps the column at 34rem. */
 
 .party-guestbook-back {
   margin: 0 0 1rem;
@@ -30,6 +31,33 @@
   opacity: 1;
 }
 
+/* The invitation to leave a memory ---------------------------------------- */
+
+.guestbook-invite {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1.1rem;
+  border: 1px solid var(--contribution-border);
+  border-radius: 1.25rem;
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgb(0 212 255 / 12%), transparent 60%),
+    var(--contribution-surface);
+}
+
+.guestbook-invite-help {
+  margin: 0;
+  color: var(--contribution-muted);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.guestbook-invite .party-contribution-quota {
+  margin: 0;
+}
+
+/* The book ------------------------------------------------------------------ */
+
 .party-guestbook-entries {
   margin-top: 2rem;
 }
@@ -46,28 +74,621 @@
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 0.75rem;
+  /* One column, always — see the note at the top. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
 }
 
 .party-guestbook-entry {
-  border-radius: 1rem;
-  padding: 1rem 1.125rem;
-  background: rgb(255 255 255 / 6%);
-  border: 1px solid rgb(255 255 255 / 10%);
+  min-width: 0;
 }
 
-.party-guestbook-body {
+/* One memory ---------------------------------------------------------------- *
+ *
+ * The parts every design shares: a framed photograph, then the words. Each
+ * design below changes the composition, never the meaning. Every design is
+ * VERSIONED in its class name (`--polaroid-1`): a redesign is a new class
+ * beside the old one, so a memory already published keeps its look. */
+
+.guestbook-memory {
+  --memory-paper: var(--brand-deep-blue);
+  --memory-ink: var(--brand-cloud-white);
+  --memory-muted: rgb(245 247 251 / 72%);
+  --memory-accent: var(--brand-cyan-glow);
+
+  position: relative;
+  box-sizing: border-box;
+  min-width: 0;
   margin: 0;
-  /* A dedication arrives as ONE line — the server collapses every line ending
-     — so what matters here is that long words and pasted URLs cannot push the
-     card past the viewport at 320px. */
+  overflow: hidden;
+  background: var(--memory-paper);
+  color: var(--memory-ink);
+}
+
+.guestbook-memory-photo {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: rgb(10 15 26 / 70%);
+}
+
+.guestbook-memory-photo img {
+  position: absolute;
+  max-width: none;
+  object-fit: cover;
+  user-select: none;
+}
+
+.guestbook-memory-ornament {
+  display: none;
+}
+
+.guestbook-memory-words {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.guestbook-memory-body {
+  margin: 0;
+  /* A dedication keeps its PARAGRAPHS — the server keeps the line breaks, at
+     most one blank line between them — so they are shown as written. Long
+     words and pasted URLs still cannot push the card past a 320px screen. */
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.55;
 }
 
-.party-guestbook-author {
-  margin: 0.5rem 0 0;
-  font-size: 0.875rem;
-  opacity: 0.72;
+.guestbook-memory-author {
+  margin: 0;
+  color: var(--memory-muted);
+  font-size: 0.9rem;
   overflow-wrap: anywhere;
+}
+
+.guestbook-memory .is-placeholder {
+  opacity: 0.55;
+  font-style: italic;
+}
+
+/* NubArca — the default. The photograph leads, the words sit right under it,
+   the signature is quiet, and the only flourish is the brand's own cyan. */
+
+.guestbook-memory--nubarca-1 {
+  border: 1px solid rgb(245 247 251 / 12%);
+  border-radius: 1.25rem;
+  background:
+    radial-gradient(130% 60% at 100% 100%, rgb(21 101 255 / 22%), transparent 62%),
+    var(--memory-paper);
+}
+
+.guestbook-memory--nubarca-1 .guestbook-memory-words {
+  padding: 1rem 1.1rem 1.15rem;
+}
+
+.guestbook-memory--nubarca-1 .guestbook-memory-author {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.guestbook-memory--nubarca-1 .guestbook-memory-author::before {
+  content: '';
+  flex: none;
+  width: 1.25rem;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--memory-accent);
+}
+
+/* Polaroid — a light instant-print frame, a square photograph and a generous
+   strip below it for the words. Evocative, not a costume: no tape, no tilt. */
+
+.guestbook-memory--polaroid-1 {
+  --memory-paper: #f6f4ef;
+  --memory-ink: #1d2433;
+  --memory-muted: #5a6273;
+
+  padding: 0.85rem 0.85rem 0;
+  border-radius: 0.35rem;
+  box-shadow: 0 18px 40px -22px rgb(0 0 0 / 70%);
+}
+
+.guestbook-memory--polaroid-1 .guestbook-memory-photo {
+  border-radius: 0.15rem;
+  background: #d9d6cf;
+}
+
+.guestbook-memory--polaroid-1 .guestbook-memory-words {
+  min-height: 5.5rem;
+  padding: 1.1rem 0.35rem 1.4rem;
+}
+
+.guestbook-memory--polaroid-1 .guestbook-memory-body {
+  font-size: 1.05rem;
+}
+
+.guestbook-memory--polaroid-1 .guestbook-memory-author {
+  align-self: flex-end;
+  font-weight: 600;
+}
+
+/* Editorial — typography first. A light page, the photograph as a full-bleed
+   plate, an oversized opening mark, a tracked byline under a rule. */
+
+.guestbook-memory--editorial-1 {
+  --memory-paper: var(--brand-cloud-white);
+  --memory-ink: var(--brand-midnight-navy);
+  --memory-muted: #4c5568;
+  --memory-accent: var(--brand-electric-blue);
+
+  border-radius: 0.5rem;
+}
+
+.guestbook-memory--editorial-1 .guestbook-memory-words {
+  padding: 1.35rem 1.35rem 1.5rem;
+}
+
+.guestbook-memory--editorial-1 .guestbook-memory-body {
+  font-family: var(--font-heading);
+  font-size: 1.15rem;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+}
+
+.guestbook-memory--editorial-1 .guestbook-memory-body::before {
+  content: '\201C';
+  display: block;
+  height: 1.6rem;
+  margin-bottom: 0.25rem;
+  color: var(--memory-accent);
+  font-size: 3.25rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.guestbook-memory--editorial-1 .guestbook-memory-author {
+  padding-top: 0.75rem;
+  border-top: 1px solid rgb(10 15 26 / 16%);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* Celebration — the party's own colours around the photograph and a few
+   controlled sparks of confetti in the corner. Joyful, never noisy: no
+   animation, nothing over the photograph, nothing over the words. */
+
+.guestbook-memory--celebration-1 {
+  --memory-accent: var(--brand-soft-violet);
+
+  padding: 3px;
+  border-radius: 1.4rem;
+  background:
+    linear-gradient(140deg, var(--brand-cyan-glow), var(--brand-electric-blue) 45%, var(--brand-soft-violet));
+}
+
+.guestbook-memory--celebration-1 .guestbook-memory-photo {
+  border-radius: calc(1.4rem - 3px) calc(1.4rem - 3px) 0 0;
+}
+
+.guestbook-memory--celebration-1 .guestbook-memory-words {
+  align-items: center;
+  padding: 1.15rem 1.2rem 1.3rem;
+  border-radius: 0 0 calc(1.4rem - 3px) calc(1.4rem - 3px);
+  background:
+    radial-gradient(90% 70% at 50% 0%, rgb(154 108 255 / 22%), transparent 70%),
+    var(--brand-deep-blue);
+  text-align: center;
+}
+
+.guestbook-memory--celebration-1 .guestbook-memory-body {
+  font-size: 1.05rem;
+}
+
+.guestbook-memory--celebration-1 .guestbook-memory-author {
+  padding: 0.3rem 0.85rem;
+  border: 1px solid rgb(154 108 255 / 55%);
+  border-radius: 999px;
+  color: var(--memory-ink);
+  font-weight: 600;
+}
+
+.guestbook-memory--celebration-1 .guestbook-memory-ornament {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  display: block;
+  width: 3.25rem;
+  height: 3.25rem;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, var(--brand-cyan-glow) 0 3px, transparent 3.5px) 0 0 / 1.1rem 1.1rem,
+    radial-gradient(circle, #ffd166 0 2.5px, transparent 3px) 0.55rem 0.55rem / 1.1rem 1.1rem,
+    radial-gradient(circle, var(--brand-soft-violet) 0 2px, transparent 2.5px) 0.3rem 0.8rem / 1.1rem 1.1rem;
+  mask: linear-gradient(225deg, #000 30%, transparent 75%);
+  opacity: 0.9;
+}
+
+/* The composer -------------------------------------------------------------- */
+
+.guestbook-step-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.guestbook-step-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.3rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.guestbook-step-title:focus {
+  outline: none;
+}
+
+.guestbook-step-title:focus-visible {
+  outline: 3px solid var(--contribution-focus);
+  outline-offset: 3px;
+}
+
+.guestbook-icon-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--contribution-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--contribution-text);
+  cursor: pointer;
+}
+
+.guestbook-icon-button svg,
+.guestbook-tool svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.guestbook-notice {
+  margin: 0 0 0.85rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid rgb(0 212 255 / 35%);
+  border-radius: 0.9rem;
+  background: rgb(0 212 255 / 8%);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.guestbook-hint {
+  margin: 0;
+  color: var(--contribution-muted);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.guestbook-state {
+  padding: 1.5rem 0.5rem;
+  color: var(--contribution-muted);
+  text-align: center;
+}
+
+.guestbook-state .party-contribution-secondary {
+  margin-top: 1rem;
+}
+
+/* Step one: the photographs. Three to a row on a phone, big enough to tell
+   apart and to hit; four once there is room. */
+
+.guestbook-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 30rem) {
+  .guestbook-picker-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.guestbook-picker-grid li {
+  min-width: 0;
+}
+
+.guestbook-picker-cell {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0.6rem;
+  background: rgb(245 247 251 / 8%);
+  cursor: pointer;
+}
+
+.guestbook-picker-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.guestbook-picker-cell.is-skeleton {
+  animation: guestbook-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes guestbook-pulse {
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guestbook-picker-cell.is-skeleton {
+    animation: none;
+  }
+}
+
+.guestbook-picker-cell.is-selected {
+  outline: 3px solid var(--brand-cyan-glow);
+  outline-offset: -3px;
+}
+
+.guestbook-picker-check {
+  position: absolute;
+  right: 0.35rem;
+  bottom: 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 999px;
+  background: var(--brand-cyan-glow);
+  color: var(--brand-midnight-navy);
+}
+
+.guestbook-picker-check svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Step two: making the memory. One column, in reading order: the memory, its
+   design, the framing, the words, the signature, the button. */
+
+.guestbook-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.guestbook-compose-preview .guestbook-memory {
+  /* The draft is the memory as it will read — never a thumbnail of it. */
+  box-shadow: 0 22px 48px -30px rgb(0 0 0 / 80%);
+}
+
+.guestbook-reposition {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.guestbook-reposition .photo-crop {
+  width: 100%;
+}
+
+.guestbook-zoom {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 44px;
+  font-size: 0.9rem;
+}
+
+.guestbook-zoom input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  accent-color: var(--brand-cyan-glow);
+}
+
+.guestbook-templates {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.guestbook-field-label {
+  margin-bottom: 0.45rem;
+  padding: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+/* A row that scrolls sideways on a narrow phone rather than wrapping into a
+   second row of choices nobody can compare. */
+.guestbook-templates-row {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0 -0.25rem;
+  padding: 0.25rem;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+}
+
+.guestbook-template {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0.4rem 0.85rem 0.4rem 0.45rem;
+  border: 1px solid var(--contribution-border);
+  border-radius: 999px;
+  background: rgb(10 15 26 / 45%);
+  scroll-snap-align: start;
+  cursor: pointer;
+}
+
+/* The radio stays in the accessibility tree and takes the keyboard; the chip
+   is how it looks. */
+.guestbook-template input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.guestbook-template:has(input:focus-visible) {
+  outline: 3px solid var(--contribution-focus);
+  outline-offset: 2px;
+}
+
+.guestbook-template.is-selected {
+  border-color: var(--brand-cyan-glow);
+  background: rgb(0 212 255 / 12%);
+}
+
+/* Selection is said by a mark as well as by colour. */
+.guestbook-template.is-selected .guestbook-template-name::after {
+  content: ' \2713';
+}
+
+.guestbook-template-swatch {
+  flex: none;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 999px;
+  background: var(--brand-deep-blue);
+  box-shadow: inset 0 0 0 2px rgb(245 247 251 / 25%);
+}
+
+.guestbook-template[data-template='nubarca'] .guestbook-template-swatch {
+  background: linear-gradient(160deg, var(--brand-deep-blue) 55%, var(--brand-cyan-glow) 56%);
+}
+
+.guestbook-template[data-template='polaroid'] .guestbook-template-swatch {
+  background: linear-gradient(#9aa4b6 0 62%, #f6f4ef 62%);
+  box-shadow: inset 0 0 0 3px #f6f4ef;
+}
+
+.guestbook-template[data-template='editorial'] .guestbook-template-swatch {
+  background: var(--brand-cloud-white);
+  color: var(--brand-electric-blue);
+}
+
+.guestbook-template[data-template='editorial'] .guestbook-template-swatch::before {
+  content: '\201C';
+  display: block;
+  font-family: var(--font-heading);
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.guestbook-template[data-template='celebration'] .guestbook-template-swatch {
+  background: linear-gradient(140deg, var(--brand-cyan-glow), var(--brand-electric-blue) 45%, var(--brand-soft-violet));
+}
+
+.guestbook-template-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.guestbook-compose-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.guestbook-tool {
+  min-height: 44px;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.92rem;
+}
+
+/* The way to publish: within reach of a thumb at the bottom of the screen
+   while the guest scrolls the composer, and above the home indicator.
+   STICKY, never fixed: it stays part of the page, so an open keyboard pushes
+   the page rather than covering the button for good. */
+.guestbook-compose-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.25rem;
+  padding: 1.1rem 0 max(0.85rem, env(safe-area-inset-bottom));
+  background: linear-gradient(to top, var(--brand-midnight-navy) 72%, rgb(10 15 26 / 0%));
+}
+
+/* While a finger is moving the photograph, nothing may lie over its frame: the
+   bar goes back into the flow until the framing is done. */
+.guestbook-compose.is-repositioning .guestbook-compose-actions {
+  position: static;
+}
+
+.guestbook-compose-actions .guestbook-notice {
+  margin: 0;
+}
+
+/* After publishing ---------------------------------------------------------- */
+
+.guestbook-sent {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.guestbook-sent-help {
+  margin: -0.4rem 0 0;
+  color: var(--contribution-muted);
+  line-height: 1.5;
+}
+
+.guestbook-sent-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* In the manager's queue ---------------------------------------------------- *
+ *
+ * The memory drawn at a reading size beside its moderation controls — the
+ * same component, the same design, just narrower. */
+
+.pw-guestbook-memory {
+  display: block;
+  width: min(100%, 20rem);
+  margin-bottom: 0.5rem;
 }

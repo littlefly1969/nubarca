@@ -24,7 +24,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { installFetchMock, jsonResponse } from '../../test-utils';
 import { I18nProvider } from '../../i18n';
@@ -274,48 +274,104 @@ it('contribution — a party that takes no greetings', async () => {
 
 /* ── The guest book ───────────────────────────────────────────────────────── */
 
-const DEDICATIONS = [
+const photo = (
+  id: string, width: number, height: number, orientation: string,
+  crop = { centerX: 0.5, centerY: 0.5, zoom: 1 },
+) => ({
+  url: `/api/party/${TOKEN}/guestbook/${id}/photo`,
+  width, height, orientation, crop,
+});
+
+// One memory in each design, of each shape, with a paragraph break and a long
+// signature — the cases a layout gets wrong at 320px.
+const MEMORIES = [
   {
     id: 'g1', authorDisplayName: 'Giulia e Marco',
-    body: 'Che serata. Grazie di averci voluto qui — ci ricorderemo di questa festa per anni.',
+    body: 'Che serata. Grazie di averci voluto qui.\n\nCi ricorderemo di questa festa per anni.',
     createdAt: '2027-06-12T22:10:00Z',
+    template: { key: 'nubarca', version: 1 },
+    media: photo('g1', 1600, 1200, 'landscape'),
   },
   {
-    id: 'g2', authorDisplayName: null,
+    id: 'g2', authorDisplayName: 'Ada',
     body: 'Auguri!',
     createdAt: '2027-06-12T21:48:00Z',
+    template: { key: 'polaroid', version: 1 },
+    media: photo('g2', 1200, 1600, 'portrait', { centerX: 0.5, centerY: 0.4, zoom: 1.4 }),
   },
   {
-    id: 'g3', authorDisplayName: 'La nonna',
-    body: 'Sono fiera di te. Un bacio grande.',
+    id: 'g3', authorDisplayName: 'La nonna, che ti vuole bene più di chiunque altro al mondo',
+    body: 'Sono fiera di te. Un bacio grande, e https://un-indirizzo-lunghissimo-incollato-senza-spazi.example/che-non-deve-uscire',
     createdAt: '2027-06-12T21:02:00Z',
+    template: { key: 'editorial', version: 1 },
+    media: photo('g3', 1200, 1200, 'square'),
+  },
+  {
+    id: 'g4', authorDisplayName: 'Luca',
+    body: 'Cinquanta, e non sentirli.',
+    createdAt: '2027-06-12T20:40:00Z',
+    template: { key: 'celebration', version: 1 },
+    media: photo('g4', 1600, 900, 'landscape'),
   },
 ];
 
-it('guest book — the composer and what is already written', async () => {
-  installFetchMock({
-    [`GET /api/party/${TOKEN}`]: () => jsonResponse(context()),
-    [`GET /api/party/${TOKEN}/guestbook`]: () => jsonResponse({
-      entries: DEDICATIONS,
-      canWrite: true,
-      maxAuthorDisplayNameLength: 80,
-      maxBodyLength: 1000,
-    }),
-  });
-  mount(`/party/${TOKEN}/guestbook`, '/party/:token/guestbook', <PartyGuestbookPublicPage />);
-  await capture('guestbook', 'party-guestbook-form');
+const GUESTBOOK_PHOTOS = Array.from({ length: 11 }, (_, i) => ({
+  id: `p${i + 1}`,
+  thumbnailUrl: `/api/party/${TOKEN}/guestbook/photos/p${i + 1}/thumbnail`,
+  previewUrl: `/api/party/${TOKEN}/guestbook/photos/p${i + 1}/preview`,
+  width: i % 3 === 0 ? 1200 : 1600,
+  height: i % 3 === 0 ? 1600 : 1200,
+  orientation: i % 3 === 0 ? 'portrait' : 'landscape',
+}));
+
+const guestbookMocks = (canWrite = true) => ({
+  [`GET /api/party/${TOKEN}`]: () => jsonResponse(context(canWrite ? {} : { phase: 'after' })),
+  [`GET /api/party/${TOKEN}/guestbook`]: () => jsonResponse({
+    entries: MEMORIES,
+    canWrite,
+    maxAuthorDisplayNameLength: 80,
+    maxBodyLength: 1000,
+    remaining: canWrite ? 2 : null,
+  }),
+  [`GET /api/party/${TOKEN}/guestbook/photos`]: () => jsonResponse({ photos: GUESTBOOK_PHOTOS }),
 });
 
-it('guest book — closed to new dedications, still readable', async () => {
-  installFetchMock({
-    [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({ phase: 'after' })),
-    [`GET /api/party/${TOKEN}/guestbook`]: () => jsonResponse({
-      entries: DEDICATIONS,
-      canWrite: false,
-      maxAuthorDisplayNameLength: 80,
-      maxBodyLength: 1000,
-    }),
+it('guest book — the call to leave a memory and the book', async () => {
+  installFetchMock(guestbookMocks());
+  mount(`/party/${TOKEN}/guestbook`, '/party/:token/guestbook', <PartyGuestbookPublicPage />);
+  await capture('guestbook', 'party-guestbook-list');
+});
+
+it('guest book — choosing a photograph', async () => {
+  installFetchMock(guestbookMocks());
+  mount(`/party/${TOKEN}/guestbook`, '/party/:token/guestbook', <PartyGuestbookPublicPage />);
+  fireEvent.click(await screen.findByTestId('party-guestbook-start'));
+  await capture('guestbook-picker', 'guestbook-picker-grid');
+});
+
+it('guest book — making the memory', async () => {
+  installFetchMock(guestbookMocks());
+  mount(`/party/${TOKEN}/guestbook`, '/party/:token/guestbook', <PartyGuestbookPublicPage />);
+  fireEvent.click(await screen.findByTestId('party-guestbook-start'));
+  fireEvent.click(await screen.findByTestId('guestbook-photo-p2'));
+  fireEvent.change(await screen.findByTestId('guestbook-body'), {
+    target: { value: 'Che serata.\n\nGrazie di tutto, davvero.' },
   });
+  fireEvent.change(screen.getByTestId('guestbook-name'), { target: { value: 'Giulia' } });
+  await capture('guestbook-compose', 'guestbook-publish');
+});
+
+it('guest book — framing the photograph', async () => {
+  installFetchMock(guestbookMocks());
+  mount(`/party/${TOKEN}/guestbook`, '/party/:token/guestbook', <PartyGuestbookPublicPage />);
+  fireEvent.click(await screen.findByTestId('party-guestbook-start'));
+  fireEvent.click(await screen.findByTestId('guestbook-photo-p1'));
+  fireEvent.click(await screen.findByTestId('guestbook-reposition-open'));
+  await capture('guestbook-reposition', 'guestbook-crop');
+});
+
+it('guest book — closed to new memories, still readable', async () => {
+  installFetchMock(guestbookMocks(false));
   mount(`/party/${TOKEN}/guestbook`, '/party/:token/guestbook', <PartyGuestbookPublicPage />);
   await capture('guestbook-closed', 'party-guestbook-closed');
 });

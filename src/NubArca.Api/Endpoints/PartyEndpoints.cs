@@ -48,6 +48,9 @@ public static class PartyEndpoints
     // budget an operator would have to learn about.
     internal const string PublicRateLimitPolicy = PartyPublicRateLimitPolicy;
     internal const string MessageRateLimitPolicy = PartyMessageRateLimitPolicy;
+    // Token-scoped DERIVED media only — a page of thumbnails is hundreds of
+    // requests from one venue's shared address. Never an original.
+    internal const string PublicMediaRateLimitPolicy = PartyPublicMediaRateLimitPolicy;
     private const string PartyPublicMediaRateLimitPolicy = "party-public-media";
     private const string PartyUploadRateLimitPolicy = "party-upload";
     private const string PartyFaceSearchRateLimitPolicy = "party-face-search";
@@ -1493,20 +1496,40 @@ public static class PartyEndpoints
             return Results.NotFound();
         }
 
+        return await ServeStrippedDerivativeAsync(
+            content.Content, content.MimeType, httpContext, stripper, cancellationToken,
+            variant == "download" ? $"photo-{fileId.ToString("N")[..8]}.jpg" : null);
+    }
+
+    /// <summary>
+    /// The ONE way a derived party photograph leaves the server: its metadata
+    /// stripped, privately cached, or not at all. Takes ownership of
+    /// <paramref name="content"/>. Shared by the album's own derivatives and by
+    /// a guest book memory's preview, which is drawn from the memory's own blob
+    /// rather than from a file's thumbnail.
+    /// </summary>
+    internal static async Task<IResult> ServeStrippedDerivativeAsync(
+        Stream content,
+        string mimeType,
+        HttpContext httpContext,
+        NubArca.Api.Metadata.IImageMetadataStripper stripper,
+        CancellationToken cancellationToken,
+        string? downloadName = null)
+    {
         // The derivative retains the source EXIF/GPS — strip before serving. JPEG
         // (and PNG) are supported; any other type is refused rather than risk a leak.
-        if (!stripper.IsSupported(content.MimeType))
+        if (!stripper.IsSupported(mimeType))
         {
-            await content.Content.DisposeAsync();
+            await content.DisposeAsync();
             return Results.NotFound();
         }
 
         MemoryStream safe;
         try
         {
-            await using (content.Content)
+            await using (content)
             {
-                safe = await stripper.StripAsync(content.Content, content.MimeType, cancellationToken);
+                safe = await stripper.StripAsync(content, mimeType, cancellationToken);
             }
         }
         catch (OperationCanceledException)
@@ -1519,9 +1542,9 @@ public static class PartyEndpoints
         }
 
         SetPrivateDerivativeCache(httpContext);
-        return variant == "download"
-            ? Results.File(safe, content.MimeType, $"photo-{fileId.ToString("N")[..8]}.jpg")
-            : Results.File(safe, content.MimeType);
+        return downloadName is not null
+            ? Results.File(safe, mimeType, downloadName)
+            : Results.File(safe, mimeType);
     }
 
     private static IReadOnlyList<NubArca.Api.Party.PartyItemDto> PartyImageItems(

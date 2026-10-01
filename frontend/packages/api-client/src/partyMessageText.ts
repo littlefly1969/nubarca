@@ -31,6 +31,30 @@ export function normalizePartyMessageText(value: string | null | undefined): str
     .trim();
 }
 
+// Matches PartyMessageText.NormalizeMultiline: the text a guest book dedication
+// may keep, PARAGRAPHS included. Not a second normaliser — every line goes
+// through `normalizePartyMessageText` above, so the rules about what text IS
+// stay in one place. Only the line endings are new:
+//   1. CRLF and a lone CR become LF;
+//   2. each line is normalised on its own;
+//   3. blank lines collapse to one between paragraphs, none at either end.
+export function normalizePartyMultilineText(value: string | null | undefined): string {
+  if (!value) return '';
+  let out = '';
+  let blankLineSeen = false;
+  for (const raw of value.replace(/\r\n?/g, '\n').split('\n')) {
+    const line = normalizePartyMessageText(raw);
+    if (line.length === 0) {
+      blankLineSeen = out.length > 0;
+      continue;
+    }
+    if (out.length > 0) out += blankLineSeen ? '\n\n' : '\n';
+    blankLineSeen = false;
+    out += line;
+  }
+  return out;
+}
+
 // Length in Unicode code points. The spread is deliberate: `value.length` would
 // count UTF-16 units and disagree with the server on the first emoji typed.
 export function partyMessageLength(value: string | null | undefined): number {
@@ -64,11 +88,13 @@ export function isPartyMessageSubmittable(
 // ── The guest book ──────────────────────────────────────────────────────────
 //
 // The SAME normalisation, with the book's own limits. A dedication is written
-// to be kept rather than read out over music, so it gets more room — but the
-// rules about what text IS do not change, and there is deliberately no second
-// implementation of them here: `normalizePartyMessageText` is the one mirror of
-// `PartyMessageText.Normalize`, and the backend's `PartyGuestbookText` reuses
-// the same function on its side for the same reason.
+// to be kept rather than read out over music, so it gets more room and keeps
+// its paragraphs — but the rules about what text IS do not change: the body
+// goes through `normalizePartyMultilineText`, which is the single-line rule
+// applied line by line, exactly as the backend's `PartyGuestbookText` does.
+//
+// The signature is REQUIRED and stays on one line: a memory in the book is
+// signed by somebody.
 
 export const PARTY_GUESTBOOK_TEXT_LIMITS = {
   authorDisplayName: 80,
@@ -77,7 +103,7 @@ export const PARTY_GUESTBOOK_TEXT_LIMITS = {
 
 export function partyGuestbookBodyRemaining(value: string | null | undefined): number {
   return PARTY_GUESTBOOK_TEXT_LIMITS.body
-    - partyMessageLength(normalizePartyMessageText(value));
+    - partyMessageLength(normalizePartyMultilineText(value));
 }
 
 export function partyGuestbookAuthorRemaining(value: string | null | undefined): number {
@@ -85,13 +111,22 @@ export function partyGuestbookAuthorRemaining(value: string | null | undefined):
     - partyMessageLength(normalizePartyMessageText(value));
 }
 
+/** The dedication alone: present and within the limit once normalised. */
+export function isPartyGuestbookBodyValid(body: string | null | undefined): boolean {
+  const text = normalizePartyMultilineText(body);
+  return text.length > 0 && partyMessageLength(text) <= PARTY_GUESTBOOK_TEXT_LIMITS.body;
+}
+
+/** The signature alone: present and within the limit once normalised. */
+export function isPartyGuestbookAuthorValid(author: string | null | undefined): boolean {
+  const name = normalizePartyMessageText(author);
+  return name.length > 0
+    && partyMessageLength(name) <= PARTY_GUESTBOOK_TEXT_LIMITS.authorDisplayName;
+}
+
 export function isPartyGuestbookSubmittable(
   body: string | null | undefined,
   authorDisplayName: string | null | undefined,
 ): boolean {
-  const text = normalizePartyMessageText(body);
-  if (text.length === 0) return false;
-  if (partyMessageLength(text) > PARTY_GUESTBOOK_TEXT_LIMITS.body) return false;
-  return partyMessageLength(normalizePartyMessageText(authorDisplayName))
-    <= PARTY_GUESTBOOK_TEXT_LIMITS.authorDisplayName;
+  return isPartyGuestbookBodyValid(body) && isPartyGuestbookAuthorValid(authorDisplayName);
 }

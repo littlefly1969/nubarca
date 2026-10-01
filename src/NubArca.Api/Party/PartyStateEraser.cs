@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
+using NubArca.Api.Storage;
 using NubArca.Api.Tv;
 
 namespace NubArca.Api.Party;
@@ -38,8 +39,13 @@ public interface IPartyStateEraser
 public sealed class PartyStateEraser : IPartyStateEraser
 {
     private readonly AppDbContext _db;
+    private readonly TimeProvider _clock;
 
-    public PartyStateEraser(AppDbContext db) => _db = db;
+    public PartyStateEraser(AppDbContext db, TimeProvider? clock = null)
+    {
+        _db = db;
+        _clock = clock ?? TimeProvider.System;
+    }
 
     public async Task EraseAsync(
         Guid partyId, Guid? albumId, CancellationToken cancellationToken = default)
@@ -61,12 +67,32 @@ public sealed class PartyStateEraser : IPartyStateEraser
         // it goes before both of those are deleted.
         //
         // The book is not spared. It is the keepsake of an event that is being
-        // torn down, and leaving dedications behind pointing at nothing would
-        // be worse than taking them: a host who deletes their party expects the
+        // torn down, and leaving memories behind pointing at nothing would be
+        // worse than taking them: a host who deletes their party expects the
         // party to be gone.
+        //
+        // Each memory OWNS a reference to its photograph and, once drawn, one
+        // to its preview. They are read before the rows go and released after
+        // — in this same unit of work, so a rollback restores the rows and the
+        // counts together. With the rows gone, a blob nothing else holds is
+        // the janitor's on the ordinary grace window: the album file it was
+        // chosen from, if it still exists, keeps its own reference.
+        var guestbookBlobs = await _db.PartyGuestbookEntries
+            .Where(e => e.PartyId == partyId)
+            .Select(e => new { e.BlobObjectId, e.PreviewBlobObjectId })
+            .ToListAsync(cancellationToken);
         await _db.PartyGuestbookEntries
             .Where(e => e.PartyId == partyId)
             .ExecuteDeleteAsync(cancellationToken);
+        var now = _clock.GetUtcNow().UtcDateTime;
+        foreach (var held in guestbookBlobs)
+        {
+            await BlobService.ReleaseReferenceAsync(_db, held.BlobObjectId, now, cancellationToken);
+            if (held.PreviewBlobObjectId is Guid preview)
+            {
+                await BlobService.ReleaseReferenceAsync(_db, preview, now, cancellationToken);
+            }
+        }
 
         // The HOSTED GAME's runtime, and it has to go before four of the deletes
         // below rather than one. Its restricting foreign keys reach further than

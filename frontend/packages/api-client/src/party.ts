@@ -12,8 +12,11 @@ import type {
   PartyInvitationSendMinimal,
   PartyInvitationView,
   PartyContributionsPatch,
+  PartyGuestbookEntry,
   PartyGuestbookManagerList,
   PartyGuestbookPage,
+  PartyGuestbookPhotos,
+  PartyGuestbookSubmissionRequest,
   PartyMessageAction,
   PartyMessageList,
   PartyRsvpQuestion,
@@ -65,10 +68,18 @@ export type {
   PartyContributionSettings,
   PartyContributionsPatch,
   PartyGameSettings,
+  PartyGuestbookCrop,
   PartyGuestbookEntry,
   PartyGuestbookManagedEntry,
   PartyGuestbookManagerList,
+  PartyGuestbookMedia,
+  PartyGuestbookOrientation,
   PartyGuestbookPage,
+  PartyGuestbookPhoto,
+  PartyGuestbookPhotos,
+  PartyGuestbookRefusal,
+  PartyGuestbookSubmissionRequest,
+  PartyGuestbookTemplateKey,
   PartyMessage,
   PartyMessageAction,
   PartyMessageList,
@@ -82,8 +93,12 @@ export type {
 export {
   DESTRUCTIVE_PARTY_MESSAGE_ACTIONS,
   PARTY_GAME_RANGES,
+  DEFAULT_PARTY_GUESTBOOK_TEMPLATE,
+  PARTY_GUESTBOOK_CROP_LIMITS,
   PARTY_GUESTBOOK_LIMITS,
+  PARTY_GUESTBOOK_TEMPLATE_KEYS,
   PARTY_SLIDESHOW_RANGES,
+  partyGuestbookRefusal,
   contributionSettingsFromStatus,
   partyContributionsPatch,
   clampToRange,
@@ -1426,12 +1441,9 @@ export function moderatePartyMessage(
 // --- The GUEST BOOK ---
 //
 // A separate resource from the greetings above, on separate routes, with
-// separate types. There is deliberately no function here that promotes a
-// dedication, and none that a television would call.
-//
-// The public half rides the party's VIEW token — the one on the QR — because
-// reading the book is part of looking at the party and a host may keep a book
-// while accepting no photographs at all.
+// separate types. Every public call takes EITHER guest token — the party's view
+// token or the contribution page's upload token — because both open the same
+// book; every URL the server returns is already scoped to the token used.
 
 export function getPartyGuestbook(
   token: string,
@@ -1441,23 +1453,34 @@ export function getPartyGuestbook(
     `/api/party/${encodeURIComponent(token)}/guestbook`, { signal });
 }
 
+/** The photographs a memory may be made from: the main album's, never a video. */
+export function getPartyGuestbookPhotos(
+  token: string,
+  signal?: AbortSignal,
+): Promise<PartyGuestbookPhotos> {
+  return api<PartyGuestbookPhotos>(
+    `/api/party/${encodeURIComponent(token)}/guestbook/photos`, { signal });
+}
+
 export interface PartyGuestbookSubmission {
   id: string;
-  /** 'pending' when the host reads dedications first, else 'visible'. */
+  /** 'pending' when the host reads memories first, else 'visible'. */
   status: 'visible' | 'pending';
   createdAt: string;
   /** What this guest has left, or null for no limit. */
   remaining?: number | null;
+  /** The memory exactly as it now reads. */
+  entry?: PartyGuestbookEntry | null;
 }
 
 export function submitPartyGuestbookEntry(
   token: string,
-  entry: { authorDisplayName?: string | null; body: string },
+  memory: PartyGuestbookSubmissionRequest,
   signal?: AbortSignal,
 ): Promise<PartyGuestbookSubmission> {
   return api<PartyGuestbookSubmission>(
     `/api/party/${encodeURIComponent(token)}/guestbook`,
-    { method: 'POST', json: entry, signal },
+    { method: 'POST', json: memory, signal },
   );
 }
 

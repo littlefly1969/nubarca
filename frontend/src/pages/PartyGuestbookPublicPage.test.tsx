@@ -1,21 +1,24 @@
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { PARTY_GUESTBOOK_LIMITS } from '@nubarca/contracts';
 import { PartyGuestbookPublicPage } from './PartyGuestbookPublicPage';
 import { errorResponse, installFetchMock, jsonResponse } from '../test-utils';
 import { I18nProvider } from '../i18n';
 
+const guestbookCss = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), 'PartyGuestbook.css'), 'utf8');
+
 /**
- * The guest's side of the book.
+ * The guest's side of the book, as a book of photograph memories.
  *
- * What these defend: a party that keeps no book says so and offers no form; a
- * book that is readable but closed to new writing says WHICH of the two it is;
- * a dedication that needs approving is acknowledged as waiting rather than as
- * published; and the page says which of the two written contributions it is,
- * because a greeting and a dedication are different invitations and a guest
- * chooses between them.
+ * What these defend: a party that keeps no book says so and offers nothing; a
+ * book that is readable but closed says WHICH of the two it is; the book leads
+ * with one call to leave a memory rather than a form; and every memory is
+ * drawn from the read model alone — photograph, framing, design, paragraphs —
+ * one per row.
  */
 afterEach(() => {
   cleanup();
@@ -50,6 +53,24 @@ const context = {
   library: { available: false, accessEndsAt: null },
 };
 
+function memory(over: Record<string, unknown> = {}) {
+  return {
+    id: 'g1',
+    authorDisplayName: 'Ada',
+    body: 'Che serata',
+    createdAt: '2026-09-19T21:00:00Z',
+    template: { key: 'nubarca', version: 1 },
+    media: {
+      url: '/api/party/tok-1/guestbook/g1/photo',
+      width: 1600,
+      height: 1200,
+      orientation: 'landscape',
+      crop: { centerX: 0.5, centerY: 0.5, zoom: 1 },
+    },
+    ...over,
+  };
+}
+
 function page(over: Record<string, unknown> = {}) {
   return {
     entries: [],
@@ -60,22 +81,25 @@ function page(over: Record<string, unknown> = {}) {
   };
 }
 
-function mock(over: Record<string, unknown> = {}, submit?: () => Response) {
+function mock(over: Record<string, unknown> = {}) {
   installFetchMock({
     'GET /api/party/tok-1': () => jsonResponse(context),
     'GET /api/party/tok-1/guestbook': () => jsonResponse(page(over)),
-    'POST /api/party/tok-1/guestbook': submit
-      ?? (() => jsonResponse({ id: 'g1', status: 'visible', createdAt: '2026-09-19T21:00:00Z' })),
   });
 }
 
 describe('PartyGuestbookPublicPage (the guest book, as a guest reads it)', () => {
-  it('names the party it is a book for, and offers the composer', async () => {
+  it('names the party and leads with one call to leave a memory, not a form', async () => {
     mock();
     render(wrapper());
 
     expect(await screen.findAllByText(/Un ricordo per Beach Party/i)).not.toHaveLength(0);
-    expect(screen.getByTestId('party-guestbook-form')).toBeInTheDocument();
+    const start = await screen.findByTestId('party-guestbook-start');
+    expect(start).toHaveTextContent('Lascia un ricordo');
+    expect(start).toBeEnabled();
+    // The composer is not on the page until somebody asks for it.
+    expect(screen.queryByTestId('guestbook-compose')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     expect(screen.getByTestId('party-guestbook-empty')).toBeInTheDocument();
   });
 
@@ -89,135 +113,80 @@ describe('PartyGuestbookPublicPage (the guest book, as a guest reads it)', () =>
     render(wrapper());
 
     expect(await screen.findByTestId('party-guestbook-unavailable')).toBeInTheDocument();
-    expect(screen.queryByTestId('party-guestbook-form')).not.toBeInTheDocument();
-    // No retry, no error tone: nothing went wrong, there is simply no book.
+    expect(screen.queryByTestId('party-guestbook-start')).not.toBeInTheDocument();
     expect(screen.queryByTestId('party-guestbook-error')).not.toBeInTheDocument();
   });
 
-  it('keeps a finished party’s book readable while closing it to new dedications', async () => {
-    mock({
-      canWrite: false,
-      entries: [
-        { id: 'g1', authorDisplayName: 'Ada', body: 'Che serata', createdAt: '2026-09-19T21:00:00Z' },
-      ],
-    });
+  it('keeps a finished party’s book readable while closing it to new memories', async () => {
+    mock({ canWrite: false, entries: [memory()] });
     render(wrapper());
 
-    // A keepsake outlives the composer that filled it, so "you may read this"
-    // and "you may add to this" are two answers and the page gives both.
     expect(await screen.findByTestId('party-guestbook-closed')).toBeInTheDocument();
     expect(screen.getByTestId('party-guestbook-list')).toHaveTextContent('Che serata');
-    expect(screen.queryByTestId('party-guestbook-form')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-guestbook-start')).not.toBeInTheDocument();
   });
 
-  it('signs an unsigned dedication as a guest rather than leaving a blank', async () => {
+  it('does not invite a guest who has written every memory they were allowed', async () => {
+    mock({ remaining: 0 });
+    render(wrapper());
+
+    expect(await screen.findByTestId('party-guestbook-start')).toBeDisabled();
+    expect(screen.getByTestId('party-guestbook-remaining')).toHaveTextContent('0');
+  });
+
+  it('draws every memory from the read model alone: photograph, design, paragraphs, signature', async () => {
     mock({
       entries: [
-        { id: 'g1', authorDisplayName: null, body: 'Auguri', createdAt: '2026-09-19T21:00:00Z' },
+        memory({
+          id: 'g2',
+          authorDisplayName: 'Giulia',
+          body: 'Riga uno\n\nRiga due',
+          template: { key: 'polaroid', version: 1 },
+          media: {
+            url: '/api/party/tok-1/guestbook/g2/photo',
+            width: 1200, height: 1600, orientation: 'portrait',
+            crop: { centerX: 0.5, centerY: 0.3, zoom: 2 },
+          },
+        }),
+        memory(),
       ],
     });
     render(wrapper());
 
-    expect(await screen.findByTestId('party-guestbook-list')).toHaveTextContent('Un ospite');
+    const card = await screen.findByTestId('party-guestbook-memory-g2');
+    expect(card).toHaveAttribute('data-template', 'polaroid');
+    expect(card).toHaveAttribute('data-template-version', '1');
+    const photo = within(card).getByRole('img');
+    expect(photo).toHaveAttribute('src', '/api/party/tok-1/guestbook/g2/photo');
+    expect(photo).toHaveAttribute('alt', 'La foto scelta da Giulia');
+    // Framed as its author framed it: a 2x zoom makes the picture twice the
+    // frame's width, and the frame is the polaroid's square.
+    expect(photo.style.width).toBe('200%');
+    expect(within(card).getByTestId('party-guestbook-memory-g2-body').textContent).toBe('Riga uno\n\nRiga due');
+    expect(within(card).getByTestId('party-guestbook-memory-g2-author')).toHaveTextContent('Giulia');
   });
 
-  it('sends a dedication and says it is in the book', async () => {
-    mock();
+  it('keeps the book one memory per row, a book and not a feed', async () => {
+    mock({ entries: [memory({ id: 'a' }), memory({ id: 'b' }), memory({ id: 'c' })] });
     render(wrapper());
-    const user = userEvent.setup();
 
-    await user.type(await screen.findByTestId('party-guestbook-body'), 'Grazie di tutto');
-    await user.type(screen.getByTestId('party-guestbook-name'), 'Ada');
-    await user.click(screen.getByTestId('party-guestbook-submit'));
-
-    const sent = await screen.findByTestId('party-guestbook-sent');
-    expect(sent).toHaveTextContent(/nel guestbook/i);
-    expect(screen.getByTestId('party-guestbook-write-another')).toBeInTheDocument();
+    const list = await screen.findByTestId('party-guestbook-list');
+    expect(within(list).getAllByRole('listitem')).toHaveLength(3);
+    // The rule itself: one column at EVERY width — there is no media query
+    // that widens the list into a grid, and paragraphs are kept as written.
+    expect(guestbookCss).toMatch(/\.party-guestbook-list\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+    expect(guestbookCss).not.toMatch(/@media[^{]*\{\s*\.party-guestbook-list/);
+    expect(guestbookCss).toMatch(/\.guestbook-memory-body\s*\{[^}]*white-space:\s*pre-wrap/);
+    // …and nothing social: no reactions, no counts.
+    expect(screen.queryByRole('button', { name: /mi piace|like/i })).not.toBeInTheDocument();
   });
 
-  it('acknowledges a dedication that is waiting as waiting, not as published', async () => {
-    mock({}, () => jsonResponse({ id: 'g1', status: 'pending', createdAt: '2026-09-19T21:00:00Z' }));
-    render(wrapper());
-    const user = userEvent.setup();
-
-    await user.type(await screen.findByTestId('party-guestbook-body'), 'In attesa');
-    await user.click(screen.getByTestId('party-guestbook-submit'));
-
-    // Telling somebody their words are up when a host has not read them yet
-    // is the one thing this screen must not do.
-    const sent = await screen.findByTestId('party-guestbook-sent');
-    expect(sent).toHaveTextContent(/dopo un controllo/i);
-    expect(sent).not.toHaveTextContent(/è nel guestbook/i);
-  });
-
-  it('refuses to send a blank dedication without asking the server', async () => {
-    let posts = 0;
-    mock({}, () => { posts += 1; return jsonResponse({ id: 'g1', status: 'visible', createdAt: '' }); });
+  it('draws a memory whose design this client does not know yet, rather than nothing', async () => {
+    mock({ entries: [memory({ template: { key: 'polaroid', version: 9 } })] });
     render(wrapper());
 
-    const submit = await screen.findByTestId('party-guestbook-submit');
-    expect(submit).toBeDisabled();
-    expect(posts).toBe(0);
-  });
-
-  it('counts down to the limit and refuses past it, before the server has to', async () => {
-    mock();
-    render(wrapper());
-    const user = userEvent.setup();
-
-    // The limit comes from the SHARED CONTRACT, not from the page the server
-    // answered: both sides enforce the same number, so a guest is stopped by
-    // the same rule that would refuse them a moment later.
-    const limit = PARTY_GUESTBOOK_LIMITS.maxBodyLength;
-    await user.type(await screen.findByTestId('party-guestbook-body'), '12345');
-    expect(screen.getByTestId('party-guestbook-counter'))
-      .toHaveTextContent(new RegExp(`Restano ${limit - 5} caratteri`, 'i'));
-
-    fireEvent.change(screen.getByTestId('party-guestbook-body'), {
-      target: { value: 'a'.repeat(limit + 1) },
-    });
-    expect(screen.getByTestId('party-guestbook-counter'))
-      .toHaveTextContent(new RegExp(`al massimo di ${limit}`, 'i'));
-    expect(screen.getByTestId('party-guestbook-submit')).toBeDisabled();
-  });
-
-  it('says plainly when the book was closed between opening the page and writing', async () => {
-    mock({}, () => errorResponse(409, { error: 'guestbook_disabled' }));
-    render(wrapper());
-    const user = userEvent.setup();
-
-    await user.type(await screen.findByTestId('party-guestbook-body'), 'Tardi');
-    await user.click(screen.getByTestId('party-guestbook-submit'));
-
-    // A stable code from the server, translated here — never the code itself.
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/è stato chiuso/i));
-    expect(screen.queryByTestId('party-guestbook-sent')).not.toBeInTheDocument();
-  });
-
-  it('asks somebody who wrote too fast to wait, rather than blaming the dedication', async () => {
-    mock({}, () => errorResponse(429, { error: 'too_many_requests' }));
-    render(wrapper());
-    const user = userEvent.setup();
-
-    await user.type(await screen.findByTestId('party-guestbook-body'), 'Ancora');
-    await user.click(screen.getByTestId('party-guestbook-submit'));
-
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Troppe dediche/i));
-  });
-
-  it('says which of the two written contributions this one is', async () => {
-    mock();
-    render(wrapper());
-    await screen.findByTestId('party-guestbook-form');
-
-    // The two written contributions are different invitations: a greeting is
-    // read out during the evening, a dedication is kept. A guest picks between
-    // them from the hub, so the book states the difference rather than leaving
-    // somebody to write the same thing twice and wonder why only one appeared.
-    const text = document.body.textContent ?? '';
-    expect(text).toMatch(/Non finisce sullo schermo/i);
-    // …and it never calls itself the thing it is not.
-    expect(screen.queryByText(/Comparirà sullo schermo durante la festa/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Lascia un messaggio/i)).not.toBeInTheDocument();
+    const card = await screen.findByTestId('party-guestbook-memory-g1');
+    expect(card).toHaveAttribute('data-template', 'polaroid');
+    expect(within(card).getByRole('img')).toBeInTheDocument();
   });
 });

@@ -78,6 +78,47 @@ public static class PartyMessageText
         return builder.ToString();
     }
 
+    // The same rules for text that may keep its PARAGRAPHS — a guest book
+    // dedication. It is not a second normaliser: every line goes through
+    // Normalize above, so what is security-relevant (the bidi overrides, the
+    // zero-width padding, the control characters) still has exactly one
+    // implementation. What this adds is only which line endings survive:
+    //
+    //   1. CRLF and a lone CR become LF, so the stored text has one ending.
+    //   2. Each line is normalised on its own: trimmed, its runs collapsed.
+    //   3. Blank lines collapse to ONE between paragraphs, and none survive at
+    //      either end. A paragraph break is worth keeping; a column of empty
+    //      lines is padding, and padding is what normalisation removes.
+    public static string NormalizeMultiline(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        var blankLineSeen = false;
+        foreach (var raw in value.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+        {
+            var line = Normalize(raw);
+            if (line.Length == 0)
+            {
+                blankLineSeen = builder.Length > 0;
+                continue;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.Append(blankLineSeen ? "\n\n" : "\n");
+            }
+
+            blankLineSeen = false;
+            builder.Append(line);
+        }
+
+        return builder.ToString();
+    }
+
     // Length in Unicode code points — the counted unit for BOTH limits.
     public static int Length(string? value)
     {
