@@ -239,7 +239,7 @@ describe('PartyUploadPage (public anonymous upload)', () => {
     render(wrapper());
 
     // One channel, so no tabs: a choice between one thing is not a choice.
-    expect(await screen.findByTestId('party-guestbook-form')).toBeInTheDocument();
+    expect(await screen.findByTestId('party-guestbook-start')).toBeInTheDocument();
     expect(screen.queryByTestId('party-mode-media')).not.toBeInTheDocument();
     expect(screen.queryByTestId('party-mode-message')).not.toBeInTheDocument();
     expect(screen.queryByTestId('party-mode-guestbook')).not.toBeInTheDocument();
@@ -266,7 +266,7 @@ describe('PartyUploadPage (public anonymous upload)', () => {
     // The book is the BOOK here, not a bare form: with the hub's card gone,
     // this is where a guest reads what others wrote as well as adding to it.
     await user.click(screen.getByTestId('party-mode-guestbook'));
-    expect(await screen.findByTestId('party-guestbook-form')).toBeInTheDocument();
+    expect(await screen.findByTestId('party-guestbook-start')).toBeInTheDocument();
   });
 
   it('says what is left to write, before somebody writes it', async () => {

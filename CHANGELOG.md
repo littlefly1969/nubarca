@@ -6,6 +6,26 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### The guest book becomes a book of photographs
+
+- **A memory in the guest book is a photograph with words.** A guest taps
+  *Leave a memory*, picks one of the party album's photos (never a video),
+  and sees the memory straight away. They can choose one of four designs —
+  NubArca, Polaroid, Editorial, Celebration — move and zoom the photo if they
+  want, write a dedication and sign it. The dedication can have paragraphs.
+  The signature is now required.
+- **The photo stays with the memory.** If the host later removes the photo
+  from the album, or deletes it, the memory still shows it. The memory keeps
+  its own hold on the same stored photo; nothing is copied.
+- **A photo removed while somebody is writing** sends them back to choose
+  another, with their words and design kept. A network failure keeps the
+  whole draft and offers to try again.
+- **Hosts and Party Crew see each memory as guests will**, photo and design
+  included, before approving it.
+- **Upgrading deletes the old text-only dedications** and resets every
+  guest's guest book allowance. The migration is not automatic: it needs the
+  manual, backed-up path (see `deploy/migration-policy.json`).
+
 ### Lending a printer, and paper that cannot be wrong
 
 - **A printer can be lent to another NubArca account**, by email, from the

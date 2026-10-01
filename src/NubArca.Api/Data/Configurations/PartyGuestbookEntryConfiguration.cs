@@ -8,7 +8,23 @@ public class PartyGuestbookEntryConfiguration : IEntityTypeConfiguration<PartyGu
 {
     public void Configure(EntityTypeBuilder<PartyGuestbookEntry> builder)
     {
-        builder.ToTable("party_guestbook_entries");
+        builder.ToTable("party_guestbook_entries", t =>
+        {
+            // The framing inside the print crop editor's own limits — the same
+            // bounds party_guest_contents states — and a photograph with a
+            // real shape. The SERVER validates both before writing; these stop
+            // a corrupt write from producing a memory nothing can draw.
+            t.HasCheckConstraint(
+                "ck_party_guestbook_entries_crop",
+                "\"CropZoom\" BETWEEN 1 AND 4 AND \"CropCenterX\" BETWEEN 0 AND 1 "
+                + "AND \"CropCenterY\" BETWEEN 0 AND 1");
+            t.HasCheckConstraint(
+                "ck_party_guestbook_entries_photo_size",
+                "\"PhotoWidth\" > 0 AND \"PhotoHeight\" > 0");
+            t.HasCheckConstraint(
+                "ck_party_guestbook_entries_template_version",
+                "\"TemplateVersion\" >= 1");
+        });
         builder.HasKey(e => e.Id);
         builder.Property(e => e.Id).ValueGeneratedNever();
 
@@ -18,10 +34,15 @@ public class PartyGuestbookEntryConfiguration : IEntityTypeConfiguration<PartyGu
         // per code point. The real limit is PartyGuestbookText's; these only
         // stop a corrupt write from being unbounded.
         builder.Property(e => e.AuthorDisplayName)
+            .IsRequired()
             .HasMaxLength(PartyGuestbookLimits.MaxAuthorDisplayNameLength * 2);
         builder.Property(e => e.Body)
             .IsRequired()
             .HasMaxLength(PartyGuestbookLimits.MaxBodyLength * 2);
+
+        builder.Property(e => e.TemplateKey)
+            .IsRequired()
+            .HasMaxLength(PartyGuestbookTemplates.MaxKeyLength);
 
         builder.Property(e => e.Status).IsRequired().HasMaxLength(32);
 
@@ -68,6 +89,25 @@ public class PartyGuestbookEntryConfiguration : IEntityTypeConfiguration<PartyGu
         builder.HasOne<PartyParticipant>()
             .WithMany()
             .HasForeignKey(e => e.PartyParticipantId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // THE MEMORY'S OWN PHOTOGRAPH. Restrict, like every blob owner: the row
+        // holds one reference, counted by BlobReferenceAuditService, and the
+        // key is the janitor's last safety net should a count ever drift.
+        //
+        // There is deliberately NO key to the album file the photograph was
+        // chosen from. A memory that cascaded from a FileItem would vanish when
+        // the host tidied their album, and one that restricted it would stop
+        // the host deleting their own file.
+        builder.HasOne<BlobObject>()
+            .WithMany()
+            .HasForeignKey(e => e.BlobObjectId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // The regenerable preview, held the same way.
+        builder.HasOne<BlobObject>()
+            .WithMany()
+            .HasForeignKey(e => e.PreviewBlobObjectId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

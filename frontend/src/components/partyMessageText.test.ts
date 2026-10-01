@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  PARTY_GUESTBOOK_TEXT_LIMITS,
   PARTY_MESSAGE_LIMITS,
+  isPartyGuestbookSubmittable,
   isPartyMessageSubmittable,
   normalizePartyMessageText,
+  normalizePartyMultilineText,
+  partyGuestbookBodyRemaining,
   partyDisplayNameRemaining,
   partyMessageLength,
   partyMessageRemaining,
@@ -117,5 +121,35 @@ describe('party message text contract', () => {
       expect(isPartyMessageSubmittable('ciao', '   ')).toBe(true);
       expect(partyDisplayNameRemaining('   ')).toBe(PARTY_MESSAGE_LIMITS.displayName);
     });
+  });
+});
+
+// The guest book's dedication keeps its PARAGRAPHS. Every case is the twin of
+// `Multiline_*` in PartyMessageTextTests.cs: same input, same output.
+describe('guest book dedication text contract', () => {
+  it.each([
+    ['Riga uno\n\nRiga due', 'Riga uno\n\nRiga due'],
+    ['a\r\nb\rc\nd', 'a\nb\nc\nd'],
+    ['\n\n  uno  \n\n\n\n  due  \n\n', 'uno\n\ndue'],
+    ['a \t b\n   \nc', 'a b\n\nc'],
+    ['a\n\u200B\nb', 'a\n\nb'],
+    ['a\u2028b', 'a b'],
+    ['auguri\u202Egnorw\nciao', 'augurignorw\nciao'],
+  ])('keeps paragraphs and applies the single-line rule to each: %j', (input, expected) => {
+    expect(normalizePartyMultilineText(input)).toBe(expected);
+  });
+
+  it.each([null, '', '\r\n\r\n', ' \n \t \n\u200B '])('is empty when nothing is in it: %j', (input) => {
+    expect(normalizePartyMultilineText(input)).toBe('');
+  });
+
+  it('counts a line break as one code point', () => {
+    expect(PARTY_GUESTBOOK_TEXT_LIMITS.body - partyGuestbookBodyRemaining('ab\r\n\r\nc')).toBe(5);
+  });
+
+  it('requires a signature as well as a dedication', () => {
+    expect(isPartyGuestbookSubmittable('Auguri', 'Ada')).toBe(true);
+    expect(isPartyGuestbookSubmittable('Auguri', '   ')).toBe(false);
+    expect(isPartyGuestbookSubmittable('\n\n', 'Ada')).toBe(false);
   });
 });

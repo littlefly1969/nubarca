@@ -231,6 +231,9 @@ public sealed class PartyContributionsTests : IDisposable
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
         var albumId = await CreateAlbumAsync(owner);
+        // A memory is made from one of the album's photographs — the host's
+        // own, here, since guests are about to be refused theirs.
+        var photoId = await AddHostPhotoAsync(owner, albumId);
         var status = await EnablePartyAsync(owner, albumId);
         var uploadToken = UploadTokenFromStatus(status);
         await SetContributionsAsync(owner, albumId, new { guestbookEnabled = true });
@@ -249,11 +252,18 @@ public sealed class PartyContributionsTests : IDisposable
         // A greeting still lands.
         (await SubmitMessageAsync(uploadToken, "Ada", "Auguri")).GetProperty("id").GetGuid();
 
-        // A dedication still lands, written on the contribution page's own
-        // token — the book is read on the QR's token and written from here.
+        // A memory still lands, written on the contribution page's own token
+        // — the book is read on the QR's token and written from here.
         var dedication = await _factory.CreateClient().PostAsJsonAsync(
             $"/api/party/{uploadToken}/guestbook",
-            new { authorDisplayName = "Ada", body = "Da conservare" });
+            new
+            {
+                sourceMediaItemId = photoId,
+                authorDisplayName = "Ada",
+                body = "Da conservare",
+                templateKey = "nubarca",
+                crop = new { centerX = 0.5, centerY = 0.5, zoom = 1.0 },
+            });
         dedication.EnsureSuccessStatusCode();
 
         // And the photographs really are closed: the refusal moved from the
@@ -353,6 +363,19 @@ public sealed class PartyContributionsTests : IDisposable
         var response = await owner.PostAsJsonAsync("/api/albums", new { name });
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+    }
+
+    private static async Task<Guid> AddHostPhotoAsync(HttpClient owner, Guid albumId)
+    {
+        var part = new ByteArrayContent(ImageFixtures.PlainPng(32, 24));
+        part.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+        var upload = await owner.PostAsync(
+            "/api/files", new MultipartFormDataContent { { part, "file", "host.png" } });
+        upload.EnsureSuccessStatusCode();
+        var photoId = (await upload.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        (await owner.PostAsJsonAsync($"/api/albums/{albumId}/items", new { fileItemId = photoId }))
+            .EnsureSuccessStatusCode();
+        return photoId;
     }
 
     private static async Task<JsonElement> EnablePartyAsync(HttpClient owner, Guid albumId)

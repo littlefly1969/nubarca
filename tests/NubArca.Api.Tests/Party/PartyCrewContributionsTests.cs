@@ -4,6 +4,7 @@ using System.Text.Json;
 using NubArca.Api.Domain;
 using NubArca.Api.Party;
 using NubArca.Api.Tests.Endpoints;
+using NubArca.Api.Tests.Metadata;
 using static NubArca.Api.Tests.Party.PartyCrewTestKit;
 using static NubArca.Api.Tests.Party.PartyInvitationTestKit;
 
@@ -78,7 +79,7 @@ public sealed class PartyCrewContributionsTests : IDisposable
     {
         var (_, owner) = await NewHostAsync(_factory);
         var party = await OpenPartyAsync(owner, guestbook: true);
-        var entryId = await WriteDedicationAsync(party.ViewToken, "Ada", "Evviva");
+        var entryId = await WriteDedicationAsync(party, "Ada", "Evviva");
         var device = await PairAsCrewAsync(owner, party.PartyId, PartyCrewRoles.Director);
 
         var queue = await device.GetFromJsonAsync<JsonElement>(
@@ -87,6 +88,14 @@ public sealed class PartyCrewContributionsTests : IDisposable
         // which is how the surface knows to hide the configuration switches.
         Assert.False(queue.GetProperty("isOwner").GetBoolean());
         Assert.Equal(1, queue.GetProperty("entries").GetArrayLength());
+
+        // The memory's picture is on the CREW's own route — a collaborator has
+        // no NubArca session for the host's — and it is served there.
+        var pictureUrl = queue.GetProperty("entries")[0].GetProperty("media").GetProperty("url").GetString()!;
+        Assert.Equal($"/api/party-crew/parties/{party.PartyId}/guestbook/{entryId}/photo", pictureUrl);
+        var picture = await device.GetAsync(pictureUrl);
+        Assert.Equal(HttpStatusCode.OK, picture.StatusCode);
+        Assert.Equal("image/jpeg", picture.Content.Headers.ContentType?.MediaType);
 
         Assert.Equal(
             HttpStatusCode.NoContent,
@@ -106,13 +115,15 @@ public sealed class PartyCrewContributionsTests : IDisposable
     {
         var (_, owner) = await NewHostAsync(_factory);
         var party = await OpenPartyAsync(owner, guestbook: true);
-        var entryId = await WriteDedicationAsync(party.ViewToken, "Ada", "Evviva");
+        var entryId = await WriteDedicationAsync(party, "Ada", "Evviva");
 
         // No device cookie at all — a browser that simply knows the party id.
         // The id is a SELECTOR and never an authority, so every one of these is
         // the same generic nothing.
         var stranger = _factory.CreateClient();
         AssertRefused(await stranger.GetAsync($"/api/party-crew/parties/{party.PartyId}/guestbook"));
+        AssertRefused(await stranger.GetAsync(
+            $"/api/party-crew/parties/{party.PartyId}/guestbook/{entryId}/photo"));
         AssertRefused(await stranger.PostAsync(
             $"/api/party-crew/parties/{party.PartyId}/guestbook/{entryId}/hide", null));
         AssertRefused(await stranger.PatchAsJsonAsync(
@@ -128,12 +139,18 @@ public sealed class PartyCrewContributionsTests : IDisposable
         var (_, owner) = await NewHostAsync(_factory);
         var theirs = await OpenPartyAsync(owner, guestbook: true, albumName: "La loro");
         var other = await OpenPartyAsync(owner, guestbook: true, albumName: "L'altra");
-        var entryId = await WriteDedicationAsync(other.ViewToken, null, "Dell'altra festa");
+        var entryId = await WriteDedicationAsync(other, "Ada", "Dell'altra festa");
         var device = await PairAsCrewAsync(owner, theirs.PartyId, PartyCrewRoles.Director);
 
         // Same host, so this is a SCOPING test rather than an authorization
         // one: the party in the route selects, and the grant decides.
         AssertRefused(await device.GetAsync($"/api/party-crew/parties/{other.PartyId}/guestbook"));
+        // …nor its pictures, through either party in the route.
+        AssertRefused(await device.GetAsync(
+            $"/api/party-crew/parties/{other.PartyId}/guestbook/{entryId}/photo"));
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            (await device.GetAsync($"/api/party-crew/parties/{theirs.PartyId}/guestbook/{entryId}/photo")).StatusCode);
         // And the entry id of a book they cannot read is nothing on a party
         // they can: the moderation query is scoped to the party in the same
         // statement that finds the row.
@@ -148,14 +165,14 @@ public sealed class PartyCrewContributionsTests : IDisposable
     {
         var (_, owner) = await NewHostAsync(_factory);
         var party = await OpenPartyAsync(owner, guestbook: true);
-        await WriteDedicationAsync(party.ViewToken, "Ada", "Evviva");
+        await WriteDedicationAsync(party, "Ada", "Evviva");
         var device = await PairAsCrewAsync(owner, party.PartyId, PartyCrewRoles.Director);
 
         var raw = await device.GetStringAsync($"/api/party-crew/parties/{party.PartyId}/guestbook");
         foreach (var forbidden in new[]
                  {
                      "ownerUserId", "albumId", "partyAlbumLinkId", "partyParticipantId",
-                     "moderatedByUserId", "tokenHash", "storageKey",
+                     "moderatedByUserId", "tokenHash", "storageKey", "blobObjectId", "sourceMediaItemId",
                  })
         {
             Assert.DoesNotContain(forbidden, raw, StringComparison.OrdinalIgnoreCase);
@@ -163,13 +180,13 @@ public sealed class PartyCrewContributionsTests : IDisposable
 
         var entry = JsonDocument.Parse(raw).RootElement.GetProperty("entries")[0];
         Assert.Equal(
-            ["id", "authorDisplayName", "body", "status", "createdAt", "moderatedAt"],
+            ["id", "authorDisplayName", "body", "status", "createdAt", "moderatedAt", "template", "media"],
             entry.EnumerateObject().Select(p => p.Name).ToArray());
     }
 
     // ── Fixture ─────────────────────────────────────────────────────────────
 
-    private sealed record OpenParty(Guid PartyId, Guid AlbumId, string ViewToken);
+    private sealed record OpenParty(Guid PartyId, Guid AlbumId, string ViewToken, Guid PhotoId);
 
     private async Task<OpenParty> OpenPartyAsync(
         HttpClient owner, bool guestbook = false, string albumName = "Album della festa")
@@ -187,7 +204,17 @@ public sealed class PartyCrewContributionsTests : IDisposable
                 .EnsureSuccessStatusCode();
         }
 
-        return new OpenParty(partyId, albumId, viewToken);
+        // A memory is made from one of the album's photographs.
+        var part = new ByteArrayContent(ImageFixtures.PlainPng(40, 30));
+        part.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+        var upload = await owner.PostAsync(
+            "/api/files", new MultipartFormDataContent { { part, "file", $"{albumName}.png" } });
+        upload.EnsureSuccessStatusCode();
+        var photoId = (await upload.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        (await owner.PostAsJsonAsync($"/api/albums/{albumId}/items", new { fileItemId = photoId }))
+            .EnsureSuccessStatusCode();
+
+        return new OpenParty(partyId, albumId, viewToken, photoId);
     }
 
     private async Task<HttpClient> PairAsCrewAsync(HttpClient owner, Guid partyId, string role)
@@ -197,10 +224,18 @@ public sealed class PartyCrewContributionsTests : IDisposable
         return await PairAsync(_factory, invite);
     }
 
-    private async Task<Guid> WriteDedicationAsync(string viewToken, string? author, string body)
+    private async Task<Guid> WriteDedicationAsync(OpenParty party, string author, string body)
     {
         var response = await _factory.CreateClient().PostAsJsonAsync(
-            $"/api/party/{viewToken}/guestbook", new { authorDisplayName = author, body });
+            $"/api/party/{party.ViewToken}/guestbook",
+            new
+            {
+                sourceMediaItemId = party.PhotoId,
+                authorDisplayName = author,
+                body,
+                templateKey = "nubarca",
+                crop = new { centerX = 0.5, centerY = 0.5, zoom = 1.0 },
+            });
         response.EnsureSuccessStatusCode();
         var entry = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(PartyMessageStatuses.Visible, entry.GetProperty("status").GetString());

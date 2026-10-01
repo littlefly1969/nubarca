@@ -231,16 +231,23 @@ public sealed class BlobService : IBlobService
         return await _derivedStorage.OpenReadAsync(blob.StorageKey, cancellationToken);
     }
 
-    public async Task ReleaseAsync(Guid blobObjectId, CancellationToken cancellationToken = default)
+    public Task ReleaseAsync(Guid blobObjectId, CancellationToken cancellationToken = default) =>
+        ReleaseReferenceAsync(_db, blobObjectId, _clock.GetUtcNow().UtcDateTime, cancellationToken);
+
+    // THE release rule, for an owner that tears its rows down in bulk on a
+    // bare context — PartyStateEraser — and has no IBlobService to ask. It is
+    // the same statement ReleaseAsync runs, not a second copy of it, and it
+    // participates in whatever transaction the context is in.
+    internal static async Task ReleaseReferenceAsync(
+        AppDbContext db, Guid blobObjectId, DateTime now, CancellationToken cancellationToken)
     {
-        var now = _clock.GetUtcNow().UtcDateTime;
         // Atomic decrement-iff-positive. If the row is missing or already at 0,
         // the WHERE matches 0 rows and ExecuteUpdateAsync is a no-op. Two
         // concurrent releases on the same row serialise at the row lock; the
         // ReferenceCount > 0 predicate guarantees neither can take it negative.
         // Expressions observe the pre-update value, so ReferenceCount == 1 is
         // exactly the transition to zero that starts the purge grace window.
-        await _db.BlobObjects
+        await db.BlobObjects
             .Where(b => b.Id == blobObjectId && b.ReferenceCount > 0)
             .ExecuteUpdateAsync(
                 setters => setters

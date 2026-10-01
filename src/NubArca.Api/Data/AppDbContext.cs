@@ -151,9 +151,9 @@ public class AppDbContext : DbContext
     public DbSet<PartyParticipant> PartyParticipants => Set<PartyParticipant>();
     public DbSet<PartyMessage> PartyMessages => Set<PartyMessage>();
 
-    // The party's guest book. A separate resource from PartyMessages, keyed by
-    // the PARTY rather than by the link, and read by nothing that draws a
-    // television — see PartyGuestbookEntry.
+    // The party's guest book: photograph memories, each holding its own blob
+    // reference. A separate resource from PartyMessages, keyed by the PARTY
+    // rather than by the link — see PartyGuestbookEntry.
     public DbSet<PartyGuestbookEntry> PartyGuestbookEntries => Set<PartyGuestbookEntry>();
     public DbSet<PartyChallenge> PartyChallenges => Set<PartyChallenge>();
     public DbSet<PartyChallengeOption> PartyChallengeOptions => Set<PartyChallengeOption>();

@@ -186,6 +186,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Purely additive. It creates the new table printer_shares (its own primary key, indexes including a unique partial index on live shares, and foreign keys FROM it TO printer_devices and users that cascade in that direction only), and adds two nullable columns to printer_devices (LoadedPaperChangedAt, LoadedPaperChangedByUserId) with no default and no backfill. Nothing existing is altered, constrained or dropped, and no delete path on an existing table gains a restriction. The previously pinned application neither reads nor writes the table or the columns, so rolling the image back leaves it printing exactly as before against the upgraded schema."
+    },
+    "20261001110429_ReshapeGuestbookAsPhotoMemories": {
+      "automated": false,
+      "previousApplicationCompatible": false,
+      "reason": "DESTRUCTIVE by design: the text-only guest book was a prototype whose rows are expendable. The migration first deletes every party_guestbook_entries row and resets party_participants.SubmittedGuestbookCount to 0 (the guest book quota is persisted apart from the entries, so leaving it would charge guests for memories that no longer exist). Only then does it make AuthorDisplayName NOT NULL and add eight NOT NULL columns with NO default (BlobObjectId, PhotoWidth, PhotoHeight, TemplateKey, TemplateVersion, CropCenterX, CropCenterY, CropZoom) plus one nullable PreviewBlobObjectId, two indexes, three check constraints (crop within the print editor's limits, a positive photo size, TemplateVersion >= 1) and two RESTRICTING foreign keys to blob_objects. The prototype rows held no blob reference, so nothing is released on the way up; Down releases the references the new rows hold before deleting them. It is NOT previous-application compatible: the previous application inserts guest book entries without BlobObjectId or any of the new NOT NULL columns, so every dedication it accepted after the upgrade would fail the insert with a 500, and it would render the new rows as text-only. An image-only rollback is therefore not safe, guest book content written before the upgrade is deliberately lost, and the release must take the manual review path with a backup rather than the guided updater."
     }
   }
 }

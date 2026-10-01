@@ -10,29 +10,41 @@ namespace NubArca.Api.Endpoints;
 /// <summary>
 /// THE GUEST BOOK, public and owner-facing, in one file.
 ///
-/// <para>The public half rides the party's VIEW token — the one on the QR —
-/// rather than the upload token. Reading the book is part of looking at the
-/// party, and a host may keep a book while accepting no photographs at all: the
-/// three contributions are independent, so the book must not hang off the
-/// upload capability's switch. No new token model was introduced; this is the
-/// same capability, the same seam, the same guest session cookie and the same
-/// rate-limit family every other public Party surface uses.</para>
+/// <para>The public half rides EITHER guest token — the party's VIEW token on
+/// the QR, or the contribution page's upload token. Reading the book is part of
+/// looking at the party, and a host may keep a book while accepting no
+/// photographs at all: the three contributions are independent, so the book
+/// must not hang off the upload capability's switch. No new token model was
+/// introduced; this is the same capability, the same seam, the same guest
+/// session cookie and the same rate-limit family every other public Party
+/// surface uses.</para>
+///
+/// <para>A memory's photograph is served on the memory's OWN route
+/// (<c>…/guestbook/{entryId}/photo</c>), from the memory's own blob — never
+/// through the album file it was chosen from, which may be long gone. The
+/// photographs a guest may choose from are served on the chooser's route, by
+/// the same rule the publish re-asks.</para>
 ///
 /// <para>The owner half is PARTY-scoped rather than album-scoped, because the
 /// book is. A party may be re-minted, re-linked, or hold no album at all, and
 /// its book survives every one of those.</para>
-///
-/// <para><b>Nothing here projects anything.</b> There is no route that promotes
-/// a dedication, none that a television calls, and no shape shared with
-/// <c>PartyMessage</c>. That is the invariant, expressed as an absence.</para>
 /// </summary>
 public static class PartyGuestbookEndpoints
 {
     /// <summary>
-    /// What a guest sends. No party id, no participant id, no owner: the only
-    /// authority in the request is the token in the route.
+    /// What a guest sends. No party id, no participant id, no owner, no album
+    /// and no template version: the only authority in the request is the token
+    /// in the route, and everything else is resolved on the server.
     /// </summary>
-    public sealed record SubmitGuestbookEntryRequest(string? AuthorDisplayName, string? Body);
+    public sealed record SubmitGuestbookEntryRequest(
+        Guid? SourceMediaItemId,
+        string? AuthorDisplayName,
+        string? Body,
+        string? TemplateKey,
+        GuestbookCropRequest? Crop);
+
+    /// <summary>The framing: centre as fractions of the photograph, zoom from 1.</summary>
+    public sealed record GuestbookCropRequest(double? CenterX, double? CenterY, double? Zoom);
 
     public static IEndpointRouteBuilder MapPartyGuestbookEndpoints(this IEndpointRouteBuilder app)
     {
@@ -69,9 +81,77 @@ public static class PartyGuestbookEndpoints
             // A party that keeps no book has no book to read. Generic
             // not-found, exactly like every other absent Party capability: a
             // guest has no business learning that the surface exists elsewhere.
-            var page = await guestbook.GetPublicPageAsync(access, reader, cancellationToken);
+            var page = await guestbook.GetPublicPageAsync(access, token, reader, cancellationToken);
             return page is null ? Results.NotFound() : Results.Ok(page);
         }).WithName("GetPartyGuestbook").RequireRateLimiting(PartyEndpoints.PublicRateLimitPolicy);
+
+        // The photographs a guest may make a memory from: the main album's,
+        // and only photographs. Either token, because either token writes.
+        app.MapGet("/api/party/{token}/guestbook/photos", async (
+            string token,
+            HttpContext httpContext,
+            [FromServices] IPartyLinkService party,
+            [FromServices] IPartyGuestbookService guestbook,
+            CancellationToken cancellationToken) =>
+        {
+            NoStore(httpContext);
+            var access = await party.ResolvePublicAsync(token, cancellationToken)
+                ?? await party.ResolveUploadAsync(token, cancellationToken);
+            if (access is null) return Results.NotFound();
+
+            var photos = await guestbook.ListPhotosAsync(access, token, cancellationToken);
+            return photos is null ? Results.NotFound() : Results.Ok(photos);
+        }).WithName("ListPartyGuestbookPhotos").RequireRateLimiting(PartyEndpoints.PublicRateLimitPolicy);
+
+        // One of those photographs, as the chooser draws it. The SAME derived,
+        // metadata-stripped serving path every party surface uses, authorized by
+        // the chooser's own rule — so the upload token sees exactly what the
+        // book lets it choose, and not one file more.
+        app.MapGet("/api/party/{token}/guestbook/photos/{fileId:guid}/{variant}", async (
+            string token,
+            Guid fileId,
+            string variant,
+            HttpContext httpContext,
+            [FromServices] IPartyLinkService party,
+            [FromServices] IPartyGuestbookService guestbook,
+            [FromServices] NubArca.Api.Files.IFileThumbnailService thumbnails,
+            [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
+            CancellationToken cancellationToken) =>
+        {
+            // The two sizes the composer needs. Never a download.
+            if (variant is not ("thumbnail" or "preview")) return Results.NotFound();
+
+            var access = await party.ResolvePublicAsync(token, cancellationToken)
+                ?? await party.ResolveUploadAsync(token, cancellationToken);
+            if (access is null) return Results.NotFound();
+            if (!await guestbook.IsChoosableAsync(access, fileId, cancellationToken)) return Results.NotFound();
+
+            return await PartyEndpoints.ServeAuthorizedDerivativeAsync(
+                access.OwnerUserId, fileId, PartyMediaKind.Image, variant,
+                httpContext, thumbnails, stripper, cancellationToken);
+        }).WithName("GetPartyGuestbookPhoto").RequireRateLimiting(PartyEndpoints.PublicMediaRateLimitPolicy);
+
+        // A memory's picture. From the memory's own blob, so it is there for as
+        // long as the memory is — whatever has happened to the album since.
+        app.MapGet("/api/party/{token}/guestbook/{entryId:guid}/photo", async (
+            string token,
+            Guid entryId,
+            HttpContext httpContext,
+            [FromServices] IPartyLinkService party,
+            [FromServices] IPartyGuestbookService guestbook,
+            [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
+            CancellationToken cancellationToken) =>
+        {
+            var access = await party.ResolvePublicAsync(token, cancellationToken)
+                ?? await party.ResolveUploadAsync(token, cancellationToken);
+            if (access is null) return Results.NotFound();
+
+            var photo = await guestbook.OpenPublicPhotoAsync(access, entryId, cancellationToken);
+            return photo is null
+                ? Results.NotFound()
+                : await PartyEndpoints.ServeStrippedDerivativeAsync(
+                    photo, "image/jpeg", httpContext, stripper, cancellationToken);
+        }).WithName("GetPartyGuestbookEntryPhoto").RequireRateLimiting(PartyEndpoints.PublicMediaRateLimitPolicy);
 
         app.MapPost("/api/party/{token}/guestbook", async (
             string token,
@@ -102,7 +182,18 @@ public static class PartyGuestbookEndpoints
                 httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
 
             var result = await guestbook.SubmitAsync(
-                access, body.AuthorDisplayName, body.Body, participantId, cancellationToken);
+                access,
+                token,
+                new PartyGuestbookSubmission(
+                    body.SourceMediaItemId,
+                    body.AuthorDisplayName,
+                    body.Body,
+                    body.TemplateKey,
+                    body.Crop?.CenterX,
+                    body.Crop?.CenterY,
+                    body.Crop?.Zoom),
+                participantId,
+                cancellationToken);
 
             if (result.Error is PartyGuestbookSubmissionError.Disabled)
             {
@@ -130,6 +221,18 @@ public static class PartyGuestbookEndpoints
                     statusCode: StatusCodes.Status409Conflict);
             }
 
+            if (result.Error is PartyGuestbookSubmissionError.PhotoUnavailable)
+            {
+                // THE RACE, answered: the photograph was there when the guest
+                // chose it and is not one they may choose now — removed from the
+                // album, trashed, or never this party's. A 409 with its own
+                // code, so the composer keeps the words and sends the guest back
+                // to the photographs. Nothing was stored and no slot was spent.
+                return Results.Json(
+                    new { error = "guestbook_photo_unavailable" },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
             if (result.Error is PartyGuestbookSubmissionError error)
             {
                 // Safe, machine-readable codes with the limits beside them. The
@@ -138,25 +241,32 @@ public static class PartyGuestbookEndpoints
                 // reads.
                 return Results.BadRequest(new
                 {
-                    error = error == PartyGuestbookSubmissionError.InvalidAuthorDisplayName
-                        ? "guestbook_invalid_author"
-                        : "guestbook_invalid_body",
+                    error = error switch
+                    {
+                        PartyGuestbookSubmissionError.InvalidAuthorDisplayName => "guestbook_invalid_author",
+                        PartyGuestbookSubmissionError.PhotoRequired => "guestbook_photo_required",
+                        PartyGuestbookSubmissionError.PhotoNotImage => "guestbook_photo_not_image",
+                        PartyGuestbookSubmissionError.InvalidTemplate => "guestbook_invalid_template",
+                        PartyGuestbookSubmissionError.InvalidCrop => "guestbook_invalid_crop",
+                        _ => "guestbook_invalid_body",
+                    },
                     maxAuthorDisplayNameLength = PartyGuestbookLimits.MaxAuthorDisplayNameLength,
                     maxBodyLength = PartyGuestbookLimits.MaxBodyLength,
                 });
             }
 
             var entry = result.Entry!;
-            // The line records that somebody wrote in the book and what it
-            // became. The BODY is never logged anywhere, exactly as a
-            // greeting's is not.
+            // The line records that somebody wrote in the book, with which
+            // design, and what it became. The BODY, the signature and the
+            // photograph's blob are never logged anywhere, exactly as a
+            // greeting's text is not.
             await audit.LogAsync(
                 actor: null,
                 action: AuditActions.PartyGuestbookSubmit,
                 entityType: AuditEntityTypes.PartyGuestbookEntry,
                 entityId: entry.Id,
                 ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
-                metadata: new { status = entry.Status },
+                metadata: new { status = entry.Status, template = entry.Entry?.Template.Key },
                 cancellationToken: cancellationToken);
 
             return Results.Ok(entry);
@@ -179,9 +289,30 @@ public static class PartyGuestbookEndpoints
         {
             NoStore(httpContext);
             var actorUserId = httpContext.GetCurrentUserId()!.Value;
-            var list = await guestbook.ListForManagerAsync(partyId, actorUserId, cancellationToken);
+            var list = await guestbook.ListForManagerAsync(
+                partyId, actorUserId,
+                entryId => PartyGuestbookService.ManagerPhotoUrl(partyId, entryId),
+                cancellationToken);
             return list is null ? Results.NotFound() : Results.Ok(list);
         }).WithName("ListPartyGuestbook").RequirePermission(Permissions.PartyAccess);
+
+        // Any memory's picture, pending ones included: whoever decides whether a
+        // memory goes in the book has to see what it shows.
+        app.MapGet("/api/parties/{partyId:guid}/guestbook/{entryId:guid}/photo", async (
+            Guid partyId,
+            Guid entryId,
+            HttpContext httpContext,
+            [FromServices] IPartyGuestbookService guestbook,
+            [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
+            CancellationToken cancellationToken) =>
+        {
+            var actorUserId = httpContext.GetCurrentUserId()!.Value;
+            var photo = await guestbook.OpenManagedPhotoAsync(partyId, actorUserId, entryId, cancellationToken);
+            return photo is null
+                ? Results.NotFound()
+                : await PartyEndpoints.ServeStrippedDerivativeAsync(
+                    photo, "image/jpeg", httpContext, stripper, cancellationToken);
+        }).WithName("GetPartyGuestbookManagedPhoto").RequirePermission(Permissions.PartyAccess);
 
         MapModeration(app, "approve", PartyMessageModeration.Approve, AuditActions.PartyGuestbookApprove);
         MapModeration(app, "reject", PartyMessageModeration.Reject, AuditActions.PartyGuestbookReject);

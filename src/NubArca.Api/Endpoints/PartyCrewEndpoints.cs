@@ -320,7 +320,12 @@ public static class PartyCrewEndpoints
                 // THE OWNER'S OWN id, never the collaborator's: a collaborator
                 // owns nothing, and the service authorises against the party's
                 // owner exactly as the host's own route does.
-                var list = await guestbook.ListForManagerAsync(ctx.PartyId, ctx.OwnerUserId, ct);
+                // The pictures on the CREW's route: a collaborator has no
+                // NubArca session, so the host's route would show them nothing.
+                var list = await guestbook.ListForManagerAsync(
+                    ctx.PartyId, ctx.OwnerUserId,
+                    entryId => $"/api/party-crew/parties/{ctx.PartyId}/guestbook/{entryId}/photo",
+                    ct);
                 if (list is null) return Results.NotFound();
 
                 // …which is also why the answer has to be corrected on the way
@@ -331,6 +336,22 @@ public static class PartyCrewEndpoints
                 // collaborator the host's own switches.
                 return Results.Ok(list with { IsOwner = false });
             })).WithName("ListPartyCrewGuestbook");
+
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/guestbook/{entryId:guid}/photo", (
+            Guid partyId,
+            Guid entryId,
+            HttpContext http,
+            [FromServices] IPartyCrewAccessResolver resolver,
+            [FromServices] IPartyGuestbookService guestbook,
+            [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
+            CancellationToken ct) =>
+            With(http, partyId, resolver, PartyCrewCapabilities.ContributionsModerate, ct, async ctx =>
+            {
+                var photo = await guestbook.OpenManagedPhotoAsync(ctx.PartyId, ctx.OwnerUserId, entryId, ct);
+                return photo is null
+                    ? Results.NotFound()
+                    : await PartyEndpoints.ServeStrippedDerivativeAsync(photo, "image/jpeg", http, stripper, ct);
+            })).WithName("GetPartyCrewGuestbookPhoto");
 
         MapGuestbookModeration(app, "approve", PartyMessageModeration.Approve, AuditActions.PartyGuestbookApprove);
         MapGuestbookModeration(app, "reject", PartyMessageModeration.Reject, AuditActions.PartyGuestbookReject);

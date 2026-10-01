@@ -301,21 +301,30 @@ it('guests — an open party with no list at all', async () => {
 
 /* ── The guest book's queue ───────────────────────────────────────────────── */
 
+const memoryMedia = (id: string, width: number, height: number, orientation: string) => ({
+  url: `/api/parties/${PARTY_ID}/guestbook/${id}/photo`,
+  width, height, orientation,
+  crop: { centerX: 0.5, centerY: 0.5, zoom: 1 },
+});
+
 const DEDICATIONS = [
   {
     id: 'g1', authorDisplayName: 'Giulia e Marco', status: 'pending',
-    body: 'Che serata. Grazie di averci voluto qui — ci ricorderemo di questa festa per anni.',
+    body: 'Che serata. Grazie di averci voluto qui.\n\nCi ricorderemo di questa festa per anni.',
     createdAt: '2027-06-12T22:10:00Z', moderatedAt: null,
+    template: { key: 'polaroid', version: 1 }, media: memoryMedia('g1', 1200, 1600, 'portrait'),
   },
   {
-    id: 'g2', authorDisplayName: null, status: 'visible',
+    id: 'g2', authorDisplayName: 'Ada', status: 'visible',
     body: 'Auguri!',
     createdAt: '2027-06-12T21:48:00Z', moderatedAt: '2027-06-12T21:50:00Z',
+    template: { key: 'nubarca', version: 1 }, media: memoryMedia('g2', 1600, 1200, 'landscape'),
   },
   {
     id: 'g3', authorDisplayName: 'La nonna', status: 'hidden',
     body: 'Sono fiera di te. Un bacio grande.',
     createdAt: '2027-06-12T21:02:00Z', moderatedAt: '2027-06-12T21:30:00Z',
+    template: { key: 'celebration', version: 1 }, media: memoryMedia('g3', 1600, 900, 'landscape'),
   },
 ];
 

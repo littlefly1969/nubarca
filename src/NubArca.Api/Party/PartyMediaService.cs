@@ -80,31 +80,55 @@ public sealed class PartyMediaService : IPartyMediaService
         return row is null ? null : Classify(row.MediaCategory, row.DetectedContentType);
     }
 
+    private IQueryable<MemberRow> DisplayableMembers(Guid ownerUserId, Guid albumId) =>
+        DisplayableMembers(_db, ownerUserId, albumId);
+
     // Displayable (image/video) members of the album, owner-owned, active,
     // non-vault (FileItems carries the Private-Vault global filter). Projects to
     // an anonymous type — matching TvMediaService, which EF composes cleanly.
     // Guest uploads that are not APPROVED (pending/hidden/rejected) are excluded,
     // so moderation is enforced on every public party surface; owner-added
     // content has no moderation row and is always shown.
-    private IQueryable<MemberRow> DisplayableMembers(Guid ownerUserId, Guid albumId) =>
-        _db.AlbumItems
+    //
+    // Internal and static so the guest book's photograph chooser asks THIS rule
+    // rather than a copy of it: "what may a guest see in the party's album" has
+    // one answer, and the guest book only narrows it further.
+    internal static IQueryable<MemberRow> DisplayableMembers(
+        AppDbContext db, Guid ownerUserId, Guid albumId) =>
+        db.AlbumItems
             .AsNoTracking()
             .Where(ai => ai.AlbumId == albumId)
-            .Join(_db.FileItems.AsNoTracking(),
+            .Join(db.FileItems.AsNoTracking(),
                 ai => ai.FileItemId,
                 f => f.Id,
-                (ai, f) => new { ai.AddedAt, f.Id, f.BlobObjectId, f.OwnerUserId, f.DeletedAt, f.MediaLibraryState })
+                (ai, f) => new
+                {
+                    ai.AddedAt, f.Id, f.BlobObjectId, f.OwnerUserId, f.DeletedAt, f.MediaLibraryState,
+                    f.Width, f.Height,
+                })
             // Slice 3: a Party surface never shows a file the owner moved out of
             // the media library (Excluded), even though its AlbumItem persists.
             .Where(x => x.OwnerUserId == ownerUserId
                 && x.DeletedAt == null
                 && x.MediaLibraryState == Domain.MediaLibraryState.Active)
-            .Where(x => !_db.PartyUploadItems.Any(pu =>
+            .Where(x => !db.PartyUploadItems.Any(pu =>
                 pu.FileItemId == x.Id && pu.Status != Domain.PartyUploadStatuses.Approved))
-            .Join(_db.BlobMetadata.AsNoTracking(),
+            .Join(db.BlobMetadata.AsNoTracking(),
                 x => x.BlobObjectId,
                 m => m.BlobObjectId,
-                (x, m) => new MemberRow { Id = x.Id, AddedAt = x.AddedAt, MediaCategory = m.MediaCategory, DetectedContentType = m.DetectedContentType })
+                (x, m) => new MemberRow
+                {
+                    Id = x.Id,
+                    AddedAt = x.AddedAt,
+                    MediaCategory = m.MediaCategory,
+                    DetectedContentType = m.DetectedContentType,
+                    BlobObjectId = x.BlobObjectId,
+                    FileWidth = x.Width,
+                    FileHeight = x.Height,
+                    BlobWidth = m.Width,
+                    BlobHeight = m.Height,
+                    Orientation = m.Orientation,
+                })
             .Where(x => x.MediaCategory == Domain.MediaCategories.Image || x.MediaCategory == Domain.MediaCategories.Video);
 
     private static PartyMediaKind Classify(string mediaCategory, string? detectedContentType) =>
@@ -114,11 +138,21 @@ public sealed class PartyMediaService : IPartyMediaService
 
     // A class (not a positional record) so EF Core can bind its members in the
     // Join result selector and still compose Count/Where/OrderBy over it.
-    private sealed class MemberRow
+    internal sealed class MemberRow
     {
         public Guid Id { get; set; }
         public DateTime AddedAt { get; set; }
         public string MediaCategory { get; set; } = string.Empty;
         public string? DetectedContentType { get; set; }
+        // Owner-private plumbing for server-side callers (the guest book takes
+        // its own reference to this blob). Never projected into a DTO.
+        public Guid BlobObjectId { get; set; }
+        // CODED dimensions and the EXIF orientation, resolved to display
+        // dimensions by ImageDisplayDimensions — FileItem first, blob fallback.
+        public int? FileWidth { get; set; }
+        public int? FileHeight { get; set; }
+        public int? BlobWidth { get; set; }
+        public int? BlobHeight { get; set; }
+        public int? Orientation { get; set; }
     }
 }

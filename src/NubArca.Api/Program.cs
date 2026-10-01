@@ -1087,6 +1087,8 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<NubArca.Api.Party.IPartyMessageAccessResolver, NubArca.Api.Party.PartyMessageAccessResolver>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyMessageService, NubArca.Api.Party.PartyMessageService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyGuestbookService, NubArca.Api.Party.PartyGuestbookService>();
+    // A memory's picture, drawn from the memory's own blob — see PartyGuestbookPhotoCache.
+    builder.Services.AddScoped<NubArca.Api.Party.PartyGuestbookPhotoCache>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyAddressShareService, NubArca.Api.Party.PartyAddressShareService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyChallengeService, NubArca.Api.Party.PartyChallengeService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyGameService, NubArca.Api.Party.PartyGameService>();
