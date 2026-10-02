@@ -226,7 +226,7 @@ test('session/association invalidation tears down the Beauty Lab too', () => {
 
 type PartyView = Extract<AssignmentView, { party: unknown }>;
 const view = (
-  presentation: 'slideshow' | 'game' | 'unavailable',
+  presentation: 'slideshow' | 'game' | 'guestbook' | 'unavailable',
   key = 'k-a', albumId: string | null = 'album-a', albumName: string | null = 'Festa',
 ): PartyView => ({ presentation, party: { key, albumId, albumName } });
 const general: AssignmentView = { presentation: 'general' };
@@ -383,7 +383,7 @@ test('no local event can take an assigned television back to general', () => {
 });
 
 test('a revoked session tears an assigned party down like any other state', () => {
-  for (const presentation of ['slideshow', 'game', 'unavailable'] as const) {
+  for (const presentation of ['slideshow', 'game', 'guestbook', 'unavailable'] as const) {
     const assigned = tvFlowReducer(mode, assignment(view(presentation)));
     assert.deepEqual(tvFlowReducer(assigned, { type: 'SESSION_INVALID' }), pairing);
     const effects = flowEffects(assigned, { type: 'SESSION_INVALID' });
@@ -396,13 +396,16 @@ test('a revoked session tears an assigned party down like any other state', () =
 
 test('an incomplete association is never admitted into a party, even straight from startup', () => {
   for (const from of [initialFlowState, pairing]) {
-    for (const assignmentView of [view('slideshow'), view('game'), view('unavailable'), general]) {
+    for (const assignmentView of [view('slideshow'), view('game'), view('guestbook'), view('unavailable'), general]) {
       // Complete: one event, straight into the server's presentation.
       const complete = admissionEvents(assignmentView, true);
       assert.equal(complete.length, 1);
       assert.equal(complete.reduce(tvFlowReducer, from).name,
         assignmentView.presentation === 'general' ? 'mode'
-          : { slideshow: 'partySlideshow', game: 'partyGame', unavailable: 'partyUnavailable' }[
+          : {
+            slideshow: 'partySlideshow', game: 'partyGame', guestbook: 'partyGuestbook',
+            unavailable: 'partyUnavailable',
+          }[
             assignmentView.presentation]);
 
       // Incomplete: the existing teardown, and NO party state on the way.
@@ -441,3 +444,33 @@ test('Party and Personal Area can never be active simultaneously', () => {
   ]);
   assert.deepEqual(tvFlowReducer(personal, { type: 'CHOOSE_PARTY' }), personal);
 });
+
+test('the guest book is one more presentation, entered and left only by the server', () => {
+  const name = (presentation: 'slideshow' | 'game' | 'guestbook') =>
+    ({ slideshow: 'partySlideshow', game: 'partyGame', guestbook: 'partyGuestbook' })[presentation];
+  const journeys: Array<Array<'slideshow' | 'game' | 'guestbook'>> = [
+    ['slideshow', 'guestbook'],
+    ['guestbook', 'slideshow'],
+    ['slideshow', 'game'],
+    ['game', 'slideshow'],
+    ['guestbook', 'slideshow', 'game'],
+    ['game', 'slideshow', 'guestbook'],
+  ];
+  for (const journey of journeys) {
+    let state: TvFlowState = mode;
+    for (const presentation of journey) {
+      state = tvFlowReducer(state, assignment(view(presentation)));
+      // One surface at a time: the state names exactly the server's word.
+      assert.equal(state.name, name(presentation), journey.join(' → '));
+      assert.equal(isAssignedPartyState(state), true);
+    }
+  }
+  // A poll repeating the same answer does not restart the book.
+  const onBook = tvFlowReducer(mode, assignment(view('guestbook')));
+  assert.equal(tvFlowReducer(onBook, assignment(view('guestbook'))), onBook);
+  // No local event leaves it: BACK-like events are not the server.
+  for (const event of [{ type: 'PARTY_EXIT' }, { type: 'LOCK' }, { type: 'PARTY_CONTENT_GONE' }] as const) {
+    assert.equal(tvFlowReducer(onBook, event as never), onBook);
+  }
+});
+

@@ -100,3 +100,25 @@ export interface PartyDisplayWakeInputs {
 export function shouldKeepPartyDisplayAwake(inputs: PartyDisplayWakeInputs): boolean {
   return inputs.hostActive && inputs.showing && inputs.presentationActive;
 }
+
+export interface PartyGuestbookWakeInputs {
+  /** The app is in the foreground (useHostActive). */
+  readonly hostActive: boolean;
+  /** A memory is on screen — not the waiting card. */
+  readonly showing: boolean;
+}
+
+/**
+ * Should NubArca hold the screen for the party's guest book?
+ *
+ * The book on the party's television is a slideshow of memories the room is
+ * reading: a panel that dims halfway through a dedication is broken in the
+ * same way as one that dims during the photographs. So it holds the screen
+ * while a memory is up and the app is in the foreground — and not for the
+ * waiting card, which has nothing to read. Like the game, it lives here
+ * rather than in a wake lock of its own; when the regia returns the screen
+ * to the slideshow this screen unmounts and the slideshow's policy takes over.
+ */
+export function shouldKeepPartyGuestbookAwake(inputs: PartyGuestbookWakeInputs): boolean {
+  return inputs.hostActive && inputs.showing;
+}

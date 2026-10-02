@@ -27,8 +27,8 @@ export interface TvPairingStatus {
 // to the general experience. No party link id and no token ever cross.
 //
 // `presentation` is the server's answer to "which surface, right now": the
-// party's native slideshow, its game on the canonical web stage, or
-// unavailable. A PROJECTION of the party's state — never a game phase, which
+// party's native slideshow, its game on the canonical web stage, its guest book
+// (when the regia has put it on the screen), or unavailable. A PROJECTION of the party's state — never a game phase, which
 // this app does not know and must not learn. Absent on a server that predates
 // it (see lib/assignmentView for how that is read). `assignmentKey` is an
 // opaque identity of "this TV, this party link" that changes whenever the
@@ -38,7 +38,7 @@ export interface TvDisplayAssignment {
   albumId: string | null;
   albumName: string | null;
   partyAvailable: boolean;
-  presentation?: 'general' | 'slideshow' | 'game' | 'unavailable';
+  presentation?: 'general' | 'slideshow' | 'game' | 'guestbook' | 'unavailable';
   assignmentKey?: string | null;
 }
 
@@ -143,6 +143,37 @@ export interface TvPartyDisplayGrant {
 
 export function mintPartyDisplayGrant(signal?: AbortSignal): Promise<TvPartyDisplayGrant> {
   return tvPost<TvPartyDisplayGrant>('/api/tv/party-display/grant', undefined, undefined, signal);
+}
+
+// The party's guest book, while the regia has it on this television.
+//
+// Authenticated by the TV session cookie alone — no grant, no party or guest
+// token: the party is this device's own assignment, resolved server-side, and
+// the route answers only while the presentation IS the guest book. Visible
+// memories only, in the book's own order; each photograph is a derived,
+// metadata-free preview on the television's own route.
+export interface TvGuestbookMemory {
+  id: string;
+  authorDisplayName: string;
+  // PLAIN TEXT with LF paragraphs, blank lines included. Rendered as text.
+  body: string;
+  createdAt: string;
+  template: { key: string; version: number };
+  media: {
+    url: string;
+    width: number;
+    height: number;
+    orientation: 'portrait' | 'landscape' | 'square';
+    crop: { centerX: number; centerY: number; zoom: number };
+  };
+}
+
+export interface TvGuestbook {
+  entries: TvGuestbookMemory[];
+}
+
+export function getTvGuestbook(signal?: AbortSignal): Promise<TvGuestbook> {
+  return tvGet<TvGuestbook>('/api/tv/party/guestbook', undefined, signal);
 }
 
 export function listTvAlbums(): Promise<TvAlbum[]> {

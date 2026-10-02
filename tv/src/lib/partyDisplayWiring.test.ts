@@ -175,9 +175,11 @@ test('the first read decides the first screen, once the association is known com
 test('each assigned presentation is its own mount, keyed by the party', () => {
   assert.match(app, /<PartySlideshowScreen\s+key=\{flow\.party\.key\}/);
   assert.match(app, /<PartyDisplayScreen\s+key=\{flow\.party\.key\}/);
+  assert.match(app, /<PartyGuestbookScreen\s+key=\{flow\.party\.key\}/);
   // BACK at the root of an assigned party closes the app; nothing local takes
   // it back to general.
-  assert.match(app, /flow\.name !== 'partyGame' && flow\.name !== 'partyUnavailable'/);
+  assert.match(app,
+    /flow\.name !== 'partyGame' && flow\.name !== 'partyGuestbook'\s+&& flow\.name !== 'partyUnavailable'/);
   assert.match(app, /onExit=\{exitApp\}/);
 });
 

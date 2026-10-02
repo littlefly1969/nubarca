@@ -32,7 +32,7 @@ test('a general assignment, and no assignment at all, is the general experience'
 });
 
 test("the server's presentation is taken exactly as given", () => {
-  for (const presentation of ['slideshow', 'game', 'unavailable'] as const) {
+  for (const presentation of ['slideshow', 'game', 'guestbook', 'unavailable'] as const) {
     assert.deepEqual(toAssignmentView(party({ presentation })), {
       presentation,
       party: { key: 'key-1', albumId: 'album-1', albumName: 'Festa' },

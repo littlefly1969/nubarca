@@ -30,8 +30,8 @@ test('the assignment travels with the session and carries no link or token', () 
   assert.match(tvApi, /albumId:\s*string \| null/);
   assert.doesNotMatch(tvApi, /partyAlbumLinkId/i);
   assert.doesNotMatch(tvApi, /interface TvDisplayAssignment[\s\S]{0,600}token/i);
-  // The presentation is four words, and none of them is a game phase.
-  assert.match(tvApi, /presentation\?: 'general' \| 'slideshow' \| 'game' \| 'unavailable'/);
+  // The presentation is five words, and none of them is a game phase.
+  assert.match(tvApi, /presentation\?: 'general' \| 'slideshow' \| 'game' \| 'guestbook' \| 'unavailable'/);
 
   // It arrives on the session the app already reads — additive, so an older APK
   // simply never sees the fields.
