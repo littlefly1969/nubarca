@@ -16,6 +16,8 @@
 //   * Remove from THIS album — album source only.
 //   * Photo-only destinations (Beauty Lab, Plates, ...) — only when the
 //     selection is ENTIRELY images; never for a mixed or all-video selection.
+//   * Print — exactly ONE photograph, in the library or an own album, Active
+//     scope only: a direct print is one sheet of one photograph.
 //
 // Only currently-existing destinations appear here. A future one is added when
 // it exists, not in anticipation of it.
@@ -35,6 +37,7 @@ export interface MediaSelectionCapabilities {
   canTrash: boolean;
   canRemoveFromCurrentAlbum: boolean;
   canUsePhotoOnlyDestinations: boolean;
+  canPrintPhoto: boolean;
 }
 
 export interface CapabilityInput {
@@ -63,5 +66,6 @@ export function getMediaSelectionCapabilities(
     canTrash: hasAny,
     canRemoveFromCurrentAlbum: hasAny && source === 'album',
     canUsePhotoOnlyDestinations: allImages,
+    canPrintPhoto: count === 1 && allImages && scope === 'active',
   };
 }

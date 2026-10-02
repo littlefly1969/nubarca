@@ -3,6 +3,7 @@ import {
   ApiError, createPrintTestJob, type PrintStationStatus, type SharedPrinter,
 } from '@nubarca/api-client';
 import { useI18n, type MessageKey } from '../i18n';
+import { isPrinterOffline, PrinterMediaRemaining } from './PrinterMediaRemaining';
 import { PrinterPaperControl } from './PrinterPaperControl';
 
 const STATUS_KEYS: Record<PrintStationStatus, MessageKey> = {
@@ -74,6 +75,14 @@ export function SharedPrintersList({ printers, onChanged }: {
               </header>
               <dl>
                 <div><dt>{t('print.shared.station')}</dt><dd>{printer.stationName}</dd></div>
+                {/* The media in the printer, and — separately — what the loan
+                    allows: two numbers that are never the same thing. */}
+                <PrinterMediaRemaining
+                  remaining={printer.mediaRemainingPrints}
+                  observedAt={printer.mediaRemainingObservedAt}
+                  offline={isPrinterOffline(printer.stationStatus, printer.observedState)}
+                  testId="print-shared-media-remaining"
+                />
                 <div>
                   <dt>{t('print.stripCut')}</dt>
                   <dd>{t(printer.cutsStrips ? 'print.stripCutPrinter' : 'print.stripCutHand')}</dd>

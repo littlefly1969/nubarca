@@ -198,7 +198,7 @@ describe('PartyPrintSettings (owner panel)', () => {
     const card = await screen.findByTestId('party-print-option-dev-1-card');
     expect(within(card).getByText('DS620')).toBeInTheDocument();
     // Where it is, and which paper is in it: that decides what guests can print.
-    expect(within(card).getByText('Postazione: Sala · carta 10×15')).toBeInTheDocument();
+    expect(within(card).getByText('Postazione: Sala · carta 10×15 · Stampe residue: numero non disponibile')).toBeInTheDocument();
   });
 
   it('saves the whole draft to the print endpoint, and to nothing else', async () => {
@@ -320,7 +320,7 @@ describe('PartyPrintSettings (owner panel)', () => {
     })]);
     view();
     const card = await screen.findByTestId('party-print-option-dev-1-card');
-    expect(within(card).getByText('Postazione: Postazione sala · carta 20×15')).toBeInTheDocument();
+    expect(within(card).getByText('Postazione: Postazione sala · carta 20×15 · Stampe residue: numero non disponibile')).toBeInTheDocument();
     expect(screen.queryByTestId('party-print-option-dev-2-card')).not.toBeInTheDocument();
   });
 
@@ -404,7 +404,7 @@ describe('PartyPrintSettings (owner panel)', () => {
     const user = userEvent.setup();
     view();
     const card = await screen.findByTestId('party-print-option-dev-9-card');
-    expect(within(card).getByText('Postazione: Casa di Stefano · carta 10×15 · condivisa da Stefano'))
+    expect(within(card).getByText('Postazione: Casa di Stefano · carta 10×15 · condivisa da Stefano · Stampe residue: numero non disponibile'))
       .toBeInTheDocument();
     expect(card).toHaveTextContent('Condivisa con un tetto: restano 42 fogli.');
     expect(screen.getByTestId('party-print-option-dev-1-card')).toBeInTheDocument();
@@ -415,6 +415,19 @@ describe('PartyPrintSettings (owner panel)', () => {
     expect(JSON.parse(mock.calls.find((c) => c.method === 'PATCH')!.body!)).toMatchObject({
       printStationId: 'st-9', printerDeviceId: 'dev-9',
     });
+  });
+
+  it('shows the prints left on a lent printer\'s media apart from the loan\'s sheets', async () => {
+    mount(settings(), [station({ devices: [device({ mediaRemainingPrints: 187,
+      mediaRemainingObservedAt: '2026-10-02T12:32:00Z' })] })], undefined,
+    [lent({ maxSheets: 50, usedSheets: 8, mediaRemainingPrints: 12, mediaRemainingObservedAt: '2026-10-02T12:32:00Z' })]);
+    view();
+    const own = await screen.findByTestId('party-print-option-dev-1-card');
+    expect(own).toHaveTextContent('Stampe residue: 187');
+    const card = screen.getByTestId('party-print-option-dev-9-card');
+    // Twelve prints on the roll; forty-two sheets left on the loan. Two numbers.
+    expect(card).toHaveTextContent('Stampe residue: 12');
+    expect(card).toHaveTextContent('Condivisa con un tetto: restano 42 fogli.');
   });
 
   it('says the party cannot print when the loan’s sheets are used up', async () => {
