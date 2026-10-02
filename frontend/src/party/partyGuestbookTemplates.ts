@@ -27,12 +27,21 @@ export interface GuestbookTemplate {
   /**
    * The photograph's frame, width / height, for a photograph of `photoAspect`.
    * The framing a guest chose — centre and zoom — is placed INSIDE this frame
-   * by the print crop geometry, so it never depends on a screen's pixels.
+   * by the shared photo placement, so it never depends on a screen's pixels.
    */
   frameAspect(photoAspect: number): number;
   /** The CSS modifier the memory card is drawn with. */
   className: string;
+  /**
+   * The photo well: what the frame shows beside a photograph zoomed out. The
+   * card's stylesheet draws it (.guestbook-memory-photo); this is the same
+   * colour for the framing editor, and the Fire TV's TEMPLATE_LOOK carries it.
+   */
+  photoWell: string;
 }
+
+/** The well every design has unless it says otherwise. */
+const DARK_WELL = 'rgb(10 15 26 / 70%)';
 
 /** A photograph that is wider than it is tall, by any margin. */
 const isLandscape = (aspect: number) => aspect > 1.02;
@@ -46,6 +55,7 @@ const TEMPLATES: readonly GuestbookTemplate[] = [
     // The photograph leads: tall for a tall picture, wide for a wide one.
     frameAspect: (aspect) => (isLandscape(aspect) ? 4 / 3 : isPortrait(aspect) ? 4 / 5 : 1),
     className: 'guestbook-memory--nubarca-1',
+    photoWell: DARK_WELL,
   },
   {
     key: 'polaroid',
@@ -54,6 +64,7 @@ const TEMPLATES: readonly GuestbookTemplate[] = [
     // The instant print's square, whatever the photograph's shape.
     frameAspect: () => 1,
     className: 'guestbook-memory--polaroid-1',
+    photoWell: '#d9d6cf',
   },
   {
     key: 'editorial',
@@ -62,6 +73,7 @@ const TEMPLATES: readonly GuestbookTemplate[] = [
     // A magazine's proportions: a wide band, or a column.
     frameAspect: (aspect) => (isLandscape(aspect) ? 3 / 2 : isPortrait(aspect) ? 3 / 4 : 1),
     className: 'guestbook-memory--editorial-1',
+    photoWell: DARK_WELL,
   },
   {
     key: 'celebration',
@@ -69,6 +81,7 @@ const TEMPLATES: readonly GuestbookTemplate[] = [
     labelKey: 'partyGuestbookTemplate.celebration',
     frameAspect: (aspect) => (isLandscape(aspect) ? 4 / 3 : isPortrait(aspect) ? 4 / 5 : 1),
     className: 'guestbook-memory--celebration-1',
+    photoWell: DARK_WELL,
   },
 ];
 

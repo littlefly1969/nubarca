@@ -9,14 +9,15 @@
 //   * how large the words are drawn (a DENSITY tier), so a long dedication is
 //     shown whole instead of cut — nothing here ever truncates;
 //   * the frame the template gives the photograph, and where the photograph
-//     sits inside it (the guest's crop — the same maths as the party print);
+//     sits inside it (the guest's framing — the shared photo placement, the
+//     same maths as every print, zoomed out down to the whole photograph);
 //   * how the deck follows the book while it is on screen: new memories join,
 //     hidden ones leave, and the one being read is never pulled away by a poll.
 //
 // Nothing here decides WHETHER the book is on the screen. That is the
 // server's presentation, read from the control plane like the game's.
 
-import { cropFor } from '../../pages/partyPrintGeometry';
+import { placePhoto } from '@nubarca/contracts';
 import { guestbookTemplateFor } from '../../party/partyGuestbookTemplates';
 
 /** How often the deck is re-read while the book is on the screen. */
@@ -175,7 +176,7 @@ export function guestbookTvPhotoBox(
 // ── The template's frame, and the photograph inside it ──────────────────────
 //
 // The browser already has ONE implementation of each — the template registry
-// every guest-book surface draws with, and the party print's crop geometry —
+// every guest-book surface draws with, and the shared photo placement —
 // so these delegate to them instead of carrying a second copy. The parity test
 // holds the app's copies to these answers.
 
@@ -183,13 +184,6 @@ export interface GuestbookCrop {
   readonly centerX: number;
   readonly centerY: number;
   readonly zoom: number;
-}
-
-export interface GuestbookNormalisedCrop {
-  readonly cropX: number;
-  readonly cropY: number;
-  readonly cropWidth: number;
-  readonly cropHeight: number;
 }
 
 /** The design a memory is drawn with, as `key@version`. */
@@ -203,23 +197,17 @@ export function guestbookFrameAspect(key: string, version: number, photoAspect: 
   return guestbookTemplateFor(key, version).frameAspect(photoAspect);
 }
 
-/** The part of the photograph the frame shows — the party print's `cropFor`. */
-export function guestbookCrop(
-  photoAspect: number, frameAspect: number, crop: GuestbookCrop,
-): GuestbookNormalisedCrop {
-  return cropFor(photoAspect, frameAspect, crop);
-}
-
-/** Where the WHOLE photograph sits so the frame shows exactly `crop`, as fractions of the frame. */
+/**
+ * Where the WHOLE photograph sits in its frame, as fractions of the frame: its
+ * size and its top-left corner — the shared placement. At zoom ≥ 1 it overflows
+ * the frame (the old crop, unchanged); zoomed out it is smaller than the frame
+ * on one axis, centred on it, and the design's photo well shows beside it.
+ */
 export function guestbookPhotoPlacement(
-  crop: GuestbookNormalisedCrop,
+  photoAspect: number, frameAspect: number, crop: GuestbookCrop,
 ): { width: number; height: number; left: number; top: number } {
-  return {
-    width: 1 / crop.cropWidth,
-    height: 1 / crop.cropHeight,
-    left: -crop.cropX / crop.cropWidth,
-    top: -crop.cropY / crop.cropHeight,
-  };
+  const { width, height, left, top } = placePhoto(photoAspect, frameAspect, crop);
+  return { width, height, left, top };
 }
 
 // ── The deck, while the book is on the screen ───────────────────────────────

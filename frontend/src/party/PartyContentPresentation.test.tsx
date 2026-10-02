@@ -307,4 +307,35 @@ describe('guest: a section photograph’s frame', () => {
     fireEvent.load(img);
     expect(parseFloat(img.style.width)).toBeCloseTo(100 / 0.3, 1);
   });
+
+  it('shows a photograph the host zoomed out whole, centred, on white', () => {
+    // 4:3 in the landscape 3:2 frame, at its contain zoom (8/9): full height,
+    // equal white bands left and right.
+    mountGuest([view({
+      kind: 'info', content: { title: 'Parcheggio', body: null }, mediaUrl: '/p.jpg',
+      mediaOrientation: 'landscape', mediaCrop: { zoom: 8 / 9, centerX: 0.9, centerY: 0.1 },
+    })]);
+    const img = screen.getByTestId('party-content-media');
+    Object.defineProperty(img, 'naturalWidth', { value: 1600 });
+    Object.defineProperty(img, 'naturalHeight', { value: 1200 });
+    fireEvent.load(img);
+    expect(parseFloat(img.style.height)).toBeCloseTo(100, 6);
+    expect(parseFloat(img.style.width)).toBeCloseTo((100 * 8) / 9, 6);
+    expect(parseFloat(img.style.left)).toBeCloseTo(100 / 18, 6);
+    expect(parseFloat(img.style.top)).toBeCloseTo(0, 6);
+  });
+
+  it('draws a framing stored at zoom 1 or more exactly as before', () => {
+    mountGuest([view({
+      kind: 'info', content: { title: 'Parcheggio', body: null }, mediaUrl: '/p.jpg',
+      mediaOrientation: 'portrait', mediaCrop: { zoom: 1, centerX: 0.5, centerY: 0.5 },
+    })]);
+    const img = screen.getByTestId('party-content-media');
+    Object.defineProperty(img, 'naturalWidth', { value: 1600 });
+    Object.defineProperty(img, 'naturalHeight', { value: 1200 });
+    fireEvent.load(img);
+    // The old crop: 4:3 covering 4:5 shows 0.6 of the width, centred.
+    expect(parseFloat(img.style.width)).toBeCloseTo(100 / 0.6, 6);
+    expect(parseFloat(img.style.left)).toBeCloseTo(-20 / 0.6, 6);
+  });
 });

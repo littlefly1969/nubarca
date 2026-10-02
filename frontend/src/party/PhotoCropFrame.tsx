@@ -1,67 +1,78 @@
 import {
   useRef, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
+  type PointerEvent as ReactPointerEvent, type ReactNode,
 } from 'react';
-import { cropFor, type CropView, type NormalisedCrop } from '../pages/partyPrintGeometry';
+import {
+  panPlacement, placePhoto, type PhotoPlacement, type PlacedPhoto,
+} from '@nubarca/contracts';
 import './PhotoCropFrame.css';
 
 /**
- * Where a photograph sits inside a frame to show exactly `crop` — the one
- * placement, shared by this editor and by anything that draws the result
- * (a guest book memory), so what was framed is what is shown.
+ * Where a photograph is drawn inside its frame, as CSS — the one placement
+ * shared by this editor and by anything that draws the result (a guest book
+ * memory, a party print preview), so what was framed is what is shown.
  */
-export function cropImageStyle(crop: NormalisedCrop): CSSProperties {
+export function photoPlacementStyle(placed: PlacedPhoto): CSSProperties {
   return {
-    width: `${100 / crop.cropWidth}%`,
-    height: `${100 / crop.cropHeight}%`,
-    left: `${(-crop.cropX * 100) / crop.cropWidth}%`,
-    top: `${(-crop.cropY * 100) / crop.cropHeight}%`,
+    width: `${placed.width * 100}%`,
+    height: `${placed.height * 100}%`,
+    left: `${placed.left * 100}%`,
+    top: `${placed.top * 100}%`,
   };
 }
 
-// A photograph in a frame, placed by hand: drag it, or move it with the arrow
-// keys; the zoom is the caller's own control beside it.
-//
-// The SAME maths as the party print (`cropFor`), which is the point: a host
-// framing a photograph on the invitation and a guest framing one for the
-// printer move it the same way and get the same crop.
+/**
+ * What a frame shows beside a photograph zoomed out, when whoever draws the
+ * result has no paper of its own: white, never the editor's dark surround.
+ */
+export const DEFAULT_BAND = '#ffffff';
 
-/** How far one arrow key moves the photograph, as a fraction of the source. */
+// A photograph in a frame, placed by hand: drag it, or move it with the arrow
+// keys; the zoom is the caller's own control beside it (PhotoFramingControls).
+//
+// The SAME maths as the print and every renderer (`placePhoto`), which is the
+// point: a host framing a photograph on the invitation, a guest framing one for
+// the printer and an owner framing one for their own printer move it the same
+// way and get the same result.
+
+/** How far one arrow key moves the photograph, as a fraction of it. */
 const NUDGE = 0.02;
 
 export function PhotoCropFrame({
   src, aspect, slotAspect, view, onChange, label, onAspect, testId = 'photo-crop',
+  background = DEFAULT_BAND, children,
 }: {
   src: string;
   /** The photograph's own width / height. */
   aspect: number;
   /** The frame's width / height. */
   slotAspect: number;
-  view: CropView;
-  onChange: (view: CropView) => void;
+  view: PhotoPlacement;
+  onChange: (view: PhotoPlacement) => void;
   label: string;
   /** Learns the photograph's shape from the picture itself, once it loads. */
   onAspect?: (width: number, height: number) => void;
   testId?: string;
+  /** What the result shows beside a photograph zoomed out: its paper, its well. */
+  background?: string;
+  /** Drawn over the photograph, inside the frame (a print's date). */
+  children?: ReactNode;
 }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
-  const crop = cropFor(aspect, slotAspect, view);
-
-  const nudge = (dx: number, dy: number) => onChange({
-    ...view,
-    centerX: Math.min(1, Math.max(0, view.centerX + dx)),
-    centerY: Math.min(1, Math.max(0, view.centerY + dy)),
-  });
+  const placed = placePhoto(aspect, slotAspect, view);
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    // Precision without a pointer: the same movement a drag makes, in steps.
+    // Precision without a pointer: the same movement a drag makes, in steps of
+    // the photograph. An axis the photograph does not overflow does not move.
     const step = event.shiftKey ? NUDGE * 4 : NUDGE;
+    const x = step * placed.width;
+    const y = step * placed.height;
     switch (event.key) {
-      case 'ArrowLeft': nudge(-step, 0); break;
-      case 'ArrowRight': nudge(step, 0); break;
-      case 'ArrowUp': nudge(0, -step); break;
-      case 'ArrowDown': nudge(0, step); break;
+      case 'ArrowLeft': onChange(panPlacement(aspect, slotAspect, view, x, 0)); break;
+      case 'ArrowRight': onChange(panPlacement(aspect, slotAspect, view, -x, 0)); break;
+      case 'ArrowUp': onChange(panPlacement(aspect, slotAspect, view, 0, y)); break;
+      case 'ArrowDown': onChange(panPlacement(aspect, slotAspect, view, 0, -y)); break;
       default: return;
     }
     event.preventDefault();
@@ -78,12 +89,10 @@ export function PhotoCropFrame({
     if (!start || !frame) return;
     const box = frame.getBoundingClientRect();
     if (box.width === 0 || box.height === 0) return;
-    // A pixel of drag moves the photograph by that fraction of what is visible,
-    // so the picture tracks the finger however far it is zoomed in.
-    nudge(
-      (-(event.clientX - start.x) * crop.cropWidth) / box.width,
-      (-(event.clientY - start.y) * crop.cropHeight) / box.height,
-    );
+    // The photograph follows the finger, however far it is zoomed in.
+    onChange(panPlacement(aspect, slotAspect, view,
+      (event.clientX - start.x) / box.width,
+      (event.clientY - start.y) / box.height));
     dragRef.current = { x: event.clientX, y: event.clientY };
   };
 
@@ -93,7 +102,7 @@ export function PhotoCropFrame({
     <div
       ref={frameRef}
       className="photo-crop"
-      style={{ aspectRatio: `${slotAspect}` }}
+      style={{ aspectRatio: `${slotAspect}`, background }}
       tabIndex={0}
       role="group"
       aria-label={label}
@@ -111,8 +120,9 @@ export function PhotoCropFrame({
         draggable={false}
         onLoad={(event) => onAspect?.(
           event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
-        style={cropImageStyle(crop)}
+        style={photoPlacementStyle(placed)}
       />
+      {children}
     </div>
   );
 }

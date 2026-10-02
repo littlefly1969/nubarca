@@ -259,6 +259,28 @@ describe('a slot’s photograph frame', () => {
     expect(body.mediaCrop.centerY).toBe(0.5);
   });
 
+  it('zooms the photograph out to the whole picture in its fixed frame', async () => {
+    const { mock, onSaved } = mount(withPhoto());
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId('party-frame-menu-portrait'));
+    const frame = screen.getByTestId('party-frame-crop-menu');
+    const img = frame.querySelector('img')!;
+    Object.defineProperty(img, 'naturalWidth', { value: 1600 });
+    Object.defineProperty(img, 'naturalHeight', { value: 1200 });
+    fireEvent.load(img);
+    // White beside it, as the guest page shows it.
+    expect(frame.style.background).toBe('rgb(255, 255, 255)');
+    await user.click(within(screen.getByTestId('party-frame-controls-menu')).getByRole('button', { name: 'Adatta' }));
+    await user.click(screen.getByTestId('party-content-save-menu'));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    // 4:3 whole in a 4:5 frame: 0.6.
+    const crop = sentBody(mock).mediaCrop;
+    expect([crop.centerX, crop.centerY]).toEqual([0.5, 0.5]);
+    expect(crop.zoom).toBeCloseTo(0.6, 9);
+  });
+
   it('offers no frame for a poster, which is opened whole', () => {
     mount(withPhoto({ mediaPresentation: 'poster' }));
     expect(screen.queryByTestId('party-frame-menu')).not.toBeInTheDocument();

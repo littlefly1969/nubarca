@@ -341,14 +341,22 @@ export type PartyGuestbookTemplateKey = (typeof PARTY_GUESTBOOK_TEMPLATE_KEYS)[n
 export const DEFAULT_PARTY_GUESTBOOK_TEMPLATE: PartyGuestbookTemplateKey = 'nubarca';
 
 /**
- * The framing's limits — the party print crop editor's own: centre as
- * fractions of the photograph, magnification from 1 to 4. The server refuses
- * anything outside them.
+ * The framing's limits — the shared photo placement's own: centre as
+ * fractions of the photograph, magnification up to 4. The LOWEST zoom is not a
+ * constant: it is the photograph's contain zoom in its template's frame
+ * (`containZoom` in photoPlacement.ts), where the whole photograph shows. The
+ * server refuses anything outside them.
  */
-export const PARTY_GUESTBOOK_CROP_LIMITS = { minZoom: 1, maxZoom: 4 } as const;
+export const PARTY_GUESTBOOK_CROP_LIMITS = { maxZoom: 4 } as const;
 
 export type PartyGuestbookOrientation = 'portrait' | 'landscape' | 'square';
 
+/**
+ * A memory's `crop` on the wire. Named for what it was; it is the shared
+ * PhotoPlacement (zoom 1 covers the frame, down to contain shows the whole
+ * photograph on the template's photo well). The field keeps its name so no
+ * stored memory and no client changes shape.
+ */
 export interface PartyGuestbookCrop {
   centerX: number;
   centerY: number;

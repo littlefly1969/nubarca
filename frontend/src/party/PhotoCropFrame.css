@@ -1,5 +1,8 @@
-/* The frame a photograph is placed in by hand. Shared by the party print and
-   the invitation's section photographs, so both move the same way. */
+/* The frame a photograph is placed in by hand. Shared by the party print, the
+   invitation's section photographs, the guest book and the owner's own print,
+   so all of them move the same way. Its background is set by each editor to
+   what the RESULT shows beside a photograph zoomed out (paper, well, white);
+   this one is only seen before the photograph loads. */
 
 .photo-crop {
   position: relative;
@@ -21,4 +24,59 @@
   max-width: none;
   object-fit: cover;
   user-select: none;
+}
+
+/* Adatta / Riempi / Centra and the zoom, under any frame. On the party's dark
+   pages and in the cloud's dialogs alike: the colours are the surface's own. */
+.photo-framing {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.photo-framing-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.photo-framing-presets button {
+  flex: 1 1 0;
+  min-width: 5.5rem;
+  min-height: 44px;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 0.6rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.photo-framing-presets button:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.photo-framing-presets button:focus-visible,
+.photo-framing-zoom input:focus-visible {
+  outline: 2px solid var(--brand-cyan-glow, #00d4ff);
+  outline-offset: 2px;
+}
+
+.photo-framing-zoom {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 44px;
+  font-size: 0.9rem;
+}
+
+.photo-framing-zoom input {
+  flex: 1;
+  min-width: 0;
+  /* The track stays a line; the thumb's target is as tall as a thumb. */
+  min-height: 44px;
+  accent-color: var(--brand-cyan-glow, #00d4ff);
 }

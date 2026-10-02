@@ -8,7 +8,6 @@ import { PartyGuestbookTvStage } from './PartyGuestbookTvStage';
 import {
   GUESTBOOK_DWELL_MS,
   GUESTBOOK_LONG_DWELL_MS,
-  guestbookCrop,
   guestbookFrameAspect,
   guestbookPhotoPlacement,
   guestbookTvPhotoBox,
@@ -108,11 +107,25 @@ describe('one memory, drawn as its author made it', () => {
     const crop = { centerX: 0.3, centerY: 0.7, zoom: 2 };
     mount([memory('g1', { media: { url: '/p', width: 1600, height: 1200, orientation: 'landscape', crop } })]);
     const img = photoBox().querySelector('img') as HTMLImageElement;
-    const placement = guestbookPhotoPlacement(guestbookCrop(1600 / 1200, 4 / 3, crop));
+    const placement = guestbookPhotoPlacement(1600 / 1200, 4 / 3, crop);
     expect(parseFloat(img.style.width)).toBeCloseTo(placement.width * 100, 6);
     expect(parseFloat(img.style.left)).toBeCloseTo(placement.left * 100, 6);
     expect(parseFloat(img.style.top)).toBeCloseTo(placement.top * 100, 6);
     expect(img).toHaveAttribute('src', '/p');
+  });
+
+  it('draws a memory zoomed out whole, centred on the design\'s photo well', () => {
+    // A wide photograph in the square polaroid frame, at its contain zoom: the
+    // whole width shows, with equal bands above and below it.
+    const crop = { centerX: 0.5, centerY: 0.5, zoom: 0.75 };
+    mount([memory('g1', { template: { key: 'polaroid', version: 1 }, media: {
+      url: '/w', width: 1600, height: 1200, orientation: 'landscape', crop,
+    } })]);
+    const img = photoBox().querySelector('img') as HTMLImageElement;
+    expect(parseFloat(img.style.width)).toBeCloseTo(100, 6);
+    expect(parseFloat(img.style.height)).toBeCloseTo(75, 6);
+    expect(parseFloat(img.style.left)).toBeCloseTo(0, 6);
+    expect(parseFloat(img.style.top)).toBeCloseTo(12.5, 6);
   });
 
   it('keeps every line break, blank lines included, and signs the memory', () => {

@@ -11,7 +11,8 @@
 //   * how large the words are drawn (a DENSITY tier), so a long dedication is
 //     shown whole instead of cut — nothing here ever truncates;
 //   * the frame the template gives the photograph, and where the photograph
-//     sits inside it (the guest's crop — the same maths as the party print);
+//     sits inside it (the guest's framing — the shared photo placement, zoomed
+//     out down to the whole photograph on the design's photo well);
 //   * how the deck follows the book while it is on screen: new memories join,
 //     hidden ones leave, and the one being read is never pulled away by a poll.
 //
@@ -215,54 +216,39 @@ export interface GuestbookCrop {
   readonly zoom: number;
 }
 
-export interface GuestbookNormalisedCrop {
-  readonly cropX: number;
-  readonly cropY: number;
-  readonly cropWidth: number;
-  readonly cropHeight: number;
-}
-
 const MAX_ZOOM = 4;
 
-/**
- * The part of the photograph the frame shows: the largest centred crop that
- * fills the frame, magnified by the guest's zoom and moved to their centre,
- * kept inside the picture. The party print's own geometry (`cropFor`).
- */
-export function guestbookCrop(
-  photoAspect: number, frameAspect: number, crop: GuestbookCrop,
-): GuestbookNormalisedCrop {
-  let baseWidth = 1;
-  let baseHeight = 1;
-  if (Number.isFinite(photoAspect) && photoAspect > 0) {
-    if (photoAspect > frameAspect) baseWidth = frameAspect / photoAspect;
-    else baseHeight = photoAspect / frameAspect;
-  }
-  const zoom = Math.min(MAX_ZOOM, Math.max(1, crop.zoom));
-  const width = Math.min(1, Math.max(0.05, baseWidth / zoom));
-  const height = Math.min(1, Math.max(0.05, baseHeight / zoom));
-  return {
-    cropWidth: width,
-    cropHeight: height,
-    cropX: Math.min(1 - width, Math.max(0, crop.centerX - width / 2)),
-    cropY: Math.min(1 - height, Math.max(0, crop.centerY - height / 2)),
-  };
+const usable = (n: number) => Number.isFinite(n) && n > 0;
+const clamp01 = (n: number) => (Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0.5);
+
+/** One axis: pan when the photograph overflows the frame, centre when it does not. */
+function placeAxis(size: number, center: number): number {
+  if (size <= 1) return (1 - size) / 2;
+  return Math.min(0, Math.max(1 - size, 0.5 - clamp01(center) * size));
 }
 
 /**
- * Where the WHOLE photograph sits so that the frame shows exactly `crop`, as
- * fractions of the frame: its size, and its top-left corner (negative — it
- * starts outside the frame).
+ * Where the WHOLE photograph sits in its frame, as fractions of the frame: its
+ * size and its top-left corner. The shared photo placement — a COPY of
+ * `placePhoto` in packages/contracts/src/photoPlacement.ts, which this app
+ * cannot import; the parity test holds it to the browser's.
+ *
+ * zoom 1 covers the frame (every memory stored before zooming out existed);
+ * above 1 it overflows and pans; below 1, down to the photograph's contain
+ * zoom, it is smaller than the frame on one axis, centred on it, and the
+ * design's photo well shows beside it. Never below contain, never above 4.
  */
 export function guestbookPhotoPlacement(
-  crop: GuestbookNormalisedCrop,
+  photoAspect: number, frameAspect: number, crop: GuestbookCrop,
 ): { width: number; height: number; left: number; top: number } {
-  return {
-    width: 1 / crop.cropWidth,
-    height: 1 / crop.cropHeight,
-    left: -crop.cropX / crop.cropWidth,
-    top: -crop.cropY / crop.cropHeight,
-  };
+  const frame = usable(frameAspect) ? frameAspect : 1;
+  const photo = usable(photoAspect) ? photoAspect : frame;
+  const contain = Math.min(photo / frame, frame / photo, 1);
+  const zoom = Number.isFinite(crop.zoom) ? Math.min(MAX_ZOOM, Math.max(contain, crop.zoom)) : 1;
+  const scale = Math.max(frame / photo, 1) * zoom;
+  const width = (photo * scale) / frame;
+  const height = scale;
+  return { width, height, left: placeAxis(width, crop.centerX), top: placeAxis(height, crop.centerY) };
 }
 
 // ── The deck, while the book is on the screen ───────────────────────────────

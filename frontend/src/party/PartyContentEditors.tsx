@@ -11,9 +11,10 @@ import {
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
 import { usePartyApi } from './workspace/partyApi';
-import { DEFAULT_CROP_VIEW, MAX_ZOOM } from '../pages/partyPrintGeometry';
+import { DEFAULT_CROP_VIEW } from '../pages/partyPrintGeometry';
 import { defaultTextAlign, SLOT_FRAME_ASPECT } from './PartyGuestContent';
-import { PhotoCropFrame } from './PhotoCropFrame';
+import { DEFAULT_BAND, PhotoCropFrame } from './PhotoCropFrame';
+import { PhotoFramingControls } from './PhotoFramingControls';
 import { PartySlotImageField } from './PartyImageField';
 
 // The owner's typed editors: six named shapes, one card each.
@@ -421,8 +422,8 @@ function TextAlignChoice({
 
 /**
  * How a section photograph is framed: the whole picture, or a fixed portrait or
- * landscape frame the host places it in — the party print's own crop editor,
- * dragged or moved with the arrow keys, with a zoom beside it.
+ * landscape frame the host places it in — the shared framing editor, dragged
+ * or moved with the arrow keys, zoomed in or out to the whole photograph.
  */
 function PhotoFrameChoice({
   kind, previewUrl, orientation, crop, disabled, onChange,
@@ -470,22 +471,20 @@ function PhotoFrameChoice({
             onAspect={(width, height) => { if (width > 0 && height > 0) setAspect(width / height); }}
             onChange={(next) => onChange(orientation, next)}
             testId={`party-frame-crop-${kind}`}
+            // The guest page shows white beside a photograph zoomed out.
+            background={DEFAULT_BAND}
           />
           <p className="pw-small pw-muted">{t('partyContent.frameHelp')}</p>
-          <label className="pw-field">
-            <span>{t('partyContent.frameZoom')}</span>
-            <input
-              type="range" min={1} max={MAX_ZOOM} step={0.05} value={view.zoom}
-              disabled={disabled} aria-label={t('partyContent.frameZoom')}
-              onChange={(event) => onChange(orientation, { ...view, zoom: Number(event.target.value) })}
+          <fieldset className="party-frame-controls" disabled={disabled}>
+            <PhotoFramingControls
+              aspect={aspect}
+              slotAspect={SLOT_FRAME_ASPECT[orientation]}
+              view={view}
+              onChange={(next) => onChange(orientation, next)}
+              zoomLabel={t('partyContent.frameZoom')}
+              testId={`party-frame-controls-${kind}`}
             />
-          </label>
-          <button
-            type="button" className="pw-btn" disabled={disabled}
-            onClick={() => onChange(orientation, null)}
-          >
-            {t('partyContent.frameReset')}
-          </button>
+          </fieldset>
         </div>
       )}
     </fieldset>

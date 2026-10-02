@@ -23,11 +23,13 @@ import { useI18n, type MessageKey } from '../i18n';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PRODUCT_NAME } from '../brand/brand';
 import { recallFaceFilter, recallPartyHome } from './partyGuestMemo';
-import { PhotoCropFrame } from '../party/PhotoCropFrame';
+import { effectiveZoom, placePhoto } from '@nubarca/contracts';
+import { PhotoCropFrame, photoPlacementStyle } from '../party/PhotoCropFrame';
+import { PhotoFramingControls } from '../party/PhotoFramingControls';
 import {
-  DEFAULT_CROP_VIEW, MAX_ZOOM, SLOTS_PER_STRIP, STRIPS_PER_SHEET,
+  DEFAULT_CROP_VIEW, SLOTS_PER_STRIP, STRIPS_PER_SHEET,
   PORTRAIT_HEIGHT, PORTRAIT_WIDTH,
-  type CropView, cropFor, photoLayout, photoSlotAspect, stripFooter, stripSlot,
+  type CropView, photoLayout, photoSlotAspect, stripFooter, stripSlot,
   STRIP_WORDMARK_WIDTH_FRACTION, gridLayout, gridPortrait, gridSlotAspect, sheet, type PaperSize,
   OVERLAY_LINE_FRACTION, OVERLAY_MARGIN_FRACTION, OVERLAY_SYMBOL_FRACTION, OVERLAY_TITLE_FRACTION,
   OVERLAY_NUMBER_FRACTION, OVERLAY_TEXT_SUPPORT_PADDING_FRACTION, OVERLAY_HALO_BLUR_FRACTION,
@@ -198,6 +200,17 @@ const PAPER_LABEL: Record<PaperSize, string> = {
   '20x15': '20\u00d715',
 };
 
+/**
+ * What a slot shows beside a photograph zoomed out — the renderer's band:
+ * each palette's own paper, and white on the photograph that has none.
+ */
+const PRINT_BAND: Readonly<Record<PartyPrintTheme, string>> = {
+  pure: '#f5f7fb',
+  midnight: '#0a0f1a',
+  event: '#0f1e3a',
+  overlay: '#ffffff',
+};
+
 /** Where each of the four sits on its sheet, in reading order. */
 const GRID_POSITION: readonly MessageKey[] = [
   'partyPrint.gridPosition.topLeft', 'partyPrint.gridPosition.topRight',
@@ -217,8 +230,8 @@ function StripIcon() {
 
 /**
  * A photograph inside a rectangle, framed exactly as the server will frame it.
- * The same crop maths drives this and the print, so what a guest arranges here
- * is what the paper gets.
+ * The same placement maths drives this and the print, so what a guest arranges
+ * here is what the paper gets — zoomed out, the slot's own paper beside it.
  */
 function FramedPhoto({
   photo, aspect, slotAspect, view, onAspect,
@@ -230,7 +243,6 @@ function FramedPhoto({
   onAspect?: (width: number, height: number) => void;
 }) {
   if (!photo) return null;
-  const crop = cropFor(aspect, slotAspect, view);
   return (
     <img
       className="party-print-framed"
@@ -240,12 +252,7 @@ function FramedPhoto({
       // learning shapes here too rather than only from the chooser's thumbnails.
       onLoad={(event) => onAspect?.(
         event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
-      style={{
-        width: `${100 / crop.cropWidth}%`,
-        height: `${100 / crop.cropHeight}%`,
-        left: `${(-crop.cropX * 100) / crop.cropWidth}%`,
-        top: `${(-crop.cropY * 100) / crop.cropHeight}%`,
-      }}
+      style={photoPlacementStyle(placePhoto(aspect, slotAspect, view))}
     />
   );
 }
@@ -792,8 +799,11 @@ export function PartyPrintPage() {
     pendingRef.current ??= {
       key: newIdempotencyKey(),
       slots: chosen.map((id) => {
-        const crop = cropFor(aspectOf(id), slotAspectFor(id), views[id] ?? DEFAULT_CROP_VIEW);
-        return { itemId: id, ...crop };
+        const view = views[id] ?? DEFAULT_CROP_VIEW;
+        // The zoom as drawn: a framing held below a shape learned later is
+        // sent as the contain it now shows.
+        const zoom = effectiveZoom(aspectOf(id), slotAspectFor(id), view.zoom);
+        return { itemId: id, placement: { centerX: view.centerX, centerY: view.centerY, zoom } };
       }),
     };
     const pending = pendingRef.current;
@@ -1156,29 +1166,24 @@ export function PartyPrintPage() {
                   view={view}
                   label={t('partyPrint.cropHelp')}
                   onChange={(next) => setView(id, next)}
+                  // "Adatta" needs the photograph's shape: learn it here too.
+                  onAspect={(width, height) => noteAspect(id, width, height)}
                   testId="party-print-crop"
+                  // What this slot shows beside a photograph zoomed out: the
+                  // sheet's own paper, white on the photograph with no paper.
+                  background={PRINT_BAND[theme]}
                 />
               </div>
             )}
             <p className="party-print-hint">{t('partyPrint.cropHelp')}</p>
-            <label className="party-print-zoom">
-              <span>{t('partyPrint.zoom')}</span>
-              <input
-                type="range"
-                min={1}
-                max={MAX_ZOOM}
-                step={0.05}
-                value={view.zoom}
-                onChange={(event) => setView(id, { ...view, zoom: Number(event.target.value) })}
-              />
-            </label>
-            <button
-              type="button"
-              className="party-print-secondary"
-              onClick={() => setView(id, DEFAULT_CROP_VIEW)}
-            >
-              {t('partyPrint.resetCrop')}
-            </button>
+            <PhotoFramingControls
+              aspect={aspectOf(id)}
+              slotAspect={slotAspectFor(id)}
+              view={view}
+              onChange={(next) => setView(id, next)}
+              zoomLabel={t('partyPrint.zoom')}
+              testId="party-print-framing"
+            />
             <div className="party-print-actions">
               <button
                 type="button"

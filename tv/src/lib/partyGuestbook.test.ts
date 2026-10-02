@@ -5,7 +5,6 @@ import {
   GUESTBOOK_LONG_DEDICATION_CHARS,
   GUESTBOOK_LONG_DEDICATION_LINES,
   GUESTBOOK_LONG_DWELL_MS,
-  guestbookCrop,
   guestbookDensity,
   guestbookDwellMs,
   guestbookFrameAspect,
@@ -17,6 +16,7 @@ import {
   nextGuestbookMemory,
   reconcileGuestbookDeck,
 } from './partyGuestbook.ts';
+import { readFileSync } from 'node:fs';
 import { read } from '../testing/sourceText.ts';
 
 // The guest book on the party's television: the rules both televisions draw
@@ -71,19 +71,35 @@ test('every template frames the photograph as the web registry does, and falls b
   assert.equal(guestbookTemplateKey('mystery', 1), 'nubarca@1');
 });
 
-test('the photograph is placed inside its frame by the guest\'s crop', () => {
+test('the photograph is placed inside its frame by the guest\'s framing', () => {
   // A centred, unzoomed landscape photograph in a square frame shows its middle.
-  const centred = guestbookCrop(2, 1, { centerX: 0.5, centerY: 0.5, zoom: 1 });
-  assert.deepEqual(centred, { cropX: 0.25, cropY: 0, cropWidth: 0.5, cropHeight: 1 });
-  assert.deepEqual(guestbookPhotoPlacement(centred), { width: 2, height: 1, left: -0.5, top: -0 });
-  // Zoom magnifies around the chosen centre, and the crop never leaves the picture.
-  const zoomed = guestbookCrop(1, 1, { centerX: 0.95, centerY: 0.05, zoom: 2 });
-  assert.equal(zoomed.cropWidth, 0.5);
-  assert.equal(zoomed.cropX, 0.5);
-  assert.equal(zoomed.cropY, 0);
-  // Out-of-range zoom is clamped to 1…4.
-  assert.equal(guestbookCrop(1, 1, { centerX: 0.5, centerY: 0.5, zoom: 10 }).cropWidth, 0.25);
-  assert.equal(guestbookCrop(1, 1, { centerX: 0.5, centerY: 0.5, zoom: 0 }).cropWidth, 1);
+  assert.deepEqual(
+    guestbookPhotoPlacement(2, 1, { centerX: 0.5, centerY: 0.5, zoom: 1 }),
+    { width: 2, height: 1, left: -0.5, top: 0 },
+  );
+  // Zoom magnifies around the chosen centre, and the frame never leaves the picture.
+  const zoomed = guestbookPhotoPlacement(1, 1, { centerX: 0.95, centerY: 0.05, zoom: 2 });
+  assert.deepEqual(zoomed, { width: 2, height: 2, left: -1, top: 0 });
+  // Zoomed out, the whole photograph, centred, with the photo well above and below.
+  assert.deepEqual(
+    guestbookPhotoPlacement(2, 1, { centerX: 0.1, centerY: 0.9, zoom: 0.5 }),
+    { width: 1, height: 0.5, left: 0, top: 0.25 },
+  );
+  // Out-of-range zoom is held between contain and 4.
+  assert.equal(guestbookPhotoPlacement(1, 1, { centerX: 0.5, centerY: 0.5, zoom: 10 }).width, 4);
+  assert.equal(guestbookPhotoPlacement(2, 1, { centerX: 0.5, centerY: 0.5, zoom: 0 }).width, 1);
+});
+
+test('the placement is the shared one, case by case', () => {
+  // The table packages/contracts checks the browser and the server against.
+  const table = JSON.parse(readFileSync(
+    new URL('../../../packages/contracts/src/photoPlacement.cases.json', import.meta.url), 'utf8'));
+  for (const c of table.cases) {
+    const placed = guestbookPhotoPlacement(c.photoAspect, c.frameAspect, c.placement);
+    for (const k of ['width', 'height', 'left', 'top'] as const) {
+      assert.ok(Math.abs(placed[k] - c.placed[k]) < 1e-9, `${JSON.stringify(c)} ${k}: ${placed[k]}`);
+    }
+  }
 });
 
 test('the photograph is the protagonist, and gives way to a long dedication', () => {

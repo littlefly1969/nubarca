@@ -851,12 +851,20 @@ export interface PartyPrintManifest {
 }
 
 /** A crop, normalised to the auto-oriented source so the server reads it the same. */
-export interface PartyPrintSlot {
-  itemId: string;
-  cropX: number;
-  cropY: number;
-  cropWidth: number;
-  cropHeight: number;
+/**
+ * One photograph on the sheet: how it sits in its slot. A `placement` (the
+ * shared PhotoPlacement, zoom down to the photograph's contain) is what the
+ * studio sends; the four crop numbers are the older form the server still
+ * accepts. Never both.
+ */
+export type PartyPrintSlot =
+  | { itemId: string; placement: PartyPrintPlacement }
+  | { itemId: string; cropX: number; cropY: number; cropWidth: number; cropHeight: number };
+
+export interface PartyPrintPlacement {
+  centerX: number;
+  centerY: number;
+  zoom: number;
 }
 
 export interface PartyPrintAccepted {

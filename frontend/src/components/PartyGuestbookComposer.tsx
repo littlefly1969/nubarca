@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import {
   ApiError,
-  PARTY_GUESTBOOK_CROP_LIMITS,
   PARTY_GUESTBOOK_TEXT_LIMITS,
   isPartyGuestbookAuthorValid,
   isPartyGuestbookBodyValid,
@@ -14,9 +13,11 @@ import {
   type PartyGuestbookPhoto,
   type PartyGuestbookSubmission,
 } from '@nubarca/api-client';
+import { effectiveZoom } from '@nubarca/contracts';
 import { useI18n } from '../i18n';
 import { DEFAULT_CROP_VIEW, type CropView } from '../pages/partyPrintGeometry';
 import { PhotoCropFrame } from '../party/PhotoCropFrame';
+import { PhotoFramingControls } from '../party/PhotoFramingControls';
 import {
   DEFAULT_GUESTBOOK_TEMPLATE,
   PUBLISHABLE_GUESTBOOK_TEMPLATES,
@@ -64,6 +65,12 @@ function draftMemory(
     template: { key: template.key, version: template.version },
     media: { url: photo.previewUrl, width: photo.width, height: photo.height, crop: view },
   };
+}
+
+/** The zoom a framing is drawn at in `template`'s frame for `photo`. */
+function framedZoom(photo: PartyGuestbookPhoto, template: GuestbookTemplate, view: CropView): number {
+  const aspect = photo.width > 0 && photo.height > 0 ? photo.width / photo.height : 1;
+  return effectiveZoom(aspect, template.frameAspect(aspect), view.zoom);
 }
 
 /** A sensible first framing: centred, nothing enlarged, a tall picture's faces kept. */
@@ -140,7 +147,10 @@ export function PartyGuestbookComposer({
         authorDisplayName: author,
         body,
         templateKey: template.key,
-        crop: { centerX: view.centerX, centerY: view.centerY, zoom: view.zoom },
+        // The zoom as drawn in THIS design's frame: a photograph zoomed out in
+        // one design and moved to a design that frames it closer is sent as
+        // that design's contain, never below it.
+        crop: { centerX: view.centerX, centerY: view.centerY, zoom: framedZoom(photo, template, view) },
       });
       setSent(result);
       // A memory in the book is drawn as the book returns it. One waiting for
@@ -312,20 +322,17 @@ export function PartyGuestbookComposer({
               onChange={setView}
               label={t('partyGuestbookComposer.repositionHelp')}
               testId="guestbook-crop"
+              background={template.photoWell}
             />
             <p className="guestbook-hint">{t('partyGuestbookComposer.repositionHelp')}</p>
-            <label className="guestbook-zoom">
-              <span>{t('partyGuestbookComposer.zoom')}</span>
-              <input
-                type="range"
-                min={PARTY_GUESTBOOK_CROP_LIMITS.minZoom}
-                max={PARTY_GUESTBOOK_CROP_LIMITS.maxZoom}
-                step={0.05}
-                value={view.zoom}
-                onChange={(e) => setView({ ...view, zoom: Number(e.target.value) })}
-                data-testid="guestbook-zoom"
-              />
-            </label>
+            <PhotoFramingControls
+              aspect={photoAspect}
+              slotAspect={template.frameAspect(photoAspect)}
+              view={view}
+              onChange={setView}
+              zoomLabel={t('partyGuestbookComposer.zoom')}
+              testId="guestbook"
+            />
             <button
               type="button"
               className="party-contribution-secondary"

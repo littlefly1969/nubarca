@@ -465,7 +465,7 @@ describe('the same guest book on the screen', () => {
     }
   });
 
-  it('places the photograph inside its frame the same way', () => {
+  it('places the photograph inside its frame the same way, zoomed in or out', () => {
     const crops = [
       { centerX: 0.5, centerY: 0.5, zoom: 1 },
       { centerX: 0, centerY: 1, zoom: 1 },
@@ -473,16 +473,20 @@ describe('the same guest book on the screen', () => {
       { centerX: 0.9, centerY: 0.1, zoom: 4 },
       { centerX: 0.5, centerY: 0.5, zoom: 9 },
       { centerX: -1, centerY: 2, zoom: 0.2 },
+      // Zoomed out: between contain and 1, at contain, and below it.
+      { centerX: 0.3, centerY: 0.7, zoom: 0.9 },
+      { centerX: 0.5, centerY: 0.5, zoom: 0.75 },
+      { centerX: 0.1, centerY: 0.9, zoom: 0.5 },
+      { centerX: 0.5, centerY: 0.5, zoom: Number.NaN },
     ];
     for (const photo of aspects) {
-      for (const frame of [4 / 5, 1, 4 / 3, 3 / 2, 3 / 4]) {
+      for (const frame of [4 / 5, 1, 4 / 3, 3 / 2, 3 / 4, 0, Number.NaN]) {
         for (const crop of crops) {
-          const web = webGuestbook.guestbookCrop(photo, frame, crop);
-          const app = g('guestbookCrop')(photo, frame, crop) as typeof web;
-          for (const k of ['cropX', 'cropY', 'cropWidth', 'cropHeight'] as const) {
-            expect(web[k]).toBeCloseTo(app[k], 12);
+          const web = webGuestbook.guestbookPhotoPlacement(photo, frame, crop);
+          const app = g('guestbookPhotoPlacement')(photo, frame, crop) as typeof web;
+          for (const k of ['width', 'height', 'left', 'top'] as const) {
+            expect(web[k], `${photo} in ${frame} at ${JSON.stringify(crop)}: ${k}`).toBeCloseTo(app[k], 12);
           }
-          expect(webGuestbook.guestbookPhotoPlacement(web)).toEqual(g('guestbookPhotoPlacement')(web));
         }
       }
     }

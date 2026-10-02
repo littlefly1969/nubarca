@@ -1380,6 +1380,8 @@
 .party-after-cover[data-frame='fixed'] {
   position: relative;
   overflow: hidden;
+  /* Beside a photograph the host zoomed out: white, as on every print. */
+  background: #ffffff;
 }
 
 .party-content-frame-img {
