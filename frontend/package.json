@@ -11,7 +11,8 @@
     "lint": "npm run typecheck",
     "test": "vitest",
     "test:run": "vitest run",
-    "check:stage-layout": "node scripts/check-party-stage-layout.mjs"
+    "check:stage-layout": "node scripts/check-party-stage-layout.mjs",
+    "check:guestbook-tv-layout": "node scripts/check-guestbook-tv-layout.mjs"
   },
   "dependencies": {
     "@fontsource/exo-2": "^5.3.0",

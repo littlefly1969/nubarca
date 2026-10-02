@@ -57,6 +57,7 @@ const REFUSAL_LABEL: Record<string, MessageKey> = {
   no_challenges: 'partyControl.refusedEmpty',
   game_disabled: 'partyControl.refusedDisabled',
   invalid_plan: 'partyControl.refusedPlan',
+  guestbook_active: 'partyGame.guestbookOnTv',
   conflict: 'partyControl.refusedGeneric',
 };
 
@@ -251,6 +252,14 @@ export function PartyControlRoomPage({
           )}
         </aside>
       </section>
+
+      {/* The guest book holds the television: the commands that would take
+          it back are already absent, and this says why. */}
+      {snapshot.guestbookOnTv && (
+        <p className="muted" role="status" data-testid="party-control-guestbook-on-tv">
+          {t('partyGame.guestbookOnTv')}
+        </p>
+      )}
 
       {/* A refusal is stated where the action is, and the screen behind it is
           already correct: the server handed back the state it measured. */}

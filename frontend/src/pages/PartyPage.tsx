@@ -117,6 +117,15 @@ function PrinterIcon() {
   );
 }
 
+function BookIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 6.5C10.3 5 7.8 4.5 4.5 4.5v13c3.3 0 5.8.5 7.5 2 1.7-1.5 4.2-2 7.5-2v-13c-3.3 0-5.8.5-7.5 2Z" />
+      <path d="M12 6.5v13" />
+    </svg>
+  );
+}
+
 function PhotoStackIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -714,6 +723,10 @@ export function PartyPage() {
   const contributionUrl = context.capabilities.contributionUrl;
   const printUrl = context.capabilities.printUrl;
   const gameUrl = context.capabilities.gameUrl;
+  // Present only while the party is live AND the regia has opened the book to
+  // the room. It rides the context poll, so the card comes and goes without a
+  // reload; writing a memory is a separate door and is not affected.
+  const guestbookViewUrl = context.capabilities.guestbookViewUrl ?? null;
   // A BACKEND THAT PREDATES THE SWITCH sends no field at all, and for it the
   // old rule is still the right one: a party that accepts contributions
   // accepts greetings. `null` from a backend that HAS the field means the host
@@ -760,6 +773,17 @@ export function PartyPage() {
       variant: 'activity',
       badgeKey: 'partyHub.live',
       available: Boolean(gameUrl),
+    },
+    {
+      // "Guarda il Guestbook". Reading, never writing — and only when the
+      // server says so, exactly like the game.
+      id: 'guestbook',
+      titleKey: 'partyHub.guestbookView',
+      descriptionKey: 'partyHub.guestbookViewHelp',
+      icon: <BookIcon />,
+      target: { kind: 'route', to: guestbookViewUrl ?? '' },
+      variant: 'activity',
+      available: Boolean(guestbookViewUrl),
     },
     {
       // Printing is PHYSICAL, so this card appears only when a sheet would

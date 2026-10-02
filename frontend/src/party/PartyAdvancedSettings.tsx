@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  ApiError,
   PARTY_GAME_RANGES,
   PARTY_SLIDESHOW_RANGES,
   type AlbumPartyStatus,
@@ -197,7 +198,7 @@ export function PartyGameSettings({
   const { t } = useI18n();
   const api = usePartyApi();
   const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'saved' | 'failed'>('idle');
+  const [status, setStatus] = useState<'idle' | 'saved' | 'failed' | 'guestbookActive'>('idle');
   const [draft, setDraft] = useState({
     gameEnabled: false, priorityVotingEnabled: false, minChallengeIntervalSeconds: '300',
     maxChallengeIntervalSeconds: '540', votesPerGuest: '3', maxChallengesPerSession: '',
@@ -241,7 +242,14 @@ export function PartyGameSettings({
         maxChallengesPerSession: sessionMax,
       }));
       setStatus('saved');
-    } catch { setStatus('failed'); } finally { setSaving(false); }
+    } catch (err) {
+      // Turning the game ON while the guest book holds the television is
+      // refused by name: the regia returns the screen to the slideshow first.
+      const code = err instanceof ApiError && err.status === 409
+        ? (err.body as { error?: string } | null)?.error
+        : undefined;
+      setStatus(code === 'guestbook_active' ? 'guestbookActive' : 'failed');
+    } finally { setSaving(false); }
   }
 
   return (
@@ -318,6 +326,11 @@ export function PartyGameSettings({
         </span>
       </div>
       {status === 'failed' && <p role="alert" className="pw-field-error">{t('partyGame.error')}</p>}
+      {status === 'guestbookActive' && (
+        <p role="alert" className="pw-field-error" data-testid="party-game-guestbook-active">
+          {t('partyGame.guestbookOnTv')}
+        </p>
+      )}
 
       {draft.gameEnabled && (
         // Preparing and conducting are different jobs, so they stay different

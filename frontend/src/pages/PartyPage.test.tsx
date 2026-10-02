@@ -83,7 +83,7 @@ describe('PartyPage (public party landing)', () => {
   function context(overrides: Record<string, unknown> = {}) {
     const {
       contributionUrl, gameUrl, printUrl, faceSearch, gameEnabled,
-      slideshowMessageUrl, guestbookUrl, ...rest
+      slideshowMessageUrl, guestbookUrl, guestbookViewUrl, ...rest
     } = {
       contributionUrl: '/party/upload-token/upload' as string | null,
       gameUrl: undefined as string | null | undefined,
@@ -114,6 +114,7 @@ describe('PartyPage (public party landing)', () => {
         // say "older server", and it is what exercises the page's own fallback.
         ...(slideshowMessageUrl === undefined ? {} : { slideshowMessageUrl }),
         ...(guestbookUrl === undefined ? {} : { guestbookUrl }),
+        ...(guestbookViewUrl === undefined ? {} : { guestbookViewUrl }),
       },
       library: { available: false, accessEndsAt: null },
       ...rest,
@@ -1047,8 +1048,70 @@ describe('PartyPage (public party landing)', () => {
 
     // And nothing reaches the composer or the book from here, by any route:
     // the server may still report where they are, and the hub does not use it.
+    // (READING the whole book is a separate card, offered only while the regia
+    // has opened it to the room — see "Guarda il Guestbook" below.)
     expect(document.querySelectorAll('a[href*="mode=message"]')).toHaveLength(0);
     expect(document.querySelectorAll('a[href*="/guestbook"]')).toHaveLength(0);
+  });
+
+  // --- "Guarda il Guestbook" -----------------------------------------------
+  //
+  // Reading the book during the party is the regia's decision, carried by the
+  // server as `guestbookViewUrl` on the context the page already polls. It is
+  // never a way to WRITE: leaving a memory stays behind the one contribution
+  // door, whatever the regia decides here.
+
+  it('offers no reading card while the regia keeps the book closed, and writing stays open', async () => {
+    mockHub({ guestbookUrl: '/party/tok-1/guestbook', guestbookViewUrl: null });
+    render(wrapper());
+    await screen.findByTestId('party-grid');
+
+    expect(screen.queryByTestId('party-capability-guestbook')).not.toBeInTheDocument();
+    expect(screen.queryByText('Guarda il Guestbook')).not.toBeInTheDocument();
+    // "Lascia un ricordo" lives behind the contribution door, unchanged.
+    expect(screen.getByTestId('party-hub-cta')).toHaveAttribute('href', '/party/upload-token/upload');
+  });
+
+  it('offers "Guarda il Guestbook" while the regia has opened the book to the room', async () => {
+    mockHub({ guestbookUrl: '/party/tok-1/guestbook', guestbookViewUrl: '/party/tok-1/guestbook' });
+    render(wrapper());
+
+    const card = await screen.findByTestId('party-capability-guestbook');
+    expect(card).toHaveAttribute('data-variant', 'activity');
+    expect(within(card).getByRole('link', { name: /Guarda il Guestbook/i }))
+      .toHaveAttribute('href', '/party/tok-1/guestbook');
+    // Opening the book is reading it; nothing here is a feed or a reaction.
+    expect(card.textContent).not.toMatch(/like|commenta|reazion/i);
+  });
+
+  it('shows and hides the card as the regia decides, without a reload', async () => {
+    let viewUrl: string | null = null;
+    installFetchMock({
+      'GET /api/party/tok-1': () => jsonResponse(context({
+        guestbookUrl: '/party/tok-1/guestbook', guestbookViewUrl: viewUrl,
+      })),
+      'GET /api/party/tok-1/items': () => jsonResponse(items),
+    });
+    vi.useFakeTimers();
+    try {
+      render(wrapper());
+      await settle();
+      expect(screen.queryByTestId('party-capability-guestbook')).not.toBeInTheDocument();
+
+      // The regia opens the book: the next poll brings the card.
+      viewUrl = '/party/tok-1/guestbook';
+      await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+      await settle();
+      expect(screen.getByTestId('party-capability-guestbook')).toBeInTheDocument();
+
+      // …and closes it again: the next poll takes it away.
+      viewUrl = null;
+      await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+      await settle();
+      expect(screen.queryByTestId('party-capability-guestbook')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // --- Guest dock -----------------------------------------------------------

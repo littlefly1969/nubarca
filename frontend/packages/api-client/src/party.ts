@@ -13,6 +13,10 @@ import type {
   PartyInvitationView,
   PartyContributionsPatch,
   PartyGuestbookEntry,
+  PartyGuestbookLiveCommand,
+  PartyGuestbookLiveControl,
+  PartyGuestbookLiveRefusalBody,
+  PartyGuestbookLiveRefusalCode,
   PartyGuestbookManagerList,
   PartyGuestbookPage,
   PartyGuestbookPhotos,
@@ -77,9 +81,16 @@ export type {
   PartyGuestbookPage,
   PartyGuestbookPhoto,
   PartyGuestbookPhotos,
+  PartyGuestbookLiveCommand,
+  PartyGuestbookLiveControl,
+  PartyGuestbookLiveRefusalBody,
+  PartyGuestbookLiveRefusalCode,
   PartyGuestbookRefusal,
+  PartyGuestbookScope,
   PartyGuestbookSubmissionRequest,
   PartyGuestbookTemplateKey,
+  PartyGuestbookTvUnavailableReason,
+  PartyTvPresentation,
   PartyMessage,
   PartyMessageAction,
   PartyMessageList,
@@ -96,6 +107,7 @@ export {
   DEFAULT_PARTY_GUESTBOOK_TEMPLATE,
   PARTY_GUESTBOOK_CROP_LIMITS,
   PARTY_GUESTBOOK_LIMITS,
+  PARTY_GUESTBOOK_LIVE_COMMANDS,
   PARTY_GUESTBOOK_TEMPLATE_KEYS,
   PARTY_SLIDESHOW_RANGES,
   partyGuestbookRefusal,
@@ -739,6 +751,13 @@ export interface PartyGuestCapabilities {
    * for as long as the book is READABLE, which outlasts the party itself.
    */
   guestbookUrl?: string | null;
+  /**
+   * "Guarda il Guestbook": present exactly while the party is LIVE and the
+   * regia has opened the whole book to the room — the same route as
+   * `guestbookUrl`, offered as its own card only then. It arrives on the
+   * party's ordinary poll, so the card comes and goes without a reload.
+   */
+  guestbookViewUrl?: string | null;
 }
 
 export interface PartyGuestLibrary {
@@ -1504,6 +1523,61 @@ export function moderatePartyGuestbookEntry(
     `/api/parties/${partyId}/guestbook/${entryId}/${action}`,
     { method: 'POST', signal },
   );
+}
+
+// --- THE GUEST BOOK, LIVE (owner) ---
+//
+// The regia's two decisions about the book during the evening. Album-scoped,
+// like the game's control: the live party behind an album is what both act on.
+
+/**
+ * A refused live command. NOT an error to show and forget: `control` is the
+ * state the refusal was measured against, so the regia adopts it and ends the
+ * request correct.
+ */
+export class PartyGuestbookLiveConflict extends Error {
+  constructor(
+    readonly code: PartyGuestbookLiveRefusalCode,
+    readonly control: PartyGuestbookLiveControl | null,
+  ) {
+    super(code);
+    this.name = 'PartyGuestbookLiveConflict';
+  }
+}
+
+/** A 403 or 409 from a live command, as the refusal it carries. */
+export function asPartyGuestbookLiveConflict(error: unknown): unknown {
+  if (error instanceof ApiError && (error.status === 409 || error.status === 403)) {
+    const body = error.body as Partial<PartyGuestbookLiveRefusalBody> | null;
+    return new PartyGuestbookLiveConflict(
+      body?.code ?? (error.status === 403 ? 'forbidden' : 'version_conflict'),
+      body?.control ?? null);
+  }
+  return error;
+}
+
+export function getPartyGuestbookLive(
+  albumId: string,
+  signal?: AbortSignal,
+): Promise<PartyGuestbookLiveControl> {
+  return api<PartyGuestbookLiveControl>(
+    `/api/albums/${encodeURIComponent(albumId)}/party-guestbook-live`, { signal });
+}
+
+export async function sendPartyGuestbookLiveCommand(
+  albumId: string,
+  command: PartyGuestbookLiveCommand,
+  expectedVersion: number,
+  signal?: AbortSignal,
+): Promise<PartyGuestbookLiveControl> {
+  try {
+    return await api<PartyGuestbookLiveControl>(
+      `/api/albums/${encodeURIComponent(albumId)}/party-guestbook-live/commands`,
+      { method: 'POST', json: { command, expectedVersion }, signal },
+    );
+  } catch (error) {
+    throw asPartyGuestbookLiveConflict(error);
+  }
 }
 
 // --- WHERE THE PARTY IS ---

@@ -9,6 +9,7 @@ import * as webAssignment from './assignmentView';
 import * as webFlow from './flow';
 import * as webMessages from './partyMessages';
 import * as webSlideshow from './partySlideshow';
+import * as webGuestbook from './partyGuestbook';
 import * as webLiveItems from './liveItems';
 import * as webGrant from './partyDisplayGrant';
 import * as webRemote from './remoteMap';
@@ -51,7 +52,7 @@ async function loadNative(relative: string): Promise<Record<string, unknown>> {
 type Module = Record<string, unknown>;
 let native: {
   assignment: Module; flow: Module; messages: Module; slideshow: Module; liveItems: Module; grant: Module;
-  remote: Module;
+  remote: Module; guestbook: Module;
 };
 
 beforeAll(async () => {
@@ -63,6 +64,7 @@ beforeAll(async () => {
     liveItems: await loadNative('lib/liveItems.ts'),
     grant: await loadNative('lib/partyDisplayGrant.ts'),
     remote: await loadNative('video/remoteMap.ts'),
+    guestbook: await loadNative('lib/partyGuestbook.ts'),
   };
 });
 
@@ -83,6 +85,7 @@ describe('the browser ports every rule the app has', () => {
   it('navigation', () => assertSurface(native.flow, webFlow));
   it('greetings and Heroes', () => assertSurface(native.messages, webMessages));
   it('slideshow timing', () => assertSurface(native.slideshow, webSlideshow));
+  it('the guest book on the screen', () => assertSurface(native.guestbook, webGuestbook));
   it('live items', () => assertSurface(native.liveItems, webLiveItems));
   it('the remote in the viewer', () => assertSurface(native.remote, webRemote));
   it('game display grant', () => assertSurface(native.grant, webGrant, {
@@ -100,6 +103,8 @@ const assignments = [
   { kind: 'general', albumId: null, albumName: null, partyAvailable: false, presentation: 'general' },
   { kind: 'party', albumId: 'a1', albumName: 'Festa', partyAvailable: true, presentation: 'slideshow', assignmentKey: 'k1' },
   { kind: 'party', albumId: 'a1', albumName: 'Festa', partyAvailable: true, presentation: 'game', assignmentKey: 'k1' },
+  { kind: 'party', albumId: 'a1', albumName: 'Festa', partyAvailable: true, presentation: 'guestbook', assignmentKey: 'k1' },
+  { kind: 'party', albumId: null, albumName: null, partyAvailable: true, presentation: 'guestbook', assignmentKey: 'k3' },
   { kind: 'party', albumId: 'a1', albumName: 'Festa', partyAvailable: false, presentation: 'unavailable', assignmentKey: 'k1' },
   { kind: 'party', albumId: null, albumName: null, partyAvailable: true, presentation: 'slideshow', assignmentKey: 'k2' },
   { kind: 'party', albumId: 'a1', albumName: 'Festa', partyAvailable: true },
@@ -136,6 +141,7 @@ describe('the same navigation', () => {
     { name: 'party' },
     { name: 'partySlideshow', party: partyA },
     { name: 'partyGame', party: partyA },
+    { name: 'partyGuestbook', party: partyA },
     { name: 'partyUnavailable', party: partyA },
     { name: 'pin', target: 'personal' },
     { name: 'pin', target: 'beautyLab' },
@@ -151,6 +157,7 @@ describe('the same navigation', () => {
     { type: 'SESSION_READY', assignment: view('general') },
     { type: 'SESSION_READY', assignment: view('slideshow') },
     { type: 'SESSION_READY', assignment: view('game') },
+    { type: 'SESSION_READY', assignment: view('guestbook') },
     { type: 'SESSION_INVALID' },
     { type: 'ASSOCIATION_INCOMPLETE' },
     { type: 'CHOOSE_PARTY' },
@@ -166,6 +173,8 @@ describe('the same navigation', () => {
     { type: 'ASSIGNMENT', view: view('general') },
     { type: 'ASSIGNMENT', view: view('slideshow') },
     { type: 'ASSIGNMENT', view: view('game') },
+    { type: 'ASSIGNMENT', view: view('guestbook') },
+    { type: 'ASSIGNMENT', view: view('guestbook', partyB) },
     { type: 'ASSIGNMENT', view: view('unavailable') },
     { type: 'ASSIGNMENT', view: view('slideshow', partyB) },
     { type: 'ASSIGNMENT', view: view('slideshow', { ...partyA, albumName: 'Renamed' }) },
@@ -184,7 +193,7 @@ describe('the same navigation', () => {
   );
 
   it('admits a session the same way', () => {
-    for (const assignment of [view('general'), view('slideshow'), view('game'), view('unavailable')]) {
+    for (const assignment of [view('general'), view('slideshow'), view('game'), view('guestbook'), view('unavailable')]) {
       for (const pinConfigured of [true, false]) {
         expect(webFlow.admissionEvents(assignment as never, pinConfigured))
           .toEqual(fn(native.flow, 'admissionEvents')(assignment, pinConfigured));
@@ -402,3 +411,121 @@ describe('the same remote', () => {
     }
   });
 });
+
+describe('the same guest book on the screen', () => {
+  const g = (name: string) => fn(native.guestbook, name);
+  const bodies = [
+    '',
+    'Auguri!',
+    'a'.repeat(220),
+    'a'.repeat(221),
+    'uno\ndue\ntre\nquattro\ncinque',
+    'uno\ndue\ntre\nquattro\ncinque\nsei',
+    'a\n\n\nb',
+    '😀'.repeat(221),
+    'x'.repeat(90),
+    'x'.repeat(91),
+    'x'.repeat(560),
+    'x'.repeat(561),
+    'Cara Anna,\n\nche festa!\n\nUn abbraccio',
+    'z'.repeat(1000),
+    `a${'\n'.repeat(400)}b`,
+  ];
+
+  it('holds a memory for the same time and draws its words at the same density', () => {
+    for (const body of bodies) {
+      expect(webGuestbook.isLongDedication(body), body).toBe(g('isLongDedication')(body));
+      expect(webGuestbook.guestbookDwellMs(body), body).toBe(g('guestbookDwellMs')(body));
+      expect(webGuestbook.guestbookTextWeight(body), body).toBe(g('guestbookTextWeight')(body));
+      expect(webGuestbook.guestbookDensity(body), body).toBe(g('guestbookDensity')(body));
+      for (const height of [720, 1080, 2160]) {
+        const density = webGuestbook.guestbookDensity(body);
+        expect(webGuestbook.guestbookTvFontPx(height, density)).toBe(g('guestbookTvFontPx')(height, density));
+      }
+    }
+    for (const px of [-1, 0, 1, 2, 3, 6, 7, 26, 52, 79.5]) {
+      expect(webGuestbook.guestbookTvShrink(px)).toBe(g('guestbookTvShrink')(px));
+    }
+  });
+
+  // The app's template table is a COPY; this is what keeps it the web's.
+  const templates: Array<[string, number]> = [
+    ['nubarca', 1], ['polaroid', 1], ['editorial', 1], ['celebration', 1],
+    ['polaroid', 9], ['unknown', 1], ['', 0],
+  ];
+  const aspects = [0.5, 0.75, 0.98, 1, 1.02, 1.03, 4 / 3, 16 / 9, 3, Number.NaN, 0];
+
+  it('frames every template the same way', () => {
+    for (const [key, version] of templates) {
+      expect(webGuestbook.guestbookTemplateKey(key, version)).toBe(g('guestbookTemplateKey')(key, version));
+      for (const aspect of aspects) {
+        expect(webGuestbook.guestbookFrameAspect(key, version, aspect), `${key}@${version} ${aspect}`)
+          .toBe(g('guestbookFrameAspect')(key, version, aspect));
+      }
+    }
+  });
+
+  it('places the photograph inside its frame the same way', () => {
+    const crops = [
+      { centerX: 0.5, centerY: 0.5, zoom: 1 },
+      { centerX: 0, centerY: 1, zoom: 1 },
+      { centerX: 0.2, centerY: 0.8, zoom: 2.5 },
+      { centerX: 0.9, centerY: 0.1, zoom: 4 },
+      { centerX: 0.5, centerY: 0.5, zoom: 9 },
+      { centerX: -1, centerY: 2, zoom: 0.2 },
+    ];
+    for (const photo of aspects) {
+      for (const frame of [4 / 5, 1, 4 / 3, 3 / 2, 3 / 4]) {
+        for (const crop of crops) {
+          const web = webGuestbook.guestbookCrop(photo, frame, crop);
+          const app = g('guestbookCrop')(photo, frame, crop) as typeof web;
+          for (const k of ['cropX', 'cropY', 'cropWidth', 'cropHeight'] as const) {
+            expect(web[k]).toBeCloseTo(app[k], 12);
+          }
+          expect(webGuestbook.guestbookPhotoPlacement(web)).toEqual(g('guestbookPhotoPlacement')(web));
+        }
+      }
+    }
+  });
+
+  it('sizes the photograph on the stage the same way', () => {
+    for (const [w, h] of [[960, 540], [1280, 720], [1920, 1080], [3840, 2160]]) {
+      expect(webGuestbook.guestbookTvStageSize(w, h)).toEqual(g('guestbookTvStageSize')(w, h));
+    }
+    for (const [w, h] of [[1280, 720], [1920, 1080], [1152, 634], [1728, 950], [3840, 2160]]) {
+      for (const frame of [4 / 5, 1, 4 / 3, 3 / 2, 3 / 4, 0, Number.NaN]) {
+        for (const density of ['airy', 'regular', 'compact', 'dense']) {
+          expect(webGuestbook.guestbookTvPhotoBox(w, h, frame, density as never))
+            .toEqual(g('guestbookTvPhotoBox')(w, h, frame, density));
+          const photoHeight = webGuestbook.guestbookTvPhotoBox(w, h, frame, density as never).height;
+          expect(webGuestbook.guestbookTvWordsHeight(h, photoHeight, density as never))
+            .toBe(g('guestbookTvWordsHeight')(h, photoHeight, density));
+          const photoWidth = webGuestbook.guestbookTvPhotoBox(w, h, frame, density as never).width;
+          expect(webGuestbook.guestbookTvWordsWidth(w, photoWidth, density as never))
+            .toBe(g('guestbookTvWordsWidth')(w, photoWidth, density));
+        }
+      }
+    }
+  });
+
+  it('follows the book the same way', () => {
+    const decks: Array<[string[], string | null, string[]]> = [
+      [[], null, []],
+      [[], null, ['a', 'b']],
+      [['a', 'b', 'c'], 'b', ['a', 'b', 'c']],
+      [['a', 'b', 'c'], 'b', ['a', 'b', 'c', 'd']],
+      [['a', 'b', 'c'], 'b', ['a', 'c']],
+      [['a', 'b', 'c'], 'c', ['a', 'b']],
+      [['a', 'b', 'c'], 'c', ['b']],
+      [['a', 'b', 'c'], 'b', []],
+      [['a'], 'a', ['x', 'y']],
+      [['a', 'b'], 'z', ['a', 'b']],
+    ];
+    for (const [previous, current, fresh] of decks) {
+      expect(webGuestbook.reconcileGuestbookDeck(previous, current, fresh))
+        .toBe(g('reconcileGuestbookDeck')(previous, current, fresh));
+      expect(webGuestbook.nextGuestbookMemory(fresh, current)).toBe(g('nextGuestbookMemory')(fresh, current));
+    }
+  });
+});
+

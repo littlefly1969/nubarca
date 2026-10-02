@@ -183,6 +183,12 @@ export interface PartyGameSnapshot {
   priorityVotingEnabled: boolean;
   /** Whether the guests may still change their preferences. */
   preferencesOpen: boolean;
+  /**
+   * The regia has put the guest book on the party's television. Every command
+   * that would take the screen back is then absent from `availableCommands`;
+   * the game resumes once the regia returns the television to the slideshow.
+   */
+  guestbookOnTv?: boolean;
   /** Guests seen recently on this party link. */
   guestsPresent: number;
   /**
@@ -271,6 +277,9 @@ export type PartyGameCommandCode =
   // A planning action that cannot be carried out: an unknown activity, or one
   // the host may not move — anything already played, and whatever is on screen.
   | 'invalid_plan'
+  // The guest book holds the television: a command that would take the screen
+  // waits until the regia returns it to the slideshow.
+  | 'guestbook_active'
   | 'conflict';
 
 export type PartyGamePreferenceCode =

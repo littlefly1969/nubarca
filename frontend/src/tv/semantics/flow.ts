@@ -15,19 +15,19 @@
 //      │            │                          │ OPEN_LIBRARY ▶ personalLibrary
 //      │            │                          │ ◀─ LIBRARY_BACK┘
 //      │            │                          └── LOCK ──▶ mode
-//      │            └─(assigned party)──▶ partySlideshow | partyGame | partyUnavailable
+//      │            └─(assigned party)──▶ partySlideshow | partyGame | partyGuestbook | partyUnavailable
 //      ├── SESSION_INVALID (from ANY state) ──▶ pairing
 //      └── ASSOCIATION_INCOMPLETE (any paired state) ──▶ pairing(incomplete)
 //
 //   ASSIGNMENT (from ANY paired state):
-//      party presentation ──▶ partySlideshow | partyGame | partyUnavailable
+//      party presentation ──▶ partySlideshow | partyGame | partyGuestbook | partyUnavailable
 //      general            ──▶ mode (only when leaving a party presentation)
 //
 // THE ASSIGNMENT IS SERVER-AUTHORITATIVE. An owner who assigns this display to
 // a party has decided what the screen in the room shows, and nothing local
 // outranks it: not the mode selector, not manual Party browsing, not the PIN
 // entry and not somebody standing in their own Personal Area — leaving a
-// personal screen that way LOCKS it (flowEffects). The three party states are
+// personal screen that way LOCKS it (flowEffects). The four party states are
 // keyed by the server's assignment key, so Party A → Party B and slideshow →
 // game are different states, which is what forces a teardown. And an assigned
 // party is left ONLY by the server: no local event returns it to general.
@@ -51,6 +51,8 @@ export type TvFlowState =
   | { name: 'party' }
   | { name: 'partySlideshow'; party: AssignedParty }
   | { name: 'partyGame'; party: AssignedParty }
+  // The party's guest book, while the regia has put it on the screen.
+  | { name: 'partyGuestbook'; party: AssignedParty }
   | { name: 'partyUnavailable'; party: AssignedParty }
   | { name: 'pin'; target: UnlockTarget }
   | { name: 'personalHome'; home: PersonalHomeInfo }
@@ -144,6 +146,7 @@ function assignedState(view: AssignmentView): TvFlowState | null {
     case 'general': return null;
     case 'slideshow': return { name: 'partySlideshow', party: view.party };
     case 'game': return { name: 'partyGame', party: view.party };
+    case 'guestbook': return { name: 'partyGuestbook', party: view.party };
     case 'unavailable': return { name: 'partyUnavailable', party: view.party };
   }
 }
@@ -156,12 +159,13 @@ function sameAssignedState(state: TvFlowState, target: TvFlowState): boolean {
     && state.party.albumName === target.party.albumName;
 }
 
-/** The three states a display assigned to a party can be in. */
+/** The four states a display assigned to a party can be in. */
 export function isAssignedPartyState(
   state: TvFlowState,
 ): state is Extract<TvFlowState, { party: AssignedParty }> {
   return state.name === 'partySlideshow'
     || state.name === 'partyGame'
+    || state.name === 'partyGuestbook'
     || state.name === 'partyUnavailable';
 }
 

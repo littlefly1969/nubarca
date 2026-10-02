@@ -1,0 +1,35 @@
+/* The guest book on a television: one memory, centred inside a generous safe
+   area, on the party's night colour. Nothing here clips: the stage sizes the
+   memory to fit, and the memory's words are measured until they do. */
+
+.guestbook-tv-stage {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 6vh 5vw;
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgb(21 101 255 / 16%), transparent 60%),
+    var(--brand-midnight-navy, #0a0f1a);
+  color: var(--brand-cloud-white, #f5f7fb);
+}
+
+.guestbook-tv-memory {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  animation: guestbook-tv-in 700ms ease-out both;
+}
+
+/* A sober dissolve with the faintest settle. Never for a viewer who asked for
+   less motion: they get the new memory, still. */
+@keyframes guestbook-tv-in {
+  from { opacity: 0; transform: scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guestbook-tv-memory { animation: none; }
+}

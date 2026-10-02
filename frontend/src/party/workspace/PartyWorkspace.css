@@ -1897,3 +1897,14 @@
 @media (width >= 30rem) {
   .pw-product-numbers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* The guest book's live card: the television's half sits under the room's,
+   separated the way two decisions are. */
+.pw-guestbook-live-tv {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--pw-line);
+}
+.pw-guestbook-live-tv > p { margin: 0; }
