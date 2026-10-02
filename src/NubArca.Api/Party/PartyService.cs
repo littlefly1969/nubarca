@@ -237,10 +237,25 @@ public sealed class PartyService : IPartyService
         // control can put it back once the party is over. Whether the room may
         // read the book is a setting of the live surface, not runtime, and is
         // left as the host set it.
+        //
+        // It joins the SAME boundary as every guest-book command and every game
+        // command that takes the screen: the party's link rows, locked first
+        // and UNCONDITIONALLY. The lock must not depend on the flag — a clear
+        // filtered on `GuestbookTvActive` matches nothing while it is false and
+        // takes no lock, so a `show_on_tv` could commit `true` between that
+        // statement and the party leaving LIVE, and outlive the evening. Locked
+        // first, the two are ordered: a `show_on_tv` that won is cleared below,
+        // read after the lock; one that waits reads the party already over and
+        // is refused as `party_not_live`.
         var owned = _db.Database.CurrentTransaction is null;
         var tx = owned ? await _db.Database.BeginTransactionAsync(cancellationToken) : null;
         try
         {
+            await _db.PartyAlbumLinks
+                .Where(l => l.PartyId == party.Id)
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(l => l.GuestbookControlVersion, l => l.GuestbookControlVersion),
+                    cancellationToken);
             await _db.PartyAlbumLinks
                 .Where(l => l.PartyId == party.Id && l.GuestbookTvActive)
                 .ExecuteUpdateAsync(s => s
