@@ -13,12 +13,25 @@ is built is described by `ARCHITECTURE.md`.
 - Frontend: React, TypeScript, Vite
 - Runtime: Docker Compose with separate API, worker and frontend services
 - Print foundation: server-owned stations/devices/jobs plus a separately
-  packaged headless Print Agent `0.4.0`: a Windows service (spooler), a Linux
+  packaged headless Print Agent `0.5.0`: a Windows service (spooler), a Linux
   fake simulator (systemd instances, protocol acceptance) and a headless Linux
   Print Box on Ubuntu Server 24.04+ or Debian 12+ (`cups` adapter over
   CUPS/Gutenprint with queues created by the installer, NetworkManager Wi-Fi
-  setup network and local setup page). DNP printers still require hardware acceptance
-  on each path
+  setup network and local setup page). The Print Box reports the prints left
+  on the media from Gutenprint's CUPS marker (IPP query shipped with the
+  agent, `ipptool`); it is telemetry (`PrinterDevice.MediaRemainingPrints`),
+  never a gate. DNP printers still require hardware acceptance on each path,
+  including the media count
+- Photo placement: every framing editor and renderer (party print, party
+  content, guest book web/TV/Fire TV, owner print) uses one
+  `{centerX, centerY, zoom}` placement, zoom from the photograph's contain to
+  4, 1 = the historical cover; contracts, server and the Fire TV copy are held
+  to one case table. Party Print slots send `placement` (legacy crop still
+  accepted); bands are the consumer's own background
+- Owner direct print: one own library/album photo on an own or lent printer
+  (`POST /api/print/photo-jobs`, `owner-photo` jobs), `IPrinterAccess`,
+  idempotent through `owner_photo_print_requests`, optional date
+  (override → EXIF → today in the client's zone), white bands, calibration
 - Party printing: the operator sets the printer's loaded paper (10x15, 13x18,
   20x15) and guests compose what that paper can make — a photo or four photos
   two by two on any of them, the twin strip (two strips of four different
