@@ -2235,6 +2235,51 @@ automated contract implementation. The generic Windows spooler adapter discovers
 installed queues and requires a driver-exposed 4×6/10×15 paper size. DNP DS620
 acceptance remains a manual hardware gate; no vendor SDK behavior is claimed.
 
+### 22.7 One photo placement, and the owner's direct print
+
+Every surface that frames a photograph — the party print, the party's section
+photographs, the guest book on phones and televisions, and the owner's direct
+print — shares **one placement**: `{centerX, centerY, zoom}`, the frame's
+centre as fractions of the photograph and a magnification relative to the
+photograph just covering the frame. Zoom 1 is exactly the crop every framing
+stored before this existed meant; zoom may go down to the photograph's
+**contain** zoom, `min(S/F, F/S, 1)`, where the whole photograph is inside the
+frame, and up to 4. An axis the photograph overflows pans, clamped so no gap
+opens; an axis it does not fill is centred, and the consumer's own background
+shows beside it (a party theme's paper, white on an owner's print and on party
+content, the guest book design's photo well). A crop rectangle cannot describe
+a photograph smaller than its frame, so the placement — not a crop — is what
+the editors send and what renderers draw; the crop a placement at zoom ≥ 1
+implies is kept beside it on `PrintJobSource` for the existing readers. The
+geometry exists three times by necessity — `@nubarca/contracts`
+(`photoPlacement.ts`), the server (`PhotoPlacementGeometry`) and the Fire TV's
+pure copy — and one generated case table holds all three to the same numbers.
+The server validates a zoom below 1 against the photograph's **display** shape
+and the frame (1% tolerance for a preview's rounding) before anything is
+reserved; the guest book wire field keeps its name `crop`.
+
+An owner prints one of their own library or album photographs on their own
+printer or one lent to them (`POST /api/print/photo-jobs`, job kind
+`owner-photo`). It is not a party: no party, budget, footer or brand is
+involved. Access is `IPrinterAccess`'s answer, a loan's sheet is taken by the
+same atomic statement as everywhere else and returned on any failure before a
+job exists, the original is read and rendered inside the server, the printer's
+calibration is applied, and `owner_photo_print_requests` makes a key one sheet
+(same key and composition → the same job; a different composition →
+`idempotency_conflict`). The optional date is the owner's correction, else the
+camera's, else **today in the client's IANA zone** (an unknown zone is refused,
+never guessed) — never the upload date — formatted from one table shared with
+the preview.
+
+The prints left on a printer's media are **telemetry**. The Linux Print Box
+reads Gutenprint's own count from the CUPS marker attributes with one IPP query
+the agent ships; a `marker-levels` percentage never becomes a count, and no
+number is better than an invented one. The heartbeat's `mediaRemaining` is
+stored as `MediaRemainingPrints` with a server-clock observation time, shown to
+the printer's owner and borrowers next to — never as — a loan's quota or a
+party's budget, labelled as the last reading while the printer is offline, and
+never a gate: a printer that says 0 still gets its job.
+
 ## 23. Security and privacy boundary checklist
 
 Every new route, service, query, job, or client feature must preserve all applicable checks below.

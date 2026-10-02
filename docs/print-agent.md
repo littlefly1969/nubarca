@@ -322,8 +322,9 @@ Three commands and two answers; nothing else is done by hand.
    It answers two questions silently — the **setup Wi-Fi password** (8–63
    characters) and the **enrollment token** — and then, by itself:
 
-   - installs `cups`, `printer-driver-gutenprint`, `network-manager`,
-     `dnsmasq-base`, `avahi-daemon`, `polkitd`, `iw`, ICU and CA certificates;
+   - installs `cups`, `cups-ipp-utils` (for `ipptool`, see *Prints remaining*),
+     `printer-driver-gutenprint`, `network-manager`, `dnsmasq-base`,
+     `avahi-daemon`, `polkitd`, `iw`, ICU and CA certificates;
    - finds the DNP on USB and creates both print queues (next section);
    - names the machine `nubarca-print` (`--hostname`, `--keep-hostname`);
    - installs `nubarca-print-agent@box` under its own account
@@ -417,6 +418,52 @@ request body, and never returns a password. Passwords reach `nmcli` as separate
 arguments, never through a shell; while `nmcli` runs they are visible in the
 process list to other local accounts, which a dedicated box does not have.
 
+### Prints remaining on the media
+
+From agent **0.5** the box reports how many prints are left on the loaded
+media, as the printer itself counts them. NubArca never talks to the DNP over
+USB: Gutenprint's dye-sub backend reads the printer and publishes the count as
+a CUPS marker, and the agent asks CUPS for it.
+
+- **The query** is one IPP Get-Printer-Attributes the bundle ships
+  (`linux/nubarca-media-status.test`), asking only `marker-message`,
+  `marker-levels`, `marker-change-time` and `printer-up-time`:
+  `ipptool -T 5 -X ipp://localhost/printers/<photo queue> nubarca-media-status.test`,
+  with an 8-second ceiling. `ipptool` comes from `cups-ipp-utils`, which the
+  installer installs.
+- **The count** is the integer in a message such as `187 native prints
+  remaining on '4x6' media`. Nothing else is: `marker-levels` is a percentage
+  and is never multiplied into prints; a missing, unrecognised, negative or
+  implausible (over 100 000) message, or two messages that disagree, is **no
+  number** — "Not available" — never a guess. 0 is a real reading: the media
+  is used up.
+- **One printer, one count.** The strip queue is the same printer and the same
+  media, so the count is always read through the photo queue.
+- **Cached for 8 seconds**, and dropped when a sheet is submitted so the next
+  heartbeat reads again; the agent never decrements it itself. A query that
+  fails or hangs is no number and never makes a ready printer offline.
+- **Sent on every heartbeat** as `mediaRemaining {available, remainingPrints,
+  ageSeconds}` (age from `printer-up-time` − `marker-change-time`). An older
+  server ignores the field; an older agent sends none and the server keeps the
+  last reading untouched.
+- **Where it shows**: Cloud functions → Print stations (and a borrower's
+  *Printers lent to you*), the party's printer choice and the direct-print
+  dialog — always beside, never instead of, a loan's quota or a party's
+  budget — and the box's own status page (*Prints remaining*). Never to party
+  guests. While a printer is offline NubArca shows the count only as *Last
+  reading: N · hh:mm*.
+- **It is never a gate.** A printer reporting 0 still receives its job; CUPS,
+  the driver and the printer decide what happens to the paper.
+- Logs: `print.media.remaining.observed` / `print.media.remaining.unavailable`
+  once per change, with the queue and count — no job, photo or credential.
+
+Windows (spooler) reports no count in this version; the simulator reports
+`PrintAgent:FakeRemainingPrints` when set, one fewer per sheet.
+
+Upgrading a box is the same install command with the new bundle: the
+enrollment, credential, station, Wi-Fi profiles and queue names are kept; the
+only new package is `cups-ipp-utils`.
+
 ### Diagnostics
 
 - `systemctl status nubarca-print-agent@box` and
@@ -446,6 +493,23 @@ Not verified until one dated record covers, on the RX1HS over USB:
 | 9 | Reboot | saved network used; no setup network |
 | 10 | New place, no known network | setup network after the grace period |
 | 11 | Wrong password | setup network back, page says it failed, box still configurable |
+
+**Prints remaining (agent 0.5) — physical acceptance pending.** Verified only
+in automated tests against real `ipptool` output from the shipped query; not
+yet on a DNP. One dated record must cover:
+
+| # | Check | Expected |
+|---:|---|---|
+| 1 | DNP on, media loaded | a count in Print stations and on the box's page |
+| 2 | Print one photo | after the printer updates, the count is one lower |
+| 3 | Print a twin strip | one physical sheet consumed |
+| 4 | Media used up | 0, or the printer's media-empty state, consistently |
+| 5 | USB unplugged | printer offline; the count shown only as the last reading |
+| 6 | USB plugged back | the count returns |
+| 7 | Reboot the box | the count is read again from CUPS/Gutenprint |
+| 8 | `systemctl restart cups` | the agent keeps running and reads again |
+| 9 | Box status page | the same value as NubArca |
+| 10 | 10×15 / 13×18 / 20×15 where loaded | a count consistent with the media |
 
 ## Colour adjustment per printer
 

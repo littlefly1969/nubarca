@@ -6,6 +6,37 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Printing: the prints left, your own photos on paper, the whole photo
+
+- **See how many prints are left on the printer.** A Linux Print Box with a
+  DNP reports the count the printer itself gives (for example 187), in Print
+  stations, on a printer lent to you, in the party's printer choice, in the
+  print dialog and on the box's own page. It is the printer's estimate: when
+  the printer gives no number NubArca says *Number not available* instead of
+  guessing, and while the printer is offline it shows the last reading with
+  its time. It is never a limit — a printer that says 0 still gets the job.
+  Party guests never see it. It is shown apart from a loan's *Shared quota*
+  and a party's budget, which are different numbers.
+- **Print a photo straight from your library or one of your albums.** Select
+  one photo and press *Print*: choose your printer or one lent to you, see the
+  paper and the prints left, turn the sheet, place the photo, and optionally
+  add its date in small type bottom-right — your corrected date, else the
+  camera's, else today; never the upload date. The preview is the print. No
+  party, no logo, no extra text. Pressing *Send* twice prints one sheet.
+- **Zoom out to the whole photo, everywhere you frame one.** The party print
+  (one photo, four photos, both strips), the party's section photos and the
+  guest book now offer *Fit*, *Fill* and *Center* and a zoom that goes down to
+  the whole photograph. Beside it the sheet shows its own paper (the party
+  theme's colour; white on your own prints and on the party's pages; the
+  design's frame in the guest book), never black bars. Every framing made
+  before keeps exactly how it looked.
+- **The guest book on the TV draws zoomed-out photos too** — both the browser
+  `/tv` and the Fire TV, which needs the TV update (OTA) that ships with this
+  release.
+- **Print Agent 0.5.0** reads the count on the Linux Print Box; the installer
+  adds `cups-ipp-utils`. Re-running the installer keeps the station, its
+  credential, the Wi-Fi and the queues.
+
 ### The guest book, live: on the guests' phones and on the TV
 
 - **The party's control room has a Guest book card.** One switch decides
