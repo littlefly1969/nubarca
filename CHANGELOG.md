@@ -6,6 +6,30 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### The guest book, live: on the guests' phones and on the TV
+
+- **The party's control room has a Guest book card.** One switch decides
+  whether guests may open and read the book from the party; it never changes
+  who may write, how many memories each guest may leave or how they are
+  approved. While it is off, a guest reads only the memories they wrote.
+- **Guests get "See the guest book"** in the party hub while the switch is on,
+  and lose it when it is turned off — without reloading the page.
+- **The guest book can go on the party's TV.** *Show the guest book on the TV*
+  shows one memory at a time — the photo as its author framed it, the whole
+  dedication with its line breaks, the signature, the design it was published
+  with — for 12 seconds, 18 for a long dedication. New approved memories join;
+  hidden ones leave; when nothing visible is left the TV goes back to the
+  slideshow. *Back to the slideshow* ends it.
+- **The game and the guest book never share the TV.** While the game is on
+  screen the book cannot be shown, and the card says why; while the book is on
+  screen the game cannot take the TV back, and the game's control room says
+  why. Two people pressing both at once get one winner and the other an honest
+  refusal with the current state.
+- **Party Crew** can use the same controls: the reading switch with
+  *moderate contributions*, the TV with *manage screens*.
+- **A Fire TV and a browser `/tv` show the same thing.** Both need the TV
+  update (OTA) that ships with this release.
+
 ### The guest book becomes a book of photographs
 
 - **A memory in the guest book is a photograph with words.** A guest taps

@@ -551,8 +551,10 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   television shows (next entry).
 - **An assigned television is taken over by its party, and the SERVER picks the
   surface.** Beside a party assignment `/api/tv/session` projects a
-  `presentation` — `slideshow`, `game` or `unavailable` (`general` otherwise) —
-  from the party's own state in `TvPartyPresentations.Decide`: `game` while a
+  `presentation` — `slideshow`, `game`, `guestbook` or `unavailable` (`general`
+  otherwise) — from the party's own state in `TvPartyPresentations.Decide`, in
+  that order of precedence (`unavailable`, a game holding the screen, the
+  regia's guest book request while a memory is visible, the slideshow): `game` while a
   game is switched on, the host may run one and the party is LIVE (the Games
   capability is phase-folded: before or after the party the lobby's code would
   lead nowhere), from before the first match through every phase EXCEPT
@@ -566,7 +568,7 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   that is not waiting; "back to the party" is said to one that is), and
   `restart_game → lobby` brings the takeover back with no special case. Five
   things are easy to undo by accident. The shell never learns a phase: it
-  switches on four words and mounts one surface per word, keyed by an opaque
+  switches on five words and mounts one surface per word, keyed by an opaque
   `assignmentKey` (session + link digest, accepted by no endpoint) so Party A →
   B is always a fresh mount. The control plane is a five-second READ in the
   foreground whatever the television shows — a general one is the one waiting to
@@ -1103,9 +1105,31 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   rotation. Moderation reuses `PartyMessageTransitions` and
   `IPartyMessageAccessResolver`. Reading rides either guest token, and writing
   additionally needs `Capabilities.Contributions`, which is what lets an ended
-  party's book stay readable and closed. Nothing projects it to a television
-  YET; the read model is complete precisely so that a guest book slideshow can
-  read it without touching the album. See `ARCHITECTURE.md` §14.5.1.
+  party's book stay readable and closed. See `ARCHITECTURE.md` §14.5.1.
+- **During the party the regia decides who READS the book and whether it is on
+  the television — never who writes in it.** Two flags on the party link,
+  `GuestbookViewingEnabled` and `GuestbookTvActive`, behind one version
+  (`GuestbookControlVersion`) and four commands (`enable_viewing`,
+  `disable_viewing`, `show_on_tv`, `return_to_slideshow`) served by ONE
+  service (`PartyGuestbookLiveService`) on the host's routes and the Party
+  Crew's (`contributions.moderate` for the room's half, `screens.manage` for the
+  television's). Viewing off during LIVE means a guest reads only their own
+  memories (`scope: "mine"`); viewing on adds "Guarda il Guestbook" to the hub
+  through `guestbookViewUrl` on the context it already polls. The submit
+  endpoint never reads either flag. Four things are easy to undo by accident.
+  The game and the book are mutually exclusive on the SCREEN, not on the phones:
+  every screen-taking game command and every live command lock the party link
+  row first (a self-assigning `ExecuteUpdate`), then re-read and refuse with
+  `guestbook_active` / `game_active` — remove the lock from either side and the
+  PostgreSQL race tests (`PartyGuestbookGameRacePostgresTests`) fail. The
+  presentation projection still lets `game` win defensively and logs
+  `party.presentation.invariant_violation`. The television's routes
+  (`/api/tv/party/guestbook`, `/{id}/photo`) are authorised by the TV session,
+  its assignment and the presentation being `guestbook` — NOT by
+  `PartyDisplayGrant`, which is unchanged and stays the game's alone. And the
+  last visible memory leaving the book withdraws the TV request
+  (`party.guestbook.tv.empty_fallback`), as do leaving LIVE and switching the
+  book off.
 - **Telling somebody WHERE the party is does not go through the guest list.**
   Until `POST /api/parties/{partyId}/address-share`, the only way to say where a
   party was, was to create an invitation group and share a personal invitation —

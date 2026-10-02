@@ -1367,6 +1367,14 @@ never `localStorage`, `sessionStorage`, a cookie or IndexedDB. A reload
 therefore has no credential and asks the native shell for a new one rather than
 inventing anything.
 
+**The grant is the GAME's, and only the game's.** The party's guest book on
+a television (§14.5.1, §21.5) neither mints nor honours it: its routes are
+authorised by the TV session, the session's assignment and the server's
+presentation being `guestbook`, re-read on every request. Nothing about the
+grant's table, lifetime, mint rule or scope changed for it — a grant minted
+while the game held the screen stops authorising the moment the presentation
+moves to the book, exactly as it does for the slideshow.
+
 ### 14.3.9 Party Crew: the fourth kind of credential
 
 **A collaborator is not a user, and that is the whole design.** A party often
@@ -1578,7 +1586,11 @@ The guest book is a book of **photograph memories**: each `PartyGuestbookEntry` 
 
 **Its picture is drawn from its own blob.** Album derivatives belong to the file, so a memory cannot borrow them. `PartyGuestbookPhotoCache` renders a medium preview from the memory's original through the shared `ImageDerivativeRenderer` and input gates, stores it as a content-addressed derived blob held by `PreviewBlobObjectId` (one more counted reference), and regenerates it if the derived bytes are lost. It leaves the server only through the same metadata-stripping path as every party derivative; no original is ever served.
 
-**The row is complete.** It stores the photograph's display size, `TemplateKey` and `TemplateVersion` — the client names the key, the server assigns the version, so a later `polaroid` v2 never changes a published memory — and the framing as the print crop editor states it (centre and zoom, fractions, never pixels). URLs are built per request for the capability that asked (either guest token, the host's route, or the Party Crew's) and are never stored. Any surface can therefore draw a memory from the read model alone; the web renders it with one view-model component (`PartyGuestbookMemoryCard`) and a declarative template registry, which is what a television slideshow of the book would consume.
+**The row is complete.** It stores the photograph's display size, `TemplateKey` and `TemplateVersion` — the client names the key, the server assigns the version, so a later `polaroid` v2 never changes a published memory — and the framing as the print crop editor states it (centre and zoom, fractions, never pixels). URLs are built per request for the capability that asked (either guest token, the host's route, or the Party Crew's) and are never stored. Any surface can therefore draw a memory from the read model alone; the web renders it with one view-model component (`PartyGuestbookMemoryCard`) and a declarative template registry — the same component draws the television's composition.
+
+**Live: the room and the television.** While the party is live the regia makes two separate decisions about the book, on the party link (`GuestbookViewingEnabled`, `GuestbookTvActive`, both guarded by `GuestbookControlVersion`). Neither touches who may WRITE: the submit endpoint never reads them. With viewing **off** a guest reads only the memories THEY wrote (`scope: "mine"`), with it **on** the whole book, and the guest hub offers "Guarda il Guestbook" through `guestbookViewUrl` on the context it already polls. Outside the live phase the book reads as before. Putting the book **on the television** is a request the presentation honours only while no game holds the screen and at least one memory is visible; the moment the last visible memory is hidden the request is withdrawn (`party.guestbook.tv.empty_fallback`), and leaving the live phase or switching the book off clears it. Four commands — `enable_viewing`, `disable_viewing`, `show_on_tv`, `return_to_slideshow` — each quote the version and are refused by stable code (`party_not_live`, `guestbook_not_available`, `guestbook_empty`, `game_active`, `version_conflict`, `illegal_transition`, `forbidden`, `not_found`) together with the current read model, which carries the server's own `tvPresentation` and `availableCommands`. Host and Party Crew drive one service (`PartyGuestbookLiveService`) on two route families: the crew holds the room's half through `contributions.moderate` and the television's through `screens.manage`.
+
+**Mutual exclusion with the game.** Every game command whose target phase takes the screen and every guest-book live command open a transaction with a self-assigning update of the party link row, so they are ordered by that row's write lock; each then reads what the other committed and refuses (`guestbook_active` / `game_active`) rather than both winning. Switching the game ON is refused the same way while the book is on the television. PostgreSQL tests race the two on real connections in both orders and released together.
 
 ### 14.6 Party printed keepsakes
 
@@ -2016,7 +2028,15 @@ by `TvPartyPresentations.Decide` from the party's own state:
 | no game switched on, host may not run games, or the party is not live | `slideshow` |
 | game switched on and the party live: no match yet, lobby, any round phase | `game` |
 | game `finished`, first `FinishedDwell` (15 s) after `FinishedAt` | `game` (the closing card) |
+| no game holds the screen, the regia asked for the guest book, the party is live and the book has a visible memory | `guestbook` |
 | game `finished`, after the dwell | `slideshow` |
+
+The order is the rule: `unavailable`, then `game` when it holds the screen,
+then `guestbook`, then `slideshow`. The game and the guest book are never both
+granted the screen — their commands serialise on the party link row and each
+refuses while the other holds it (§14.5.1) — so `game` winning over a
+`guestbook` request is a defensive tie-break that logs
+`party.presentation.invariant_violation`, never a path the product takes.
 
 It is a PROJECTION and never a transition: nothing writes game state, FINISHED
 stays FINISHED, and `restart_game → lobby` brings the takeover back with no
@@ -2024,7 +2044,8 @@ special case. "Showable" is the same resolver that decides whether a display
 grant may be minted, and "game" additionally requires what the display snapshot
 requires plus the host's phase-folded Games capability — so a television is
 never told to show a game it would be refused, nor a lobby whose code leads
-guests to a game they cannot join. The shell knows four words and no phase.
+guests to a game they cannot join. The shell knows five words — `general`,
+`slideshow`, `game`, `guestbook`, `unavailable` — and no phase.
 
 The shell mounts one surface per presentation, each keyed by an opaque
 `assignmentKey` (a digest of session + link that no endpoint accepts), so
@@ -2044,8 +2065,22 @@ never the old one with new contents:
   would say `unavailable`, for whatever reason, the album closes too. The album
   list is unchanged.
 - **game** — the **canonical web renderer**, hosted in a WebView (below).
+- **guestbook** — the party's guest book, one memory at a time, drawn
+  NATIVELY (`PartyGuestbookScreen`; the browser's `TvAssignedGuestbook` +
+  `PartyGuestbookTvStage`) from one rule set held equal across both clients by
+  the parity test (`lib/partyGuestbook`): dwell 12 s, 18 s for a long
+  dedication; density tiers and a measured fit, so a dedication is shown whole
+  and never clamped; the template's frame and the guest's crop; a deck that
+  keeps the memory being read, admits new ones and moves to the NEXT one when
+  the current is hidden. It is authorised by the television's session alone —
+  `GET /api/tv/party/guestbook` and `/{id}/photo` answer only while the
+  session's assignment projects `guestbook`, re-read per request — so it needs
+  no grant, no WebView and no party or guest token. A `404` there asks the
+  control plane at once; an empty book does too, and the server's slideshow
+  takes over.
 - **unavailable** — a native card. Fail closed: never general, never another
-  party. It is left only by a server read saying slideshow, game or general.
+  party. It is left only by a server read saying slideshow, game, guestbook or
+  general.
 
 **The assignment is the control plane and it is server-authoritative.** While
 paired and in the foreground the shell reads `/api/tv/session` every five
