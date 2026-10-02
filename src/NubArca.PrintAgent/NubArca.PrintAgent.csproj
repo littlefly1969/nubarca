@@ -41,5 +41,6 @@
     <None Update="linux/nubarca-print-agent@.service" CopyToOutputDirectory="PreserveNewest" />
     <None Update="linux/install-print-box.sh" CopyToOutputDirectory="PreserveNewest" />
     <None Update="linux/nubarca-print-box.rules" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="linux/nubarca-media-status.test" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

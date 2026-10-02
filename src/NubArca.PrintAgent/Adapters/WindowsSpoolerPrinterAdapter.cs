@@ -51,6 +51,14 @@ public sealed class WindowsSpoolerPrinterAdapter : IPrinterAdapter
         return Task.FromResult(new PrinterCapabilities(formats, settings.SupportsColor));
     }
 
+    /// <summary>
+    /// The Windows spooler exposes no reliable count of the prints left on a
+    /// dye-sub's media, so none is reported. The Linux Print Box reads it from
+    /// CUPS; here it is simply not available, which is a valid answer.
+    /// </summary>
+    public Task<PrinterMediaStatus> GetMediaStatusAsync(DiscoveredPrinter printer,
+        CancellationToken cancellationToken) => Task.FromResult(PrinterMediaStatus.Unavailable);
+
     public Task<PrinterObservedStatus> GetStatusAsync(DiscoveredPrinter printer,
         CancellationToken cancellationToken)
     {

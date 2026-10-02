@@ -18,12 +18,25 @@ public sealed class FakePrinterAdapter : IPrinterAdapter
 
     private readonly string _outputPath;
     private readonly TimeSpan _sheetDuration;
+    private int? _remainingPrints;
 
-    public FakePrinterAdapter(string outputPath, TimeSpan? sheetDuration = null)
+    /// <param name="remainingPrints">
+    /// The media count this simulator reports, deterministic and decremented by
+    /// one for every sheet it produces — what a real printer does, minus the
+    /// delay. Null reports none, like a driver that gives no count.
+    /// </param>
+    public FakePrinterAdapter(string outputPath, TimeSpan? sheetDuration = null, int? remainingPrints = null)
     {
         _outputPath = outputPath;
         _sheetDuration = sheetDuration ?? DefaultSheetDuration;
+        _remainingPrints = remainingPrints;
     }
+
+    public Task<PrinterMediaStatus> GetMediaStatusAsync(DiscoveredPrinter printer,
+        CancellationToken cancellationToken) =>
+        Task.FromResult(_remainingPrints is int remaining
+            ? new PrinterMediaStatus(remaining, 0)
+            : PrinterMediaStatus.Unavailable);
     public string Kind => PrintAdapterKinds.Fake;
     public bool FailNextSubmission { get; set; }
     public int SubmissionCount { get; private set; }
@@ -71,6 +84,8 @@ public sealed class FakePrinterAdapter : IPrinterAdapter
             FileShare.None, 81920, FileOptions.Asynchronous | FileOptions.WriteThrough);
         await source.CopyToAsync(target, cancellationToken);
         await target.FlushAsync(cancellationToken);
+        // One sheet out, one print fewer on the media.
+        if (_remainingPrints is int remaining) _remainingPrints = Math.Max(0, remaining - 1);
         return new(true, $"fake:{submission.JobId:N}", null);
     }
 }
