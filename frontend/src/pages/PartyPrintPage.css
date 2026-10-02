@@ -346,20 +346,6 @@
   width: min(100%, 22rem, max(10rem, calc((100dvh - 9rem) * var(--crop-aspect))));
 }
 
-.party-print-zoom {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  font-size: 0.9rem;
-}
-
-.party-print-zoom input {
-  flex: 1;
-  /* The track stays a line; the thumb's target is as tall as a thumb. */
-  min-height: 2.75rem;
-  accent-color: var(--brand-cyan-glow);
-}
-
 /* Themes ----------------------------------------------------------------- */
 
 .party-print-themes {
@@ -426,6 +412,12 @@
   --sheet-bg: #0a0f1a;
   --sheet-fg: #f5f7fb;
   --sheet-muted: #a9b4c8;
+}
+
+/* The photograph with the title on it has no paper of its own: a photograph
+   zoomed out shows white beside it, as the renderer prints it. */
+.party-print-sheet[data-theme='overlay'] {
+  --sheet-bg: #ffffff;
 }
 
 .party-print-sheet[data-theme='event'] {

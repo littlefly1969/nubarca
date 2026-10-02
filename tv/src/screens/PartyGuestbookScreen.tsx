@@ -20,7 +20,6 @@ import { backoffMs } from '../lib/assignmentView';
 import {
   GUESTBOOK_TRANSITION_MS,
   GUESTBOOK_TV_POLL_MS,
-  guestbookCrop,
   guestbookDensity,
   guestbookDwellMs,
   guestbookFrameAspect,
@@ -201,7 +200,7 @@ function MemoryOnStage({ memory }: { memory: TvGuestbookMemory }) {
   const design = guestbookTemplateKey(memory.template.key, memory.template.version);
   const frameAspect = guestbookFrameAspect(memory.template.key, memory.template.version, photoAspect);
   const box = guestbookTvPhotoBox(stageW, stageH, frameAspect, density);
-  const placement = guestbookPhotoPlacement(guestbookCrop(photoAspect, frameAspect, memory.media.crop));
+  const placement = guestbookPhotoPlacement(photoAspect, frameAspect, memory.media.crop);
 
   // The measured fit.
   const baseFont = guestbookTvFontPx(stageH, density);
@@ -304,6 +303,7 @@ const BRAND = {
 
 interface Look {
   card: ViewStyle;
+  /** The photo well: what shows beside a photograph its author zoomed out (the web card's .guestbook-memory-photo). */
   photo: ViewStyle;
   column: ViewStyle;
   words: ViewStyle;
@@ -341,7 +341,7 @@ const TEMPLATE_LOOK: Record<string, Look> = {
   },
   editorial: {
     card: { backgroundColor: BRAND.cloud, borderRadius: 8 },
-    photo: {},
+    photo: { backgroundColor: 'rgba(10,15,26,0.7)' },
     column: {},
     words: {},
     body: { color: BRAND.midnight, fontWeight: '500' },
@@ -353,7 +353,7 @@ const TEMPLATE_LOOK: Record<string, Look> = {
   },
   celebration: {
     card: { backgroundColor: BRAND.deepBlue, borderRadius: 22, borderWidth: 3, borderColor: BRAND.violet },
-    photo: { borderTopLeftRadius: 19, borderBottomLeftRadius: 19 },
+    photo: { backgroundColor: 'rgba(10,15,26,0.7)', borderTopLeftRadius: 19, borderBottomLeftRadius: 19 },
     column: { alignItems: 'center' },
     words: { alignItems: 'center' },
     body: { color: BRAND.cloud, textAlign: 'center' },

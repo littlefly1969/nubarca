@@ -237,8 +237,9 @@ describe('PartyGuestbookComposer (making a memory)', () => {
     await user.click(screen.getByTestId('guestbook-reposition-open'));
     const frame = screen.getByTestId('guestbook-crop');
     frame.focus();
-    await user.keyboard('{ArrowRight}{ArrowDown}');
+    // Zoomed in, the photograph overflows its frame both ways and moves both ways.
     fireEvent.change(screen.getByTestId('guestbook-zoom'), { target: { value: '2' } });
+    await user.keyboard('{ArrowRight}{ArrowDown}');
     await user.click(screen.getByTestId('guestbook-reposition-done'));
     // Back to the memory itself, framed anew.
     expect(screen.getByTestId('guestbook-preview-memory')).toBeInTheDocument();
@@ -250,6 +251,49 @@ describe('PartyGuestbookComposer (making a memory)', () => {
     expect(crop.centerX).toBeCloseTo(0.52);
     expect(crop.centerY).toBeCloseTo(0.52);
     expect(crop.zoom).toBe(2);
+  });
+
+  it('zooms out to the whole photograph on the design\'s photo well, and sends that framing', async () => {
+    const { calls } = mock();
+    renderBook();
+    const user = userEvent.setup();
+
+    // A landscape photograph in the square polaroid: whole at 0.75.
+    await openComposerAndChoose(user);
+    await user.click(screen.getByTestId('guestbook-template-polaroid'));
+    await user.click(screen.getByTestId('guestbook-reposition-open'));
+    const frame = screen.getByTestId('guestbook-crop');
+    expect(frame.style.background).toBe('rgb(217, 214, 207)');
+    await user.click(screen.getByTestId('guestbook-fit'));
+    const img = frame.querySelector('img')!;
+    expect(parseFloat(img.style.width)).toBeCloseTo(100);
+    expect(parseFloat(img.style.top)).toBeCloseTo(12.5);
+    await user.click(screen.getByTestId('guestbook-reposition-done'));
+
+    await write(user, 'Tutta intera', 'Ada');
+    await user.click(screen.getByTestId('guestbook-publish'));
+    await screen.findByTestId('guestbook-sent');
+    expect(lastPost(calls).crop).toEqual({ centerX: 0.5, centerY: 0.5, zoom: 0.75 });
+  });
+
+  it('never sends a framing below what the chosen design can show', async () => {
+    const { calls } = mock();
+    renderBook();
+    const user = userEvent.setup();
+
+    // Whole in the square polaroid (0.75), then moved to nubarca, whose 4:3
+    // frame IS the photograph's shape: there the whole photograph is zoom 1.
+    await openComposerAndChoose(user);
+    await user.click(screen.getByTestId('guestbook-template-polaroid'));
+    await user.click(screen.getByTestId('guestbook-reposition-open'));
+    await user.click(screen.getByTestId('guestbook-fit'));
+    await user.click(screen.getByTestId('guestbook-reposition-done'));
+    await user.click(screen.getByTestId('guestbook-template-nubarca'));
+
+    await write(user, 'Cambio idea', 'Ada');
+    await user.click(screen.getByTestId('guestbook-publish'));
+    await screen.findByTestId('guestbook-sent');
+    expect(lastPost(calls).crop.zoom).toBe(1);
   });
 
   it('shows the new memory once the server has it, and the book has it on the way back', async () => {

@@ -3,7 +3,9 @@ import type {
   PartyGuestContentKind, PartyGuestContentView, PartyMediaCrop, PartyMediaOrientation,
   PartyTextAlign,
 } from '@nubarca/api-client';
-import { cropFor, DEFAULT_CROP_VIEW } from '../pages/partyPrintGeometry';
+import { placePhoto } from '@nubarca/contracts';
+import { DEFAULT_CROP_VIEW } from '../pages/partyPrintGeometry';
+import { photoPlacementStyle } from './PhotoCropFrame';
 import { useI18n } from '../i18n';
 import { partyVenueMapUrl } from './partyAddress';
 
@@ -97,7 +99,7 @@ export function PartyContentImage({
   }
 
   const slotAspect = SLOT_FRAME_ASPECT[orientation];
-  const crop = aspect ? cropFor(aspect, slotAspect, frame?.mediaCrop ?? DEFAULT_CROP_VIEW) : null;
+  const placed = aspect ? placePhoto(aspect, slotAspect, frame?.mediaCrop ?? DEFAULT_CROP_VIEW) : null;
   return (
     <div
       className={className} data-frame="fixed" data-orientation={orientation}
@@ -112,13 +114,9 @@ export function PartyContentImage({
         }}
         onError={() => setFailed(src)}
         // Until its shape is known the frame is simply filled; the host's exact
-        // crop — the party print's own maths — follows the moment it arrives.
-        style={crop ? {
-          width: `${100 / crop.cropWidth}%`,
-          height: `${100 / crop.cropHeight}%`,
-          left: `${(-crop.cropX * 100) / crop.cropWidth}%`,
-          top: `${(-crop.cropY * 100) / crop.cropHeight}%`,
-        } : { width: '100%', height: '100%', left: 0, top: 0 }}
+        // framing — the shared placement, white beside a photograph zoomed
+        // out — follows the moment it arrives.
+        style={placed ? photoPlacementStyle(placed) : { width: '100%', height: '100%', left: 0, top: 0 }}
       />
       {words}
     </div>

@@ -1,7 +1,7 @@
 import type { CSSProperties, Ref } from 'react';
 import { useI18n } from '../i18n';
-import { cropFor } from '../pages/partyPrintGeometry';
-import { cropImageStyle } from '../party/PhotoCropFrame';
+import { placePhoto } from '@nubarca/contracts';
+import { photoPlacementStyle } from '../party/PhotoCropFrame';
 import { guestbookTemplateFor } from '../party/partyGuestbookTemplates';
 import '../pages/PartyGuestbook.css';
 
@@ -71,11 +71,9 @@ export function PartyGuestbookMemoryCard({
   const { width, height } = memory.media;
   const photoAspect = width > 0 && height > 0 ? width / height : 1;
   const frameAspect = template.frameAspect(photoAspect);
-  const crop = cropFor(photoAspect, frameAspect, {
-    zoom: memory.media.crop.zoom,
-    centerX: memory.media.crop.centerX,
-    centerY: memory.media.crop.centerY,
-  });
+  // Where the photograph sits in the design's frame — zoomed out, on the
+  // design's photo well (.guestbook-memory-photo).
+  const placed = placePhoto(photoAspect, frameAspect, memory.media.crop);
 
   const body = memory.body.length > 0 ? memory.body : bodyPlaceholder ?? '';
   const author = memory.authorDisplayName.length > 0 ? memory.authorDisplayName : authorPlaceholder ?? '';
@@ -108,7 +106,7 @@ export function PartyGuestbookMemoryCard({
           loading={loading}
           decoding="async"
           draggable={false}
-          style={cropImageStyle(crop)}
+          style={photoPlacementStyle(placed)}
         />
       </div>
       {/* The decoration, where a design has any, is drawn by the stylesheet

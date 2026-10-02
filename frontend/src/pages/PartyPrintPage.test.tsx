@@ -3,6 +3,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { PartyPrintPage } from './PartyPrintPage';
+import { containZoom } from '@nubarca/contracts';
+import { photoSlotAspect } from './partyPrintGeometry';
 import { errorResponse, installFetchMock, jsonResponse } from '../test-utils';
 import { I18nProvider } from '../i18n';
 
@@ -271,7 +273,7 @@ describe('PartyPrintPage (public print studio)', () => {
 
   // --- Framing ------------------------------------------------------------
 
-  it('sends the whole photograph when the guest frames nothing', async () => {
+  it('sends the photograph filling its slot, centred, when the guest frames nothing', async () => {
     const user = setup();
     const mock = mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
@@ -281,11 +283,11 @@ describe('PartyPrintPage (public print studio)', () => {
     await user.click(screen.getByRole('button', { name: 'Stampa' }));
     await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
     expect(lastPost(mock.calls).slots).toEqual([
-      { itemId: 'f1', cropX: 0, cropY: 0, cropWidth: 1, cropHeight: 1 },
+      { itemId: 'f1', placement: { centerX: 0.5, centerY: 0.5, zoom: 1 } },
     ]);
   });
 
-  it('narrows the crop when the guest zooms in, and restores it on reset', async () => {
+  it('zooms in, and "Riempi" puts the filled frame back', async () => {
     const user = setup();
     const mock = mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
@@ -298,17 +300,47 @@ describe('PartyPrintPage (public print studio)', () => {
     const zoom = () => screen.getByRole('slider', { name: /Ingrandimento/ }) as HTMLInputElement;
     fireEvent.change(zoom(), { target: { value: '2' } });
 
-    // Reset puts the whole photograph back, so framing is always undoable.
-    await user.click(screen.getByRole('button', { name: 'Reimposta inquadratura' }));
+    // Riempi is the historical framing, so framing is always undoable.
+    await user.click(screen.getByRole('button', { name: 'Riempi' }));
     expect(zoom().value).toBe('1');
 
     fireEvent.change(zoom(), { target: { value: '2' } });
     await user.click(next());
     await user.click(screen.getByRole('button', { name: 'Stampa' }));
     await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
-    const zoomed = lastPost(mock.calls).slots[0];
-    expect(zoomed.cropWidth).toBeCloseTo(0.5, 5);
-    expect(zoomed.cropX).toBeCloseTo(0.25, 5);
+    expect(lastPost(mock.calls).slots[0].placement).toEqual({ centerX: 0.5, centerY: 0.5, zoom: 2 });
+  });
+
+  it('"Adatta" puts the whole photograph on the sheet, on the theme\'s own paper', async () => {
+    const user = setup();
+    const mock = mount(manifest(), {
+      [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
+    });
+    render(wrapper());
+    await chooseFormat(user, 'photo');
+    await pick(user, 1);
+    await user.click(next());
+    // A wide photograph: the sheet lies down, and its slot is wider still.
+    const frame = screen.getByTestId('party-print-crop');
+    setNatural(frame.querySelector('img')!, 4000, 3000);
+    const slider = screen.getByRole('slider', { name: /Ingrandimento/ }) as HTMLInputElement;
+    expect(Number(slider.min)).toBeLessThan(1);
+
+    await user.click(screen.getByRole('button', { name: 'Adatta' }));
+    const contain = containZoom(4 / 3, photoSlotAspect(false));
+    const img = frame.querySelector('img')!;
+    expect(parseFloat(img.style.height)).toBeCloseTo(100, 4);
+    expect(parseFloat(img.style.width)).toBeLessThan(100);
+    // The editor shows what the paper will: the pure theme's paper beside it.
+    expect(frame.style.background).toBe('rgb(245, 247, 251)');
+
+    await user.click(next());
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    const sent = lastPost(mock.calls).slots[0];
+    expect(sent).not.toHaveProperty('cropX');
+    expect(sent.placement.zoom).toBeCloseTo(contain, 9);
+    expect(sent.placement.zoom).toBeLessThan(1);
   });
 
   it('pans with the arrow keys, not only with a finger', async () => {
@@ -329,8 +361,8 @@ describe('PartyPrintPage (public print studio)', () => {
     await user.click(next());
     await user.click(screen.getByRole('button', { name: 'Stampa' }));
     await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
-    // Two nudges right of a half-width crop centred at 0.5.
-    expect(lastPost(mock.calls).slots[0].cropX).toBeCloseTo(0.29, 5);
+    // Two nudges of 2% of the photograph, right of the centre.
+    expect(lastPost(mock.calls).slots[0].placement.centerX).toBeCloseTo(0.54, 5);
   });
 
   it('never lets framing walk off the edge of the photograph', async () => {
@@ -350,10 +382,31 @@ describe('PartyPrintPage (public print studio)', () => {
     await user.click(next());
     await user.click(screen.getByRole('button', { name: 'Stampa' }));
     await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
-    const crop = lastPost(mock.calls).slots[0];
-    // The server rejects a crop that leaves the image; the editor cannot make one.
-    expect(crop.cropX + crop.cropWidth).toBeLessThanOrEqual(1);
-    expect(crop.cropX).toBeGreaterThanOrEqual(0);
+    // At 2x the frame shows half the photograph: its centre stops a quarter in.
+    expect(lastPost(mock.calls).slots[0].placement.centerX).toBeCloseTo(0.75, 9);
+  });
+
+  it('keeps each of the eight photographs on the twin strip in its own framing', async () => {
+    const user = setup();
+    const mock = mount(manifest(), {
+      [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
+    });
+    render(wrapper());
+    await chooseFormat(user, 'twinStrip4');
+    await pick(user, 8);
+    await user.click(next());
+    await user.click(next());
+    // The first zoomed in, the fourth further; the others untouched.
+    const zoomTo = (value: string) => fireEvent.change(
+      screen.getByRole('slider', { name: /Ingrandimento/ }), { target: { value } });
+    zoomTo('2');
+    for (let i = 0; i < 3; i += 1) await user.click(next());
+    zoomTo('3');
+    for (let i = 0; i < 5; i += 1) await user.click(next());
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    expect(lastPost(mock.calls).slots.map((s: { placement: { zoom: number } }) => s.placement.zoom))
+      .toEqual([2, 1, 1, 3, 1, 1, 1, 1]);
   });
 
   // --- The sheet ----------------------------------------------------------

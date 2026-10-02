@@ -11,6 +11,10 @@
  * parity test in partyPrintGeometry.test.ts is what says so out loud.
  */
 
+import {
+  DEFAULT_PHOTO_PLACEMENT, MAX_PLACEMENT_ZOOM, type PhotoPlacement,
+} from '@nubarca/contracts';
+
 /** 10x15cm at 300dpi, portrait. The twin strip's sheet. */
 export const PORTRAIT_WIDTH = 1200;
 export const PORTRAIT_HEIGHT = 1800;
@@ -306,28 +310,26 @@ export function clampCrop(crop: NormalisedCrop): NormalisedCrop {
 // --- The crop, as the editor moves it ---------------------------------------
 
 /**
- * A crop the way a guest manipulates it: how far in, and what is in the middle.
- *
- * Pan and zoom are far easier to reason about as a centre and a magnification
- * than as four edges, and the two always agree because `cropFor` is the only
- * thing that converts between them.
+ * How a guest arranges a photograph in a slot: the shared placement
+ * (`@nubarca/contracts` photoPlacement) — what is in the middle, and how far
+ * in. Zoom 1 covers the slot exactly as every crop always did; below 1, down to
+ * the photograph's contain zoom, the whole photograph comes into the slot and
+ * the sheet's own paper shows beside it.
  */
-export interface CropView {
-  zoom: number;
-  centerX: number;
-  centerY: number;
-}
+export type CropView = PhotoPlacement;
 
 /** Untouched: the whole slot filled, nothing enlarged, nothing off-centre. */
-export const DEFAULT_CROP_VIEW: CropView = { zoom: 1, centerX: 0.5, centerY: 0.5 };
+export const DEFAULT_CROP_VIEW: CropView = DEFAULT_PHOTO_PLACEMENT;
+
+/** Past this the print is visibly soft, so the editor simply does not go there. */
+export const MAX_ZOOM = MAX_PLACEMENT_ZOOM;
 
 /**
- * Past this the print is visibly soft, so the editor simply does not go there
- * rather than letting a guest choose a bad print.
+ * LEGACY: the crop a framing at zoom ≥ 1 means, as the party print sent it
+ * before placements existed. Kept for the parity tests and for anything that
+ * still reads a crop; a zoom below 1 is held at 1 here, because a crop cannot
+ * describe a photograph smaller than its frame — `placePhoto` can.
  */
-export const MAX_ZOOM = 4;
-
-/** The crop the server will receive, from what the guest arranged. */
 export function cropFor(
   sourceAspect: number, slotAspect: number, view: CropView,
 ): NormalisedCrop {
