@@ -67,6 +67,14 @@ just said "back to the party" is standing in front of a room expecting the
 music.) `next_challenge` resumes and the takeover returns with no special case —
 the same edge `next_challenge` takes from a result, minus the round to complete.
 
+While the regia has put the GUEST BOOK on the television, no command whose
+target phase would take the screen is offered (`availableCommands`, with
+`guestbookOnTv` on the snapshot saying why), and one that arrives anyway is
+refused as `guestbook_active` with the current snapshot. Both sides lock the
+party link row before deciding, so the game and the book are never both
+granted the screen; `return_to_slideshow` lets the next challenge through.
+Switching the game ON is refused the same way while the book is up.
+
 It is deliberately NOT `FINISHED`. A finished match is over and the only way back
 is `restart_game`, which DISCARDS it.
 

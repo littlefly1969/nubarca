@@ -35,6 +35,7 @@ information, not a function, and deliberately has no entry.
 | Audio focus | expo-video `AudioFocusManager` | **None.** A second `AudioManager` owner is duplicate registration |
 | Video keep-awake | expo-video `keepScreenOnWhilePlaying` | Set explicitly, so the invariant is visible and testable |
 | Photo slideshow keep-awake | NubArca `useScreenAwake` | Only while actually rotating, in the foreground |
+| Party guest book keep-awake | NubArca `useScreenAwake` (`shouldKeepPartyGuestbookAwake`) | Only while a memory is up, in the foreground — never for the waiting card |
 | Video player | Exactly one `expo-video` player | `ReadyPlayer` keyed by source; `useVideoPlayer` releases on unmount |
 | Background release | NubArca (`src/video/playerLifecycle.ts`) | Snapshot, then unmount — the release is Expo's documented contract |
 | Output-route loss | NubArca observer (`NubArcaTvOutputObserver.kt`) | **Reports only.** It never plays, pauses, focuses or routes |
