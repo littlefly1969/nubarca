@@ -13,6 +13,7 @@ export * from './mediaWorkspace.ts';
 export * from './mediaSelection.ts';
 export * from './sharing.ts';
 export * from './party.ts';
+export * from './photoPlacement.ts';
 export * from './partyRsvp.ts';
 export * from './partyAttendance.ts';
 export * from './partyGuestDirectory.ts';
