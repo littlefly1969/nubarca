@@ -69,7 +69,7 @@ const flow = () => screen.getByTestId('tv-display').getAttribute('data-flow');
 const calls = (mock: InstalledFetchMock, method: string, path: string) =>
   mock.calls.filter((c) => c.method === method && c.url.split('?')[0] === path).length;
 
-type Presentation = 'slideshow' | 'game' | 'unavailable';
+type Presentation = 'slideshow' | 'game' | 'guestbook' | 'unavailable';
 const party = (key: string, albumId: string, presentation: Presentation) => ({
   kind: 'party', albumId, albumName: `Festa ${albumId}`,
   partyAvailable: presentation !== 'unavailable', presentation, assignmentKey: key,
@@ -344,6 +344,159 @@ describe('the owner’s assignment takes the screen, live', () => {
     expect(platform.fullscreen).toBe(false);
     expect(flow()).toBe('partySlideshow');
     expect(screen.getByAltText('p1.jpg')).toBeInTheDocument();
+  });
+});
+
+describe('the guest book takes the screen when the regia asks', () => {
+  const memory = (id: string, over: Record<string, unknown> = {}) => ({
+    id, authorDisplayName: `Autore ${id}`, body: `Dedica ${id}`, createdAt: '2027-06-12T20:00:00Z',
+    template: { key: 'nubarca', version: 1 },
+    media: {
+      url: `/api/tv/party/guestbook/${id}/photo`, width: 1600, height: 1200, orientation: 'landscape',
+      crop: { centerX: 0.5, centerY: 0.5, zoom: 1 },
+    },
+    ...over,
+  });
+  const onScreen = () => screen.queryByTestId('tv-party-guestbook')
+    ?.querySelector('[data-memory-id]')?.getAttribute('data-memory-id') ?? null;
+  const surfaces = () => ({
+    guestbook: screen.queryByTestId('tv-party-guestbook') !== null,
+    game: screen.queryByTestId('party-tv-stage') !== null,
+    slideshow: screen.queryByAltText('p1.jpg') !== null,
+  });
+
+  it('moves between the slideshow, the game and the book — one surface at a time', async () => {
+    let assignment: unknown = party('kA', 'a1', 'slideshow');
+    const mock = installTvMock({
+      'GET /api/tv/session': () => session(assignment),
+      'GET /api/tv/albums/a1/items': () => jsonResponse(albumItems('a1', [photo('p1')])),
+      'GET /api/tv/party/guestbook': () => jsonResponse({ entries: [memory('g1')] }),
+      ...gameHandlers,
+    });
+    mount();
+    await settle();
+
+    const go = async (presentation: Presentation) => {
+      assignment = party('kA', 'a1', presentation);
+      await advance(CONTROL_POLL_MS);
+      await settle();
+      const now = surfaces();
+      // Never two at once: there is no "game + guest book" screen.
+      expect([now.guestbook, now.game, now.slideshow].filter(Boolean)).toHaveLength(1);
+      return now;
+    };
+    // slideshow → guestbook → slideshow → game → slideshow → guestbook → slideshow → game
+    expect((await go('guestbook')).guestbook).toBe(true);
+    expect(flow()).toBe('partyGuestbook');
+    expect(screen.getByAltText('La foto scelta da Autore g1'))
+      .toHaveAttribute('src', '/api/tv/party/guestbook/g1/photo');
+    expect((await go('slideshow')).slideshow).toBe(true);
+    expect((await go('game')).game).toBe(true);
+    expect((await go('slideshow')).slideshow).toBe(true);
+    expect((await go('guestbook')).guestbook).toBe(true);
+    expect((await go('slideshow')).slideshow).toBe(true);
+    expect((await go('game')).game).toBe(true);
+    expect((await go('slideshow')).slideshow).toBe(true);
+
+    // The book never asked for a game grant: the session is its only credential.
+    const grantsBefore = calls(mock, 'POST', '/api/tv/party-display/grant');
+    await go('guestbook');
+    await advance(30_000);
+    await settle();
+    expect(calls(mock, 'POST', '/api/tv/party-display/grant')).toBe(grantsBefore);
+    expect(mock.calls.some((c) => c.url.startsWith('/api/party/') || /token/i.test(c.url))).toBe(false);
+  });
+
+  it('follows the book while it is up: joins, leaves, and hands back the screen when empty', async () => {
+    let entries = [memory('g1'), memory('g2')];
+    let assignment: unknown = party('kA', 'a1', 'guestbook');
+    const mock = installTvMock({
+      'GET /api/tv/session': () => session(assignment),
+      'GET /api/tv/party/guestbook': () => jsonResponse({ entries }),
+      'GET /api/tv/albums/a1/items': () => jsonResponse(albumItems('a1', [photo('p1')])),
+    });
+    mount();
+    await settle();
+    expect(onScreen()).toBe('g1');
+
+    // A new memory is approved: it joins, and the one being read stays.
+    entries = [memory('g1'), memory('g2'), memory('g3')];
+    await advance(10_000);
+    await settle();
+    expect(onScreen()).toBe('g1');
+
+    // The dwell moves the round on.
+    await advance(2_000);
+    await settle();
+    expect(onScreen()).toBe('g2');
+
+    // The one on screen is hidden, and the book is read again at once (a
+    // resume): the NEXT memory after it — not the first, which a reset would
+    // pick, and not what the dwell would have picked later.
+    entries = [memory('g1'), memory('g3')];
+    platform.hide();
+    await settle();
+    platform.show();
+    await settle();
+    expect(onScreen()).toBe('g3');
+
+    // The last visible memory goes: the control plane is asked AT ONCE, and
+    // the server's slideshow takes the screen.
+    const reads = () => calls(mock, 'GET', '/api/tv/session') + calls(mock, 'POST', '/api/tv/session/heartbeat');
+    const before = reads();
+    entries = [];
+    assignment = party('kA', 'a1', 'slideshow');
+    await advance(10_000);
+    await settle();
+    expect(reads()).toBeGreaterThan(before);
+    expect(flow()).toBe('partySlideshow');
+    expect(screen.getByAltText('p1.jpg')).toBeInTheDocument();
+  });
+
+  it('keeps the last frame through a failure, and asks the control plane when the book is not its to show', async () => {
+    let answer: () => Response = () => jsonResponse({ entries: [memory('g1')] });
+    const mock = installTvMock({
+      'GET /api/tv/session': () => session(party('kA', 'a1', 'guestbook')),
+      'GET /api/tv/party/guestbook': () => answer(),
+    });
+    mount();
+    await settle();
+    expect(onScreen()).toBe('g1');
+
+    answer = () => errorResponse(503);
+    await advance(10_000);
+    await settle();
+    expect(onScreen()).toBe('g1');
+
+    const reads = () => calls(mock, 'GET', '/api/tv/session') + calls(mock, 'POST', '/api/tv/session/heartbeat');
+    const before = reads();
+    answer = () => errorResponse(404);
+    await advance(30_000);
+    await settle();
+    expect(reads()).toBeGreaterThan(before);
+    expect(readTvDiagnostics().some((e) => e.event === 'tv.party.guestbook.moved')).toBe(true);
+  });
+
+  it('BACK never leaves the book, and a page shown again reads it at once', async () => {
+    const mock = installTvMock({
+      'GET /api/tv/session': () => session(party('kA', 'a1', 'guestbook')),
+      'GET /api/tv/party/guestbook': () => jsonResponse({ entries: [memory('g1')] }),
+    });
+    mount();
+    await settle();
+    fireEvent.keyDown(window, { key: 'Backspace' });
+    await settle();
+    expect(flow()).toBe('partyGuestbook');
+    expect(onScreen()).toBe('g1');
+
+    platform.hide();
+    await settle();
+    await advance(60_000);
+    const before = calls(mock, 'GET', '/api/tv/party/guestbook');
+    platform.show();
+    await settle();
+    expect(calls(mock, 'GET', '/api/tv/party/guestbook')).toBeGreaterThan(before);
+    expect(onScreen()).toBe('g1');
   });
 });
 

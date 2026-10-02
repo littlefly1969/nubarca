@@ -27,6 +27,7 @@ import { tvLog } from './diagnostics';
 import { TvPairingScreen, type PairingNotice } from './TvPairingScreen';
 import { TvAssignedSlideshow } from './party/TvAssignedSlideshow';
 import { TvAssignedGame } from './party/TvAssignedGame';
+import { TvAssignedGuestbook } from './party/TvAssignedGuestbook';
 import { TvPartySurface } from './party/TvPartyOverlays';
 import './tvDisplay.css';
 
@@ -285,7 +286,7 @@ export function TvDisplay() {
     if (platform.isFullscreen()) void platform.exitFullscreen();
   }, [platform]);
   useEffect(() => {
-    if (flow.name !== 'partyGame' && flow.name !== 'partyUnavailable') return;
+    if (flow.name !== 'partyGame' && flow.name !== 'partyGuestbook' && flow.name !== 'partyUnavailable') return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (platform.mapKey(event) !== 'back') return;
       event.preventDefault();
@@ -355,6 +356,17 @@ export function TvDisplay() {
     case 'partyGame':
       surface = (
         <TvAssignedGame
+          key={flow.party.key}
+          albumName={flow.party.albumName}
+          onSessionInvalid={onSessionInvalid}
+          onRequestAssignment={refreshControlPlane}
+          refreshKey={resumeEpoch}
+        />
+      );
+      break;
+    case 'partyGuestbook':
+      surface = (
+        <TvAssignedGuestbook
           key={flow.party.key}
           albumName={flow.party.albumName}
           onSessionInvalid={onSessionInvalid}

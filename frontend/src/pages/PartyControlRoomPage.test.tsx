@@ -147,6 +147,43 @@ describe('the control room', () => {
     expect(reads).toBe(readsBefore);
   });
 
+  it('says the guest book holds the television, and offers nothing that would take it back', async () => {
+    // The server already left the screen-taking commands out; the page says why.
+    installFetchMock({
+      [`GET ${READ}`]: () => jsonResponse(snapshot({
+        phase: 'intermission', currentChallenge: null, guestbookOnTv: true,
+        availableCommands: ['skip_challenge'],
+      })),
+    });
+    mount();
+
+    expect(await screen.findByTestId('party-control-guestbook-on-tv'))
+      .toHaveTextContent('Il Guestbook è in TV');
+    expect(screen.queryByTestId('party-control-next_challenge')).not.toBeInTheDocument();
+    expect(screen.getByTestId('party-control-primary')).not.toHaveAttribute('data-command', 'next_challenge');
+  });
+
+  it('names a refusal because the guest book took the television first', async () => {
+    installFetchMock({
+      [`GET ${READ}`]: () => jsonResponse(snapshot({
+        phase: 'intermission', currentChallenge: null, availableCommands: ['next_challenge', 'finish'],
+      })),
+      [`POST ${COMMANDS}`]: () => errorResponse(409, {
+        code: 'guestbook_active',
+        snapshot: snapshot({
+          phase: 'intermission', currentChallenge: null, guestbookOnTv: true, availableCommands: ['finish'],
+        }),
+      }),
+    });
+    mount();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.click(await screen.findByTestId('party-control-primary'));
+
+    expect(await screen.findByTestId('party-control-refusal')).toHaveTextContent('Il Guestbook è in TV');
+    expect(screen.getByTestId('party-control-guestbook-on-tv')).toBeInTheDocument();
+    expect(screen.queryByTestId('party-control-next_challenge')).not.toBeInTheDocument();
+  });
+
   it('does not duplicate an action when the same command is sent twice', async () => {
     let version = 3;
     const sent: number[] = [];

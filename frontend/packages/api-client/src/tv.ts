@@ -1,4 +1,5 @@
 import { api, ApiError } from './client';
+import type { PartyGuestbookEntry } from '@nubarca/contracts';
 
 export interface TvPairingStarted {
   publicCode: string;
@@ -21,7 +22,8 @@ export interface TvPairingStatus {
 // television". No party link id and no token ever cross.
 //
 // `presentation` is what the party wants on that screen right now — its native
-// slideshow, its game on the canonical stage, or unavailable — projected by the
+// slideshow, its game on the canonical stage, its guest book, or unavailable —
+// projected by the
 // server from the party's own state. `assignmentKey` is only ever sent to the
 // television itself and is null here.
 export interface TvDisplayAssignment {
@@ -29,7 +31,7 @@ export interface TvDisplayAssignment {
   albumId: string | null;
   albumName: string | null;
   partyAvailable: boolean;
-  presentation?: 'general' | 'slideshow' | 'game' | 'unavailable';
+  presentation?: 'general' | 'slideshow' | 'game' | 'guestbook' | 'unavailable';
   assignmentKey?: string | null;
 }
 
@@ -192,6 +194,22 @@ export function listTvAlbums(signal?: AbortSignal): Promise<TvAlbum[]> {
 
 export function listTvAlbumItems(albumId: string, signal?: AbortSignal): Promise<TvAlbumItems> {
   return api<TvAlbumItems>(`/api/tv/albums/${encodeURIComponent(albumId)}/items`, { signal });
+}
+
+// --- The party's guest book on a television ---
+//
+// Authorised by the television's session cookie alone — no grant, no party or
+// guest token: the party is the device's own assignment, and the route answers
+// only while the server's presentation IS the guest book. Visible memories
+// only, in the book's own order; each photograph a derived, metadata-free
+// preview on the television's own route, which a same-origin <img> reaches
+// with the session cookie.
+export interface TvGuestbook {
+  entries: PartyGuestbookEntry[];
+}
+
+export function getTvGuestbook(signal?: AbortSignal): Promise<TvGuestbook> {
+  return api<TvGuestbook>('/api/tv/party/guestbook', { signal });
 }
 
 // --- The party on a television: greetings, the challenge hold, the game ---

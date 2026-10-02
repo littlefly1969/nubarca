@@ -27,6 +27,7 @@ export type TvDiagnosticEvent =
   | 'tv.video.error'
   | 'tv.video.skipped'
   | 'tv.party.gone'
+  | 'tv.party.guestbook.moved'
   | 'tv.game.grant.failed'
   | 'tv.personal.preempted';
 

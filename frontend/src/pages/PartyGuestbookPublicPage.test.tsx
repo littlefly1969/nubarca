@@ -126,6 +126,38 @@ describe('PartyGuestbookPublicPage (the guest book, as a guest reads it)', () =>
     expect(screen.queryByTestId('party-guestbook-start')).not.toBeInTheDocument();
   });
 
+  it('tells a guest, while the book is closed to the room, that these are THEIR memories', async () => {
+    mock({ scope: 'mine', entries: [memory({ body: 'Il mio ricordo' })] });
+    render(wrapper());
+
+    expect(await screen.findByTestId('party-guestbook-scope-mine'))
+      .toHaveTextContent('Durante la festa vedi i ricordi che hai lasciato tu.');
+    expect(screen.getByRole('heading', { name: 'I tuoi ricordi' })).toBeInTheDocument();
+    expect(screen.getByTestId('party-guestbook-list')).toHaveTextContent('Il mio ricordo');
+    // Writing is untouched by the room's visibility.
+    expect(screen.getByTestId('party-guestbook-start')).toBeEnabled();
+  });
+
+  it('says a guest has left nothing yet, rather than that the book is empty', async () => {
+    mock({ scope: 'mine', entries: [] });
+    render(wrapper());
+
+    expect(await screen.findByTestId('party-guestbook-empty'))
+      .toHaveTextContent('Non hai ancora lasciato un ricordo.');
+  });
+
+  it('reads the whole book, as a book, when the regia has opened it', async () => {
+    mock({ scope: 'all', entries: [memory(), memory({ id: 'g2', authorDisplayName: 'Bo', body: 'Auguri' })] });
+    render(wrapper());
+
+    const list = await screen.findByTestId('party-guestbook-list');
+    expect(list.querySelectorAll('figure.guestbook-memory')).toHaveLength(2);
+    expect(screen.queryByTestId('party-guestbook-scope-mine')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'I ricordi' })).toBeInTheDocument();
+    // A book, not a feed: nothing to like, react to or rank.
+    expect(document.body.textContent ?? '').not.toMatch(/mi piace|like|commenta|reazion|classifica/i);
+  });
+
   it('does not invite a guest who has written every memory they were allowed', async () => {
     mock({ remaining: 0 });
     render(wrapper());

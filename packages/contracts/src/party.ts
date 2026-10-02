@@ -391,7 +391,16 @@ export interface PartyGuestbookPage {
   /** Memories this guest has left, or null when the host set no limit —
    * said before somebody composes one the server would refuse. */
   remaining?: number | null;
+  /**
+   * Whose memories `entries` holds. `mine` while the party is live and the
+   * regia has not opened the book to the room: a guest then reads only what
+   * THEY wrote. `all` otherwise. Absent from a server that predates it, which
+   * meant `all`.
+   */
+  scope?: PartyGuestbookScope;
 }
+
+export type PartyGuestbookScope = 'all' | 'mine';
 
 /** A photograph a guest may choose: one of the main album's, never a video. */
 export interface PartyGuestbookPhoto {
@@ -664,3 +673,70 @@ export function partyMessagesQueryToParams(input: { includeHidden?: boolean }): 
   b.setBool('includeHidden', input.includeHidden);
   return b.build();
 }
+
+// --- THE GUEST BOOK, LIVE ---
+//
+// Two decisions the regia makes about the book while the party is happening:
+// whether the room may READ it on their phones, and whether it is on the
+// party's TELEVISION. Neither touches who may write in it. The server answers
+// every question here, including which commands are legal right now; a client
+// renders that answer and never derives it from the flags.
+
+/** The four commands, each the inverse of another. */
+export const PARTY_GUESTBOOK_LIVE_COMMANDS = [
+  'enable_viewing',
+  'disable_viewing',
+  'show_on_tv',
+  'return_to_slideshow',
+] as const;
+export type PartyGuestbookLiveCommand = (typeof PARTY_GUESTBOOK_LIVE_COMMANDS)[number];
+
+/**
+ * What a television assigned to a party is told to show. ONE answer at any
+ * moment, decided by the server: the game and the guest book never share it.
+ */
+export type PartyTvPresentation = 'slideshow' | 'game' | 'guestbook' | 'unavailable';
+
+/** Why "show on TV" is not offered right now. */
+export type PartyGuestbookTvUnavailableReason =
+  | 'party_not_live'
+  | 'guestbook_not_available'
+  | 'game_active'
+  | 'guestbook_empty';
+
+export interface PartyGuestbookLiveControl {
+  /** Quoted back by every command. */
+  version: number;
+  /** The room may read the whole book. */
+  viewingEnabled: boolean;
+  /** The regia ASKED for the book on the television… */
+  tvActive: boolean;
+  /** …and this is what a paired television is actually told to show. The two
+   * can differ (an emptied book yields to the slideshow): follow this one. */
+  tvPresentation: PartyTvPresentation;
+  visibleEntries: number;
+  pendingEntries: number;
+  /** Decided by the server for THIS caller, now. */
+  availableCommands: PartyGuestbookLiveCommand[];
+  tvUnavailableReason: PartyGuestbookTvUnavailableReason | null;
+  partyLive: boolean;
+  guestbookEnabled: boolean;
+}
+
+/** The stable machine codes of a refused command. */
+export type PartyGuestbookLiveRefusalCode =
+  | 'party_not_live'
+  | 'guestbook_not_available'
+  | 'guestbook_empty'
+  | 'game_active'
+  | 'version_conflict'
+  | 'illegal_transition'
+  | 'forbidden'
+  | 'not_found';
+
+/** A refusal carries the state it was measured against, when there is one. */
+export interface PartyGuestbookLiveRefusalBody {
+  code: PartyGuestbookLiveRefusalCode;
+  control: PartyGuestbookLiveControl | null;
+}
+

@@ -1,3 +1,4 @@
+import type { CSSProperties, Ref } from 'react';
 import { useI18n } from '../i18n';
 import { cropFor } from '../pages/partyPrintGeometry';
 import { cropImageStyle } from '../party/PhotoCropFrame';
@@ -29,12 +30,30 @@ export interface GuestbookMemoryView {
   };
 }
 
+/**
+ * The television's composition of the SAME memory: the photograph beside the
+ * words instead of above them, at a size the stage decided. Everything that
+ * makes it this memory — template, crop, words, signature — is unchanged.
+ */
+export interface GuestbookMemoryTvLayout {
+  /** The photograph's box, in pixels. Its aspect is the template's frame. */
+  photoWidth: number;
+  photoHeight: number;
+  /** The dedication's type size, in pixels. */
+  fontPx: number;
+  /** The words column's box, in pixels: what they must fit inside. */
+  wordsWidth: number;
+  wordsHeight: number;
+}
+
 export function PartyGuestbookMemoryCard({
   memory,
   bodyPlaceholder,
   authorPlaceholder,
   loading = 'lazy',
   testId = 'guestbook-memory',
+  tv,
+  wordsRef,
 }: {
   memory: GuestbookMemoryView;
   /** Shown, muted, while a draft has no words yet. */
@@ -42,6 +61,10 @@ export function PartyGuestbookMemoryCard({
   authorPlaceholder?: string;
   loading?: 'lazy' | 'eager';
   testId?: string;
+  /** Draw it for a television (see GuestbookMemoryTvLayout). */
+  tv?: GuestbookMemoryTvLayout;
+  /** The words column, for a stage that measures whether they fit. */
+  wordsRef?: Ref<HTMLElement>;
 }) {
   const { t } = useI18n();
   const template = guestbookTemplateFor(memory.template.key, memory.template.version);
@@ -57,14 +80,26 @@ export function PartyGuestbookMemoryCard({
   const body = memory.body.length > 0 ? memory.body : bodyPlaceholder ?? '';
   const author = memory.authorDisplayName.length > 0 ? memory.authorDisplayName : authorPlaceholder ?? '';
 
+  const photoStyle: CSSProperties = tv
+    ? { width: `${tv.photoWidth}px`, height: `${tv.photoHeight}px` }
+    : { aspectRatio: `${frameAspect}` };
+  const wordsStyle = tv
+    // The width may SHRINK (see .guestbook-memory--tv): a design's own frame —
+    // a paper border, a gradient rim — takes its room from the words rather
+    // than pushing them past the edge of the card.
+    ? ({
+      '--guestbook-tv-font': `${tv.fontPx}px`, width: `${tv.wordsWidth}px`, height: `${tv.wordsHeight}px`,
+    } as CSSProperties)
+    : undefined;
+
   return (
     <figure
-      className={`guestbook-memory ${template.className}`}
+      className={`guestbook-memory ${template.className}${tv ? ' guestbook-memory--tv' : ''}`}
       data-template={template.key}
       data-template-version={template.version}
       data-testid={testId}
     >
-      <div className="guestbook-memory-photo" style={{ aspectRatio: `${frameAspect}` }}>
+      <div className="guestbook-memory-photo" style={photoStyle}>
         <img
           src={memory.media.url}
           alt={memory.authorDisplayName
@@ -79,7 +114,7 @@ export function PartyGuestbookMemoryCard({
       {/* The decoration, where a design has any, is drawn by the stylesheet
           and says nothing to a screen reader. */}
       <span className="guestbook-memory-ornament" aria-hidden="true" />
-      <figcaption className="guestbook-memory-words">
+      <figcaption className="guestbook-memory-words" style={wordsStyle} ref={wordsRef}>
         {/* TEXT, always: never dangerouslySetInnerHTML and never a Markdown
             renderer. Paragraphs survive through `white-space: pre-wrap`. */}
         <p

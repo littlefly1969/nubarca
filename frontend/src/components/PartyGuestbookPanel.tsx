@@ -107,6 +107,7 @@ export function PartyGuestbookPanel({
     ? leftAfterPublish
     : remaining ?? status.page.remaining ?? null;
   const canStart = status.page.canWrite && left !== 0;
+  const mine = status.page.scope === 'mine';
 
   if (composing) {
     return (
@@ -153,11 +154,19 @@ export function PartyGuestbookPanel({
 
       <section className="party-guestbook-entries" aria-labelledby="party-guestbook-entries-title">
         <h2 id="party-guestbook-entries-title" className="party-guestbook-entries-title">
-          {t('partyGuestbookPublic.entriesTitle')}
+          {t(mine ? 'partyGuestbookPublic.mineTitle' : 'partyGuestbookPublic.entriesTitle')}
         </h2>
+        {/* While the party is live and the regia has not opened the book to
+            the room, a guest reads only what THEY wrote — and is told so,
+            rather than left to think the book is this short. */}
+        {mine && (
+          <p className="party-contribution-intro" data-testid="party-guestbook-scope-mine">
+            {t('partyGuestbookPublic.mineNote')}
+          </p>
+        )}
         {status.page.entries.length === 0 ? (
           <p className="party-contribution-intro" data-testid="party-guestbook-empty">
-            {t('partyGuestbookPublic.empty')}
+            {t(mine ? 'partyGuestbookPublic.mineEmpty' : 'partyGuestbookPublic.empty')}
           </p>
         ) : (
           <ul className="party-guestbook-list" data-testid="party-guestbook-list">

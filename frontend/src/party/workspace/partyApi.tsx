@@ -11,6 +11,7 @@ import {
   getAlbumPartySettings,
   getParty,
   getPartyGameSnapshot,
+  getPartyGuestbookLive,
   getPartyInvitationGroup,
   getPartyPrintSettings,
   getPartyRsvpQuestions,
@@ -33,6 +34,7 @@ import {
   reorderPartyRsvpQuestions,
   rotatePartyInvitationLink,
   sendPartyGameCommand,
+  sendPartyGuestbookLiveCommand,
   sendPartyInvitation,
   setAlbumPartyMode,
   setAlbumTvVisibility,
@@ -141,6 +143,8 @@ const owner = {
   moderatePartyMessage,
   listPartyGuestbook,
   moderatePartyGuestbookEntry,
+  getPartyGuestbookLive,
+  sendPartyGuestbookLiveCommand,
 
   /**
    * WHERE THE PARTY IS, ready to hand to somebody.

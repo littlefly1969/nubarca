@@ -663,6 +663,23 @@ describe('activities and screens', () => {
     expect(screen.queryByTestId('party-activities-game-locked')).not.toBeInTheDocument();
   });
 
+  it('says why the game cannot be switched on while the guest book holds the television', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty({ gameEnabled: false })),
+      [`GET /api/albums/${ALBUM_ID}/party-challenges`]: () => jsonResponse({ albumId: ALBUM_ID, challenges: [] }),
+      [`PATCH /api/albums/${ALBUM_ID}/party-game-settings`]: () =>
+        jsonResponse({ error: 'guestbook_active' }, 409),
+    }, { permissions: [PERMISSIONS.partyAccess, PERMISSIONS.partyGames], at: '?section=activities' });
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByTestId('party-game-enable'));
+    await user.click(screen.getByTestId('party-game-save'));
+
+    expect(await screen.findByTestId('party-game-guestbook-active'))
+      .toHaveTextContent('Il Guestbook è in TV');
+  });
+
   it('says a locked capability is not available rather than showing dead controls', async () => {
     mount({
       [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),

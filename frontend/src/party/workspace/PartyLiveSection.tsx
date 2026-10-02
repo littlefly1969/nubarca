@@ -13,6 +13,7 @@ import { PERMISSIONS } from '../../auth/permissions';
 import { useI18n, type MessageKey } from '../../i18n';
 import { mainMediaSource } from '../partyModel';
 import { absoluteGuestUrl } from './PartyShareCard';
+import { PartyGuestbookLivePanel } from './PartyGuestbookLivePanel';
 import {
   attentionBodyKey,
   attentionBodyPluralKey,
@@ -61,6 +62,7 @@ export function PartyLiveSection({
   const { party, moderation } = facts;
   const albumParty = loadedValue(facts.albumParty);
   const attention = workspaceAttention(facts);
+  const liveAlbumId = mainMediaSource(party)?.albumId ?? null;
 
   return (
     <>
@@ -97,6 +99,12 @@ export function PartyLiveSection({
       ))}
 
       <RightNow party={party} albumParty={albumParty} moderation={moderation} />
+
+      {/* The book on the room's phones and on the television. The server
+          decides whether there is anything to control and who may. */}
+      {albumParty?.guestbookEnabled !== false && liveAlbumId && (
+        <PartyGuestbookLivePanel albumId={liveAlbumId} />
+      )}
 
       <EndTheParty party={party} onPartyUpdated={onPartyUpdated} />
 

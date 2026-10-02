@@ -287,6 +287,8 @@ import type {
   AlbumPartyStatus,
   PartyAddressShare,
   PartyContributionsPatch,
+  PartyGuestbookLiveCommand,
+  PartyGuestbookLiveControl,
   PartyGuestbookManagerList,
   GuestDirectoryPage,
   GuestDirectoryQuery,
@@ -315,6 +317,7 @@ import type {
   PartyRsvpQuestionWrite,
   PartyUploadList,
 } from './party';
+import { asPartyGuestbookLiveConflict } from './party';
 import type { AlbumDetail, AlbumItemSummary } from './albums';
 import type { PartyGameCommand, PartyGamePlanAction, PartyGameSnapshot } from './partyGame';
 import type { PrintStation, SharedPrinter } from './printStations';
@@ -416,6 +419,24 @@ export function partyCrewRoutes(partyId: string) {
 
     listPartyGuestbook: (_p: string, signal?: AbortSignal): Promise<PartyGuestbookManagerList> =>
       api<PartyGuestbookManagerList>(`${at}/guestbook`, { signal }),
+
+    // The book on the room's phones and on the television: the host's two
+    // live controls, gated per half by `contributions.moderate` and
+    // `screens.manage` — the server decides which this device holds.
+    getPartyGuestbookLive: (_a: string, signal?: AbortSignal): Promise<PartyGuestbookLiveControl> =>
+      api<PartyGuestbookLiveControl>(`${at}/guestbook-live`, { signal }),
+
+    sendPartyGuestbookLiveCommand: async (
+      _a: string, command: PartyGuestbookLiveCommand, expectedVersion: number, signal?: AbortSignal,
+    ): Promise<PartyGuestbookLiveControl> => {
+      try {
+        return await api<PartyGuestbookLiveControl>(`${at}/guestbook-live/commands`, {
+          method: 'POST', json: { command, expectedVersion }, signal,
+        });
+      } catch (error) {
+        throw asPartyGuestbookLiveConflict(error);
+      }
+    },
 
     moderatePartyGuestbookEntry: (
       _p: string, entryId: string, action: PartyMessageAction, signal?: AbortSignal,
