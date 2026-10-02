@@ -773,6 +773,25 @@ public sealed class PartyContentMediaPresentationTests : IDisposable
         Assert.Equal(0, (await OwnerSlotAsync(party, "menu")).GetProperty("version").GetInt32());
     }
 
+    [Theory]
+    [InlineData("portrait", 0.8)]      // a square photograph whole in a 4:5 frame
+    [InlineData("landscape", 2.0 / 3)] // …and in a 3:2 one
+    public async Task A_Frame_May_Zoom_Out_To_The_Whole_Photograph_And_No_Further(string orientation, double contain)
+    {
+        var party = await SeedPartyAsync();
+
+        var refused = await WriteFramedAsync(
+            party, party.AlbumPhotoId, 0, orientation, new { zoom = contain * 0.9, centerX = 0.5, centerY = 0.5 });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+
+        var accepted = await WriteFramedAsync(
+            party, party.AlbumPhotoId, 0, orientation, new { zoom = contain, centerX = 0.5, centerY = 0.5 });
+        accepted.EnsureSuccessStatusCode();
+        var (frame, crop) = FrameOf(await OwnerSlotAsync(party, "menu"));
+        Assert.Equal(orientation, frame);
+        Assert.Equal(contain, crop!.Value.GetProperty("zoom").GetDouble(), 9);
+    }
+
     // --- Where the words sit -------------------------------------------------
 
     private static string? PlacementOf(JsonElement slot) =>

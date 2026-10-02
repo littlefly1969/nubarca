@@ -10,7 +10,19 @@ public sealed record PrintEnrollmentRequest(Guid StationId, string EnrollmentTok
 public sealed record PrintEnrollmentResponse(Guid StationId, string StationCredential, string DesiredState);
 public sealed record PrinterDeviceReport(
     string DeviceKey, string DisplayName, string? Manufacturer, string? Model,
-    string AdapterKind, object Capabilities, string ObservedState);
+    string AdapterKind, object Capabilities, string ObservedState,
+    /// <summary>
+    /// Absent from an agent that predates it — the stored count is then left
+    /// exactly as it is. A current agent always sends it, available or not.
+    /// </summary>
+    PrinterMediaRemainingReport? MediaRemaining = null);
+
+/// <summary>
+/// The physical media count as the agent read it: <c>available</c> false when it
+/// asked and the printer gave no number; <c>ageSeconds</c> how old the reading
+/// is, never a timestamp of the box's own.
+/// </summary>
+public sealed record PrinterMediaRemainingReport(bool Available, int? RemainingPrints, int? AgeSeconds);
 public sealed record PrintHeartbeatRequest(string AgentVersion, IReadOnlyList<PrinterDeviceReport> Devices);
 public sealed record PrintHeartbeatResponse(string DesiredState, DateTime ServerTime);
 public sealed record PrintDeviceDto(
@@ -30,7 +42,14 @@ public sealed record PrintDeviceDto(
     /// <summary>The owner's view only: whom this printer is lent to now.</summary>
     IReadOnlyList<PrinterShareDto>? Shares = null,
     /// <summary>The owner's view only: sheets per person, across the whole history.</summary>
-    IReadOnlyList<PrinterUsageDto>? Usage = null);
+    IReadOnlyList<PrinterUsageDto>? Usage = null,
+    /// <summary>
+    /// Prints physically left on the loaded media, as the printer last reported
+    /// them, and when — null when it reports none. Shown as current only while
+    /// the printer is online; otherwise as a last reading.
+    /// </summary>
+    int? MediaRemainingPrints = null,
+    DateTime? MediaRemainingObservedAt = null);
 /// <summary>A live loan of a printer, as its owner sees it.</summary>
 public sealed record PrinterShareDto(
     Guid Id, string GranteeName, string GranteeEmail, int? MaxSheets, int UsedSheets, DateTime CreatedAt);
@@ -46,7 +65,9 @@ public sealed record SharedPrinterDto(
     Guid ShareId, Guid StationId, string StationName, string StationStatus,
     Guid DeviceId, string DisplayName, string ObservedState, string OwnerName,
     string LoadedPaperSize, IReadOnlyList<string> Papers, bool SupportsPhoto10x15, bool CutsStrips,
-    string? LoadedPaperChangedBy, DateTime? LoadedPaperChangedAt, int? MaxSheets, int UsedSheets);
+    string? LoadedPaperChangedBy, DateTime? LoadedPaperChangedAt, int? MaxSheets, int UsedSheets,
+    /// <summary>Prints physically left on the media (the printer's count, not the loan's).</summary>
+    int? MediaRemainingPrints = null, DateTime? MediaRemainingObservedAt = null);
 public sealed record SharePrinterRequest(string? Email, int? MaxSheets);
 /// <summary>
 /// A loan's new ceiling. <c>maxSheets</c> must be present: null removes the

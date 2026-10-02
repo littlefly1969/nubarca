@@ -113,7 +113,7 @@ public sealed class PartyPrintSubmissionTests : IDisposable
             Grid: new PartyPrintProductState(true, 5)), albumId);
     }
 
-    private IPartyPrintSubmissionService Service(IServiceScope scope, IPartyPrintSourceReader? sources = null) =>
+    private IPartyPrintSubmissionService Service(IServiceScope scope, IPrintPhotoSourceReader? sources = null) =>
         new PartyPrintSubmissionService(
             scope.ServiceProvider.GetRequiredService<AppDbContext>(),
             new PartyPrintBudget(scope.ServiceProvider.GetRequiredService<AppDbContext>()),
@@ -162,6 +162,102 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         return await db.PartyPrintProfiles.AsNoTracking()
             .SingleAsync(p => p.PartyAlbumId == albumId);
+    }
+
+    // --- framing by placement --------------------------------------------------
+
+    /// <summary>Gives a seeded photograph a known display shape.</summary>
+    private async Task ShapeAsync(Guid fileId, int width, int height)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var file = await db.FileItems.SingleAsync(f => f.Id == fileId);
+        (file.Width, file.Height) = (width, height);
+        await db.SaveChangesAsync();
+    }
+
+    private static PartyPrintSubmitRequest Placed(string product, double zoom, string? orientation, params Guid[] ids) =>
+        new(product, "pure",
+            ids.Select(id => new PartyPrintSlotRequest(id, Placement: new PartyPrintPlacementRequest(0.5, 0.5, zoom))).ToList(),
+            Orientation: orientation);
+
+    [Fact]
+    public async Task A_Placement_Zoomed_Out_To_The_Whole_Photograph_Prints_And_Is_Kept_As_The_Authority()
+    {
+        var (access, _) = await SeedAsync();
+        await ShapeAsync(_photos[0], 1500, 1000);
+        // A wide photograph whole on a standing sheet.
+        var contain = PhotoPlacementGeometry.ContainZoom(1.5, PartyPrintGeometry.PhotoSlotAspect(portrait: true));
+        var result = await SubmitAsync(access, Placed(PartyPrintProducts.Photo, contain, "portrait", _photos[0]), "pz1");
+        Assert.True(result.Ok, result.Refusal.ToString());
+
+        using var scope = _factory.Services.CreateScope();
+        var source = await scope.ServiceProvider.GetRequiredService<AppDbContext>().PrintJobSources.AsNoTracking()
+            .SingleAsync(x => x.PrintJobId == result.Accepted!.JobId);
+        Assert.Equal(contain, source.PlacementZoom);
+        Assert.Equal((0.5, 0.5), (source.PlacementCenterX!.Value, source.PlacementCenterY!.Value));
+        // The crop beside it: the whole photograph is what shows.
+        Assert.Equal((0.0, 0.0, 1.0, 1.0), (source.CropX, source.CropY, source.CropWidth, source.CropHeight));
+    }
+
+    [Fact]
+    public async Task Further_Out_Than_The_Whole_Photograph_Is_Refused_Before_Anything_Is_Spent()
+    {
+        var (access, albumId) = await SeedAsync();
+        await ShapeAsync(_photos[0], 1500, 1000);
+        var contain = PhotoPlacementGeometry.ContainZoom(1.5, PartyPrintGeometry.PhotoSlotAspect(portrait: true));
+        var result = await SubmitAsync(access, Placed(PartyPrintProducts.Photo, contain * 0.8, "portrait", _photos[0]), "pz2");
+        Assert.Equal(PartyPrintRefusal.Invalid, result.Refusal);
+        Assert.Equal(0, (await ProfileAsync(albumId)).PhotoAcceptedCount);
+    }
+
+    [Fact]
+    public async Task A_Slot_Framed_Two_Ways_Or_None_Says_Nothing_And_Is_Refused()
+    {
+        var (access, _) = await SeedAsync();
+        var both = new PartyPrintSubmitRequest(PartyPrintProducts.Photo, "pure",
+            [new PartyPrintSlotRequest(_photos[0], 0, 0, 1, 1, new PartyPrintPlacementRequest(0.5, 0.5, 1))]);
+        Assert.Equal(PartyPrintRefusal.Invalid, (await SubmitAsync(access, both, "pz3")).Refusal);
+        var none = new PartyPrintSubmitRequest(PartyPrintProducts.Photo, "pure", [new PartyPrintSlotRequest(_photos[0])]);
+        Assert.Equal(PartyPrintRefusal.Invalid, (await SubmitAsync(access, none, "pz4")).Refusal);
+        var nonsense = Placed(PartyPrintProducts.Photo, double.NaN, null, _photos[0]);
+        Assert.Equal(PartyPrintRefusal.Invalid, (await SubmitAsync(access, nonsense, "pz5")).Refusal);
+    }
+
+    [Fact]
+    public async Task A_Photograph_Whose_Shape_Is_Unknown_Frames_As_It_Always_Could()
+    {
+        var (access, _) = await SeedAsync();
+        // No dimensions stored: zooming out cannot be checked, zooming in can.
+        Assert.Equal(PartyPrintRefusal.Invalid,
+            (await SubmitAsync(access, Placed(PartyPrintProducts.Photo, 0.8, null, _photos[0]), "pz6")).Refusal);
+        Assert.True((await SubmitAsync(access, Placed(PartyPrintProducts.Photo, 1.5, null, _photos[0]), "pz7")).Ok);
+    }
+
+    [Fact]
+    public async Task Four_And_Eight_Photographs_Each_Keep_Their_Own_Placement()
+    {
+        var (access, _) = await SeedAsync();
+        foreach (var id in _photos) await ShapeAsync(id, 1000, 1000);
+        var grid = new PartyPrintSubmitRequest(PartyPrintProducts.Grid4, "pure",
+            _photos.Take(4).Select((id, i) => new PartyPrintSlotRequest(id,
+                Placement: new PartyPrintPlacementRequest(0.5, 0.5, i == 0 ? PhotoPlacementGeometry.ContainZoom(1, PartyPrintGeometry.GridSlotAspect("10x15")) : 1 + i))).ToList());
+        var gridResult = await SubmitAsync(access, grid, "pz8");
+        Assert.True(gridResult.Ok, gridResult.Refusal.ToString());
+        var strip = new PartyPrintSubmitRequest(PartyPrintProducts.TwinStrip4, "midnight",
+            Eight().Select((id, i) => new PartyPrintSlotRequest(id,
+                Placement: new PartyPrintPlacementRequest(0.5, 0.5, 1 + (i * 0.25)))).ToList());
+        var stripResult = await SubmitAsync(access, strip, "pz9");
+        Assert.True(stripResult.Ok, stripResult.Refusal.ToString());
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var gridZooms = await db.PrintJobSources.AsNoTracking().Where(x => x.PrintJobId == gridResult.Accepted!.JobId)
+            .OrderBy(x => x.SlotIndex).Select(x => x.PlacementZoom!.Value).ToListAsync();
+        Assert.Equal(4, gridZooms.Distinct().Count());
+        var stripZooms = await db.PrintJobSources.AsNoTracking().Where(x => x.PrintJobId == stripResult.Accepted!.JobId)
+            .OrderBy(x => x.SlotIndex).Select(x => x.PlacementZoom!.Value).ToListAsync();
+        Assert.Equal([1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75], stripZooms);
     }
 
     [Fact]
@@ -868,7 +964,7 @@ public sealed class PartyPrintSubmissionTests : IDisposable
                 : videos.Contains(f) ? PartyMediaKind.Video : null);
     }
 
-    private sealed class FakeSources : IPartyPrintSourceReader
+    private sealed class FakeSources : IPrintPhotoSourceReader
     {
         public Task<byte[]?> ReadAsync(Guid owner, Guid fileItemId, CancellationToken c)
         {
@@ -880,12 +976,12 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         }
     }
 
-    private sealed class ScriptedSources(Func<CancellationToken, Task<byte[]?>> read) : IPartyPrintSourceReader
+    private sealed class ScriptedSources(Func<CancellationToken, Task<byte[]?>> read) : IPrintPhotoSourceReader
     {
         public Task<byte[]?> ReadAsync(Guid owner, Guid fileItemId, CancellationToken c) => read(c);
     }
 
-    private sealed class BrokenSources : IPartyPrintSourceReader
+    private sealed class BrokenSources : IPrintPhotoSourceReader
     {
         public Task<byte[]?> ReadAsync(Guid owner, Guid fileItemId, CancellationToken c) =>
             Task.FromResult<byte[]?>([0x00, 0x01, 0x02, 0x03]);

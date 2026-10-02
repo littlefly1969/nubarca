@@ -41,9 +41,17 @@ public sealed record PartyPrintOverlay(PartyPrintOverlayText Text, PartyPrintOve
     public static readonly PartyPrintOverlay Default = new(PartyPrintOverlayText.White, PartyPrintOverlayLogo.Light);
 }
 
-/// <summary>One photograph and how it is framed, already validated.</summary>
+/// <summary>
+/// One photograph and how it is framed, already validated: by its
+/// <see cref="Placement"/> when the studio sent one, else by the legacy crop.
+/// </summary>
 public sealed record PartyPrintPhoto(
-    byte[] Bytes, double CropX, double CropY, double CropWidth, double CropHeight);
+    byte[] Bytes, double CropX, double CropY, double CropWidth, double CropHeight,
+    PhotoPlacement? Placement = null)
+{
+    public static PartyPrintPhoto Placed(byte[] bytes, PhotoPlacement placement) =>
+        new(bytes, 0, 0, 1, 1, placement);
+}
 
 /// <summary>Which way round the sheet goes for a single photograph.</summary>
 public enum PartyPrintOrientation
@@ -99,6 +107,7 @@ public sealed record PartyPrintComposition(
 public sealed class PartyPrintComposer
 {
     private static readonly Rgba32 CloudWhite = new(0xF5, 0xF7, 0xFB);
+    private static readonly Rgba32 White = new(0xFF, 0xFF, 0xFF);
     private static readonly Rgba32 MidnightNavy = new(0x0A, 0x0F, 0x1A);
     private static readonly Rgba32 DeepBlue = new(0x0F, 0x1E, 0x3A);
     private static readonly Rgba32 CyanGlow = new(0x00, 0xD4, 0xFF);
@@ -315,8 +324,10 @@ public sealed class PartyPrintComposer
         // tall as they turned out to be.
         var layout = LayoutOverlayText(composition, w, h);
         var sheet = new Image<Rgba32>(w, h);
+        // Full bleed has no paper of its own: a photograph zoomed out sits on
+        // white, the colour of the sheet it is printed on.
         DrawFramed(sheet, source, photo, new Rectangle(0, 0, w, h), composition.Theme,
-            Palette(PartyPrintTheme.Pure));
+            Palette(PartyPrintTheme.Pure), band: White);
         DrawOverlayTextSupport(sheet, OverlayTextSupportTop(layout, w, h), support);
 
         var shortEdge = Math.Min(w, h);
@@ -514,7 +525,57 @@ public sealed class PartyPrintComposer
     /// </summary>
     private static void DrawFramed(
         Image<Rgba32> sheet, Image<Rgba32> source, PartyPrintPhoto photo,
-        Rectangle slot, PartyPrintTheme theme, ThemePalette palette)
+        Rectangle slot, PartyPrintTheme theme, ThemePalette palette, Rgba32? band = null)
+    {
+        if (photo.Placement is PhotoPlacement placement)
+        {
+            // The frame's own paper first: where a zoomed-out photograph leaves
+            // room, the theme's background shows — never a black bar.
+            DrawPlaced(sheet, source, placement, slot, band ?? palette.Background);
+        }
+        else
+        {
+            DrawCropped(sheet, source, photo, slot);
+        }
+
+        if (theme == PartyPrintTheme.Midnight)
+        {
+            // A HAIRLINE where the photograph meets the dark paper. Eight bright
+            // cyan frames on one sheet read as neon; one thin, low-contrast edge
+            // per picture reads as a deliberate mount, which is the intent.
+            var edge = new RectangularPolygon(
+                slot.X - 1, slot.Y - 1, slot.Width + 2, slot.Height + 2);
+            sheet.Mutate(x => x.Draw(palette.Edge, 2f, edge));
+        }
+    }
+
+    /// <summary>
+    /// A photograph placed in a frame by the shared geometry, on the frame's
+    /// <paramref name="band"/>: covered, zoomed in, or zoomed out with the band
+    /// showing — never stretched, never panned into a gap.
+    /// </summary>
+    internal static void DrawPlaced(
+        Image<Rgba32> target, Image<Rgba32> source, PhotoPlacement placement, Rectangle slot, Rgba32 band)
+    {
+        target.Mutate(x => x.Fill(band, new RectangularPolygon(slot.X, slot.Y, slot.Width, slot.Height)));
+        var placed = PhotoPlacementGeometry.Place(
+            (double)source.Width / source.Height, (double)slot.Width / slot.Height, placement);
+        var visible = PhotoPlacementGeometry.Visible(placed);
+        var (cx, cy, cw, ch) = PhotoPlacementGeometry.LegacyCrop(placed);
+        var from = Rectangle.Intersect(new Rectangle(
+            (int)Math.Round(cx * source.Width), (int)Math.Round(cy * source.Height),
+            Math.Max(1, (int)Math.Round(cw * source.Width)), Math.Max(1, (int)Math.Round(ch * source.Height))),
+            source.Bounds);
+        var to = new Rectangle(
+            slot.X + (int)Math.Round(visible.Left * slot.Width), slot.Y + (int)Math.Round(visible.Top * slot.Height),
+            Math.Max(1, (int)Math.Round(visible.Width * slot.Width)),
+            Math.Max(1, (int)Math.Round(visible.Height * slot.Height)));
+        using var drawn = source.Clone(x => x.Crop(from).Resize(to.Width, to.Height));
+        target.Mutate(x => x.DrawImage(drawn, new Point(to.X, to.Y), 1f));
+    }
+
+    /// <summary>A job from before placements: its crop, filled edge to edge, as it always printed.</summary>
+    private static void DrawCropped(Image<Rgba32> sheet, Image<Rgba32> source, PartyPrintPhoto photo, Rectangle slot)
     {
         var cropRect = new Rectangle(
             (int)Math.Round(photo.CropX * source.Width),
@@ -535,16 +596,6 @@ public sealed class PartyPrintComposer
             }));
 
         sheet.Mutate(x => x.DrawImage(framed, new Point(slot.X, slot.Y), 1f));
-
-        if (theme == PartyPrintTheme.Midnight)
-        {
-            // A HAIRLINE where the photograph meets the dark paper. Eight bright
-            // cyan frames on one sheet read as neon; one thin, low-contrast edge
-            // per picture reads as a deliberate mount, which is the intent.
-            var edge = new RectangularPolygon(
-                slot.X - 1, slot.Y - 1, slot.Width + 2, slot.Height + 2);
-            sheet.Mutate(x => x.Draw(palette.Edge, 2f, edge));
-        }
     }
 
     private void DrawFooter(

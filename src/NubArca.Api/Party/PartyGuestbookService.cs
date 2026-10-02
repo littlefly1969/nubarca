@@ -1,3 +1,4 @@
+using NubArca.Api.Print;
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
@@ -207,13 +208,14 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
             return PartyGuestbookSubmissionResult.Fail(PartyGuestbookSubmissionError.InvalidTemplate);
         }
 
-        // The crop editor's own limits, refused rather than clamped: a value
-        // outside them is not something the composer produces, so it is not a
-        // framing anybody chose.
+        // The framing's structure, refused rather than clamped: a value outside
+        // it is not something the composer produces, so it is not a framing
+        // anybody chose. How far OUT is allowed depends on the photograph and
+        // its frame, and is checked once the photograph is known (below).
         if (submission.CropZoom is not double zoom
             || submission.CropCenterX is not double centerX
             || submission.CropCenterY is not double centerY
-            || !PartyGuestContentMediaOrientations.IsValidCrop(zoom, centerX, centerY))
+            || !PhotoPlacementGeometry.IsStructurallyValid(new PhotoPlacement(centerX, centerY, zoom)))
         {
             return PartyGuestbookSubmissionResult.Fail(PartyGuestbookSubmissionError.InvalidCrop);
         }
@@ -267,6 +269,17 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
             {
                 await tx.RollbackAsync(cancellationToken);
                 return PartyGuestbookSubmissionResult.Fail(refused);
+            }
+
+            // No further out than the whole photograph inside the design's frame:
+            // below that, zooming out only adds empty frame on every side.
+            var photoAspect = (double)photo.Width / photo.Height;
+            if (!PhotoPlacementGeometry.IsValid(photoAspect,
+                    PartyGuestbookTemplates.FrameAspect(entry.TemplateKey, entry.TemplateVersion, photoAspect),
+                    new PhotoPlacement(centerX, centerY, zoom)))
+            {
+                await tx.RollbackAsync(cancellationToken);
+                return PartyGuestbookSubmissionResult.Fail(PartyGuestbookSubmissionError.InvalidCrop);
             }
 
             if (participantId is Guid writer

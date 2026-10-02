@@ -153,6 +153,26 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
             return new PartyGuestContentResult(PartyGuestContentOutcome.InvalidMedia);
         }
 
+        // A framing zoomed OUT goes no further than the whole photograph in its
+        // frame, which depends on the photograph: checked against its stored
+        // shape. One whose shape is not known yet frames as it always could.
+        if (write.MediaCrop is { Zoom: < 1 } outward)
+        {
+            var orientation = write.MediaOrientation ?? row?.MediaOrientation;
+            var framedMedia = write.MediaFileItemId ?? row?.MediaFileItemId;
+            var shapes = framedMedia is Guid id
+                ? await Print.PrintPhotoShapes.DisplayAspectsAsync(_db, ownerUserId, [id], cancellationToken)
+                : new Dictionary<Guid, double>();
+            if (orientation is null || !PartyGuestContentMediaOrientations.IsKnown(orientation)
+                || framedMedia is not Guid known || !shapes.TryGetValue(known, out var photoAspect)
+                || !Print.PhotoPlacementGeometry.IsValid(photoAspect,
+                    PartyGuestContentMediaOrientations.FrameAspect(orientation),
+                    new Print.PhotoPlacement(outward.CenterX, outward.CenterY, outward.Zoom)))
+            {
+                return new PartyGuestContentResult(PartyGuestContentOutcome.InvalidPayload);
+            }
+        }
+
         // "poster" with no photograph cannot be CREATED — a poster slot IS its
         // picture and the surface has no composition to fall back to. But it can
         // legitimately EXIST: `MediaFileItemId` is ON DELETE SET NULL, so a

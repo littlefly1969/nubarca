@@ -65,6 +65,7 @@ public class AppDbContext : DbContext
     public DbSet<PrintJobSource> PrintJobSources => Set<PrintJobSource>();
     public DbSet<PartyPrintProfile> PartyPrintProfiles => Set<PartyPrintProfile>();
     public DbSet<PartyPrintRequest> PartyPrintRequests => Set<PartyPrintRequest>();
+    public DbSet<OwnerPhotoPrintRequest> OwnerPhotoPrintRequests => Set<OwnerPhotoPrintRequest>();
     public DbSet<AdminImportRun> AdminImportRuns => Set<AdminImportRun>();
     public DbSet<AdminImportItem> AdminImportItems => Set<AdminImportItem>();
     public DbSet<RemoteUploadSession> RemoteUploadSessions => Set<RemoteUploadSession>();

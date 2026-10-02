@@ -17,9 +17,13 @@ public sealed class PrintStationService
 
     private readonly IPrinterAccess _printers;
 
+    private readonly ILogger<PrintStationService> _logger;
+
     public PrintStationService(AppDbContext db, TimeProvider clock, IOptions<PrintOptions> options,
-        IDerivedBlobStorage artifacts, PrintArtifactRenderer renderer, IPrinterAccess printers)
+        IDerivedBlobStorage artifacts, PrintArtifactRenderer renderer, IPrinterAccess printers,
+        ILogger<PrintStationService>? logger = null)
     {
+        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PrintStationService>.Instance;
         _db = db;
         _clock = clock;
         _options = options.Value;
@@ -217,7 +221,8 @@ public sealed class PrintStationService
                 PrintCapabilityMatcher.SupportsFormat(device.CapabilitiesJson, PrintFormats.Strip2x6Pair),
                 device.LoadedPaperChangedByUserId is Guid by ? people.GetValueOrDefault(by)?.Name : null,
                 device.LoadedPaperChangedAt,
-                share.MaxSheets, share.UsedSheets);
+                share.MaxSheets, share.UsedSheets,
+                device.MediaRemainingPrints, device.MediaRemainingObservedAt);
         }).Where(x => x is not null).Cast<SharedPrinterDto>()
             .OrderBy(x => x.OwnerName).ThenBy(x => x.DisplayName).ToArray();
     }
@@ -431,6 +436,7 @@ public sealed class PrintStationService
             device.CapabilitiesJson = JsonSerializer.Serialize(report.Capabilities);
             device.LastObservedState = report.ObservedState;
             device.LastSeenAt = now;
+            ApplyMediaRemaining(stationId, device, report.MediaRemaining, now);
         }
         foreach (var missing in knownDevices.Values.Where(x => !reportedKeys.Contains(x.DeviceKey)))
             missing.LastObservedState = PrintDeviceStates.Offline;
@@ -696,6 +702,42 @@ public sealed class PrintStationService
         }, raw);
     }
 
+    /// <summary>No photo printer's media holds anywhere near this many prints.</summary>
+    internal const int MaxMediaRemainingPrints = 100_000;
+
+    /// <summary>A reading older than this is still the last one, dated no earlier.</summary>
+    internal static readonly TimeSpan MaxMediaReadingAge = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// The physical media count. An agent that does not send it is an older one,
+    /// and the stored reading is left exactly as it was — never made to look
+    /// fresh. "Not available" clears it. A count outside any plausible media is
+    /// treated as no count rather than refusing the heartbeat: the printer's
+    /// state matters more than a number it could not report sensibly.
+    /// </summary>
+    private void ApplyMediaRemaining(Guid stationId, PrinterDevice device,
+        PrinterMediaRemainingReport? report, DateTime now)
+    {
+        if (report is null) return;
+        if (!report.Available || report.RemainingPrints is not int remaining
+            || remaining < 0 || remaining > MaxMediaRemainingPrints)
+        {
+            if (device.MediaRemainingPrints is not null)
+                _logger.LogInformation("print.media.remaining.unavailable station={StationId} device={DeviceId}",
+                    stationId, device.Id);
+            device.MediaRemainingPrints = null;
+            device.MediaRemainingObservedAt = null;
+            return;
+        }
+        var age = TimeSpan.FromSeconds(Math.Clamp(report.AgeSeconds ?? 0, 0, (int)MaxMediaReadingAge.TotalSeconds));
+        if (device.MediaRemainingPrints != remaining)
+            _logger.LogInformation(
+                "print.media.remaining.observed station={StationId} device={DeviceId} remainingPrints={RemainingPrints}",
+                stationId, device.Id, remaining);
+        device.MediaRemainingPrints = remaining;
+        device.MediaRemainingObservedAt = now - age;
+    }
+
     private static void ValidateDevice(PrinterDeviceReport report)
     {
         if (string.IsNullOrWhiteSpace(report.DeviceKey) || report.DeviceKey.Length > 256
@@ -720,7 +762,9 @@ public sealed class PrintStationService
                 x.CalibrationGamma, x.CalibrationSaturation),
             PaperOf(x), Papers(x),
             x.LoadedPaperChangedByUserId is Guid by ? people?.GetValueOrDefault(by)?.Name : null,
-            x.LoadedPaperChangedAt);
+            x.LoadedPaperChangedAt,
+            MediaRemainingPrints: x.MediaRemainingPrints,
+            MediaRemainingObservedAt: x.MediaRemainingObservedAt);
 
     private static string PaperOf(PrinterDevice x) =>
         PrintPapers.IsKnown(x.LoadedPaperSize) ? x.LoadedPaperSize : PrintPapers.Photo10x15;

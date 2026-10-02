@@ -1,4 +1,6 @@
+using SixLabors.Fonts;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
@@ -9,6 +11,25 @@ public sealed class PrintArtifactRenderer
 {
     public const int LandscapeWidth = 1800;
     public const int LandscapeHeight = 1200;
+
+    /// <summary>The paper a zoomed-out photograph sits on: the sheet's own white.</summary>
+    public static readonly Rgba32 OwnerBand = new(0xFF, 0xFF, 0xFF);
+
+    /// <summary>Type size of the date, a fraction of the sheet's short edge: discreet, legible.</summary>
+    public const double DateTypeFraction = 0.03;
+
+    /// <summary>Its inset from the visible photograph's bottom-right corner, short-edge fraction.</summary>
+    public const double DateInsetFraction = 0.035;
+
+    private readonly string _assetRoot;
+    private readonly Lazy<FontFamily> _dateFont;
+
+    public PrintArtifactRenderer(string? assetRoot = null)
+    {
+        _assetRoot = assetRoot ?? AppContext.BaseDirectory;
+        _dateFont = new Lazy<FontFamily>(() =>
+            new FontCollection().Add(Path.Combine(_assetRoot, "Assets", "fonts", "Exo2-Medium.ttf")));
+    }
 
     private static readonly IReadOnlyDictionary<char, string> Glyphs = new Dictionary<char, string>
     {
@@ -84,25 +105,99 @@ public sealed class PrintArtifactRenderer
             DrawBand(image, StripLeft + (i * patch), PatchTop, patch - 8, PatchHeight, Patches[i]);
     }
 
+    /// <summary>
+    /// A whole photograph on a 10x15 that follows its shape, on white — the
+    /// owner print at its most basic, kept for its callers and drawn by it.
+    /// </summary>
     public async Task<byte[]> RenderPhoto10x15Async(
         ReadOnlyMemory<byte> source, CancellationToken cancellationToken)
     {
-        using var image = Image.Load(source.Span);
-        image.Mutate(x => x.AutoOrient());
-        var portrait = image.Height > image.Width;
-        var width = portrait ? LandscapeHeight : LandscapeWidth;
-        var height = portrait ? LandscapeWidth : LandscapeHeight;
-        image.Mutate(x => x.Resize(new ResizeOptions
+        var info = Image.Identify(source.Span);
+        var (w, h) = Oriented(info);
+        var portrait = h > w;
+        var (sheetW, sheetH) = PartyPrintGeometry.Sheet(Domain.Print.PrintPapers.Photo10x15, portrait);
+        return await RenderOwnerPhotoAsync(new OwnerPhotoComposition(
+            source.ToArray(), Domain.Print.PrintPapers.Photo10x15, portrait,
+            new PhotoPlacement(0.5, 0.5,
+                PhotoPlacementGeometry.ContainZoom((double)w / h, (double)sheetW / sheetH))), cancellationToken);
+    }
+
+    /// <summary>
+    /// An owner's own photograph printed on its own: the loaded paper at 300dpi,
+    /// standing or lying, the photograph placed by the shared framing (filled,
+    /// zoomed in, or zoomed out onto white), and — only when asked — the
+    /// photograph's date, small, bottom-right ON the photograph, never on a
+    /// band. No brand, no frame, no footer, no number. The printer's
+    /// calibration is applied as to every sheet; no metadata leaves with it.
+    /// </summary>
+    public async Task<byte[]> RenderOwnerPhotoAsync(
+        OwnerPhotoComposition composition, CancellationToken cancellationToken)
+    {
+        using var source = Image.Load<Rgba32>(composition.Bytes);
+        source.Mutate(x => x.AutoOrient());
+        var (w, h) = PartyPrintGeometry.Sheet(composition.Paper, composition.Portrait);
+        using var sheet = new Image<Rgba32>(w, h, OwnerBand);
+        var frame = new Rectangle(0, 0, w, h);
+        PartyPrintComposer.DrawPlaced(sheet, source, composition.Placement, frame, OwnerBand);
+
+        if (composition.DateText is { Length: > 0 } text)
         {
-            Size = new Size(width, height),
-            Mode = ResizeMode.Pad,
-            PadColor = Color.White,
-            Position = AnchorPositionMode.Center,
-            Sampler = KnownResamplers.Lanczos3,
-        }));
+            var placed = PhotoPlacementGeometry.Place(
+                (double)source.Width / source.Height, (double)w / h, composition.Placement);
+            DrawDate(sheet, text, PhotoPlacementGeometry.Visible(placed));
+        }
+
+        (composition.Calibration ?? PrintCalibration.Neutral).ApplyTo(sheet);
+        sheet.Metadata.ExifProfile = null;
+        sheet.Metadata.XmpProfile = null;
+        sheet.Metadata.IptcProfile = null;
+        sheet.Metadata.IccProfile = null;
         using var output = new MemoryStream();
-        await image.SaveAsJpegAsync(output, new JpegEncoder { Quality = 92 }, cancellationToken);
+        await sheet.SaveAsJpegAsync(
+            output, new JpegEncoder { Quality = 94, ColorType = JpegEncodingColor.YCbCrRatio444 }, cancellationToken);
         return output.ToArray();
+    }
+
+    /// <summary>
+    /// Where the date's text box ends, in sheet pixels: inset from the visible
+    /// photograph's bottom-right corner. Public so a test can find it.
+    /// </summary>
+    public static PointF DateAnchor(int sheetWidth, int sheetHeight, FrameRect visible)
+    {
+        var inset = DateInsetFraction * Math.Min(sheetWidth, sheetHeight);
+        return new PointF(
+            (float)((visible.Right * sheetWidth) - inset),
+            (float)((visible.Bottom * sheetHeight) - inset));
+    }
+
+    /// <summary>White type with a soft dark halo — no box, nothing opaque behind it.</summary>
+    private void DrawDate(Image<Rgba32> sheet, string text, FrameRect visible)
+    {
+        var shortEdge = Math.Min(sheet.Width, sheet.Height);
+        var font = _dateFont.Value.CreateFont((float)(DateTypeFraction * shortEdge));
+        var anchor = DateAnchor(sheet.Width, sheet.Height, visible);
+        RichTextOptions Options() => new(font)
+        {
+            Origin = anchor,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom,
+        };
+        using (var halo = new Image<Rgba32>(sheet.Width, sheet.Height, new Rgba32(0, 0, 0, 0)))
+        {
+            halo.Mutate(x => x.DrawText(Options(), text, new Rgba32(0, 0, 0, 255))
+                .GaussianBlur((float)(0.004 * shortEdge)));
+            sheet.Mutate(x => x.DrawImage(halo, new Point(0, 0), 0.55f));
+        }
+        sheet.Mutate(x => x.DrawText(Options(), text, new Rgba32(0xFF, 0xFF, 0xFF, 0xFF)));
+    }
+
+    /// <summary>A photograph's displayed size: its coded size, turned for a quarter-turn EXIF orientation.</summary>
+    private static (int Width, int Height) Oriented(ImageInfo info)
+    {
+        var orientation = info.Metadata.ExifProfile?.TryGetValue(
+            SixLabors.ImageSharp.Metadata.Profiles.Exif.ExifTag.Orientation, out var value) == true
+            ? value!.Value : (ushort)1;
+        return orientation is >= 5 and <= 8 ? (info.Height, info.Width) : (info.Width, info.Height);
     }
 
     private static void DrawText(Image<Rgb24> image, string text, int x, int y, int scale, Rgb24 color)

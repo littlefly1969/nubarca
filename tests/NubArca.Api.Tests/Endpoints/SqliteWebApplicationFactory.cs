@@ -295,7 +295,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<NubArca.Api.Print.IPartyPrintBudget, NubArca.Api.Print.PartyPrintBudget>();
             services.AddScoped<NubArca.Api.Print.IPrinterAccess, NubArca.Api.Print.PrinterAccess>();
             services.AddScoped<
-                NubArca.Api.Print.IPartyPrintSourceReader, NubArca.Api.Print.PartyPrintSourceReader>();
+                NubArca.Api.Print.IPrintPhotoSourceReader, NubArca.Api.Print.PrintPhotoSourceReader>();
             services.AddScoped<
                 NubArca.Api.Print.IPartyPrintSubmissionService,
                 NubArca.Api.Print.PartyPrintSubmissionService>();
@@ -414,6 +414,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<JobProcessor>();
             services.AddScoped<NubArca.Api.Print.PrintStationService>();
             services.AddSingleton<NubArca.Api.Print.PrintArtifactRenderer>();
+            services.AddScoped<NubArca.Api.Print.IOwnerPhotoPrintService, NubArca.Api.Print.OwnerPhotoPrintService>();
             services.AddAuthentication().AddScheme<AuthenticationSchemeOptions,
                 NubArca.Api.Print.PrintStationAuthenticationHandler>(
                 NubArca.Api.Print.PrintStationAuthentication.Scheme, _ => { });

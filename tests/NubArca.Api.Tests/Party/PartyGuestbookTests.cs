@@ -698,7 +698,8 @@ public sealed class PartyGuestbookTests : IDisposable
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
         var party = await OpenPartyAsync(owner, guestbook: true);
 
-        foreach (var (x, y, zoom) in new[] { (0.5, 0.5, 0.5), (0.5, 0.5, 4.5), (-0.1, 0.5, 1.0), (0.5, 1.2, 1.0) })
+        // 0.05 is far below the whole photograph in any frame; 0 and below are no zoom at all.
+        foreach (var (x, y, zoom) in new[] { (0.5, 0.5, 0.05), (0.5, 0.5, 0.0), (0.5, 0.5, 4.5), (-0.1, 0.5, 1.0), (0.5, 1.2, 1.0) })
         {
             var refused = await SubmitRawAsync(
                 party.ViewToken, Memory(party.PhotoId, "Ada", "Auguri", centerX: x, centerY: y, zoom: zoom));
@@ -712,6 +713,44 @@ public sealed class PartyGuestbookTests : IDisposable
         });
         Assert.Equal("guestbook_invalid_crop", await ErrorOf(missing));
         Assert.Equal(0, await EntryCountAsync());
+    }
+
+    [Fact]
+    public async Task A_memory_may_zoom_out_to_the_whole_photograph_in_its_design_and_no_further()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var party = await OpenPartyAsync(owner, guestbook: true);
+        var photoAspect = (double)PhotoWidth / PhotoHeight;
+
+        foreach (var template in new[] { "nubarca", "polaroid", "editorial", "celebration" })
+        {
+            var frame = NubArca.Api.Domain.PartyGuestbookTemplates.FrameAspect(template, 1, photoAspect);
+            var contain = NubArca.Api.Print.PhotoPlacementGeometry.ContainZoom(photoAspect, frame);
+            if (contain < 1)
+            {
+                // Below the whole photograph: only more empty frame, refused.
+                var refused = await SubmitRawAsync(party.ViewToken,
+                    Memory(party.PhotoId, "Ada", "Auguri", template: template, zoom: contain * 0.9));
+                Assert.Equal("guestbook_invalid_crop", await ErrorOf(refused));
+            }
+            // The whole photograph: accepted, and kept exactly as chosen.
+            var accepted = await SubmitAsync(party.ViewToken,
+                Memory(party.PhotoId, "Ada", "Auguri " + template, template: template, zoom: contain));
+            Assert.Equal(contain, accepted.GetProperty("entry").GetProperty("media").GetProperty("crop")
+                .GetProperty("zoom").GetDouble(), 9);
+        }
+    }
+
+    [Fact]
+    public async Task A_memory_framed_at_one_or_more_reads_back_unchanged()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var party = await OpenPartyAsync(owner, guestbook: true);
+        var accepted = await SubmitAsync(party.ViewToken,
+            Memory(party.PhotoId, "Ada", "Auguri", centerX: 0.3, centerY: 0.7, zoom: 1.4));
+        var crop = accepted.GetProperty("entry").GetProperty("media").GetProperty("crop");
+        Assert.Equal((0.3, 0.7, 1.4),
+            (crop.GetProperty("centerX").GetDouble(), crop.GetProperty("centerY").GetDouble(), crop.GetProperty("zoom").GetDouble()));
     }
 
     [Fact]
