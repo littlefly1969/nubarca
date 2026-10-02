@@ -30,7 +30,8 @@ public sealed class SetupEndpointsTests : IAsyncLifetime
                 TimeSpan.FromHours(1), TimeSpan.FromHours(1), TimeSpan.Zero),
             boxSuffix: "A7F3");
         await _service.BootAsync(default); // no network: setup mode
-        var status = new PrintBoxStatusService(_service, new FakePrinterAdapter(_fakeOutput, TimeSpan.Zero),
+        var status = new PrintBoxStatusService(_service,
+            new FakePrinterAdapter(_fakeOutput, TimeSpan.Zero, remainingPrints: 187),
             new AgentConnectionState(), new PrintAgentOptions());
         _app = SetupEndpoints.Build(_service, status, _logs.Factory, IPAddress.Loopback, 0);
         await _app.StartAsync();
@@ -47,6 +48,32 @@ public sealed class SetupEndpointsTests : IAsyncLifetime
 
     private Task<HttpResponseMessage> Connect(string json) =>
         _http.PostAsync("/setup/wifi/connect", new StringContent(json, Encoding.UTF8, "application/json"));
+
+    [Fact]
+    public async Task An_Offline_Printers_Last_Count_Is_Not_Shown_As_Current()
+    {
+        var status = new PrintBoxStatusService(_service, new OfflineWithCount(),
+            new AgentConnectionState(), new PrintAgentOptions());
+        var printer = (await status.GetAsync(default)).Printer!;
+        Assert.Equal("offline", printer.State);
+        Assert.Null(printer.RemainingPrints);
+    }
+
+    /// <summary>A printer that still has a cached count but is no longer there.</summary>
+    private sealed class OfflineWithCount : IPrinterAdapter
+    {
+        public string Kind => "fake";
+        public Task<IReadOnlyList<DiscoveredPrinter>> DiscoverAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<DiscoveredPrinter>>([new("p", "DNP DS-RX1HS", "DNP", "RX1HS", "fake")]);
+        public Task<PrinterCapabilities> GetCapabilitiesAsync(DiscoveredPrinter p, CancellationToken ct) =>
+            Task.FromResult(new PrinterCapabilities(["10x15"], true));
+        public Task<PrinterObservedStatus> GetStatusAsync(DiscoveredPrinter p, CancellationToken ct) =>
+            Task.FromResult(new PrinterObservedStatus("offline"));
+        public Task<PrintSubmissionResult> SubmitAsync(PrintSubmission s, CancellationToken ct) =>
+            throw new NotSupportedException();
+        public Task<PrinterMediaStatus> GetMediaStatusAsync(DiscoveredPrinter p, CancellationToken ct) =>
+            Task.FromResult(new PrinterMediaStatus(187));
+    }
 
     [Fact]
     public async Task The_Page_Is_Served_Locked_Down()
@@ -71,6 +98,8 @@ public sealed class SetupEndpointsTests : IAsyncLifetime
         Assert.Equal("ready", status.GetProperty("networkManager").GetString());
         Assert.Equal("not-used", status.GetProperty("cups").GetString());
         Assert.Equal("ready", status.GetProperty("printer").GetProperty("state").GetString());
+        // The printer's own count of the prints left on its media.
+        Assert.Equal(187, status.GetProperty("printer").GetProperty("remainingPrints").GetInt32());
         Assert.Equal("disconnected", status.GetProperty("nubarca").GetString());
         Assert.DoesNotContain("setup-pass", body);
     }

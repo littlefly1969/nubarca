@@ -18,7 +18,11 @@ public sealed record PrintBoxStatus(
     DateTimeOffset? LastServerContact,
     PrintBoxAttempt? LastAttempt);
 
-public sealed record PrintBoxPrinter(string Name, string State, string? Detail);
+/// <summary>
+/// The box's printer. <see cref="RemainingPrints"/> is the physical media count
+/// the printer reports, or null when it reports none — never a guess.
+/// </summary>
+public sealed record PrintBoxPrinter(string Name, string State, string? Detail, int? RemainingPrints = null);
 
 public sealed record PrintBoxAttempt(string Ssid, string Outcome, DateTimeOffset At);
 
@@ -58,7 +62,14 @@ public sealed class PrintBoxStatusService
         if (chosen is not null)
         {
             var observed = await _adapter.GetStatusAsync(chosen, cancellationToken);
-            printer = new PrintBoxPrinter(chosen.DisplayName, DisplayState(observed.State), observed.Detail);
+            // The same cached reading the heartbeat sends, so the page and the
+            // server agree; a failed query is no count, never a failed page.
+            PrinterMediaStatus media;
+            try { media = await _adapter.GetMediaStatusAsync(chosen, cancellationToken); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { media = PrinterMediaStatus.Unavailable; }
+            // An offline printer's last count is not a current one.
+            var remaining = observed.State == "offline" ? null : media.RemainingPrints;
+            printer = new PrintBoxPrinter(chosen.DisplayName, DisplayState(observed.State), observed.Detail, remaining);
         }
         else if (_options.PrinterName is { Length: > 0 } missing)
         {

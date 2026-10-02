@@ -117,7 +117,9 @@ if [[ "$skip_packages" == false ]]; then
   # The self-contained agent still needs the system ICU library.
   icu="$(apt-cache pkgnames libicu | grep -E '^libicu[0-9]+$' | sort -V | tail -n 1 || true)"
   [[ -n "$icu" ]] || { echo 'No libicu package found in the configured APT sources.' >&2; exit 1; }
-  packages=(ca-certificates "$icu" cups printer-driver-gutenprint avahi-daemon iw)
+  # cups-ipp-utils carries ipptool, which reads the printer's remaining-prints
+  # marker from CUPS (linux/nubarca-media-status.test).
+  packages=(ca-certificates "$icu" cups cups-ipp-utils printer-driver-gutenprint avahi-daemon iw)
   if [[ "$provisioning" == true ]]; then
     # dnsmasq-base serves addresses on the setup network; polkitd reads the
     # JavaScript rule below (Debian 12 and later).

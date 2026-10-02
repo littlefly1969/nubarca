@@ -7,7 +7,20 @@ namespace NubArca.PrintAgent.Api;
 public sealed record AgentEnrollmentResponse(Guid StationId, string StationCredential, string DesiredState);
 public sealed record AgentHeartbeatResponse(string DesiredState, DateTime ServerTime);
 public sealed record AgentDeviceReport(string DeviceKey, string DisplayName, string? Manufacturer,
-    string? Model, string AdapterKind, PrinterCapabilities Capabilities, string ObservedState);
+    string? Model, string AdapterKind, PrinterCapabilities Capabilities, string ObservedState,
+    AgentMediaRemaining? MediaRemaining = null);
+
+/// <summary>
+/// The physical media count as this agent read it. Always sent by an agent
+/// that knows how to ask — <c>available: false</c> when it asked and got no
+/// number — so the server can tell it from an older agent, which sends nothing.
+/// </summary>
+public sealed record AgentMediaRemaining(bool Available, int? RemainingPrints, int? AgeSeconds)
+{
+    public static AgentMediaRemaining From(PrinterMediaStatus status) => status.RemainingPrints is int remaining
+        ? new(true, remaining, status.ObservationAgeSeconds)
+        : new(false, null, null);
+}
 public sealed record AgentClaim(Guid JobId, string ClaimToken, string Kind, string Format,
     string ArtifactUrl, long ArtifactByteLength, string ContentType, string DeviceKey);
 

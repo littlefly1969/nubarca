@@ -34,6 +34,11 @@
     } else {
       show('printer', 'Not found', 'bad');
     }
+    // The printer's own count of the prints left on its media. Absent when
+    // the printer reports none, or is offline — never an estimate.
+    var remaining = s.printer && typeof s.printer.remainingPrints === 'number' ? s.printer.remainingPrints : null;
+    show('remaining', remaining === null ? 'Not available' : String(remaining),
+      remaining === 0 ? 'bad' : '');
     show('cups', s.cups === 'ready' ? 'Ready' : s.cups === 'not-used' ? 'Not used' : 'Unavailable',
       s.cups === 'ready' ? 'ok' : s.cups === 'not-used' ? '' : 'bad');
     show('nubarca', s.nubarca === 'connected' ? 'Connected'

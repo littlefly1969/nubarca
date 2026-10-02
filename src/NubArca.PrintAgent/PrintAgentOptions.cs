@@ -36,6 +36,12 @@ public sealed class PrintAgentOptions
     /// standing in for a real printer is not.
     /// </summary>
     public int FakeSheetSeconds { get; set; } = 10;
+
+    /// <summary>
+    /// The media count the FAKE printer reports, decremented per sheet it
+    /// produces. Null reports none. Deterministic, for tests and simulators.
+    /// </summary>
+    public int? FakeRemainingPrints { get; set; }
     public long MaxArtifactBytes { get; set; } = 32 * 1024 * 1024;
     public long MaxTemporaryBytes { get; set; } = 128 * 1024 * 1024;
 
@@ -63,6 +69,8 @@ public sealed class PrintAgentOptions
             throw new InvalidOperationException("PrintAgent:Adapter must be fake, windows-spooler, or cups.");
         if (FakeSheetSeconds < 0) throw new InvalidOperationException(
             "Print Agent bounds are invalid.");
+        if (FakeRemainingPrints is < 0 or > Adapters.CupsMarkers.MaxPlausiblePrints)
+            throw new InvalidOperationException("PrintAgent:FakeRemainingPrints is out of range.");
         if (IdlePollSeconds < 1 || MaxBackoffSeconds < 2 || MaxArtifactBytes < 1
             || MaxTemporaryBytes < MaxArtifactBytes)
             throw new InvalidOperationException("Print Agent bounds are invalid.");

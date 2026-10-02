@@ -1,0 +1,20 @@
+# NubArca Print Agent: the physical media count of one CUPS queue.
+#
+# Asks the local CUPS server for the marker attributes the printer driver
+# (Gutenprint, for a DNP) publishes, and nothing else. Run by the agent as
+#   ipptool -T 5 -X ipp://localhost/printers/<queue> nubarca-media-status.test
+# Shipped with the agent so it never depends on a distribution's own files.
+{
+	NAME "NubArca media status"
+	OPERATION Get-Printer-Attributes
+	GROUP operation-attributes-tag
+	ATTR charset attributes-charset utf-8
+	ATTR naturalLanguage attributes-natural-language en
+	ATTR uri printer-uri $uri
+	ATTR keyword requested-attributes marker-message,marker-levels,marker-change-time,printer-up-time
+	STATUS successful-ok
+	DISPLAY marker-message
+	DISPLAY marker-levels
+	DISPLAY marker-change-time
+	DISPLAY printer-up-time
+}

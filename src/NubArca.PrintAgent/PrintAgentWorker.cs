@@ -80,8 +80,28 @@ public sealed class PrintAgentWorker : BackgroundService
             var capabilities = await _adapter.GetCapabilitiesAsync(printer, ct);
             var status = await _adapter.GetStatusAsync(printer, ct);
             result.Add(new(printer.DeviceKey, printer.DisplayName, printer.Manufacturer,
-                printer.Model, printer.AdapterKind, capabilities, status.State));
+                printer.Model, printer.AdapterKind, capabilities, status.State,
+                AgentMediaRemaining.From(await MediaAsync(printer, ct))));
         }
         return result;
+    }
+
+    /// <summary>
+    /// The media count is telemetry beside the printer's state: a query that
+    /// fails or hangs past its own bound reports no count and never stops the
+    /// heartbeat, the claim or the printer being reported ready.
+    /// </summary>
+    private async Task<PrinterMediaStatus> MediaAsync(DiscoveredPrinter printer, CancellationToken ct)
+    {
+        try
+        {
+            return await _adapter.GetMediaStatusAsync(printer, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("print.media.remaining.unavailable device={DeviceKey} ({ExceptionType})",
+                printer.DeviceKey, ex.GetType().Name);
+            return PrinterMediaStatus.Unavailable;
+        }
     }
 }

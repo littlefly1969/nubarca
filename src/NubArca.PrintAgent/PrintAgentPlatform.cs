@@ -16,7 +16,7 @@ public static class PrintAgentPlatform
         IProcessRunner? runner = null, ILoggerFactory? loggers = null) => options.Adapter switch
     {
         PrintAdapterKinds.Fake => new FakePrinterAdapter(
-            options.FakeOutputPath, TimeSpan.FromSeconds(options.FakeSheetSeconds)),
+            options.FakeOutputPath, TimeSpan.FromSeconds(options.FakeSheetSeconds), options.FakeRemainingPrints),
         PrintAdapterKinds.WindowsSpooler when OperatingSystem.IsWindows() =>
             new WindowsSpoolerPrinterAdapter(options.PrinterName, options.StripPrinterName),
         PrintAdapterKinds.WindowsSpooler => throw new PlatformNotSupportedException("windows-spooler requires Windows."),

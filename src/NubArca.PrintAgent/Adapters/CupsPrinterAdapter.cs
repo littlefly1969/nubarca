@@ -43,6 +43,27 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
     private readonly HashSet<string> _announced = new(StringComparer.OrdinalIgnoreCase);
     private const string MissingMarker = "missing:";
 
+    /// <summary>
+    /// The media count is asked once per physical printer per this window:
+    /// a heartbeat, the local status page and a second heartbeat a few seconds
+    /// later share one IPP query, and a submitted job clears it at once.
+    /// </summary>
+    private static readonly TimeSpan MediaLifetime = TimeSpan.FromSeconds(8);
+
+    /// <summary>The IPP query is bounded twice: ipptool's own I/O timeout, and the process's.</summary>
+    private const int IppToolTimeoutSeconds = 5;
+    private static readonly TimeSpan MediaQueryTimeout = TimeSpan.FromSeconds(8);
+
+    /// <summary>A queue name that is safe as a path segment of the CUPS URI.</summary>
+    private static readonly System.Text.RegularExpressions.Regex SafeQueue =
+        new(@"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,126}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    private readonly string _mediaQueryPath;
+    private readonly SemaphoreSlim _mediaGate = new(1, 1);
+    private readonly Dictionary<string, (long At, PrinterMediaStatus Status)> _media =
+        new(StringComparer.OrdinalIgnoreCase);
+    private long _mediaGeneration;
+
     /// <summary>The driver's page sizes change only when a queue is set up again.</summary>
     private static readonly TimeSpan PageSizeLifetime = TimeSpan.FromMinutes(10);
     private readonly Dictionary<string, (long At, IReadOnlyList<string> Papers)> _papers =
@@ -57,13 +78,18 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
     };
 
     public CupsPrinterAdapter(string? configuredPrinter, string? stripPrinter,
-        IProcessRunner runner, ILogger<CupsPrinterAdapter> logger)
+        IProcessRunner runner, ILogger<CupsPrinterAdapter> logger, string? mediaQueryPath = null)
     {
         _configuredPrinter = string.IsNullOrWhiteSpace(configuredPrinter) ? null : configuredPrinter;
         _stripPrinter = string.IsNullOrWhiteSpace(stripPrinter) ? null : stripPrinter;
         _runner = runner;
         _logger = logger;
+        _mediaQueryPath = mediaQueryPath ?? DefaultMediaQueryPath;
     }
+
+    /// <summary>The IPP query shipped with the agent, beside its own binary.</summary>
+    public static string DefaultMediaQueryPath =>
+        Path.Combine(AppContext.BaseDirectory, "linux", "nubarca-media-status.test");
 
     public string Kind => PrintAdapterKinds.Cups;
 
@@ -180,6 +206,107 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
         return new PrintSubmissionResult(false, null, code);
     }
 
+    /// <summary>
+    /// The prints left on the loaded media, as Gutenprint reports them to
+    /// CUPS — read with one IPP query per physical printer, through its PHOTO
+    /// queue: the strip queue is the same printer and the same media, and is
+    /// never asked or added. A ready printer whose driver gives no count is
+    /// <see cref="PrinterMediaStatus.Unavailable"/>, never offline because of it.
+    /// </summary>
+    public async Task<PrinterMediaStatus> GetMediaStatusAsync(DiscoveredPrinter printer,
+        CancellationToken cancellationToken)
+    {
+        // The strip queue, if it is ever asked about, is the photo queue's printer.
+        var queue = _stripPrinter is not null && _configuredPrinter is not null
+            && string.Equals(printer.DeviceKey, _stripPrinter, StringComparison.OrdinalIgnoreCase)
+            ? _configuredPrinter
+            : printer.DeviceKey;
+
+        await _mediaGate.WaitAsync(cancellationToken);
+        try
+        {
+            long generation;
+            lock (_media)
+            {
+                if (_media.TryGetValue(queue, out var cached)
+                    && Environment.TickCount64 - cached.At < MediaLifetime.TotalMilliseconds)
+                    return cached.Status;
+                generation = _mediaGeneration;
+            }
+
+            var status = await QueryMediaAsync(queue, cancellationToken);
+            lock (_media)
+            {
+                // A job submitted while this query ran makes its answer older
+                // than the cache it would land in: return it, keep nothing.
+                if (generation == _mediaGeneration) _media[queue] = (Environment.TickCount64, status);
+            }
+            return status;
+        }
+        finally
+        {
+            _mediaGate.Release();
+        }
+    }
+
+    private async Task<PrinterMediaStatus> QueryMediaAsync(string queue, CancellationToken cancellationToken)
+    {
+        if (!SafeQueue.IsMatch(queue))
+        {
+            Announce("media:unsafe:" + queue, () =>
+                _logger.LogWarning("Media count not read: queue {Queue} is not a plain CUPS name.", queue));
+            return PrinterMediaStatus.Unavailable;
+        }
+        if (!File.Exists(_mediaQueryPath))
+        {
+            Announce("media:query-missing", () =>
+                _logger.LogWarning("Media count not read: the agent's IPP query file is missing."));
+            return PrinterMediaStatus.Unavailable;
+        }
+
+        var result = await _runner.RunAsync("ipptool",
+            ["-T", IppToolTimeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture), "-X",
+             $"ipp://localhost/printers/{queue}", _mediaQueryPath],
+            MediaQueryTimeout, cancellationToken);
+        if (result.NotFound)
+        {
+            Announce("media:ipptool-missing", () =>
+                _logger.LogWarning("Media count not read: ipptool is not installed (package cups-ipp-utils)."));
+            return PrinterMediaStatus.Unavailable;
+        }
+        // ipptool exits non-zero for a failed test; the plist still says why,
+        // and a failed query is simply no count.
+        var status = CupsMarkers.StatusOf(result.Succeeded ? CupsMarkers.ParsePlist(result.StdOut) : null);
+        var key = "media:" + queue;
+        if (status.RemainingPrints is int remaining)
+        {
+            lock (_announced) _announced.Remove(key + ":none");
+            if (_lastRemaining.TryGetValue(queue, out var last) && last == remaining) return status;
+            _lastRemaining[queue] = remaining;
+            _logger.LogInformation(
+                "print.media.remaining.observed queue={Queue} remainingPrints={RemainingPrints}", queue, remaining);
+        }
+        else
+        {
+            _lastRemaining.Remove(queue);
+            Announce(key + ":none", () => _logger.LogInformation(
+                "print.media.remaining.unavailable queue={Queue}", queue));
+        }
+        return status;
+    }
+
+    private readonly Dictionary<string, int> _lastRemaining = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Logs a condition when it starts, not on every heartbeat it lasts.</summary>
+    private void Announce(string key, Action log)
+    {
+        lock (_announced)
+        {
+            if (!_announced.Add(key)) return;
+        }
+        log();
+    }
+
     public async Task<bool> IsAvailableAsync(CancellationToken cancellationToken)
     {
         var result = await _runner.RunAsync("lpstat", ["-r"], QueryTimeout, cancellationToken);
@@ -217,8 +344,21 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
         }
     }
 
-    /// <summary>A submitted job changes what lpstat says; the next question asks again.</summary>
-    private void Invalidate() => _snapshot = null;
+    /// <summary>
+    /// A submitted job changes what lpstat says, and soon what the media holds;
+    /// the next question asks again. The count is NOT decremented here: the
+    /// sheet still has to pass through CUPS, the driver and the printer, and
+    /// the number converges when the printer reports it.
+    /// </summary>
+    private void Invalidate()
+    {
+        _snapshot = null;
+        lock (_media)
+        {
+            _media.Clear();
+            _mediaGeneration++;
+        }
+    }
 
     private static string? Manufacturer(string name) =>
         name.Contains("DNP", StringComparison.OrdinalIgnoreCase)

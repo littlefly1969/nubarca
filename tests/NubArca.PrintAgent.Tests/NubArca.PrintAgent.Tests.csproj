@@ -15,4 +15,9 @@
     <ProjectReference Include="..\..\src\NubArca.PrintAgent\NubArca.PrintAgent.csproj" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
+  <ItemGroup>
+    <!-- Real `ipptool -T 5 -X` reports of the shipped media query, captured
+         against an IPP printer carrying Gutenprint-shaped markers. -->
+    <None Include="Fixtures/*.plist" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
