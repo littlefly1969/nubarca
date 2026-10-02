@@ -1112,7 +1112,8 @@ public sealed class PartyGuestbookTests : IDisposable
         HttpClient owner,
         bool guestbook = false,
         bool requireApproval = false,
-        string albumName = "Festa")
+        string albumName = "Festa",
+        bool openToTheRoom = true)
     {
         var album = await owner.PostAsJsonAsync("/api/albums", new { name = albumName });
         album.EnsureSuccessStatusCode();
@@ -1136,6 +1137,14 @@ public sealed class PartyGuestbookTests : IDisposable
             status = await SetContributionsAsync(
                 owner, albumId,
                 new { guestbookEnabled = guestbook, requireGuestbookApproval = requireApproval });
+        }
+
+        // These tests read the book AS THE ROOM READS IT, through browsers that
+        // did not write in it — so the regia opens it to the room, through the
+        // real live command. The closed book is GuestbookLiveTests' subject.
+        if (guestbook && openToTheRoom)
+        {
+            await GuestbookLiveFixture.OpenToTheRoomAsync(owner, albumId);
         }
 
         var uploadUrl = status.GetProperty("uploadUrl").GetString()!;

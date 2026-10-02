@@ -192,7 +192,11 @@ public sealed record PartyAccess(
     // validity, because the upload token now means "may contribute" and each of
     // the three contributions answers for itself. A view grant leaves it false;
     // nothing reads it there.
-    bool UploadEnabled = false);
+    bool UploadEnabled = false,
+    // Whether, during the LIVE phase, the room reads the WHOLE book — and is
+    // offered "Guarda il Guestbook". Off, a guest reads only what they wrote.
+    // Carried on both grants: the book is read through either token.
+    bool GuestbookViewingEnabled = false);
 
 // --- PUBLIC (anonymous) party DTOs ---
 // Deliberately minimal. NO owner identity, GPS, DateTaken, raw metadata,
@@ -272,7 +276,12 @@ public sealed record PartyGuestCapabilitiesDto(
     // The book's own route on the VIEW token. Present whenever the book is
     // READABLE — during the party and for as long as the memories last — and
     // absent otherwise, so a keepsake outlives the composer that filled it.
-    string? GuestbookUrl = null);
+    string? GuestbookUrl = null,
+    // "Guarda il Guestbook": present exactly while the party is LIVE and the
+    // regia has opened the whole book to the room. The same route as the book;
+    // a separate field because it is a separate decision — the hub offers the
+    // card only when the regia asked for it.
+    string? GuestbookViewUrl = null);
 
 // Whether the memories are reachable, and until when if the host said so.
 public sealed record PartyGuestLibraryDto(bool Available, DateTime? AccessEndsAt = null);
@@ -570,7 +579,16 @@ public sealed record PartyGuestbookPageDto(
     int MaxBodyLength = PartyGuestbookLimits.MaxBodyLength,
     // What this guest has left to write, or null for no limit — so the page can
     // say it before somebody composes a memory it will refuse.
-    int? Remaining = null);
+    int? Remaining = null,
+    // "all" — the whole book — or "mine": during the live evening, until the
+    // regia opens the book to the room, a guest reads only what they wrote.
+    string Scope = PartyGuestbookScopes.All);
+
+public static class PartyGuestbookScopes
+{
+    public const string All = "all";
+    public const string Mine = "mine";
+}
 
 // A photograph a guest may choose for a memory: one of the main album's
 // photographs, and nothing else — never a video. Safe derived URLs only, on the

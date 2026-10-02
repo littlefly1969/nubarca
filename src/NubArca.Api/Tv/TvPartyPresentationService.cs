@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Data;
+using NubArca.Api.Domain;
 using NubArca.Api.Party;
 
 namespace NubArca.Api.Tv;
@@ -43,12 +44,16 @@ public sealed class TvPartyPresentationService : ITvPartyPresentationService
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
     private readonly IPartyLinkService _links;
+    private readonly ILogger<TvPartyPresentationService> _logger;
 
-    public TvPartyPresentationService(AppDbContext db, TimeProvider clock, IPartyLinkService links)
+    public TvPartyPresentationService(
+        AppDbContext db, TimeProvider clock, IPartyLinkService links,
+        ILogger<TvPartyPresentationService>? logger = null)
     {
         _db = db;
         _clock = clock;
         _links = links;
+        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<TvPartyPresentationService>.Instance;
     }
 
     /// <summary>
@@ -72,13 +77,26 @@ public sealed class TvPartyPresentationService : ITvPartyPresentationService
             {
                 l.AlbumId,
                 l.GameEnabled,
+                l.GuestbookEnabled,
+                l.GuestbookTvActive,
                 Game = _db.PartyGameSessions.AsNoTracking()
                     .Where(s => s.PartyAlbumLinkId == l.Id)
                     .Select(s => new { s.Status, s.Phase, s.FinishedAt })
                     .FirstOrDefault(),
+                // The book is the PARTY's, whichever link the television is on.
+                HasVisibleMemory = _db.PartyGuestbookEntries.AsNoTracking()
+                    .Any(e => e.PartyId == l.PartyId && e.Status == PartyMessageStatuses.Visible),
             })
             .FirstOrDefaultAsync(cancellationToken);
         if (link is null) return TvPartyState.Unavailable;
+
+        // The regia's request, and whether it can be honoured: only while the
+        // party is live, the book is open and there is a memory to show. An
+        // empty book yields to the slideshow rather than a blank screen.
+        var guestbookRequested = link.GuestbookTvActive
+            && link.GuestbookEnabled
+            && access.Experience.AllowsLiveCapabilities
+            && link.HasVisibleMemory;
 
         var presentation = TvPartyPresentations.Decide(
             partyShowable: true,
@@ -87,7 +105,19 @@ public sealed class TvPartyPresentationService : ITvPartyPresentationService
             gameStatus: link.Game?.Status,
             gamePhase: link.Game?.Phase,
             finishedAt: link.Game?.FinishedAt,
-            now: _clock.GetUtcNow().UtcDateTime);
+            now: _clock.GetUtcNow().UtcDateTime,
+            guestbookRequested: guestbookRequested);
+
+        if (presentation == TvPartyPresentations.Game && link.GuestbookTvActive)
+        {
+            // Both takeovers held at once. The commands make this impossible;
+            // should stored state say otherwise, the game wins (it may be
+            // mid-activity) and the operator is told. Ids only.
+            _logger.LogWarning(
+                "party.presentation.invariant_violation LinkId={LinkId} Holder={Holder} Ignored={Ignored}",
+                partyAlbumLinkId, TvPartyPresentations.Game, TvPartyPresentations.Guestbook);
+        }
+
         return new TvPartyState(presentation, link.AlbumId, access);
     }
 }

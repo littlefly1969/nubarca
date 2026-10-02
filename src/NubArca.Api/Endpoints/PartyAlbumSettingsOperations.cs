@@ -222,11 +222,17 @@ internal static class PartyAlbumSettingsOperations
             return Results.BadRequest(new { error = "invalid_party_game_settings" });
         }
 
-        var ok = await party.UpdateGameSettingsAsync(
+        var outcome = await party.UpdateGameSettingsAsync(
             ownerUserId, albumId, body.GameEnabled,
             body.MinChallengeIntervalSeconds, body.MaxChallengeIntervalSeconds,
             body.VotesPerGuest, body.MaxChallengesPerSession, body.PriorityVotingEnabled, ct);
-        if (!ok) return Results.NotFound();
+        if (outcome == PartyGameSettingsOutcome.NotFound) return Results.NotFound();
+        if (outcome == PartyGameSettingsOutcome.GuestbookActive)
+        {
+            // Switching the game on would take the television from the guest
+            // book. A stable code, so the settings page can say so.
+            return Results.Json(new { error = "guestbook_active" }, statusCode: StatusCodes.Status409Conflict);
+        }
 
         return Results.Ok(await party.GetOwnerStatusAsync(ownerUserId, albumId, ct));
     }

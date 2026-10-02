@@ -202,6 +202,8 @@ public sealed class PartyCrewContributionsTests : IDisposable
             (await owner.PatchAsJsonAsync(
                 $"/api/albums/{albumId}/party-contributions", new { guestbookEnabled = true }))
                 .EnsureSuccessStatusCode();
+            // The public book these tests read is the ROOM's view of it.
+            await GuestbookLiveFixture.OpenToTheRoomAsync(owner, albumId);
         }
 
         // A memory is made from one of the album's photographs.

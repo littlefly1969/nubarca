@@ -139,6 +139,7 @@ public static class PartyGuestbookEndpoints
             HttpContext httpContext,
             [FromServices] IPartyLinkService party,
             [FromServices] IPartyGuestbookService guestbook,
+            [FromServices] IPartyParticipantService participants,
             [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
             CancellationToken cancellationToken) =>
         {
@@ -146,7 +147,12 @@ public static class PartyGuestbookEndpoints
                 ?? await party.ResolveUploadAsync(token, cancellationToken);
             if (access is null) return Results.NotFound();
 
-            var photo = await guestbook.OpenPublicPhotoAsync(access, entryId, cancellationToken);
+            // Who is looking — resolved, never minted — because while the book
+            // is closed to the room a guest sees only the pictures of what they
+            // wrote.
+            var reader = await PartyGuestSession.ResolveAsync(
+                httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
+            var photo = await guestbook.OpenPublicPhotoAsync(access, entryId, reader, cancellationToken);
             return photo is null
                 ? Results.NotFound()
                 : await PartyEndpoints.ServeStrippedDerivativeAsync(
@@ -314,12 +320,75 @@ public static class PartyGuestbookEndpoints
                     photo, "image/jpeg", httpContext, stripper, cancellationToken);
         }).WithName("GetPartyGuestbookManagedPhoto").RequirePermission(Permissions.PartyAccess);
 
+        // ── THE GUEST BOOK, LIVE (owner) ─────────────────────────────────────
+        //
+        // Album-scoped, beside the game's own control room: the regia runs the
+        // evening from one place. Letting the room read the book and putting
+        // it on the television are two decisions with one version; a refusal
+        // is a 409 carrying the current state, exactly like a game command.
+
+        app.MapGet("/api/albums/{albumId:guid}/party-guestbook-live", async (
+            Guid albumId,
+            HttpContext httpContext,
+            [FromServices] IPartyGuestbookLiveService live,
+            CancellationToken cancellationToken) =>
+        {
+            NoStore(httpContext);
+            var control = await live.GetAsync(
+                httpContext.GetCurrentUserId()!.Value, albumId, PartyGuestbookLiveRights.Owner, cancellationToken);
+            return control is null ? Results.NotFound() : Results.Ok(control);
+        }).WithName("GetPartyGuestbookLive").RequirePermission(Permissions.PartyAccess);
+
+        app.MapPost("/api/albums/{albumId:guid}/party-guestbook-live/commands", async (
+            Guid albumId,
+            HttpContext httpContext,
+            [FromServices] IPartyGuestbookLiveService live,
+            [FromBody] PartyGuestbookLiveCommandRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            NoStore(httpContext);
+            return await ExecuteLiveAsync(
+                live, httpContext.GetCurrentUserId()!.Value, albumId, PartyGuestbookLiveRights.Owner,
+                body, cancellationToken);
+        }).WithName("ExecutePartyGuestbookLiveCommand").RequirePermission(Permissions.PartyAccess);
+
         MapModeration(app, "approve", PartyMessageModeration.Approve, AuditActions.PartyGuestbookApprove);
         MapModeration(app, "reject", PartyMessageModeration.Reject, AuditActions.PartyGuestbookReject);
         MapModeration(app, "hide", PartyMessageModeration.Hide, AuditActions.PartyGuestbookHide);
         MapModeration(app, "restore", PartyMessageModeration.Restore, AuditActions.PartyGuestbookRestore);
 
         return app;
+    }
+
+    /// <summary>
+    /// One guest-book live command, shared by the host's route and the Party
+    /// Crew façade — so the two cannot drift. The rights say what THIS caller
+    /// may do; the service re-checks every one on arrival.
+    /// </summary>
+    internal static async Task<IResult> ExecuteLiveAsync(
+        IPartyGuestbookLiveService live,
+        Guid ownerUserId,
+        Guid albumId,
+        PartyGuestbookLiveRights rights,
+        PartyGuestbookLiveCommandRequest? body,
+        CancellationToken cancellationToken)
+    {
+        if (body?.Command is null || body.ExpectedVersion is null) return Results.BadRequest();
+
+        var result = await live.ExecuteAsync(
+            ownerUserId, albumId, body.Command, body.ExpectedVersion.Value, rights, cancellationToken);
+        return result.Error switch
+        {
+            null => Results.Ok(result.Control),
+            PartyGuestbookLiveError.NotFound => Results.NotFound(),
+            PartyGuestbookLiveError.UnknownCommand => Results.BadRequest(new { error = "unknown_command" }),
+            PartyGuestbookLiveError.Forbidden => Results.Json(
+                new PartyGuestbookLiveRefusalDto("forbidden", result.Control),
+                statusCode: StatusCodes.Status403Forbidden),
+            PartyGuestbookLiveError error => Results.Json(
+                new PartyGuestbookLiveRefusalDto(PartyGuestbookLiveService.Code(error), result.Control),
+                statusCode: StatusCodes.Status409Conflict),
+        };
     }
 
     /// <summary>

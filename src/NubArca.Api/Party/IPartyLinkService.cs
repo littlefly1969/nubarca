@@ -99,7 +99,7 @@ public interface IPartyLinkService
     // optional settings field is: omitted means unchanged, so a client written
     // before pre-game preferences existed cannot switch them off by saving the
     // rest of the form.
-    Task<bool> UpdateGameSettingsAsync(
+    Task<PartyGameSettingsOutcome> UpdateGameSettingsAsync(
         Guid ownerUserId, Guid albumId, bool gameEnabled,
         int minChallengeIntervalSeconds, int maxChallengeIntervalSeconds,
         int votesPerGuest, int? maxChallengesPerSession,
@@ -145,4 +145,16 @@ public interface IPartyLinkService
     // quotas, so a contribution path needs no second query.
     Task<PartyAccess?> ResolveUploadAsync(
         string uploadToken, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// What saving the game's settings came to. Switching the game ON puts its
+/// lobby on the party's television at once, so it is refused — with nothing
+/// saved — while the regia has the GUEST BOOK there: the screen has one holder.
+/// </summary>
+public enum PartyGameSettingsOutcome
+{
+    Ok,
+    NotFound,
+    GuestbookActive,
 }

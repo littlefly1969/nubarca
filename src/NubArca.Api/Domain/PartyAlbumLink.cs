@@ -133,6 +133,45 @@ public class PartyAlbumLink
     /// </summary>
     public bool RequireGuestbookApproval { get; set; }
 
+    // --- The guest book, LIVE ---
+    //
+    // Two decisions the regia makes during the evening, separate from each
+    // other and from whether the book takes memories at all (GuestbookEnabled):
+    // letting the room READ the whole book on their phones, and putting the
+    // book on the party's television. Neither implies the other, and neither
+    // changes what a guest may write.
+
+    /// <summary>
+    /// Whether, while the party is LIVE, guests are offered "Guarda il
+    /// Guestbook" and read the whole book. Off by default.
+    ///
+    /// <para>Off, a guest still writes memories and still reads THEIR OWN; the
+    /// rest of the book waits for the regia. It governs the LIVE phase only:
+    /// after the party the book reads exactly as it always has, and nothing a
+    /// guest may WRITE depends on it.</para>
+    /// </summary>
+    public bool GuestbookViewingEnabled { get; set; }
+
+    /// <summary>
+    /// Whether the regia has put the guest book on the party's television.
+    /// RUNTIME state: off by default, never copied by a duplicate, cleared when
+    /// the party leaves LIVE.
+    ///
+    /// <para>It is a REQUEST, not the screen. What a television shows is
+    /// decided by <c>TvPartyPresentations.Decide</c>, where the game always
+    /// wins and an empty book yields to the slideshow; this flag is one input.
+    /// The commands that set it and the game commands that take the screen
+    /// serialise on this row, so the two are never both granted.</para>
+    /// </summary>
+    public bool GuestbookTvActive { get; set; }
+
+    /// <summary>
+    /// The concurrency token of the guest book's live controls: every command
+    /// quotes it and spends one — the discipline the game's own session version
+    /// follows. Starts at 0.
+    /// </summary>
+    public int GuestbookControlVersion { get; set; }
+
     // --- Slideshow timing (owner-configurable, TV-facing) ---
     // How long a PHOTO holds the party slideshow, in seconds. The TV reads these
     // through its album-items context; changing either takes effect on the TV's

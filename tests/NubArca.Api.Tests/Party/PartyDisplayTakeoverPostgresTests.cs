@@ -384,7 +384,7 @@ public sealed class PartyDisplayTakeoverPostgresTests : IAsyncLifetime
             bool? requireMessageApproval, bool? guestbookEnabled, bool? requireGuestbookApproval,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
-        public Task<bool> UpdateGameSettingsAsync(Guid ownerUserId, Guid albumId, bool gameEnabled,
+        public Task<PartyGameSettingsOutcome> UpdateGameSettingsAsync(Guid ownerUserId, Guid albumId, bool gameEnabled,
             int minChallengeIntervalSeconds, int maxChallengeIntervalSeconds, int votesPerGuest,
             int? maxChallengesPerSession, bool? priorityVotingEnabled = null,
             CancellationToken cancellationToken = default) =>

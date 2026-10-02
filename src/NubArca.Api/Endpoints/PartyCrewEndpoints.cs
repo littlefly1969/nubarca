@@ -353,6 +353,40 @@ public static class PartyCrewEndpoints
                     : await PartyEndpoints.ServeStrippedDerivativeAsync(photo, "image/jpeg", http, stripper, ct);
             })).WithName("GetPartyCrewGuestbookPhoto");
 
+        // The guest book, LIVE: the same service the host's control room calls.
+        // The guests' half rides `contributions.moderate` (letting the room read
+        // what guests left), the television's half `screens.manage` (the screen
+        // in the room). A device holding neither has nothing here — the same
+        // generic 404 every other missing capability is.
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/guestbook-live", (
+            Guid partyId,
+            HttpContext http,
+            [FromServices] IPartyCrewAccessResolver resolver,
+            [FromServices] IPartyGuestbookLiveService live,
+            CancellationToken ct) =>
+            WithAlbum(http, partyId, resolver, null, ct, async (ctx, albumId) =>
+            {
+                var rights = GuestbookLiveRights(ctx);
+                if (!rights.Any) return Results.NotFound();
+                var control = await live.GetAsync(ctx.OwnerUserId, albumId, rights, ct);
+                return control is null ? Results.NotFound() : Results.Ok(control);
+            })).WithName("GetPartyCrewGuestbookLive");
+
+        app.MapPost("/api/party-crew/parties/{partyId:guid}/guestbook-live/commands", (
+            Guid partyId,
+            HttpContext http,
+            [FromServices] IPartyCrewAccessResolver resolver,
+            [FromServices] IPartyGuestbookLiveService live,
+            [FromBody] PartyGuestbookLiveCommandRequest? body,
+            CancellationToken ct) =>
+            WithAlbum(http, partyId, resolver, null, ct, (ctx, albumId) =>
+            {
+                var rights = GuestbookLiveRights(ctx);
+                return rights.Any
+                    ? PartyGuestbookEndpoints.ExecuteLiveAsync(live, ctx.OwnerUserId, albumId, rights, body, ct)
+                    : Task.FromResult(Results.NotFound());
+            })).WithName("ExecutePartyCrewGuestbookLiveCommand");
+
         MapGuestbookModeration(app, "approve", PartyMessageModeration.Approve, AuditActions.PartyGuestbookApprove);
         MapGuestbookModeration(app, "reject", PartyMessageModeration.Reject, AuditActions.PartyGuestbookReject);
         MapGuestbookModeration(app, "hide", PartyMessageModeration.Hide, AuditActions.PartyGuestbookHide);
@@ -1233,6 +1267,9 @@ public static class PartyCrewEndpoints
                     action, auditAction, Ip(http), ct)))
             .WithName($"PartyCrewMessage{segment}");
     }
+
+    private static PartyGuestbookLiveRights GuestbookLiveRights(PartyCrewAccessContext ctx) =>
+        new(ctx.Can(PartyCrewCapabilities.ContributionsModerate), ctx.Can(PartyCrewCapabilities.ScreensManage));
 
     private static void MapGuestbookModeration(
         IEndpointRouteBuilder app, string segment, PartyMessageModeration action, string auditAction)

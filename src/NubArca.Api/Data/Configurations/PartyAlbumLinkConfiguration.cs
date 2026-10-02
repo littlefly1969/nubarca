@@ -35,6 +35,12 @@ public class PartyAlbumLinkConfiguration : IEntityTypeConfiguration<PartyAlbumLi
         // keepsake nobody asked for is clutter on the guest surface.
         builder.Property(p => p.GuestbookEnabled).HasDefaultValue(false);
         builder.Property(p => p.RequireGuestbookApproval).HasDefaultValue(false);
+        // The guest book's live controls: both off and a fresh version for every
+        // party that predates them, which is exactly "the regia has decided
+        // nothing yet".
+        builder.Property(p => p.GuestbookViewingEnabled).HasDefaultValue(false);
+        builder.Property(p => p.GuestbookTvActive).HasDefaultValue(false);
+        builder.Property(p => p.GuestbookControlVersion).HasDefaultValue(0);
         // 0 is unlimited, and it is the migration default: no existing party
         // acquires a message limit it never had.
         builder.Property(p => p.MaxMessagesPerParticipant).HasDefaultValue(0);
