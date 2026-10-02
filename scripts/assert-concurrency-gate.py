@@ -39,6 +39,10 @@ REQUIRED = {
     "A_show_on_tv_that_wins_the_row_is_cleared_by_the_end_of_the_party",
     "A_show_on_tv_that_arrives_after_the_end_is_claimed_is_refused_as_not_live",
     "Released_together_again_and_again_an_ended_party_never_keeps_the_book_on_the_tv",
+    # An owner's direct print: one key is one sheet, a loan's last sheet is taken once.
+    "One_Key_Sent_Six_Times_At_Once_Is_One_Sheet",
+    "The_Last_Sheet_Of_A_Loan_Is_Taken_Once",
+    "One_Key_Racing_For_The_Last_Sheet_Spends_It_Once",
 }
 
 NS = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}

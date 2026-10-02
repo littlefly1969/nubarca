@@ -34,6 +34,22 @@ public sealed class PrinterDevice
     /// </summary>
     public DateTime? LoadedPaperChangedAt { get; set; }
     public Guid? LoadedPaperChangedByUserId { get; set; }
+
+    /// <summary>
+    /// How many prints the media physically loaded in the printer still holds,
+    /// as the PRINTER reports it (a DNP through Gutenprint and CUPS, read by the
+    /// Print Agent). Null when the printer reports no reliable count, or an
+    /// agent has said it has none. Telemetry only: never a party's budget,
+    /// never a loan's ceiling, never a lock on a job.
+    /// </summary>
+    public int? MediaRemainingPrints { get; set; }
+
+    /// <summary>
+    /// When the printer last reported that count, on the SERVER's clock (the
+    /// agent sends only how old its reading is). An agent that predates the
+    /// count never touches either column.
+    /// </summary>
+    public DateTime? MediaRemainingObservedAt { get; set; }
 }
 
 public static class PrintDeviceStates

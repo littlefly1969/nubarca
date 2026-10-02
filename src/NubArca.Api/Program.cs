@@ -1060,7 +1060,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<NubArca.Api.Print.IPartyPrintBudget, NubArca.Api.Print.PartyPrintBudget>();
     builder.Services.AddScoped<NubArca.Api.Print.IPrinterAccess, NubArca.Api.Print.PrinterAccess>();
     builder.Services.AddScoped<
-        NubArca.Api.Print.IPartyPrintSourceReader, NubArca.Api.Print.PartyPrintSourceReader>();
+        NubArca.Api.Print.IPrintPhotoSourceReader, NubArca.Api.Print.PrintPhotoSourceReader>();
     builder.Services.AddScoped<
         NubArca.Api.Print.IPartyPrintSubmissionService, NubArca.Api.Print.PartyPrintSubmissionService>();
     builder.Services.AddSingleton<NubArca.Api.Print.PartyPrintComposer>();
@@ -1166,6 +1166,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<JobProcessor>();
     builder.Services.AddScoped<NubArca.Api.Print.PrintStationService>();
     builder.Services.AddSingleton<NubArca.Api.Print.PrintArtifactRenderer>();
+    builder.Services.AddScoped<NubArca.Api.Print.IOwnerPhotoPrintService, NubArca.Api.Print.OwnerPhotoPrintService>();
 
     // Slice 81: admin-only server-side directory import. Reuses the file +
     // folder pipelines; runs as an `admin.import` background job.

@@ -23,8 +23,26 @@ public sealed record PartyPrintSubmitRequest(
     /// </summary>
     string? PaperSize = null);
 
+/// <summary>
+/// One photograph of the sheet and how it is framed. A current studio sends
+/// <see cref="Placement"/> — where the frame's centre falls on the photograph
+/// and how far in or out, the one framing the whole product shares. A page
+/// opened before it existed sends the four crop fractions instead, and is still
+/// printed exactly as before. Both at once is a request that does not say what
+/// it means, and is refused.
+/// </summary>
 public sealed record PartyPrintSlotRequest(
-    Guid ItemId, double CropX, double CropY, double CropWidth, double CropHeight);
+    Guid ItemId,
+    double? CropX = null, double? CropY = null, double? CropWidth = null, double? CropHeight = null,
+    PartyPrintPlacementRequest? Placement = null)
+{
+    public bool HasCrop => CropX is not null || CropY is not null || CropWidth is not null || CropHeight is not null;
+}
+
+public sealed record PartyPrintPlacementRequest(double CenterX, double CenterY, double Zoom)
+{
+    public PhotoPlacement ToPlacement() => new(CenterX, CenterY, Zoom);
+}
 
 /// <summary>Why a submission was refused, in terms the guest UI can speak.</summary>
 public enum PartyPrintRefusal

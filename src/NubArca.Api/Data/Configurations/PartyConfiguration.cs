@@ -137,9 +137,11 @@ public class PartyGuestContentConfiguration : IEntityTypeConfiguration<PartyGues
             t.HasCheckConstraint(
                 "ck_party_guest_contents_media_orientation",
                 "\"MediaOrientation\" IN ('portrait', 'landscape')");
+            // The framing's STRUCTURE only: how far below 1 the zoom may go
+            // depends on the photograph and is checked by the server.
             t.HasCheckConstraint(
                 "ck_party_guest_contents_media_crop",
-                "\"MediaCropZoom\" BETWEEN 1 AND 4 AND \"MediaCropCenterX\" BETWEEN 0 AND 1 "
+                "\"MediaCropZoom\" > 0 AND \"MediaCropZoom\" <= 4 AND \"MediaCropCenterX\" BETWEEN 0 AND 1 "
                 + "AND \"MediaCropCenterY\" BETWEEN 0 AND 1");
             // Below is the absence of a choice; the only stored one is on the picture.
             t.HasCheckConstraint(

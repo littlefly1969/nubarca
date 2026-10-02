@@ -12,6 +12,15 @@ namespace NubArca.Api.Domain.Print;
 /// The crop is stored NORMALISED to the auto-oriented source (0..1 of its width
 /// and height), never in the pixels of whatever screen composed it, so the
 /// server and the browser can compute the same framing from the same numbers.
+///
+/// The crop alone is no longer the whole composition. A photograph may now be
+/// zoomed OUT, smaller than its frame with the paper showing beside it, and a
+/// crop — a part of the photograph — cannot say that. A job composed since then
+/// carries its <see cref="PlacementCenterX"/>/<see cref="PlacementCenterY"/>/
+/// <see cref="PlacementZoom"/> (see <c>PhotoPlacementGeometry</c>), which are the
+/// authority; its crop is the part of the photograph that placement shows,
+/// kept so every reader of the old columns still finds a valid one. Older jobs
+/// have no placement, and their crop is what they printed.
 /// </summary>
 public sealed class PrintJobSource
 {
@@ -27,6 +36,13 @@ public sealed class PrintJobSource
     public double CropY { get; set; }
     public double CropWidth { get; set; }
     public double CropHeight { get; set; }
+
+    /// <summary>Where the frame's centre fell on the photograph, 0..1 — null on a job from before placements.</summary>
+    public double? PlacementCenterX { get; set; }
+    public double? PlacementCenterY { get; set; }
+
+    /// <summary>How far in (above 1) or out (below 1) the photograph was, relative to just covering its frame.</summary>
+    public double? PlacementZoom { get; set; }
 
     /// <summary>The whole photograph, which is what an untouched selection means.</summary>
     public static PrintJobSource Full(Guid printJobId, int slotIndex, Guid fileItemId) => new()

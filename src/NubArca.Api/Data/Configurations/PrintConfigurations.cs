@@ -53,7 +53,14 @@ public sealed class PrinterDeviceConfiguration : IEntityTypeConfiguration<Printe
 {
     public void Configure(EntityTypeBuilder<PrinterDevice> builder)
     {
-        builder.ToTable("printer_devices");
+        builder.ToTable("printer_devices", t =>
+        {
+            // The printer's own count of what is left on its media: none, or
+            // a plausible one. The server already discards anything else.
+            t.HasCheckConstraint(
+                "ck_printer_devices_media_remaining",
+                "\"MediaRemainingPrints\" IS NULL OR \"MediaRemainingPrints\" BETWEEN 0 AND 100000");
+        });
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.DeviceKey).IsRequired().HasMaxLength(256);
@@ -74,6 +81,7 @@ public sealed class PrinterDeviceConfiguration : IEntityTypeConfiguration<Printe
         builder.Property(x => x.LoadedPaperSize).IsRequired().HasMaxLength(8)
             .HasDefaultValue(PrintPapers.Photo10x15);
         builder.Property(x => x.LoadedPaperChangedAt).HasColumnType("timestamp with time zone");
+        builder.Property(x => x.MediaRemainingObservedAt).HasColumnType("timestamp with time zone");
         builder.HasIndex(x => new { x.PrintStationId, x.DeviceKey }).IsUnique()
             .HasDatabaseName("ux_printer_devices_station_device_key");
         builder.HasOne<PrintStation>().WithMany().HasForeignKey(x => x.PrintStationId)
@@ -175,7 +183,19 @@ public sealed class PrintJobSourceConfiguration : IEntityTypeConfiguration<Print
 {
     public void Configure(EntityTypeBuilder<PrintJobSource> builder)
     {
-        builder.ToTable("print_job_sources");
+        builder.ToTable("print_job_sources", t =>
+        {
+            // A placement is the three numbers together or none of them (a job
+            // from before placements), and structurally a placement.
+            t.HasCheckConstraint(
+                "ck_print_job_sources_placement",
+                "(\"PlacementCenterX\" IS NULL AND \"PlacementCenterY\" IS NULL AND \"PlacementZoom\" IS NULL) "
+                // NOT NULL spelled out: a CHECK whose result is NULL passes, and
+                // `NULL BETWEEN 0 AND 1` is NULL — a half-written placement would.
+                + "OR (\"PlacementCenterX\" IS NOT NULL AND \"PlacementCenterY\" IS NOT NULL AND \"PlacementZoom\" IS NOT NULL "
+                + "AND \"PlacementCenterX\" BETWEEN 0 AND 1 AND \"PlacementCenterY\" BETWEEN 0 AND 1 "
+                + "AND \"PlacementZoom\" > 0 AND \"PlacementZoom\" <= 4)");
+        });
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).ValueGeneratedNever();
         // One photograph per slot: the shape of a strip is a constraint, not a
@@ -188,6 +208,28 @@ public sealed class PrintJobSourceConfiguration : IEntityTypeConfiguration<Print
         // print cannot be deleted out from under it.
         builder.HasOne<FileItem>().WithMany().HasForeignKey(x => x.FileItemId)
             .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class OwnerPhotoPrintRequestConfiguration : IEntityTypeConfiguration<OwnerPhotoPrintRequest>
+{
+    public void Configure(EntityTypeBuilder<OwnerPhotoPrintRequest> builder)
+    {
+        builder.ToTable("owner_photo_print_requests");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).ValueGeneratedNever();
+        builder.Property(x => x.IdempotencyKeyHash).IsRequired().HasMaxLength(64).IsFixedLength();
+        builder.Property(x => x.RequestFingerprint).IsRequired().HasMaxLength(64).IsFixedLength();
+        builder.Property(x => x.CreatedAt).HasColumnType("timestamp with time zone");
+        // THE guarantee against a second physical print of an owner's photograph:
+        // one accepted request per key per owner, refused by the database even
+        // when two requests race.
+        builder.HasIndex(x => new { x.OwnerUserId, x.IdempotencyKeyHash }).IsUnique()
+            .HasDatabaseName("ux_owner_photo_print_requests_owner_key");
+        builder.HasOne<User>().WithMany().HasForeignKey(x => x.OwnerUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<PrintJob>().WithMany().HasForeignKey(x => x.PrintJobId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
 

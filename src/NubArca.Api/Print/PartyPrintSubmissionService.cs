@@ -28,7 +28,8 @@ public interface IPartyPrintSubmissionService
 /// and printing has a physical effect:
 ///
 ///  1. VALIDATE the shape — right product, right number of photographs, no
-///     duplicates in a strip, crops that are actually crops.
+///     duplicates in a strip, framings that are framings (a placement no
+///     further out than the whole photograph, or a legacy crop inside it).
 ///  2. RE-VALIDATE EVERY SOURCE against the database. The browser's list is a
 ///     suggestion: a photograph must still be a photograph, still belong to THIS
 ///     party, and still be visible to guests. One that was hidden or moderated
@@ -50,13 +51,13 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
     private readonly IPartyMediaService _media;
     private readonly IDerivedBlobStorage _artifacts;
     private readonly PartyPrintComposer _composer;
-    private readonly IPartyPrintSourceReader _sources;
+    private readonly IPrintPhotoSourceReader _sources;
     private readonly NubArca.Api.Party.IPartyParticipantService _participants;
 
     public PartyPrintSubmissionService(
         AppDbContext db, IPartyPrintBudget budget, IPartyMediaService media,
         IDerivedBlobStorage artifacts, PartyPrintComposer composer,
-        IPartyPrintSourceReader sources,
+        IPrintPhotoSourceReader sources,
         NubArca.Api.Party.IPartyParticipantService participants,
         IPrinterAccess printers)
     {
@@ -94,10 +95,17 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         // strip's eight: the same picture twice is not what was asked for.
         if (request.Slots.Select(s => s.ItemId).Distinct().Count() != required)
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
-        if (request.Slots.Any(s => !PrintJobSource.IsValidCrop(
-                s.CropX, s.CropY, s.CropWidth, s.CropHeight)))
+        // Each photograph is framed ONE way: by a placement (a current studio)
+        // or by the four crop fractions (a page from before placements). Both
+        // at once does not say what it means; neither frames nothing.
+        foreach (var slot in request.Slots)
         {
-            return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
+            var valid = slot.Placement is { } placement
+                ? !slot.HasCrop && PhotoPlacementGeometry.IsStructurallyValid(placement.ToPlacement())
+                : slot.CropX is double x && slot.CropY is double y
+                    && slot.CropWidth is double cw && slot.CropHeight is double ch
+                    && PrintJobSource.IsValidCrop(x, y, cw, ch);
+            if (!valid) return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
         }
 
         // The sheet was composed for one paper; it prints on that paper or not
@@ -126,6 +134,45 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         // Videos are not printable, and a video's poster is not a photograph.
         if (request.Slots.Any(s => !printable.Contains(s.ItemId)))
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.InvalidSource);
+
+        // How far OUT a photograph may go depends on its shape and its frame's:
+        // no further than the whole photograph inside the frame. Checked from the
+        // stored metadata, before anything is reserved. A photograph whose shape
+        // is not known yet may be framed as it always could, at zoom 1 and in.
+        var theme = ThemeFor(productId, request.Theme);
+        var orientation = productId == PartyPrintProducts.Photo
+            ? ParseOrientation(request.Orientation)
+            : PartyPrintOrientation.FollowPhoto;
+        var shapes = await PrintPhotoShapes.DisplayAspectsAsync(
+            _db, access.OwnerUserId, request.Slots.Select(s => s.ItemId).ToList(), cancellationToken);
+        double? FrameAspectOf(Guid itemId)
+        {
+            if (productId == PartyPrintProducts.TwinStrip4) return PartyPrintGeometry.StripSlotAspect();
+            if (productId == PartyPrintProducts.Grid4) return PartyPrintGeometry.GridSlotAspect(paper);
+            if (!shapes.TryGetValue(itemId, out var aspect) && orientation == PartyPrintOrientation.FollowPhoto)
+                return null;
+            // The composer's own rule: the sheet follows the photograph unless turned.
+            var portrait = orientation switch
+            {
+                PartyPrintOrientation.Portrait => true,
+                PartyPrintOrientation.Landscape => false,
+                _ => aspect <= 1,
+            };
+            return theme == PartyPrintTheme.Overlay
+                ? PartyPrintGeometry.OverlaySlotAspect(portrait, paper)
+                : PartyPrintGeometry.PhotoSlotAspect(portrait, paper);
+        }
+        foreach (var slot in request.Slots)
+        {
+            if (slot.Placement is not { } requested) continue;
+            var placement = requested.ToPlacement();
+            if (placement.Zoom >= 1) continue;
+            if (!shapes.TryGetValue(slot.ItemId, out var aspect) || FrameAspectOf(slot.ItemId) is not double frame
+                || !PhotoPlacementGeometry.IsValid(aspect, frame, placement))
+            {
+                return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
+            }
+        }
 
         // 3. Idempotency: the same key answers with the same job, always.
         var keyHash = HashKey(idempotencyKey);
@@ -238,21 +285,19 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                     await ReleaseUnlessAcceptedAsync();
                     return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.InvalidSource);
                 }
-                photos.Add(new PartyPrintPhoto(
-                    bytes, slot.CropX, slot.CropY, slot.CropWidth, slot.CropHeight));
+                photos.Add(slot.Placement is { } placement
+                    ? PartyPrintPhoto.Placed(bytes, placement.ToPlacement())
+                    : new PartyPrintPhoto(bytes, slot.CropX!.Value, slot.CropY!.Value,
+                        slot.CropWidth!.Value, slot.CropHeight!.Value));
             }
 
             // The number is reserved before the sheet is drawn, so it can be
             // printed ON it: the guest reads the same number off their phone and
             // off the paper.
-            var theme = ThemeFor(productId, request.Theme);
             // The words' and the symbol's colours belong to the title on the photo only.
+            // (Only a single photograph turns: four photographs sit as the paper
+            // is named, and the twin strip is the one geometry the cut expects.)
             var overlay = theme == PartyPrintTheme.Overlay ? ParseOverlay(request) : null;
-            // Only a single photograph turns: four photographs sit as the paper
-            // is named, and the twin strip is the one geometry the cut expects.
-            var orientation = productId == PartyPrintProducts.Photo
-                ? ParseOrientation(request.Orientation)
-                : PartyPrintOrientation.FollowPhoto;
             var artifact = await _composer.RenderAsync(new PartyPrintComposition(
                 productId, theme, photos,
                 access.PartyName, access.FooterText,
@@ -323,17 +368,33 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 for (var i = 0; i < request.Slots.Count; i++)
                 {
                     var slot = request.Slots[i];
-                    _db.PrintJobSources.Add(new PrintJobSource
+                    var source = new PrintJobSource
                     {
                         Id = Guid.NewGuid(),
                         PrintJobId = jobId,
                         SlotIndex = i,
                         FileItemId = slot.ItemId,
-                        CropX = slot.CropX,
-                        CropY = slot.CropY,
-                        CropWidth = slot.CropWidth,
-                        CropHeight = slot.CropHeight,
-                    });
+                    };
+                    if (slot.Placement is { } requested)
+                    {
+                        // The placement is the authority; the crop beside it is
+                        // the part of the photograph it shows, for every reader of
+                        // the older columns.
+                        var placement = requested.ToPlacement();
+                        source.PlacementCenterX = placement.CenterX;
+                        source.PlacementCenterY = placement.CenterY;
+                        source.PlacementZoom = placement.Zoom;
+                        (source.CropX, source.CropY, source.CropWidth, source.CropHeight) =
+                            shapes.TryGetValue(slot.ItemId, out var aspect) && FrameAspectOf(slot.ItemId) is double frame
+                                ? PhotoPlacementGeometry.LegacyCrop(PhotoPlacementGeometry.Place(aspect, frame, placement))
+                                : (0, 0, 1, 1);
+                    }
+                    else
+                    {
+                        (source.CropX, source.CropY, source.CropWidth, source.CropHeight) =
+                            (slot.CropX!.Value, slot.CropY!.Value, slot.CropWidth!.Value, slot.CropHeight!.Value);
+                    }
+                    _db.PrintJobSources.Add(source);
                 }
                 _db.PartyPrintRequests.Add(new PartyPrintRequest
                 {
@@ -462,7 +523,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
 /// Reads an original's bytes for composition. Separate so the submission service
 /// does not reach into storage itself, and so a test can supply fixtures.
 /// </summary>
-public interface IPartyPrintSourceReader
+public interface IPrintPhotoSourceReader
 {
     Task<byte[]?> ReadAsync(Guid ownerUserId, Guid fileItemId, CancellationToken cancellationToken);
 }

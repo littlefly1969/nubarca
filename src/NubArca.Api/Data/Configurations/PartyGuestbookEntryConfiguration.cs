@@ -10,13 +10,15 @@ public class PartyGuestbookEntryConfiguration : IEntityTypeConfiguration<PartyGu
     {
         builder.ToTable("party_guestbook_entries", t =>
         {
-            // The framing inside the print crop editor's own limits — the same
-            // bounds party_guest_contents states — and a photograph with a
-            // real shape. The SERVER validates both before writing; these stop
-            // a corrupt write from producing a memory nothing can draw.
+            // The framing's STRUCTURE — a positive zoom no larger than 4, its
+            // centre inside the photograph — and a photograph with a real
+            // shape. How far below 1 a zoom may go depends on the photograph
+            // and its frame (no further than the whole photograph in it), so
+            // the SERVER checks that before writing; these stop a corrupt write
+            // from producing a memory nothing can draw.
             t.HasCheckConstraint(
                 "ck_party_guestbook_entries_crop",
-                "\"CropZoom\" BETWEEN 1 AND 4 AND \"CropCenterX\" BETWEEN 0 AND 1 "
+                "\"CropZoom\" > 0 AND \"CropZoom\" <= 4 AND \"CropCenterX\" BETWEEN 0 AND 1 "
                 + "AND \"CropCenterY\" BETWEEN 0 AND 1");
             t.HasCheckConstraint(
                 "ck_party_guestbook_entries_photo_size",

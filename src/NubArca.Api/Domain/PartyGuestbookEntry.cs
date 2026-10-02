@@ -122,11 +122,15 @@ public class PartyGuestbookEntry
     public int TemplateVersion { get; set; } = 1;
 
     /// <summary>
-    /// The framing, as the party print's crop editor states it: a
-    /// magnification from 1 to <see cref="PartyGuestContentMediaOrientations.MaxZoom"/>
-    /// and the centre of what shows, as fractions (0..1) of the photograph.
-    /// Independent of any pixel and any screen, which is what lets a phone and
-    /// a television draw the same memory.
+    /// The framing — semantically a PHOTO PLACEMENT (see <c>PhotoPlacementGeometry</c>),
+    /// still called "crop" on the wire and in the columns, which are not renamed:
+    /// the centre of what shows as fractions (0..1) of the photograph, and a zoom
+    /// relative to the photograph just covering the design's frame — above 1 in,
+    /// down to the whole photograph inside the frame out (the frame's well then
+    /// shows beside it), at most <see cref="PartyGuestContentMediaOrientations.MaxZoom"/>.
+    /// A memory stored at zoom ≥ 1 draws exactly as it always did. Independent of
+    /// any pixel and any screen, which is what lets a phone and a television
+    /// draw the same memory.
     /// </summary>
     public double CropCenterX { get; set; } = 0.5;
 
@@ -262,6 +266,34 @@ public static class PartyGuestbookTemplates
         version = 0;
         return key is not null && Publishable.TryGetValue(key, out version);
     }
+
+    /// <summary>
+    /// The photograph's frame (width / height) in the design <paramref name="key"/>
+    /// at <paramref name="version"/>, for a photograph of <paramref name="photoAspect"/> —
+    /// the same table as every client's template registry (the shared
+    /// <c>photoPlacement.cases.json</c> holds them equal). The server needs it for
+    /// one thing: how far a guest may zoom OUT, which depends on the frame.
+    /// A pair it does not know falls back as the clients do: the same key's
+    /// current design, else the default.
+    /// </summary>
+    public static double FrameAspect(string key, int version, double photoAspect)
+    {
+        var rule = Frames.TryGetValue($"{key}@{version}", out var exact)
+            ? exact
+            : Frames.TryGetValue($"{key}@{(Publishable.TryGetValue(key, out var current) ? current : 0)}", out var latest)
+                ? latest
+                : Frames[$"{NubArca}@1"];
+        return photoAspect > 1.02 ? rule.Landscape : photoAspect < 0.98 ? rule.Portrait : rule.Square;
+    }
+
+    private static readonly IReadOnlyDictionary<string, (double Landscape, double Portrait, double Square)> Frames =
+        new Dictionary<string, (double, double, double)>(StringComparer.Ordinal)
+        {
+            [$"{NubArca}@1"] = (4.0 / 3, 4.0 / 5, 1),
+            [$"{Polaroid}@1"] = (1, 1, 1),
+            [$"{Editorial}@1"] = (3.0 / 2, 3.0 / 4, 1),
+            [$"{Celebration}@1"] = (4.0 / 3, 4.0 / 5, 1),
+        };
 }
 
 /// <summary>

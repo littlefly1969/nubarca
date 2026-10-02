@@ -112,7 +112,10 @@ public class PartyGuestContent
     /// </summary>
     public string? MediaOrientation { get; set; }
 
-    /// <summary>How far in, from 1 (the frame filled) to <see cref="PartyGuestContentMediaOrientations.MaxZoom"/>.</summary>
+    /// <summary>
+    /// How far in (above 1, up to <see cref="PartyGuestContentMediaOrientations.MaxZoom"/>) or out
+    /// (below 1, down to the whole photograph in the frame) — 1 is the frame filled.
+    /// </summary>
     public double? MediaCropZoom { get; set; }
 
     /// <summary>The centre of what shows, as fractions of the photograph (0..1).</summary>
@@ -253,12 +256,22 @@ public static class PartyGuestContentMediaOrientations
     /// The print crop editor's limit, mirrored: past it a picture is visibly
     /// soft, so the editor does not go there.
     /// </summary>
-    public const double MaxZoom = 4;
+    public const double MaxZoom = NubArca.Api.Print.PhotoPlacementGeometry.MaxZoom;
 
+    /// <summary>
+    /// The frame's shape (width / height), mirrored from the guest surface:
+    /// a portrait frame is 4:5, a landscape one 3:2.
+    /// </summary>
+    public static double FrameAspect(string orientation) => orientation == Portrait ? 4.0 / 5 : 3.0 / 2;
+
+    /// <summary>
+    /// A framing's structure: finite, its centre inside the photograph, a
+    /// positive zoom no larger than the maximum. How far OUT it may go — no
+    /// further than the whole photograph in the frame — depends on the
+    /// photograph and is checked where the photograph is known.
+    /// </summary>
     public static bool IsValidCrop(double zoom, double centerX, double centerY) =>
-        double.IsFinite(zoom) && zoom >= 1 && zoom <= MaxZoom
-        && double.IsFinite(centerX) && centerX >= 0 && centerX <= 1
-        && double.IsFinite(centerY) && centerY >= 0 && centerY <= 1;
+        NubArca.Api.Print.PhotoPlacementGeometry.IsStructurallyValid(new NubArca.Api.Print.PhotoPlacement(centerX, centerY, zoom));
 }
 
 /// <summary>

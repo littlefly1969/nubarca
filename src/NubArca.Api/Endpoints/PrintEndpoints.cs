@@ -105,6 +105,40 @@ public static class PrintEndpoints
             return job is null ? Results.NotFound() : Results.Accepted(value: job);
         }).WithName("CreatePrintTestJob");
 
+        // An owner's own photograph, printed directly from their library or an
+        // album, on their printer or one lent to them.
+        owner.MapPost("/photo-jobs", async ([FromBody] OwnerPhotoPrintSubmitRequest? request,
+            [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey, HttpContext context,
+            [FromServices] IOwnerPhotoPrintService service, CancellationToken ct) =>
+        {
+            if (request is null) return Results.BadRequest(new { error = OwnerPhotoPrintErrors.InvalidRequest });
+            var result = await service.SubmitAsync(context.GetCurrentUserId()!.Value, request, idempotencyKey, ct);
+            if (result.Accepted is { } accepted) return Results.Accepted($"/api/print/stations", accepted);
+            var error = result.Error!;
+            return error switch
+            {
+                OwnerPhotoPrintErrors.InvalidRequest or OwnerPhotoPrintErrors.InvalidOrientation
+                    or OwnerPhotoPrintErrors.InvalidPlacement or OwnerPhotoPrintErrors.InvalidTimezone =>
+                    Results.BadRequest(new { error }),
+                OwnerPhotoPrintErrors.NotFound or OwnerPhotoPrintErrors.PrinterNotFound =>
+                    Results.NotFound(new { error }),
+                OwnerPhotoPrintErrors.RenderFailed =>
+                    Results.Json(new { error }, statusCode: StatusCodes.Status500InternalServerError),
+                _ => Results.Conflict(new { error }),
+            };
+        }).WithName("CreateOwnerPhotoPrintJob");
+        // The date such a print would carry, resolved exactly as the print
+        // resolves it, so the preview shows the characters the paper gets.
+        owner.MapGet("/photo-jobs/date", async ([FromQuery] Guid? fileItemId, [FromQuery] string? timeZone,
+            HttpContext context, [FromServices] IOwnerPhotoPrintService service, CancellationToken ct) =>
+        {
+            if (fileItemId is not Guid id) return Results.BadRequest(new { error = OwnerPhotoPrintErrors.InvalidRequest });
+            var zone = OwnerPhotoPrintDates.Zone(timeZone);
+            if (zone is null) return Results.BadRequest(new { error = OwnerPhotoPrintErrors.InvalidTimezone });
+            var date = await service.ResolveDateAsync(context.GetCurrentUserId()!.Value, id, zone, ct);
+            return date is null ? Results.NotFound(new { error = OwnerPhotoPrintErrors.NotFound }) : Results.Ok(date);
+        }).WithName("ResolveOwnerPhotoPrintDate");
+
         // Lending a printer: its owner shares it, sets a ceiling, ends it.
         owner.MapGet("/shared-printers", async (HttpContext context,
             [FromServices] PrintStationService service, CancellationToken ct) =>
