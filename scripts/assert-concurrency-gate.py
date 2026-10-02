@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """A SKIPPED RACE IS NOT A PASSED ONE.
 
-The Album Share concurrency tests run against real PostgreSQL through
+The concurrency tests in the merge gate (Album Share, and the party guest
+book's races against the game and the end of the party) run against real
+PostgreSQL through
 Testcontainers, and the fixture answers `Skip.IfNot(Available)` when Docker is
 missing so that a developer's laptop does not fail the whole suite. On CI that
 kindness becomes a hole: a runner without a working container leaves every race
@@ -29,6 +31,14 @@ REQUIRED = {
     "Two_resends_produce_one_challenge_and_one_usable_code",
     "Fifty_one_addresses_arriving_together_do_not_exceed_the_ceiling",
     "A_reactivation_racing_a_new_address_for_the_last_slot_respects_the_ceiling",
+    # The party guest book on the television: the game and the book never
+    # share the screen, and an ended party never keeps the book on it.
+    "A_guest_book_that_commits_first_turns_the_next_challenge_away",
+    "A_challenge_that_commits_first_turns_the_guest_book_away",
+    "Released_together_again_and_again_there_is_always_exactly_one_winner",
+    "A_show_on_tv_that_wins_the_row_is_cleared_by_the_end_of_the_party",
+    "A_show_on_tv_that_arrives_after_the_end_is_claimed_is_refused_as_not_live",
+    "Released_together_again_and_again_an_ended_party_never_keeps_the_book_on_the_tv",
 }
 
 NS = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
@@ -71,13 +81,13 @@ def main() -> int:
 
     if problems:
         print(
-            "FAIL: the Album Share concurrency gate did not run clean.\n"
+            "FAIL: the concurrency gate did not run clean.\n"
             + "\n".join(problems),
             file=sys.stderr,
         )
         return 1
 
-    print(f"Album Share concurrency gate: {len(REQUIRED)} races ran and passed.")
+    print(f"Concurrency gate: {len(REQUIRED)} races ran and passed.")
     return 0
 
 

@@ -138,14 +138,16 @@ jobs:
           --no-restore
 
       # Deliberately NOT the whole External suite, which is a nightly's worth of
-      # work. These are the races this feature's correctness rests on.
-      - name: Run Album Share concurrency tests
+      # work. These are the races the features' correctness rests on: Album
+      # Share's, and the party guest book's against the game (one holder of the
+      # television) and against the end of the party (never on after it).
+      - name: Run concurrency tests
         run: >-
           dotnet test tests/NubArca.Api.Tests/NubArca.Api.Tests.csproj
           --configuration Release
           --no-restore
           --no-build
-          --filter "FullyQualifiedName~AlbumShareConcurrencyPostgresTests"
+          --filter "FullyQualifiedName~AlbumShareConcurrencyPostgresTests|FullyQualifiedName~PartyGuestbookGameRacePostgresTests|FullyQualifiedName~PartyGuestbookEndLiveRacePostgresTests"
           --logger "console;verbosity=normal"
           --logger trx
           --results-directory "$GITHUB_WORKSPACE/TestResults/backend-concurrency"
