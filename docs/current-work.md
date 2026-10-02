@@ -1129,7 +1129,11 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   `PartyDisplayGrant`, which is unchanged and stays the game's alone. And the
   last visible memory leaving the book withdraws the TV request
   (`party.guestbook.tv.empty_fallback`), as do leaving LIVE and switching the
-  book off.
+  book off. Leaving LIVE locks the party's link rows UNCONDITIONALLY before it
+  clears the flag: filtering that lock on `GuestbookTvActive` takes no lock
+  while the flag is false and lets a concurrent `show_on_tv` survive the end of
+  the party (`PartyGuestbookEndLiveRacePostgresTests`, in the CI concurrency
+  gate with the game races).
 - **Telling somebody WHERE the party is does not go through the guest list.**
   Until `POST /api/parties/{partyId}/address-share`, the only way to say where a
   party was, was to create an invitation group and share a personal invitation —
