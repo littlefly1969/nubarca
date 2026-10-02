@@ -48,6 +48,7 @@ import { PersonalAlbumsScreen } from './src/screens/PersonalAlbumsScreen';
 import { BeautyLabScreen } from './src/screens/BeautyLabScreen';
 import { UpdateScreen } from './src/screens/UpdateScreen';
 import { PartyDisplayScreen } from './src/screens/PartyDisplayScreen';
+import { PartyGuestbookScreen } from './src/screens/PartyGuestbookScreen';
 import { PartySlideshowScreen } from './src/screens/PartySlideshowScreen';
 import { PartyNativeSurface } from './src/components/PartyNativeSurface';
 import { exitTvApp } from './src/lib/tvPlatform';
@@ -428,7 +429,8 @@ function AppInner(): React.JSX.Element {
   // unmounted and released.
   useEffect(() => {
     if (flow.name !== 'mode' && flow.name !== 'pairing'
-      && flow.name !== 'partyGame' && flow.name !== 'partyUnavailable') return;
+      && flow.name !== 'partyGame' && flow.name !== 'partyGuestbook'
+      && flow.name !== 'partyUnavailable') return;
     const onBackPress = () => {
       exitApp();
       return true;
@@ -476,6 +478,14 @@ function AppInner(): React.JSX.Element {
       )}
       {flow.name === 'partyGame' && (
         <PartyDisplayScreen
+          key={flow.party.key}
+          albumName={flow.party.albumName}
+          onSessionInvalid={onSessionInvalid}
+          onRequestAssignment={refreshControlPlane}
+        />
+      )}
+      {flow.name === 'partyGuestbook' && (
+        <PartyGuestbookScreen
           key={flow.party.key}
           albumName={flow.party.albumName}
           onSessionInvalid={onSessionInvalid}

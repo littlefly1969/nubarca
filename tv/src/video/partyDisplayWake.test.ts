@@ -36,3 +36,15 @@ test('a native cover or an error card holds nothing', () => {
     shouldKeepPartyDisplayAwake({ hostActive: true, showing: true, presentationActive: false }),
     false);
 });
+
+test('the guest book holds the screen while a memory is up in the foreground, and only then', async () => {
+  const { shouldKeepPartyGuestbookAwake } = await import('./wakePolicy.ts');
+  for (const hostActive of [true, false]) {
+    for (const showing of [true, false]) {
+      assert.equal(
+        shouldKeepPartyGuestbookAwake({ hostActive, showing }),
+        hostActive && showing,
+        JSON.stringify({ hostActive, showing }));
+    }
+  }
+});

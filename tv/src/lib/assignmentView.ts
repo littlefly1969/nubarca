@@ -9,7 +9,7 @@
 
 import type { TvDisplayAssignment } from '../api/tv';
 
-export type PartyPresentation = 'slideshow' | 'game' | 'unavailable';
+export type PartyPresentation = 'slideshow' | 'game' | 'guestbook' | 'unavailable';
 
 export interface AssignedParty {
   /**
@@ -67,7 +67,7 @@ export function backoffMs(attempt: number): number {
 }
 
 function isPartyPresentation(value: unknown): value is PartyPresentation {
-  return value === 'slideshow' || value === 'game' || value === 'unavailable';
+  return value === 'slideshow' || value === 'game' || value === 'guestbook' || value === 'unavailable';
 }
 
 /**
