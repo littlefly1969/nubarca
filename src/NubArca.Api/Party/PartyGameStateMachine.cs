@@ -195,8 +195,16 @@ public static class PartyGameStateMachine
     /// TypeScript — and the server still validates, because a client is never an
     /// authority.
     /// </summary>
+    /// <param name="guestbookHoldsTheScreen">
+    /// The regia has put the guest book on the party's television. Every
+    /// command whose target phase would take the screen back is then left out:
+    /// the screen has one holder, and the server refuses those commands on
+    /// arrival anyway (see <see cref="TakesTheScreen"/>). The transitions
+    /// themselves are unchanged — this only says which are offered now.
+    /// </param>
     public static IReadOnlyList<string> LegalCommands(
-        string phase, bool hasNextChallenge, bool currentActivityVotes = true)
+        string phase, bool hasNextChallenge, bool currentActivityVotes = true,
+        bool guestbookHoldsTheScreen = false)
     {
         var ordered = new[]
         {
@@ -212,11 +220,22 @@ public static class PartyGameStateMachine
         foreach (var command in ordered)
         {
             if (command is null || legal.Contains(command)) continue;
-            if (Resolve(phase, command, hasNextChallenge, currentActivityVotes) is not null)
-                legal.Add(command);
+            if (Resolve(phase, command, hasNextChallenge, currentActivityVotes) is not { } transition)
+                continue;
+            if (guestbookHoldsTheScreen && TakesTheScreen(transition)) continue;
+            legal.Add(command);
         }
         return legal;
     }
+
+    /// <summary>
+    /// Whether a transition puts the game on the party's television — its
+    /// target is a phase that holds the screen. The game's own vocabulary
+    /// answers it (<see cref="PartyGamePhases.HoldsTheScreen"/>); this only
+    /// names the question the guest book's mutual exclusion asks of a command.
+    /// </summary>
+    public static bool TakesTheScreen(PartyGameTransition transition) =>
+        PartyGamePhases.HoldsTheScreen(transition.Phase);
 
     /// <summary>
     /// The one command that advances this phase — the control room's single

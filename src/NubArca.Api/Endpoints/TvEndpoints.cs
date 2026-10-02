@@ -1797,6 +1797,52 @@ public static class TvEndpoints
             return projection is null ? Results.NotFound() : Results.Ok(projection);
         }).WithName("ListTvPartyMessages");
 
+        // THE GUEST BOOK ON THE TELEVISION. The party is the one this
+        // television's session is ASSIGNED to — never a party, album, link or
+        // token the client names — and the book is served only while the
+        // canonical projection says `guestbook`. The session alone is not
+        // enough: the moment the regia returns to the slideshow (or the game
+        // takes the screen, or the last memory leaves the book) these routes
+        // stop answering, without anything having to be revoked. No display
+        // grant is involved; that credential is the game stage's alone.
+        app.MapGet("/api/tv/party/guestbook", async (
+            HttpContext httpContext,
+            [FromServices] ITvPairingService tv,
+            [FromServices] NubArca.Api.Party.IPartyGuestbookService guestbook,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var assignment = await tv.ResolvePartyAssignmentAsync(
+                httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            if (assignment is null) return Results.Unauthorized();
+            if (GuestbookOnScreen(assignment) is not { } access) return Results.NotFound();
+
+            return Results.Ok(new TvGuestbookDto(
+                await guestbook.ListForTelevisionAsync(access.PartyId, cancellationToken)));
+        }).WithName("GetTvPartyGuestbook");
+
+        app.MapGet("/api/tv/party/guestbook/{entryId:guid}/photo", async (
+            Guid entryId,
+            HttpContext httpContext,
+            [FromServices] ITvPairingService tv,
+            [FromServices] NubArca.Api.Party.IPartyGuestbookService guestbook,
+            [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
+            CancellationToken cancellationToken) =>
+        {
+            var assignment = await tv.ResolvePartyAssignmentAsync(
+                httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            if (assignment is null) return Results.Unauthorized();
+            if (GuestbookOnScreen(assignment) is not { } access) return Results.NotFound();
+
+            // The memory's own derived preview — metadata-stripped, never the
+            // original — and only for a VISIBLE memory of this party.
+            var photo = await guestbook.OpenTelevisionPhotoAsync(access.PartyId, entryId, cancellationToken);
+            return photo is null
+                ? Results.NotFound()
+                : await PartyEndpoints.ServeStrippedDerivativeAsync(
+                    photo, "image/jpeg", httpContext, stripper, cancellationToken);
+        }).WithName("GetTvPartyGuestbookPhoto");
+
         // Persisted Party challenge state, carried over the same paired-TV
         // session and polling model as media/messages. Boundary never interrupts
         // a media item; NEXT is the existing remote action translated locally.
@@ -2344,6 +2390,15 @@ public static class TvEndpoints
     // Duplicated from Program.cs's local `SetNoStore` / `SetPrivateDerivativeCache`
     // helpers (used by dozens of other still-inline endpoints there, so they stay
     // put) — same logic.
+    /// <summary>
+    /// The assigned party's access, exactly while its presentation is the guest
+    /// book — the whole of the guest book's TV authorisation. Null otherwise.
+    /// </summary>
+    private static NubArca.Api.Party.PartyAccess? GuestbookOnScreen(TvPartyAssignment assignment) =>
+        assignment.Party is { Presentation: TvPartyPresentations.Guestbook, Access: { } access }
+            ? access
+            : null;
+
     private static void SetNoStore(HttpContext context)
     {
         context.Response.Headers.CacheControl = "no-store";

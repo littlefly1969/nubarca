@@ -26,6 +26,7 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
     private readonly IPartyParticipantService _participants;
     private readonly IBlobService _blobs;
     private readonly PartyGuestbookPhotoCache _photos;
+    private readonly ILogger<PartyGuestbookService> _logger;
 
     public PartyGuestbookService(
         AppDbContext db,
@@ -33,7 +34,8 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
         IPartyMessageAccessResolver access,
         IPartyParticipantService participants,
         IBlobService blobs,
-        PartyGuestbookPhotoCache photos)
+        PartyGuestbookPhotoCache photos,
+        ILogger<PartyGuestbookService> logger)
     {
         _db = db;
         _clock = clock;
@@ -41,6 +43,7 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
         _participants = participants;
         _blobs = blobs;
         _photos = photos;
+        _logger = logger;
     }
 
     // ── Where the pictures are ──────────────────────────────────────────────
@@ -56,6 +59,10 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
     /// <summary>A photograph the guest may choose, on the guest's own token.</summary>
     public static string CandidateUrl(string token, Guid fileItemId, string variant) =>
         $"/api/party/{Uri.EscapeDataString(token)}/guestbook/photos/{fileItemId}/{variant}";
+
+    /// <summary>A memory's picture, on a paired television's own route.</summary>
+    public static string TelevisionPhotoUrl(Guid entryId) =>
+        $"/api/tv/party/guestbook/{entryId}/photo";
 
     /// <summary>A memory's picture, on the host's own route.</summary>
     public static string ManagerPhotoUrl(Guid partyId, Guid entryId) =>
@@ -78,9 +85,8 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
         // A pending memory is not "shown greyed out" and a rejected one is not
         // shown at all: the guest surface receives what is in the book, and
         // what is in the book is what a manager let in.
-        var rows = await _db.PartyGuestbookEntries
-            .AsNoTracking()
-            .Where(e => e.PartyId == access.PartyId && e.Status == PartyMessageStatuses.Visible)
+        var whole = ReadsWholeBook(access);
+        var rows = await ReadableBy(access, participantId)
             .OrderByDescending(e => e.CreatedAt)
             .ThenByDescending(e => e.Id)
             .Take(PublicPageSize)
@@ -89,7 +95,33 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
         return new PartyGuestbookPageDto(
             rows.Select(e => ToPublicDto(e, PublicPhotoUrl(token, e.Id))).ToList(),
             CanWrite: Writable(access),
-            Remaining: await RemainingAsync(access, participantId, cancellationToken));
+            Remaining: await RemainingAsync(access, participantId, cancellationToken),
+            Scope: whole ? PartyGuestbookScopes.All : PartyGuestbookScopes.Mine);
+    }
+
+    /// <summary>
+    /// Whether THIS reader reads the whole book. During the LIVE evening the
+    /// room reads only what it wrote until the regia opens the book
+    /// (<see cref="PartyAccess.GuestbookViewingEnabled"/>); outside the live
+    /// phase — after the party — the book reads exactly as it always has.
+    /// </summary>
+    private static bool ReadsWholeBook(PartyAccess access) =>
+        access.Experience.Phase != PartyGuestPhase.Live || access.GuestbookViewingEnabled;
+
+    /// <summary>
+    /// The memories this reader may see: the visible ones of this party, and —
+    /// while the book is closed to the room — only those this browser's guest
+    /// wrote. A reader with no guest identity yet wrote nothing, so sees nothing.
+    /// The ONE rule the page and the pictures are both served by.
+    /// </summary>
+    private IQueryable<PartyGuestbookEntry> ReadableBy(PartyAccess access, Guid? participantId)
+    {
+        var visible = _db.PartyGuestbookEntries.AsNoTracking()
+            .Where(e => e.PartyId == access.PartyId && e.Status == PartyMessageStatuses.Visible);
+        if (ReadsWholeBook(access)) return visible;
+        return participantId is Guid reader
+            ? visible.Where(e => e.PartyParticipantId == reader)
+            : visible.Where(_ => false);
     }
 
     public async Task<PartyGuestbookPhotosDto?> ListPhotosAsync(
@@ -277,22 +309,46 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
     }
 
     public async Task<Stream?> OpenPublicPhotoAsync(
-        PartyAccess access, Guid entryId, CancellationToken cancellationToken = default)
+        PartyAccess access, Guid entryId, Guid? participantId = null,
+        CancellationToken cancellationToken = default)
     {
         if (!Readable(access))
         {
             return null;
         }
 
-        // The same predicate the book's page uses, in the query that finds the
-        // memory: an entry of another party, or one not in the book, is the
-        // same nothing as one that never existed.
+        // The same rule the book's page uses, in the query that finds the
+        // memory: an entry of another party, one not in the book, or one this
+        // reader may not read yet is the same nothing as one that never existed.
+        var readable = await ReadableBy(access, participantId)
+            .AnyAsync(e => e.Id == entryId, cancellationToken);
+        return readable ? await _photos.OpenAsync(entryId, cancellationToken) : null;
+    }
+
+    // ── The television's book ───────────────────────────────────────────────
+
+    public async Task<IReadOnlyList<PartyGuestbookEntryDto>> ListForTelevisionAsync(
+        Guid partyId, CancellationToken cancellationToken = default)
+    {
+        // The book's own order, newest first — the same the guest page reads.
+        // A television invents no ranking of its own.
+        var rows = await _db.PartyGuestbookEntries
+            .AsNoTracking()
+            .Where(e => e.PartyId == partyId && e.Status == PartyMessageStatuses.Visible)
+            .OrderByDescending(e => e.CreatedAt)
+            .ThenByDescending(e => e.Id)
+            .Take(PublicPageSize)
+            .ToListAsync(cancellationToken);
+        return rows.Select(e => ToPublicDto(e, TelevisionPhotoUrl(e.Id))).ToList();
+    }
+
+    public async Task<Stream?> OpenTelevisionPhotoAsync(
+        Guid partyId, Guid entryId, CancellationToken cancellationToken = default)
+    {
         var visible = await _db.PartyGuestbookEntries
             .AsNoTracking()
-            .AnyAsync(e => e.Id == entryId
-                && e.PartyId == access.PartyId
-                && e.Status == PartyMessageStatuses.Visible,
-                cancellationToken);
+            .AnyAsync(e => e.Id == entryId && e.PartyId == partyId
+                && e.Status == PartyMessageStatuses.Visible, cancellationToken);
         return visible ? await _photos.OpenAsync(entryId, cancellationToken) : null;
     }
 
@@ -375,11 +431,33 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
         }
 
         var now = _clock.GetUtcNow().UtcDateTime;
+        var leftTheBook = entry.Status == PartyMessageStatuses.Visible && target != PartyMessageStatuses.Visible;
         entry.Status = target;
         entry.ModeratedAt = now;
         entry.ModeratedByUserId = actorUserId;
         entry.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
+
+        if (leftTheBook && !await _db.PartyGuestbookEntries.AsNoTracking()
+                .AnyAsync(e => e.PartyId == partyId && e.Status == PartyMessageStatuses.Visible, cancellationToken))
+        {
+            // THE LAST MEMORY LEFT THE BOOK. The television already falls back
+            // to the slideshow — the presentation rule needs a memory to show —
+            // but the regia's request is withdrawn as well, so a memory approved
+            // later does not put the book back on the screen by itself.
+            var withdrawn = await _db.PartyAlbumLinks
+                .Where(l => l.PartyId == partyId && l.GuestbookTvActive)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(l => l.GuestbookTvActive, false)
+                    .SetProperty(l => l.GuestbookControlVersion, l => l.GuestbookControlVersion + 1),
+                    cancellationToken);
+            if (withdrawn > 0)
+            {
+                _logger.LogInformation(
+                    "party.guestbook.tv.empty_fallback PartyId={PartyId}", partyId);
+            }
+        }
+
         return PartyMessageMutation.Ok;
     }
 

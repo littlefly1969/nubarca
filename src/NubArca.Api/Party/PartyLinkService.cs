@@ -374,10 +374,25 @@ public sealed class PartyLinkService : IPartyLinkService
 
         link.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
+
+        if (guestbookEnabled == false)
+        {
+            // A closed book cannot be on the television, and must not come back
+            // there by itself when the book is opened again: the request goes
+            // with it. A statement of its own, so a guest-book command that won
+            // the row a moment ago is not overwritten by a stale copy.
+            await _db.PartyAlbumLinks
+                .Where(l => l.Id == link.Id && l.GuestbookTvActive)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(l => l.GuestbookTvActive, false)
+                    .SetProperty(l => l.GuestbookControlVersion, l => l.GuestbookControlVersion + 1),
+                    cancellationToken);
+        }
+
         return true;
     }
 
-    public async Task<bool> UpdateGameSettingsAsync(
+    public async Task<PartyGameSettingsOutcome> UpdateGameSettingsAsync(
         Guid ownerUserId, Guid albumId, bool gameEnabled,
         int minChallengeIntervalSeconds, int maxChallengeIntervalSeconds,
         int votesPerGuest, int? maxChallengesPerSession,
@@ -390,8 +405,24 @@ public sealed class PartyLinkService : IPartyLinkService
                 && p.Enabled && p.RevokedAt == null
                 && (p.ExpiresAt == null || p.ExpiresAt > now))
             .OrderByDescending(p => p.CreatedAt).FirstOrDefaultAsync(cancellationToken);
-        if (link is null) return false;
+        if (link is null) return PartyGameSettingsOutcome.NotFound;
         await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+        if (gameEnabled && !link.GameEnabled)
+        {
+            // SWITCHING THE GAME ON puts its lobby on the television at once —
+            // a takeover like any other game command, so it takes the same lock
+            // on this row and is refused while the guest book holds the screen.
+            var screenFree = await _db.PartyAlbumLinks
+                .Where(l => l.Id == link.Id && !l.GuestbookTvActive)
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(l => l.GuestbookControlVersion, l => l.GuestbookControlVersion),
+                    cancellationToken);
+            if (screenFree == 0)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                return PartyGameSettingsOutcome.GuestbookActive;
+            }
+        }
         link.GameEnabled = gameEnabled;
         link.MinChallengeIntervalSeconds = minChallengeIntervalSeconds;
         link.MaxChallengeIntervalSeconds = maxChallengeIntervalSeconds;
@@ -417,7 +448,7 @@ public sealed class PartyLinkService : IPartyLinkService
                     .SetProperty(s => s.UpdatedAt, now), cancellationToken);
         }
         await tx.CommitAsync(cancellationToken);
-        return true;
+        return PartyGameSettingsOutcome.Ok;
     }
 
     public async Task<IReadOnlyDictionary<Guid, PartyLinkUrls>> GetActivePartyUrlsAsync(
@@ -494,7 +525,8 @@ public sealed class PartyLinkService : IPartyLinkService
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
                 p.RequireMessageApproval, p.MaxMessagesPerParticipant,
                 p.MaxGuestbookEntriesPerParticipant,
-                p.SlideshowMessagesEnabled, p.GuestbookEnabled, p.RequireGuestbookApproval))
+                p.SlideshowMessagesEnabled, p.GuestbookEnabled, p.RequireGuestbookApproval,
+                p.GuestbookViewingEnabled))
             .FirstOrDefaultAsync(cancellationToken);
 
         return await BuildAccessAsync(link, isUploadGrant: false, cancellationToken);
@@ -518,7 +550,8 @@ public sealed class PartyLinkService : IPartyLinkService
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
                 p.RequireMessageApproval, p.MaxMessagesPerParticipant,
                 p.MaxGuestbookEntriesPerParticipant,
-                p.SlideshowMessagesEnabled, p.GuestbookEnabled, p.RequireGuestbookApproval))
+                p.SlideshowMessagesEnabled, p.GuestbookEnabled, p.RequireGuestbookApproval,
+                p.GuestbookViewingEnabled))
             .FirstOrDefaultAsync(cancellationToken);
 
         return await BuildAccessAsync(link, isUploadGrant: false, cancellationToken);
@@ -554,7 +587,8 @@ public sealed class PartyLinkService : IPartyLinkService
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
                 p.RequireMessageApproval, p.MaxMessagesPerParticipant,
                 p.MaxGuestbookEntriesPerParticipant,
-                p.SlideshowMessagesEnabled, p.GuestbookEnabled, p.RequireGuestbookApproval))
+                p.SlideshowMessagesEnabled, p.GuestbookEnabled, p.RequireGuestbookApproval,
+                p.GuestbookViewingEnabled))
             .FirstOrDefaultAsync(cancellationToken);
 
         return await BuildAccessAsync(link, isUploadGrant: true, cancellationToken);
@@ -574,7 +608,9 @@ public sealed class PartyLinkService : IPartyLinkService
         // guest book lives on the view token while the slideshow composer
         // lives on the upload token. A grant that knew about only one of them
         // would make the seam decide which contribution a caller meant.
-        bool SlideshowMessagesEnabled, bool GuestbookEnabled, bool RequireGuestbookApproval);
+        bool SlideshowMessagesEnabled, bool GuestbookEnabled, bool RequireGuestbookApproval,
+        // Whether the room may read the whole book while the party is live.
+        bool GuestbookViewingEnabled);
 
     // THE SEAM.
     //
@@ -694,7 +730,8 @@ public sealed class PartyLinkService : IPartyLinkService
                 link.MaxPhotoUploadsPerParticipant, link.MaxVideoUploadsPerParticipant,
                 link.RequireMessageApproval, link.MaxMessagesPerParticipant,
                 link.SlideshowMessagesEnabled, link.GuestbookEnabled, link.RequireGuestbookApproval,
-                link.MaxGuestbookEntriesPerParticipant, link.UploadEnabled)
+                link.MaxGuestbookEntriesPerParticipant, link.UploadEnabled,
+                link.GuestbookViewingEnabled)
             // The book's budget rides the VIEW grant too, because that is the
             // token a dedication is written on. A quota carried only by the
             // upload grant would be a limit the surface that spends it cannot
@@ -704,7 +741,8 @@ public sealed class PartyLinkService : IPartyLinkService
                 SlideshowMessagesEnabled: link.SlideshowMessagesEnabled,
                 GuestbookEnabled: link.GuestbookEnabled,
                 RequireGuestbookApproval: link.RequireGuestbookApproval,
-                MaxGuestbookEntriesPerParticipant: link.MaxGuestbookEntriesPerParticipant);
+                MaxGuestbookEntriesPerParticipant: link.MaxGuestbookEntriesPerParticipant,
+                GuestbookViewingEnabled: link.GuestbookViewingEnabled);
     }
 
     // view token = URL-safe base64 of HMAC-SHA256(secret, linkId). ~43 chars, 256-bit.

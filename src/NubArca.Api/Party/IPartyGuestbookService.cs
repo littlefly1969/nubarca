@@ -73,7 +73,25 @@ public interface IPartyGuestbookService
     /// stripped), or null when it is not in this party's book.
     /// </summary>
     Task<Stream?> OpenPublicPhotoAsync(
-        PartyAccess access, Guid entryId, CancellationToken cancellationToken = default);
+        PartyAccess access, Guid entryId, Guid? participantId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The book as a PAIRED TELEVISION draws it: every VISIBLE memory of the
+    /// party, in the book's own order, each with its picture on the television's
+    /// route. Never a pending, hidden or rejected one. The caller has already
+    /// established that this television may show this party's book NOW.
+    /// </summary>
+    Task<IReadOnlyList<PartyGuestbookEntryDto>> ListForTelevisionAsync(
+        Guid partyId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// A visible memory's picture for a paired television — the same derived,
+    /// regenerable preview the guest page is drawn with; null when the memory is
+    /// not a visible memory of that party.
+    /// </summary>
+    Task<Stream?> OpenTelevisionPhotoAsync(
+        Guid partyId, Guid entryId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// The manager's whole book — every state, newest first — or null when the

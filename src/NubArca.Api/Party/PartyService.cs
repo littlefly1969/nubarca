@@ -217,6 +217,7 @@ public sealed class PartyService : IPartyService
         }
 
         var now = _clock.GetUtcNow().UtcDateTime;
+        var leavingLive = party.Status == PartyStatuses.Live && target != PartyStatuses.Live;
         party.Status = target;
         // The timestamps record what HAPPENED, so they are written by the
         // transition that happened and never inferred from a status being read.
@@ -224,7 +225,35 @@ public sealed class PartyService : IPartyService
         if (action == PartyLifecycleAction.EndLive) party.LiveEndedAt = now;
         party.Version++;
         party.UpdatedAt = now;
-        await _db.SaveChangesAsync(cancellationToken);
+
+        if (!leavingLive)
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+            return PartyMutationResult.Ok(await ProjectAsync(party, cancellationToken));
+        }
+
+        // LEAVING LIVE takes the guest book off the television, in the same
+        // unit of work: the evening's runtime ends with the evening, and no live
+        // control can put it back once the party is over. Whether the room may
+        // read the book is a setting of the live surface, not runtime, and is
+        // left as the host set it.
+        var owned = _db.Database.CurrentTransaction is null;
+        var tx = owned ? await _db.Database.BeginTransactionAsync(cancellationToken) : null;
+        try
+        {
+            await _db.PartyAlbumLinks
+                .Where(l => l.PartyId == party.Id && l.GuestbookTvActive)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(l => l.GuestbookTvActive, false)
+                    .SetProperty(l => l.GuestbookControlVersion, l => l.GuestbookControlVersion + 1),
+                    cancellationToken);
+            await _db.SaveChangesAsync(cancellationToken);
+            if (owned) await tx!.CommitAsync(cancellationToken);
+        }
+        finally
+        {
+            if (tx is not null) await tx.DisposeAsync();
+        }
 
         return PartyMutationResult.Ok(await ProjectAsync(party, cancellationToken));
     }

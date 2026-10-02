@@ -48,6 +48,15 @@ public interface ITvPairingService
     Task<TvViewer?> ResolveViewerAsync(string? sessionToken,
         CancellationToken cancellationToken = default);
 
+    // The PARTY this television is assigned to, and what that party wants on
+    // its screen right now — the canonical projection, re-read on every call.
+    // Null when the session is not live (the caller answers 401); a session
+    // that is live but not assigned to a party of its own owner comes back with
+    // a null Party. The guest book's TV routes authorise on this alone: the
+    // session, its assignment, and the presentation being `guestbook`.
+    Task<TvPartyAssignment?> ResolvePartyAssignmentAsync(string? sessionToken,
+        CancellationToken cancellationToken = default);
+
     // Owner-side management: list this owner's TV sessions (safe DTOs; no token
     // hash / secret / owner id), most recent first.
     Task<IReadOnlyList<TvDeviceDto>> ListOwnerSessionsAsync(Guid ownerUserId,
@@ -73,3 +82,11 @@ public interface ITvPairingService
 /// not another television of the same owner.</para>
 /// </summary>
 public sealed record TvViewer(Guid OwnerUserId, Guid? AssignedPartyAlbumId);
+
+/// <summary>
+/// A live TV session and the party it is assigned to, as a party-scoped TV
+/// route needs it. INTERNAL: it never reaches a client. <c>Party</c> is null
+/// for a general television and for one whose assigned party belongs to
+/// somebody else; otherwise it is the canonical projection of that party.
+/// </summary>
+public sealed record TvPartyAssignment(Guid OwnerUserId, Guid? PartyAlbumLinkId, TvPartyState? Party);

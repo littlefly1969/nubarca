@@ -128,7 +128,11 @@ public sealed record PartyGameSnapshotDto(
     int GuestsPresent = 0,
     int? DisplaySeenSecondsAgo = null,
     string? TvUrl = null,
-    string? GuestUrl = null);
+    string? GuestUrl = null,
+    // The regia has put the GUEST BOOK on the party's television. Every command
+    // that would take the screen back is then absent from AvailableCommands —
+    // the server's decision, said here so the control room can say why.
+    bool GuestbookOnTv = false);
 
 /// <summary>
 /// What a guest phone or a television is told. A strict subset: no session id,
@@ -235,6 +239,13 @@ public enum PartyGameCommandError
     /// than silently reordering around them.
     /// </summary>
     InvalidPlan,
+
+    /// <summary>
+    /// The command would put the game on the television while the regia has
+    /// the GUEST BOOK there. The screen has one holder: the guest book has to
+    /// go back to the slideshow first.
+    /// </summary>
+    GuestbookActive,
 }
 
 /// <summary>

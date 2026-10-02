@@ -363,3 +363,12 @@ public sealed record TvDeviceDto(
     // service rather than read here, because pairing answers who a device is and
     // assignment answers what it shows — and they are two questions.
     TvDisplayAssignmentDto? Assignment = null);
+
+/// <summary>
+/// The party's guest book as a paired television draws it: the visible
+/// memories, in the book's own order, each complete enough to compose — its
+/// picture on the television's own route, its framing, its template and
+/// version, its words. Never a blob, a source file, a moderation detail or a
+/// token.
+/// </summary>
+public sealed record TvGuestbookDto(IReadOnlyList<NubArca.Api.Party.PartyGuestbookEntryDto> Entries);

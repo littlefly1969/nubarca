@@ -330,6 +330,13 @@ public sealed class PartyDuplicator : IPartyDuplicator
                     SlideshowMessagesEnabled = sourceLink.SlideshowMessagesEnabled,
                     GuestbookEnabled = sourceLink.GuestbookEnabled,
                     RequireGuestbookApproval = sourceLink.RequireGuestbookApproval,
+                    // Whether the room reads the book live is CONFIGURATION and
+                    // is copied; the book being on a television is what
+                    // HAPPENED at that party and is not — the copy starts on its
+                    // slideshow, at a fresh control version.
+                    GuestbookViewingEnabled = sourceLink.GuestbookViewingEnabled,
+                    GuestbookTvActive = false,
+                    GuestbookControlVersion = 0,
                     PhotoSlideSeconds = sourceLink.PhotoSlideSeconds,
                     MaxVideoSlideSeconds = sourceLink.MaxVideoSlideSeconds,
                     MaxPhotoUploadsPerParticipant = sourceLink.MaxPhotoUploadsPerParticipant,

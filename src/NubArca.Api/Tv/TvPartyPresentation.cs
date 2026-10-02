@@ -12,12 +12,21 @@ namespace NubArca.Api.Tv;
 /// <para>The assignment says what a television is FOR (general, or one
 /// specific party link) and only an owner changes it. The presentation says
 /// what that party wants on the screen RIGHT NOW, and it follows the party:
-/// the native slideshow while no game is taking the display, the canonical game
-/// stage while one is, and an honest "unavailable" when the party the
-/// assignment names cannot be shown. Turning a game phase into a new
-/// assignment would have made an owner decision out of a game event, and would
-/// have had the television learn what `voting_open` means. It knows neither:
-/// it is told one of four words.</para>
+/// the native slideshow while nothing is taking the display, the canonical game
+/// stage while a game is, the party's guest book while the regia has put it on
+/// screen, and an honest "unavailable" when the party the assignment names
+/// cannot be shown. Turning a game phase into a new assignment would have made
+/// an owner decision out of a game event, and would have had the television
+/// learn what `voting_open` means. It knows neither: it is told one of five
+/// words.</para>
+///
+/// <para>THE SCREEN HAS ONE HOLDER. The game and the guest book are both
+/// takeovers, and they are never granted together: the commands that start
+/// either one serialise on the party link and refuse while the other holds the
+/// screen. Should stored state ever claim both anyway, this rule is still
+/// deterministic — the GAME wins, because it may be mid-activity, mid-vote or
+/// on a result the room is waiting for; the guest book is a loop that loses
+/// nothing by waiting.</para>
 ///
 /// <para>This is a PROJECTION, not a state machine. It reads the game session
 /// and never writes it: FINISHED stays FINISHED, and a paired television
@@ -35,6 +44,11 @@ public static class TvPartyPresentations
 
     /// The canonical Party Game stage, hosted in the television's WebView.
     public const string Game = "game";
+
+    /// The party's guest book, one memory at a time, because the regia put it
+    /// on the screen. Drawn by the television itself from the guest book's own
+    /// TV read model — not the game stage, and not through a display grant.
+    public const string Guestbook = "guestbook";
 
     /// The assignment names a party that cannot be shown (revoked, switched
     /// off, expired, or its host may no longer run parties). The television
@@ -71,6 +85,8 @@ public static class TvPartyPresentations
     /// <item>no game yet, or a game in progress → <see cref="Game"/> (the lobby is the takeover)</item>
     /// <item>game paused between activities → <see cref="Slideshow"/>, immediately</item>
     /// <item>game finished → <see cref="Game"/> for <see cref="FinishedDwell"/>, then <see cref="Slideshow"/></item>
+    /// <item>otherwise, the regia asked for the guest book and it has something to show → <see cref="Guestbook"/></item>
+    /// <item>otherwise → <see cref="Slideshow"/></item>
     /// </list>
     ///
     /// <para>`restart_game` puts the session back in the lobby, which is the
@@ -89,18 +105,41 @@ public static class TvPartyPresentations
     /// the pre-intermission answer and leave a television on the game while the
     /// room is dancing, which is the one failure this rule exists to prevent.
     /// </param>
+    /// <param name="guestbookRequested">
+    /// The regia has put the guest book on screen AND it can be shown: the
+    /// party is live, the book is open, and at least one memory is visible.
+    /// REQUIRED like the phase: an empty or closed book must yield to the
+    /// slideshow rather than leave the room looking at nothing, and only the
+    /// caller that read the book can say whether it is empty.
+    /// </param>
     public static string Decide(
         bool partyShowable, bool gameEnabled, bool gamesPermitted,
-        string? gameStatus, string? gamePhase, DateTime? finishedAt, DateTime now)
+        string? gameStatus, string? gamePhase, DateTime? finishedAt, DateTime now,
+        bool guestbookRequested)
     {
         if (!partyShowable) return Unavailable;
-        if (!gameEnabled || !gamesPermitted) return Slideshow;
+        if (GameHoldsTheScreen(gameEnabled, gamesPermitted, gameStatus, gamePhase, finishedAt, now))
+            return Game;
+        return guestbookRequested ? Guestbook : Slideshow;
+    }
+
+    /// <summary>
+    /// Whether the GAME holds the screen right now — the whole of the game's
+    /// rule, and the one question the guest book's command asks before it may
+    /// take the screen. Kept here, once, so "the game is on the TV" can never
+    /// mean one thing to the television and another to the regia.
+    /// </summary>
+    public static bool GameHoldsTheScreen(
+        bool gameEnabled, bool gamesPermitted,
+        string? gameStatus, string? gamePhase, DateTime? finishedAt, DateTime now)
+    {
+        if (!gameEnabled || !gamesPermitted) return false;
         // WHO HOLDS THE SCREEN is the phase vocabulary's own question, asked
         // here rather than restated: a second copy of "intermission means hand
         // it back" is a second thing to remember when a phase is added.
-        if (!PartyGamePhases.HoldsTheScreen(gamePhase)) return Slideshow;
-        if (gameStatus != PartyGameStatuses.Finished) return Game;
-        return finishedAt is DateTime at && now < at + FinishedDwell ? Game : Slideshow;
+        if (!PartyGamePhases.HoldsTheScreen(gamePhase)) return false;
+        if (gameStatus != PartyGameStatuses.Finished) return true;
+        return finishedAt is DateTime at && now < at + FinishedDwell;
     }
 
     /// <summary>

@@ -134,6 +134,87 @@ public sealed class PartyGameService : IPartyGameService
                     await RoomAsync(link, cancellationToken), link));
         }
 
+        // THE SCREEN HAS ONE HOLDER.
+        //
+        // A transition that puts the game on the party's television must not
+        // win against the guest book being there. Both kinds of command
+        // serialise on the PARTY LINK's row: this one opens a transaction with a
+        // conditional update of that row which changes nothing and holds its
+        // write lock — and which matches only while the guest book is NOT on
+        // the screen. The guest book's own commands take the same lock and then
+        // re-read the game, so whichever commits first is what the other sees,
+        // and the two can never both be granted. Transitions that leave the
+        // screen alone (an intermission, a vote) need no lock and take none.
+        if (!PartyGameStateMachine.TakesTheScreen(transition))
+        {
+            return await ApplyTransitionAsync(
+                link, albumId, command!, session, currentVersion, phase, transition,
+                next, currentChallenge, cancellationToken);
+        }
+
+        var owned = _db.Database.CurrentTransaction is null;
+        var tx = owned ? await _db.Database.BeginTransactionAsync(cancellationToken) : null;
+        try
+        {
+            var screenFree = await _db.PartyAlbumLinks
+                .Where(l => l.Id == link.Id && !l.GuestbookTvActive)
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(l => l.GuestbookControlVersion, l => l.GuestbookControlVersion),
+                    cancellationToken);
+            if (screenFree == 0)
+            {
+                if (owned) await tx!.RollbackAsync(cancellationToken);
+                Refused(albumId, command, phase, PartyGameCommandError.GuestbookActive);
+                return PartyGameCommandResult.Fail(PartyGameCommandError.GuestbookActive,
+                    await BuildOwnerSnapshotAsync(albumId, session, cancellationToken,
+                        await RoomAsync(link, cancellationToken), link));
+            }
+
+            PartyGameCommandResult result;
+            try
+            {
+                result = await ApplyTransitionAsync(
+                    link, albumId, command!, session, currentVersion, phase, transition,
+                    next, currentChallenge, cancellationToken);
+            }
+            catch (Exception ex) when (owned && ex is DbUpdateConcurrencyException or DbUpdateException)
+            {
+                // A restart that lost after its claim, inside this transaction.
+                // Roll back first: a failed statement poisons the transaction for
+                // every read after it.
+                await tx!.RollbackAsync(cancellationToken);
+                _db.ChangeTracker.Clear();
+                Refused(albumId, command, phase, PartyGameCommandError.VersionConflict);
+                var winner = await _db.PartyGameSessions.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.PartyAlbumLinkId == link.Id, cancellationToken);
+                return PartyGameCommandResult.Fail(PartyGameCommandError.VersionConflict,
+                    await BuildOwnerSnapshotAsync(albumId, winner, cancellationToken,
+                        await RoomAsync(link, cancellationToken), link));
+            }
+
+            if (owned && result.Error is null && _db.Database.CurrentTransaction is not null)
+                await tx!.CommitAsync(cancellationToken);
+            return result;
+        }
+        finally
+        {
+            // Disposing an uncommitted transaction rolls it back — every refusal
+            // above leaves the game and the link exactly as they were.
+            if (tx is not null) await tx.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// The transition itself, once it is legal and — when it takes the screen —
+    /// once the screen is known to be free. Unchanged in what it writes; it is a
+    /// separate method only so the screen guard can wrap it.
+    /// </summary>
+    private async Task<PartyGameCommandResult> ApplyTransitionAsync(
+        PartyAlbumLink link, Guid albumId, string command, PartyGameSession? session,
+        int currentVersion, string phase, PartyGameTransition transition,
+        PartyChallenge? next, PartyChallenge? currentChallenge,
+        CancellationToken cancellationToken)
+    {
         var now = Now;
         if (session is null)
         {
@@ -1129,6 +1210,10 @@ public sealed class PartyGameService : IPartyGameService
         PartyGameRoomDto? room = null, PartyAlbumLink? link = null)
     {
         var total = await EnabledChallengeCountAsync(albumId, ct);
+        // Read FRESH rather than off the entity the command loaded: after a
+        // refusal for exactly this reason, the loaded copy is the stale one.
+        var guestbookOnTv = link is not null && await _db.PartyAlbumLinks.AsNoTracking()
+            .Where(l => l.Id == link.Id).Select(l => l.GuestbookTvActive).FirstOrDefaultAsync(ct);
         var playedIds = session is null
             ? new List<Guid>()
             : await _db.PartyGameRounds.AsNoTracking()
@@ -1149,10 +1234,11 @@ public sealed class PartyGameService : IPartyGameService
         if (session is null)
             return new PartyGameSnapshotDto(albumId, null, PartyGameStatuses.Lobby, PartyGamePhases.Lobby,
                 0, 0, total, 0, null, null, null, null, null, Challenge(next),
-                PartyGameStateMachine.LegalCommands(PartyGamePhases.Lobby, next is not null),
+                PartyGameStateMachine.LegalCommands(PartyGamePhases.Lobby, next is not null,
+                    guestbookHoldsTheScreen: guestbookOnTv),
                 null, plan, priorityVoting, preferencesOpen,
                 room?.GuestsPresent ?? 0, room?.DisplaySeenSecondsAgo,
-                room?.TvUrl, room?.GuestUrl);
+                room?.TvUrl, room?.GuestUrl, guestbookOnTv);
 
         PartyGameChallengeDto? current = null;
         DateTime? phaseStartedAt = null;
@@ -1194,10 +1280,11 @@ public sealed class PartyGameService : IPartyGameService
             current, Challenge(next),
             PartyGameStateMachine.LegalCommands(
                 session.Phase, next is not null,
-                current is null || PartyChallengeVotingModes.CollectsVotes(current.VotingMode)),
+                current is null || PartyChallengeVotingModes.CollectsVotes(current.VotingMode),
+                guestbookHoldsTheScreen: guestbookOnTv),
             voting, plan, priorityVoting, preferencesOpen,
             room?.GuestsPresent ?? 0, room?.DisplaySeenSecondsAgo,
-            room?.TvUrl, room?.GuestUrl);
+            room?.TvUrl, room?.GuestUrl, guestbookOnTv);
     }
 
     /// <summary>

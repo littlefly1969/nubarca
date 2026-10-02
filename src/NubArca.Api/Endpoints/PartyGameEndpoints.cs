@@ -301,6 +301,7 @@ public static class PartyGameEndpoints
         PartyGameCommandError.IllegalTransition => "illegal_transition",
         PartyGameCommandError.NoChallenges => "no_challenges",
         PartyGameCommandError.InvalidPlan => "invalid_plan",
+        PartyGameCommandError.GuestbookActive => "guestbook_active",
         _ => "conflict",
     };
 

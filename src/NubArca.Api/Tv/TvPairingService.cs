@@ -373,6 +373,38 @@ public sealed class TvPairingService : ITvPairingService
         return new TvViewer(row.OwnerUserId, assignedAlbum);
     }
 
+    public async Task<TvPartyAssignment?> ResolvePartyAssignmentAsync(
+        string? sessionToken, CancellationToken cancellationToken = default)
+    {
+        var hash = HashTokenOrNull(sessionToken);
+        if (hash is null)
+        {
+            return null;
+        }
+
+        var now = _clock.GetUtcNow().UtcDateTime;
+        var row = await _db.TvSessions
+            .AsNoTracking()
+            .Where(x => x.SessionTokenHash == hash && x.RevokedAt == null && x.ExpiresAt > now)
+            .Select(x => new { x.OwnerUserId, x.DisplayAssignment, x.AssignedPartyAlbumLinkId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (row is null) return null;
+
+        if (row.DisplayAssignment != TvDisplayAssignments.Party
+            || row.AssignedPartyAlbumLinkId is not Guid linkId)
+        {
+            return new TvPartyAssignment(row.OwnerUserId, null, null);
+        }
+
+        // The same projection the control plane sends, and only for a party the
+        // television's own owner holds — exactly the rule ResolveViewerAsync
+        // applies to the assigned album.
+        var party = await _presentation.ProjectAsync(linkId, cancellationToken);
+        return party.Showable && party.Access!.OwnerUserId != row.OwnerUserId
+            ? new TvPartyAssignment(row.OwnerUserId, linkId, null)
+            : new TvPartyAssignment(row.OwnerUserId, linkId, party);
+    }
+
     public async Task<IReadOnlyList<TvDeviceDto>> ListOwnerSessionsAsync(
         Guid ownerUserId, CancellationToken cancellationToken = default)
     {

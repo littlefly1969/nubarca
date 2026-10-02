@@ -17,9 +17,69 @@ public sealed class TvPartyPresentationTests
     private static string Decide(
         bool showable = true, bool gameEnabled = true, bool gamesPermitted = true,
         string? status = null, string? phase = null, DateTime? finishedAt = null,
-        DateTime? now = null) =>
+        DateTime? now = null, bool guestbook = false) =>
         TvPartyPresentations.Decide(
-            showable, gameEnabled, gamesPermitted, status, phase, finishedAt, now ?? Now);
+            showable, gameEnabled, gamesPermitted, status, phase, finishedAt, now ?? Now, guestbook);
+
+    // ── The guest book ──────────────────────────────────────────────────────
+
+    [Fact]
+    public void A_requested_guest_book_takes_a_screen_nothing_else_holds()
+    {
+        Assert.Equal(TvPartyPresentations.Guestbook, Decide(gameEnabled: false, guestbook: true));
+        // A paused game has handed the screen back, so the book may have it…
+        Assert.Equal(TvPartyPresentations.Guestbook, Decide(
+            status: PartyGameStatuses.Live, phase: PartyGamePhases.Intermission, guestbook: true));
+        // …and so has a finished game once its closing card has had its time.
+        Assert.Equal(TvPartyPresentations.Guestbook, Decide(
+            status: PartyGameStatuses.Finished, phase: PartyGamePhases.Finished,
+            finishedAt: Now.AddSeconds(-16), guestbook: true));
+        // Not requested (or nothing to show, which the caller folds in): slideshow.
+        Assert.Equal(TvPartyPresentations.Slideshow, Decide(gameEnabled: false, guestbook: false));
+    }
+
+    [Fact]
+    public void The_game_wins_over_the_guest_book_whenever_it_holds_the_screen()
+    {
+        // The defensive rule. Normal commands never let both be held; should the
+        // stored state claim both anyway, the game — which may be mid-activity —
+        // is what the room sees.
+        Assert.Equal(TvPartyPresentations.Game, Decide(guestbook: true)); // the lobby, before any match
+        foreach (var phase in PartyGamePhases.All.Where(p => p != PartyGamePhases.Intermission))
+            Assert.Equal(TvPartyPresentations.Game, Decide(
+                status: PartyGameStatuses.Live, phase: phase, guestbook: true));
+        // Including the finished game's closing card, for its whole dwell.
+        Assert.Equal(TvPartyPresentations.Game, Decide(
+            status: PartyGameStatuses.Finished, phase: PartyGamePhases.Finished,
+            finishedAt: Now.AddSeconds(-5), guestbook: true));
+    }
+
+    [Fact]
+    public void A_party_that_cannot_be_shown_is_unavailable_even_with_its_book_requested()
+    {
+        Assert.Equal(TvPartyPresentations.Unavailable, Decide(showable: false, guestbook: true));
+    }
+
+    [Fact]
+    public void Game_holds_the_screen_is_exactly_when_the_rule_answers_game()
+    {
+        // One question, asked by the television's rule and by the guest book's
+        // command: they must never disagree.
+        var statuses = new string?[] { null, PartyGameStatuses.Lobby, PartyGameStatuses.Live, PartyGameStatuses.Finished };
+        var phases = PartyGamePhases.All.Cast<string?>().Append(null);
+        foreach (var enabled in new[] { true, false })
+        foreach (var permitted in new[] { true, false })
+        foreach (var status in statuses)
+        foreach (var phase in phases)
+        foreach (var finishedAt in new DateTime?[] { null, Now.AddSeconds(-5), Now.AddSeconds(-60) })
+        {
+            var holds = TvPartyPresentations.GameHoldsTheScreen(enabled, permitted, status, phase, finishedAt, Now);
+            var decided = Decide(gameEnabled: enabled, gamesPermitted: permitted, status: status,
+                phase: phase, finishedAt: finishedAt, guestbook: true);
+            Assert.Equal(holds, decided == TvPartyPresentations.Game);
+            Assert.Equal(!holds, decided == TvPartyPresentations.Guestbook);
+        }
+    }
 
     [Fact]
     public void An_intermission_hands_the_television_back_with_no_dwell()

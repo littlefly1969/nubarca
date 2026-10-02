@@ -197,6 +197,14 @@ public static class PartyEndpoints
                     // branch above.
                     access.GuestbookEnabled && access.Experience.AllowsAlbumMedia
                         ? NubArca.Api.Party.PartyLinkService.BuildGuestbookUrl(token)
+                        : null,
+                    // "GUARDA IL GUESTBOOK": the regia opened the book to the room
+                    // for the live evening. Only then, and only while live — this
+                    // is the live surface's invitation, not a privacy rule; after
+                    // the party the book reads as it always has.
+                    access.GuestbookEnabled && access.GuestbookViewingEnabled
+                        && access.Experience.AllowsLiveCapabilities
+                        ? NubArca.Api.Party.PartyLinkService.BuildGuestbookUrl(token)
                         : null),
                 new NubArca.Api.Party.PartyGuestLibraryDto(
                     access.Experience.LibraryAvailable,
