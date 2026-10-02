@@ -100,14 +100,31 @@ describe('contextual actions', () => {
   });
 
   it('offers no Restore in the active library', () => {
-    expect(ids(model([photo]).contextual)).toEqual([]);
+    expect(ids(model([photo]).contextual)).not.toContain('restore');
+    expect(ids(model([photo, photo]).contextual)).toEqual([]);
   });
 
   it('offers Remove-from-album inside an album, outside the Move menu', () => {
-    const album = model([photo], ALL, { source: 'album' });
+    const album = model([photo, photo], ALL, { source: 'album' });
     expect(ids(album.contextual)).toEqual(['remove-from-album']);
     // Removing a MEMBERSHIP is not a destination alongside Trash.
     expect(ids(album.moveTo)).not.toContain('remove-from-album');
     expect(ids(album.moveTo)).toEqual(['personal', 'excluded', 'trash']);
+  });
+
+  // A direct print is one sheet of one photograph, from what is the user's own.
+  it.each([
+    ['nothing', [], 'library', 'active', false],
+    ['one photograph in the library', [photo], 'library', 'active', true],
+    ['one photograph in an own album', [photo], 'album', 'active', true],
+    ['two photographs', [photo, photo], 'library', 'active', false],
+    ['one video', [video], 'library', 'active', false],
+    ['a mixed selection', [photo, video], 'library', 'active', false],
+    ['an excluded photograph', [photo], 'library', 'excluded', false],
+  ] as const)('Print for %s: %s', (_, items, source, scope, offered) => {
+    const actions = model([...items], NONE, { source, scope });
+    expect(ids(actions.contextual).includes('print')).toBe(offered);
+    // Never a destination in either menu.
+    expect(ids([...actions.moveTo, ...actions.addTo])).not.toContain('print');
   });
 });

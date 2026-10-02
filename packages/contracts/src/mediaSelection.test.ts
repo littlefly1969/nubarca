@@ -72,3 +72,13 @@ test('being inside an album does not take the library actions away', () => {
   assert.equal(c.canTrash, true);
   assert.equal(c.canAddToAlbum, true);
 });
+
+test('print is one photograph, from the library or an own album, never excluded', () => {
+  assert.equal(caps([]).canPrintPhoto, false);
+  assert.equal(caps([image]).canPrintPhoto, true);
+  assert.equal(caps([image], 'album').canPrintPhoto, true);
+  assert.equal(caps([image, image]).canPrintPhoto, false);
+  assert.equal(caps([video]).canPrintPhoto, false);
+  assert.equal(caps([image, video]).canPrintPhoto, false);
+  assert.equal(caps([image], 'library', 'excluded').canPrintPhoto, false);
+});

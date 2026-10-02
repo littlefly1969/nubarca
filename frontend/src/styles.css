@@ -8677,6 +8677,11 @@ video.lightbox-image {
 .print-station-card dl div { min-width: 0; }
 .print-station-card dt { color: var(--muted); font-size: .75rem; }
 .print-station-card dd { margin: .2rem 0 0; overflow-wrap: anywhere; }
+/* The printer's own count of prints left: the number, then what it is. */
+.print-media-remaining dd { display: grid; gap: .1rem; }
+.print-media-remaining-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+.print-media-remaining-note { font-size: .75rem; }
+.print-media-remaining-empty { color: var(--danger, #c0392b); font-size: .85rem; }
 .print-station-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .print-paper { margin: 0 0 .75rem; display: grid; gap: .4rem; max-width: 34rem; }
 .print-paper-field { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }

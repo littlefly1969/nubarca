@@ -27,6 +27,13 @@ export interface PrintDevice {
   shares?: PrinterShare[] | null;
   /** The owner's view only: sheets per person, across the whole history. */
   usage?: PrinterUsage[] | null;
+  /**
+   * The prints physically left on the loaded media, as the printer itself
+   * reports it (null when it does not). Telemetry, never a budget: see
+   * `mediaRemainingObservedAt` for when it was read.
+   */
+  mediaRemainingPrints?: number | null;
+  mediaRemainingObservedAt?: string | null;
 }
 
 /** A live loan of a printer, as its owner sees it. */
@@ -73,6 +80,9 @@ export interface SharedPrinter {
   loadedPaperChangedAt: string | null;
   maxSheets: number | null;
   usedSheets: number;
+  /** The printer's own count of prints left on its media — not the loan. */
+  mediaRemainingPrints?: number | null;
+  mediaRemainingObservedAt?: string | null;
 }
 
 /** Share refusals the server names. */
@@ -195,4 +205,60 @@ export function updatePrinterShare(shareId: string, maxSheets: number | null): P
 /** End a loan: what is queued still prints, nothing new is accepted. */
 export function revokePrinterShare(shareId: string): Promise<void> {
   return api(`/api/print/shares/${encodeURIComponent(shareId)}`, { method: 'DELETE' });
+}
+
+// --- An owner's direct print ------------------------------------------------
+
+/** One of the owner's own photographs, printed on their printer or one lent to them. */
+export interface OwnerPhotoPrintRequest {
+  fileItemId: string;
+  printStationId: string;
+  printerDeviceId: string;
+  /** The paper the composition was made for: refused as paper_changed if another is loaded. */
+  expectedPaperSize: PrintPaperSize;
+  orientation: 'portrait' | 'landscape';
+  /** The shared PhotoPlacement on the whole sheet. */
+  placement: { centerX: number; centerY: number; zoom: number };
+  includeDate: boolean;
+  /** With the date: the language its format follows, and the zone "today" is read in. */
+  dateLocale?: 'it' | 'en' | 'es' | 'de';
+  timeZone?: string;
+}
+
+export interface OwnerPhotoPrintAccepted {
+  jobId: string;
+  shortCode: string;
+  state: string;
+  queueAhead: number;
+  mediaRemainingPrints: number | null;
+}
+
+/** The stable reasons a direct print is refused. */
+export type OwnerPhotoPrintError =
+  | 'invalid_request' | 'not_found' | 'invalid_source' | 'not_image'
+  | 'printer_unavailable' | 'printer_not_found' | 'printer_offline'
+  | 'paper_changed' | 'format_unsupported' | 'share_exhausted' | 'share_revoked'
+  | 'invalid_orientation' | 'invalid_placement' | 'invalid_timezone'
+  | 'idempotency_conflict' | 'render_failed';
+
+export function submitOwnerPhotoPrint(
+  request: OwnerPhotoPrintRequest, idempotencyKey: string, signal?: AbortSignal,
+): Promise<OwnerPhotoPrintAccepted> {
+  return api('/api/print/photo-jobs', {
+    method: 'POST', json: request, headers: { 'Idempotency-Key': idempotencyKey }, signal,
+  });
+}
+
+/** The date a direct print of this photograph would carry, as the print resolves it. */
+export interface OwnerPhotoPrintDate {
+  /** yyyy-MM-dd. */
+  date: string;
+  source: 'user' | 'embedded' | 'today';
+}
+
+export function getOwnerPhotoPrintDate(
+  fileItemId: string, timeZone: string, signal?: AbortSignal,
+): Promise<OwnerPhotoPrintDate> {
+  const query = new URLSearchParams({ fileItemId, timeZone });
+  return api(`/api/print/photo-jobs/date?${query}`, { signal });
 }

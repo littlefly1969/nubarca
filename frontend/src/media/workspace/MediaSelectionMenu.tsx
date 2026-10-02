@@ -31,6 +31,7 @@ const TEST_IDS: Record<MediaSelectionActionId, string> = {
   album: 'media-sel-album',
   plates: 'media-sel-plates',
   'beauty-lab': 'media-sel-beauty',
+  print: 'media-sel-print',
 };
 
 export function actionTestId(id: MediaSelectionActionId): string {

@@ -1,0 +1,139 @@
+/* An owner's direct print: printer, paper, orientation, the sheet itself. */
+
+.owner-print {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.owner-print fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.owner-print legend {
+  margin-bottom: 0.4rem;
+  padding: 0;
+  font-weight: 600;
+}
+
+.owner-print-printers {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.owner-print-printer {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  min-height: 44px;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.owner-print-printer input {
+  margin-top: 0.2rem;
+}
+
+.owner-print-printer.is-unavailable {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.owner-print-printer-text {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.owner-print-printer-text .muted {
+  font-size: 0.85rem;
+}
+
+.owner-print-why {
+  color: var(--danger, #c0392b);
+  font-size: 0.85rem;
+}
+
+.owner-print-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.owner-print-facts div {
+  min-width: 0;
+}
+
+.owner-print-facts dt {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.owner-print-facts dd {
+  margin: 0.2rem 0 0;
+}
+
+.owner-print-orientation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+}
+
+.owner-print-orientation legend {
+  width: 100%;
+}
+
+.owner-print-orientation label,
+.owner-print-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+/* The sheet, on a table: paper-white inside, sized to the screen too. */
+.owner-print-preview {
+  display: flex;
+  justify-content: center;
+}
+
+.owner-print-preview .photo-crop {
+  /* The date's type and inset are fractions of the sheet: container units. */
+  container-type: inline-size;
+  width: min(100%, 20rem);
+  border-radius: 0.2rem;
+  box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 30%);
+}
+
+.owner-print-preview[data-orientation='landscape'] .photo-crop {
+  width: min(100%, 26rem);
+}
+
+.owner-print-date-text {
+  position: absolute;
+  color: #ffffff;
+  font-family: var(--font-ui);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.owner-print-empty,
+.owner-print-sent {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.owner-print-empty h3,
+.owner-print-sent h3 {
+  margin: 0;
+}

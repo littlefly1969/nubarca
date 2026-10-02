@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   ApiError,
   cancelPrintJob,
@@ -17,6 +17,7 @@ import {
 import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
 import { PrinterCalibrationControls } from './PrinterCalibrationControls';
+import { isPrinterOffline, PrinterMediaRemaining } from './PrinterMediaRemaining';
 import { paperLabel, PrinterPaperControl } from './PrinterPaperControl';
 import { PrinterSharingControls } from './PrinterSharingControls';
 import { PrinterUsageSummary } from './PrinterUsageSummary';
@@ -49,6 +50,13 @@ const STATE_KEYS: Record<string, MessageKey> = {
 /** Only what has not reached the printer can be taken back. */
 const CANCELLABLE = new Set(['requested', 'rendering', 'ready']);
 
+/**
+ * How often the open panel re-reads the stations: a print's progress, the
+ * printer's count of prints left, a printer coming back. One request at a time
+ * for the whole read model, never one per printer.
+ */
+export const PRINT_STATIONS_REFRESH_MS = 8_000;
+
 export function PrintStationsPanel() {
   const { state, invalidateAuth } = useAuth();
   const { t, formatDate } = useI18n();
@@ -59,18 +67,24 @@ export function PrintStationsPanel() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (signal?: AbortSignal) => {
+  // Only the newest read is applied, so a slow refresh can never put back
+  // what a later one (or an action's own reload) already replaced.
+  const latestRead = useRef(0);
+  const load = useCallback(async (signal?: AbortSignal, quiet = false) => {
+    const read = ++latestRead.current;
     try {
       // Your stations, and the printers lent to you: the second is its own
       // list, so a person with no station of their own still finds theirs.
       const [own, lent] = await Promise.all([listPrintStations(signal), listSharedPrinters(signal)]);
+      if (read !== latestRead.current) return;
       setStations(own);
       setShared(lent);
       setError(null);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
-      setError(t('print.loadError'));
+      // A background refresh that fails keeps the last good picture on screen.
+      if (!quiet) setError(t('print.loadError'));
     }
   }, [invalidateAuth, t]);
 
@@ -78,6 +92,19 @@ export function PrintStationsPanel() {
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
+  }, [load]);
+
+  // While the panel is open and the page visible: re-read, one request at a
+  // time — the next waits for the last to finish — and stop on leaving.
+  useEffect(() => {
+    const controller = new AbortController();
+    let timer: number | undefined;
+    const tick = async () => {
+      if (document.visibilityState === 'visible') await load(controller.signal, true);
+      if (!controller.signal.aborted) timer = window.setTimeout(() => void tick(), PRINT_STATIONS_REFRESH_MS);
+    };
+    timer = window.setTimeout(() => void tick(), PRINT_STATIONS_REFRESH_MS);
+    return () => { controller.abort(); window.clearTimeout(timer); };
   }, [load]);
 
   async function create(event: FormEvent) {
@@ -160,6 +187,13 @@ export function PrintStationsPanel() {
               </header>
               <dl>
                 <div><dt>{t('print.printer')}</dt><dd>{observedPrinter?.displayName ?? t('print.noPrinter')}</dd></div>
+                {observedPrinter && (
+                  <PrinterMediaRemaining
+                    remaining={observedPrinter.mediaRemainingPrints}
+                    observedAt={observedPrinter.mediaRemainingObservedAt}
+                    offline={isPrinterOffline(station.status, observedPrinter.observedState)}
+                  />
+                )}
                 {observedPrinter && (
                   <div>
                     <dt>{t('print.stripCut')}</dt>

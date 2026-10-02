@@ -7,6 +7,7 @@ import {
 } from '@nubarca/api-client';
 import { usePartyApi } from '../party/workspace/partyApi';
 import { useI18n, type MessageKey } from '../i18n';
+import { isPrinterOffline, mediaRemainingLine } from '../cloud/PrinterMediaRemaining';
 import {
   Badge, Button, ChoiceCard, ChoiceGroup, Notice, Panel, SwitchRow,
 } from '../party/workspace/ui';
@@ -112,6 +113,10 @@ interface PrinterOption {
   sharedBy?: string;
   /** A lent printer's sheets still allowed; null is no ceiling. */
   sheetsLeft?: number | null;
+  /** The printer's own count of prints left on its media: telemetry, not a budget. */
+  mediaRemaining: number | null;
+  mediaObservedAt: string | null;
+  offline: boolean;
 }
 
 const OPTION_KEY = (stationId: string, deviceId: string) => `${stationId}:${deviceId}`;
@@ -145,6 +150,9 @@ export function printerOptions(stations: readonly PrintStation[]): PrinterOption
         paper: device.loadedPaperSize ?? '10x15',
         reachable: station.status === 'online',
         stationStatus: station.status,
+        mediaRemaining: device.mediaRemainingPrints ?? null,
+        mediaObservedAt: device.mediaRemainingObservedAt ?? null,
+        offline: isPrinterOffline(station.status, device.observedState),
       })));
 }
 
@@ -166,11 +174,15 @@ export function sharedPrinterOptions(printers: readonly SharedPrinter[]): Printe
       stationStatus: printer.stationStatus,
       sharedBy: printer.ownerName,
       sheetsLeft: printer.maxSheets === null ? null : Math.max(0, printer.maxSheets - printer.usedSheets),
+      mediaRemaining: printer.mediaRemainingPrints ?? null,
+      mediaObservedAt: printer.mediaRemainingObservedAt ?? null,
+      offline: isPrinterOffline(printer.stationStatus, printer.observedState),
     }));
 }
 
 export function PartyPrintSettings({ albumId }: { albumId: string }) {
-  const { t, tn } = useI18n();
+  const i18n = useI18n();
+  const { t, tn } = i18n;
   const api = usePartyApi();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [stations, setStations] = useState<PrintStation[]>([]);
@@ -375,6 +387,8 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
                   t('partyPrintOwner.atStation', { station: option.stationName }),
                   t('partyPrintOwner.paper', { paper: option.paper.replace('x', '\u00d7') }),
                   ...(option.sharedBy ? [t('partyPrintOwner.sharedBy', { name: option.sharedBy })] : []),
+                  // The media in the printer — not the party's prints, not the loan.
+                  mediaRemainingLine(i18n, option.mediaRemaining, option.mediaObservedAt, option.offline),
                 ].join(' \u00b7 ')}
                 note={!option.reachable
                   ? t('partyPrintOwner.offlineNote')

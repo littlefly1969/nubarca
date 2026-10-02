@@ -25,6 +25,7 @@ import type { MediaSelectionCapabilities } from './mediaSelectionCapabilities';
 export type MediaSelectionActionId =
   | 'restore'
   | 'remove-from-album'
+  | 'print'
   | 'personal'
   | 'excluded'
   | 'trash'
@@ -116,12 +117,13 @@ const ADD_TO: readonly Candidate[] = [
   },
 ];
 
-// Neither of these is a "destination" alongside the others.
+// None of these is a "destination" alongside the others.
 //
 // Restore is the inverse of Excluded, not a peer of it — offering it inside
 // "Move to" would read as a fourth place to put the media. Remove-from-album
 // takes away a MEMBERSHIP and never touches the file, so filing it beside Trash
-// would be a lie about what it does. Both stay on the dock itself.
+// would be a lie about what it does. Print sends one photograph to a printer
+// and leaves it exactly where it is. All three stay on the dock itself.
 const CONTEXTUAL: readonly Candidate[] = [
   {
     id: 'restore',
@@ -134,6 +136,14 @@ const CONTEXTUAL: readonly Candidate[] = [
     labelKey: 'mediaWs.removeFromAlbum',
     icon: 'album-remove',
     capability: (c) => c.canRemoveFromCurrentAlbum,
+  },
+  {
+    // No permission of its own, as Print Stations has none: whoever owns a
+    // printer, or was lent one, may print on it — the server decides which.
+    id: 'print',
+    labelKey: 'ownerPrint.action',
+    icon: 'print',
+    capability: (c) => c.canPrintPhoto,
   },
 ];
 

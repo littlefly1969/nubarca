@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { PrintStationsPanel } from './PrintStationsPanel';
+import { PRINT_STATIONS_REFRESH_MS, PrintStationsPanel } from './PrintStationsPanel';
 import { AuthedWrapper, emptyResponse, errorResponse, installFetchMock, jsonResponse } from '../test-utils';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -311,6 +311,8 @@ describe('PrintStationsPanel', () => {
     expect(screen.queryByTestId('print-empty')).not.toBeInTheDocument();
     expect(card).toHaveTextContent('Condivisa da Stefano');
     expect(within(card).getByTestId('print-shared-sheets')).toHaveTextContent('Fogli usati: 3 di 10');
+    // The loan is not the media: the printer's own count is its own line.
+    expect(within(card).getByText('Quota condivisa')).toBeInTheDocument();
     // Colours, pause and loans stay the owner's.
     expect(within(card).queryByRole('button', { name: 'Regola colori' })).not.toBeInTheDocument();
     expect(within(card).queryByRole('button', { name: 'Pausa' })).not.toBeInTheDocument();
@@ -346,5 +348,122 @@ describe('PrintStationsPanel', () => {
     render(view());
     await user.click(await screen.findByRole('button', { name: 'Stampa pagina test' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Hai usato tutti i fogli di questa condivisione.');
+  });
+
+  // --- The prints left on the media ---------------------------------------------
+
+  const withMedia = (remaining: number | null, status = 'online', observedState = 'ready') => ({
+    ...station, status,
+    devices: [{ ...station.devices[0], observedState, mediaRemainingPrints: remaining,
+      mediaRemainingObservedAt: remaining === null ? null : '2026-10-02T12:32:00Z' }],
+  });
+
+  it('shows the printer\'s own count of prints left, as the printer\'s estimate', async () => {
+    mockApi({ 'GET /api/print/stations': () => jsonResponse([withMedia(187)]) });
+    render(view());
+    const media = await screen.findByTestId('print-media-remaining');
+    expect(media).toHaveTextContent('Stampe residue');
+    expect(within(media).getByTestId('print-media-remaining-value')).toHaveTextContent(/^187$/);
+    expect(media).toHaveTextContent('Stima fornita dalla stampante');
+    expect(media).toHaveAttribute('data-state', 'live');
+  });
+
+  it('says plainly when the printer gives no number, and never invents one', async () => {
+    mockApi({ 'GET /api/print/stations': () => jsonResponse([withMedia(null)]) });
+    render(view());
+    const media = await screen.findByTestId('print-media-remaining');
+    expect(within(media).getByTestId('print-media-remaining-value')).toHaveTextContent(/^—$/);
+    expect(media).toHaveTextContent('Numero non disponibile');
+  });
+
+  it('labels an offline printer\'s count as the last reading, never as current', async () => {
+    mockApi({ 'GET /api/print/stations': () => jsonResponse([withMedia(187, 'offline')]) });
+    render(view());
+    const media = await screen.findByTestId('print-media-remaining');
+    expect(media).toHaveAttribute('data-state', 'last');
+    expect(within(media).getByTestId('print-media-remaining-value')).toHaveTextContent(/^Ultimo dato: 187 · \d{2}[:.]\d{2}$/);
+  });
+
+  it('warns when the printer reports its media used up — and still lets it print', async () => {
+    mockApi({ 'GET /api/print/stations': () => jsonResponse([withMedia(0)]) });
+    render(view());
+    const media = await screen.findByTestId('print-media-remaining');
+    expect(media).toHaveTextContent('La stampante segnala che il supporto è esaurito');
+    expect(screen.getByRole('button', { name: 'Stampa pagina test' })).toBeEnabled();
+  });
+
+  it('shows a lent printer\'s media count apart from the loan', async () => {
+    mockApi({
+      'GET /api/print/stations': () => jsonResponse([]),
+      'GET /api/print/shared-printers': () => jsonResponse([{ ...lent, mediaRemainingPrints: 187,
+        mediaRemainingObservedAt: '2026-10-02T12:32:00Z' }]),
+    });
+    render(view());
+    const media = await screen.findByTestId('print-shared-media-remaining');
+    expect(within(media).getByTestId('print-shared-media-remaining-value')).toHaveTextContent(/^187$/);
+    expect(screen.getByTestId('print-shared-sheets')).toHaveTextContent('Fogli usati: 3 di 10');
+  });
+
+  it('re-reads the open panel on its own, one request at a time, and stops when it closes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let reads = 0;
+      let release: (() => void) | null = null;
+      const mock = mockApi({
+        'GET /api/print/stations': () => {
+          reads += 1;
+          if (reads === 2) {
+            // The second read hangs until released: no third may start meanwhile.
+            return new Promise<Response>((resolve) => {
+              release = () => resolve(jsonResponse([withMedia(186)]));
+            });
+          }
+          return jsonResponse([withMedia(reads === 1 ? 187 : 185)]);
+        },
+      });
+      const { unmount } = render(view());
+      await screen.findByTestId('print-media-remaining');
+      expect(reads).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(PRINT_STATIONS_REFRESH_MS);
+      expect(reads).toBe(2);
+      await vi.advanceTimersByTimeAsync(PRINT_STATIONS_REFRESH_MS * 3);
+      expect(reads).toBe(2);
+      // While it waited, the last good picture stayed.
+      expect(screen.getByTestId('print-media-remaining-value')).toHaveTextContent(/^187$/);
+
+      release!();
+      await waitFor(() => expect(screen.getByTestId('print-media-remaining-value')).toHaveTextContent(/^186$/));
+      await vi.advanceTimersByTimeAsync(PRINT_STATIONS_REFRESH_MS);
+      expect(reads).toBe(3);
+
+      unmount();
+      await vi.advanceTimersByTimeAsync(PRINT_STATIONS_REFRESH_MS * 3);
+      expect(reads).toBe(3);
+      expect(mock.calls.filter((c) => c.url === '/api/print/stations')).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the last good picture when a background refresh fails', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let reads = 0;
+      mockApi({
+        'GET /api/print/stations': () => {
+          reads += 1;
+          return reads === 1 ? jsonResponse([withMedia(187)]) : errorResponse(503, { error: 'unavailable' });
+        },
+      });
+      render(view());
+      await screen.findByTestId('print-media-remaining');
+      await vi.advanceTimersByTimeAsync(PRINT_STATIONS_REFRESH_MS);
+      await waitFor(() => expect(reads).toBe(2));
+      expect(screen.getByTestId('print-media-remaining-value')).toHaveTextContent(/^187$/);
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -5,6 +5,7 @@ import {
   bulkRemoveAlbumItems,
   restoreToMediaLibrary,
   type FileMetadata,
+  type ImageMediaItem,
   type ImageSortDirection,
   type ImageSortField,
 } from '@nubarca/api-client';
@@ -47,6 +48,7 @@ import { MediaGrid, type SemanticTileMatches } from './MediaGrid';
 import { MediaWorkspaceSelectionBar } from './MediaWorkspaceSelectionBar';
 import { getMediaSelectionCapabilities } from './mediaSelectionCapabilities';
 import { buildMediaSelectionActions, type MediaSelectionActionId } from './mediaSelectionActions';
+import { OwnerPhotoPrintDialog } from './OwnerPhotoPrintDialog';
 import {
   buildFilterChips,
   clearActiveFilters,
@@ -118,6 +120,7 @@ export function MediaWorkspace({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [printItem, setPrintItem] = useState<ImageMediaItem | null>(null);
   const [busy, setBusy] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -414,9 +417,16 @@ export function MediaWorkspace({
       case 'excluded': moveToExcluded.open([...selection.selected]); break;
       case 'trash': setTrashOpen(true); break;
       case 'album': setPickerOpen(true); break;
+      case 'print': {
+        // One photograph, by the capability's own rule; the dialog prints it.
+        const [only] = selectedItems;
+        if (only?.kind === 'image') setPrintItem(only);
+        break;
+      }
       default: runPhotoDestination(id);
     }
-  }, [actionModel, restoreSelected, removeFromAlbum, moveToPersonal, moveToExcluded, selection, runPhotoDestination]);
+  }, [actionModel, restoreSelected, removeFromAlbum, moveToPersonal, moveToExcluded, selection, runPhotoDestination,
+    selectedItems]);
 
   const semantic = isSemanticActive(identity);
   // Same source as the chips rendered below the command bar, so the badge on
@@ -613,6 +623,11 @@ export function MediaWorkspace({
         onClose={() => setSheetOpen(false)}
         returnFocusRef={filtersButtonRef}
       />
+
+      {printItem && (
+        // The photograph stays selected: printing it moves nothing.
+        <OwnerPhotoPrintDialog item={printItem} onClose={() => setPrintItem(null)} />
+      )}
 
       {trashOpen && (
         <TrashConfirmation
