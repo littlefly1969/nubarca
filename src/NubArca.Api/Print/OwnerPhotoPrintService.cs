@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Domain.Print;
+using NubArca.Api.MediaLibrary;
 using NubArca.Api.Storage;
 
 namespace NubArca.Api.Print;
@@ -107,24 +108,28 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
             request.IncludeDate ? zone!.Id : null);
         if (await RepeatAsync(ownerUserId, keyHash, fingerprint, cancellationToken) is { } repeat) return repeat;
 
-        // 3. The photograph: the caller's own, in their library, an image. A
-        // file that is missing, someone else's, trashed or excluded is one
-        // answer, so this is no oracle for file ids.
+        // 3. The photograph: the caller's own, in their library, and a
+        // photograph by the Library's own rule — a legacy file with no
+        // metadata row included. A file that is missing, someone else's,
+        // trashed or excluded is one answer, so this is no oracle for file ids.
         var file = await _db.FileItems.AsNoTracking()
             .Where(f => f.Id == fileItemId && f.OwnerUserId == ownerUserId && f.DeletedAt == null
                 && f.MediaLibraryState == MediaLibraryState.Active)
             .Select(f => new
             {
                 f.Id,
-                Meta = _db.BlobMetadata.Where(m => m.BlobObjectId == f.BlobObjectId)
-                    .Select(m => new { m.MediaCategory, m.DetectedContentType, m.DateTaken }).FirstOrDefault(),
+                Embedded = _db.BlobMetadata.Where(m => m.BlobObjectId == f.BlobObjectId)
+                    .Select(m => m.DateTaken).FirstOrDefault(),
                 Override = _db.FileItemUserMetadata.Where(u => u.FileItemId == f.Id)
                     .Select(u => u.DateTakenOverride).FirstOrDefault(),
             })
             .FirstOrDefaultAsync(cancellationToken);
         if (file is null) return Refuse(OwnerPhotoPrintErrors.NotFound);
-        if (file.Meta is not { MediaCategory: MediaCategories.Image, DetectedContentType: not null })
+        if (!await _db.FileItems.AsNoTracking().Where(f => f.Id == fileItemId)
+                .Where(LibraryPhotoRule.IsPhoto(_db)).AnyAsync(cancellationToken))
+        {
             return Refuse(OwnerPhotoPrintErrors.NotImage);
+        }
 
         // 4. The printer, by the one rule every print path asks.
         var use = await _printers.ForUserAsync(ownerUserId, stationId, deviceId, cancellationToken);
@@ -150,17 +155,19 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
 
         // 6. The framing: no further out than the whole photograph on the sheet.
         var (sheetW, sheetH) = PartyPrintGeometry.Sheet(paper, portrait);
+        // The shape comes from the stored dimensions; a legacy file that has
+        // none is checked against its own decoded pixels once they are read.
+        var sheetAspect = (double)sheetW / sheetH;
         var shapes = await PrintPhotoShapes.DisplayAspectsAsync(_db, ownerUserId, [fileItemId], cancellationToken);
-        if (shapes.TryGetValue(fileItemId, out var photoAspect)
-            ? !PhotoPlacementGeometry.IsValid(photoAspect, (double)sheetW / sheetH, placement)
-            : placement.Zoom < 1)
+        var shapeKnown = shapes.TryGetValue(fileItemId, out var photoAspect);
+        if (shapeKnown && !PhotoPlacementGeometry.IsValid(photoAspect, sheetAspect, placement))
         {
             return Refuse(OwnerPhotoPrintErrors.InvalidPlacement);
         }
 
         // 7. The date, only when asked for: the owner's, the camera's, else today.
         var (date, dateSource) = request.IncludeDate
-            ? OwnerPhotoPrintDates.Resolve(file.Override, file.Meta.DateTaken, Now, zone!)
+            ? OwnerPhotoPrintDates.Resolve(file.Override, file.Embedded, Now, zone!)
             : (default(DateOnly?), OwnerPhotoPrintDates.SourceNone);
         var dateText = date is DateOnly d ? OwnerPhotoPrintDates.Format(d, request.DateLocale!) : null;
 
@@ -195,6 +202,22 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
             {
                 await ReturnUnlessAcceptedAsync();
                 return Refuse(OwnerPhotoPrintErrors.InvalidSource);
+            }
+            if (!shapeKnown && placement.Zoom < 1)
+            {
+                // No stored shape: the framing is held to the photograph as it
+                // decodes, turned by its EXIF orientation like the print is.
+                var decoded = DisplayAspectOf(bytes);
+                if (decoded is null)
+                {
+                    await ReturnUnlessAcceptedAsync();
+                    return Refuse(OwnerPhotoPrintErrors.InvalidSource);
+                }
+                if (!PhotoPlacementGeometry.IsValid(decoded.Value, sheetAspect, placement))
+                {
+                    await ReturnUnlessAcceptedAsync();
+                    return Refuse(OwnerPhotoPrintErrors.InvalidPlacement);
+                }
             }
 
             // 10. Rendered at 300dpi from it.
@@ -349,6 +372,26 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 && j.CreatedAt <= _db.PrintJobs.Where(x => x.Id == jobId).Select(x => x.CreatedAt).First())
             .CountAsync(cancellationToken);
         return new OwnerPhotoPrintAccepted(jobId, jobId.ToString("N")[..8], state, ahead, mediaRemaining);
+    }
+
+    /// <summary>The display shape of encoded image bytes, from their header and EXIF orientation; null when they are not an image.</summary>
+    private static double? DisplayAspectOf(byte[] bytes)
+    {
+        try
+        {
+            var info = SixLabors.ImageSharp.Image.Identify(bytes);
+            int? orientation = info.Metadata.ExifProfile is { } exif
+                && exif.TryGetValue(SixLabors.ImageSharp.Metadata.Profiles.Exif.ExifTag.Orientation, out var value)
+                    ? value.Value
+                    : null;
+            var (width, height) = Metadata.ImageDisplayDimensions.Resolve(info.Width, info.Height, orientation);
+            return width is > 0 && height is > 0 ? (double)width.Value / height.Value : null;
+        }
+        catch (Exception ex) when (ex is SixLabors.ImageSharp.UnknownImageFormatException
+            or SixLabors.ImageSharp.InvalidImageContentException)
+        {
+            return null;
+        }
     }
 
     private static string Hash(string value) =>
