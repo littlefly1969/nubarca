@@ -259,6 +259,104 @@ public sealed class OwnerPhotoPrintTests : IDisposable
         Assert.Equal(1, await Db(db => db.PrinterShares.Select(s => s.UsedSheets).SingleAsync()));
     }
 
+    /// <summary>
+    /// Reshapes an uploaded file into one of the kinds the Library meets:
+    /// detected, legacy (no metadata row at all), unrecognised bytes, a legacy
+    /// non-image, a video.
+    /// </summary>
+    private async Task ShapeAsync(Guid fileId, string shape, bool keepDimensions = true)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var file = await db.FileItems.SingleAsync(f => f.Id == fileId);
+        var meta = await db.BlobMetadata.SingleAsync(m => m.BlobObjectId == file.BlobObjectId);
+        switch (shape)
+        {
+            case "detected":
+                break;
+            case "legacy":
+                db.BlobMetadata.Remove(meta);
+                file.MimeType = "image/jpeg";
+                break;
+            case "unrecognised":
+                meta.DetectedContentType = null;
+                file.MimeType = "image/jpeg";
+                break;
+            case "legacy-pdf":
+                db.BlobMetadata.Remove(meta);
+                file.MimeType = "application/pdf";
+                break;
+            case "video":
+                meta.MediaCategory = MediaCategories.Video;
+                meta.DetectedContentType = "video/mp4";
+                break;
+        }
+        if (!keepDimensions)
+        {
+            file.Width = null;
+            file.Height = null;
+        }
+        await db.SaveChangesAsync();
+    }
+
+    [Theory]
+    [InlineData("detected")]
+    [InlineData("legacy")]
+    [InlineData("unrecognised")]
+    [InlineData("legacy-pdf")]
+    [InlineData("video")]
+    public async Task The_Print_Takes_Exactly_What_The_Library_Shows_As_A_Photograph(string shape)
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var file = await PhotoAsync(people.Owner);
+        await ShapeAsync(file, shape);
+
+        var listed = (await people.Owner.GetFromJsonAsync<JsonElement>("/api/media?kind=all"))
+            .GetProperty("items").EnumerateArray()
+            .Where(i => i.GetProperty("id").GetGuid() == file)
+            .Select(i => i.GetProperty("kind").GetString())
+            .SingleOrDefault();
+        var printed = await Submit(people.Owner, Body(file, printer));
+
+        // One rule: the dock offers Print on a Library photograph, and the
+        // server prints exactly those.
+        if (listed == "image")
+        {
+            Assert.Equal(HttpStatusCode.Accepted, printed.StatusCode);
+        }
+        else
+        {
+            Assert.Equal(HttpStatusCode.Conflict, printed.StatusCode);
+            Assert.Equal("not_image", await Error(printed));
+        }
+        Assert.Equal(shape is "detected" or "legacy", listed == "image");
+    }
+
+    [Fact]
+    public async Task A_Legacy_Photograph_With_No_Stored_Shape_Is_Framed_By_Its_Own_Pixels()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        (await people.Owner.PostAsJsonAsync($"/api/print/stations/{printer.StationId}/devices/{printer.DeviceId}/shares",
+            new { email = "mario@example.com", maxSheets = 5 })).EnsureSuccessStatusCode();
+        var photo = await PhotoAsync(people.Mario, 300, 200);
+        await ShapeAsync(photo, "legacy", keepDimensions: false);
+        var contain = PhotoPlacementGeometry.ContainZoom(1.5, 1800.0 / 1200);
+        var standing = PhotoPlacementGeometry.ContainZoom(1.5, 1200.0 / 1800);
+
+        // The whole photograph on a standing sheet: held to the decoded 3:2.
+        Assert.Equal(HttpStatusCode.Accepted,
+            (await Submit(people.Mario, Body(photo, printer, orientation: "portrait", zoom: standing))).StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted,
+            (await Submit(people.Mario, Body(photo, printer, zoom: contain))).StatusCode);
+        // Further out than the whole photograph: refused, and the loan's sheet comes back.
+        var refused = await Submit(people.Mario, Body(photo, printer, orientation: "portrait", zoom: standing * 0.9));
+        Assert.Equal("invalid_placement", await Error(refused));
+        Assert.Equal(2, await Db(db => db.PrinterShares.Select(s => s.UsedSheets).SingleAsync()));
+        Assert.Equal(2, await Db(db => db.PrintJobs.CountAsync()));
+    }
+
     [Fact]
     public async Task A_Photograph_That_Is_Not_Yours_Missing_Or_Trashed_Is_One_Answer()
     {
