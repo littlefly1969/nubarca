@@ -106,6 +106,56 @@ public sealed class PrintPlacementMigrationTests : IAsyncLifetime
         await Assert.ThrowsAsync<PostgresException>(() => SeedAsync(insert));
     }
 
+    [SkippableFact]
+    public async Task Down_Completes_After_Zooming_Out_And_Loses_Exactly_What_It_Declares()
+    {
+        Skip.IfNot(Available, "Docker is not available for the PostgreSQL integration container.");
+        await using var ctx = CreateContext();
+        var migrator = ctx.GetInfrastructure().GetRequiredService<IMigrator>();
+        await migrator.MigrateAsync(MigrationUnderTest);
+
+        // What the new application stores once used: zoomed-out framings, a
+        // placement, an owner print's key, a media count.
+        var zoomedMemory = Guid.NewGuid();
+        var coveredMemory = Guid.NewGuid();
+        var party = Guid.NewGuid();
+        await SeedAsync(Memory(zoomedMemory, 0.6));
+        await SeedAsync(Memory(coveredMemory, 2.5));
+        await SeedAsync($"""
+            INSERT INTO party_guest_contents ("PartyId", "Kind", "ContentJson", "CreatedAt", "UpdatedAt",
+                "MediaOrientation", "MediaCropZoom", "MediaCropCenterX", "MediaCropCenterY")
+            VALUES ('{party}', 'info', '{"{"}{"}"}', now(), now(), 'portrait', 0.6, 0.3, 0.7);
+            INSERT INTO print_job_sources ("Id", "PrintJobId", "SlotIndex", "FileItemId", "CropX", "CropY", "CropWidth", "CropHeight",
+                "PlacementCenterX", "PlacementCenterY", "PlacementZoom")
+            VALUES ('{Guid.NewGuid()}', '{Guid.NewGuid()}', 0, '{Guid.NewGuid()}', 0, 0, 1, 1, 0.5, 0.5, 0.7);
+            INSERT INTO owner_photo_print_requests ("Id", "OwnerUserId", "IdempotencyKeyHash", "RequestFingerprint", "PrintJobId", "CreatedAt")
+            VALUES ('{Guid.NewGuid()}', '{Guid.NewGuid()}', '{new string('k', 64)}', '{new string('f', 64)}', '{Guid.NewGuid()}', now());
+            """);
+
+        // Back to the previous schema: it completes rather than failing on the
+        // rows the stricter checks would refuse.
+        await migrator.MigrateAsync(PreviousMigration);
+
+        // Zoomed out becomes the cover the previous application draws, centre kept;
+        // a framing at zoom >= 1 is untouched.
+        Assert.Equal(1.0, await ScalarAsync($"SELECT \"CropZoom\" FROM party_guestbook_entries WHERE \"Id\" = '{zoomedMemory}'"));
+        Assert.Equal(2.5, await ScalarAsync($"SELECT \"CropZoom\" FROM party_guestbook_entries WHERE \"Id\" = '{coveredMemory}'"));
+        Assert.Equal("1|0.3|0.7", await ScalarAsync(
+            $"SELECT concat_ws('|', \"MediaCropZoom\", \"MediaCropCenterX\", \"MediaCropCenterY\") FROM party_guest_contents WHERE \"PartyId\" = '{party}'"));
+        // The previous checks are back in force.
+        await Assert.ThrowsAsync<PostgresException>(() => SeedAsync(Memory(Guid.NewGuid(), 0.6)));
+        // The rest of what the new application kept is gone, as declared.
+        Assert.Equal(0L, await ScalarAsync(
+            "SELECT count(*) FROM information_schema.tables WHERE table_name = 'owner_photo_print_requests'"));
+        Assert.Equal(0L, await ScalarAsync(
+            "SELECT count(*) FROM information_schema.columns WHERE table_name IN ('print_job_sources', 'printer_devices') "
+            + "AND column_name IN ('PlacementZoom', 'PlacementCenterX', 'PlacementCenterY', 'MediaRemainingPrints', 'MediaRemainingObservedAt')"));
+
+        // And forward again: the round trip leaves a schema the new application runs on.
+        await migrator.MigrateAsync(MigrationUnderTest);
+        await SeedAsync(Memory(Guid.NewGuid(), 0.6));
+    }
+
     private static string Memory(Guid id, double zoom) => $"""
         INSERT INTO party_guestbook_entries ("Id", "PartyId", "OwnerUserId", "AuthorDisplayName", "Body",
             "Status", "CreatedAt", "UpdatedAt", "BlobObjectId", "PhotoWidth", "PhotoHeight",

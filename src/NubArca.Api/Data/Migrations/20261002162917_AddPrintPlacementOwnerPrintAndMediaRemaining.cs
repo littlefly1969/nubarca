@@ -110,6 +110,20 @@ namespace NubArca.Api.Data.Migrations
         }
 
         /// <inheritdoc />
+        /// <summary>
+        /// Runs to completion whatever the new application stored, but is NOT
+        /// lossless — this is its non-reversibility contract:
+        ///   * a guest book memory or party section photo framed below zoom 1
+        ///     (zoomed out) is set to zoom 1, its centre kept: the covering
+        ///     framing the previous application draws for it anyway. The
+        ///     zoomed-out framing itself is not recoverable;
+        ///   * the per-slot placements of party prints are dropped; each slot
+        ///     keeps the crop that was stored beside it, and a sheet already
+        ///     rendered is unaffected;
+        ///   * the owner print idempotency records are dropped (their jobs stay
+        ///     in print_jobs), and so is the printers' reported media count,
+        ///     which is telemetry.
+        /// </summary>
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(
@@ -150,6 +164,13 @@ namespace NubArca.Api.Data.Migrations
             migrationBuilder.DropColumn(
                 name: "PlacementZoom",
                 table: "print_job_sources");
+
+            // Zoomed-out framings back to the cover the previous schema allows,
+            // or the stricter checks below would refuse to be re-added.
+            migrationBuilder.Sql(
+                "UPDATE party_guestbook_entries SET \"CropZoom\" = 1 WHERE \"CropZoom\" < 1;");
+            migrationBuilder.Sql(
+                "UPDATE party_guest_contents SET \"MediaCropZoom\" = 1 WHERE \"MediaCropZoom\" < 1;");
 
             migrationBuilder.AddCheckConstraint(
                 name: "ck_party_guestbook_entries_crop",
