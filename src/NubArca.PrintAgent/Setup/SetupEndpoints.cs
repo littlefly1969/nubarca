@@ -31,7 +31,8 @@ public static class SetupValidation
 
 /// <summary>
 /// The Print Box's local page: status, visible networks, and one form to join a
-/// network. Nothing else — no account, no server settings, no logs, no shell.
+/// network — in setup mode, or over Ethernet. Nothing else — no account, no
+/// server settings, no logs, no shell.
 ///
 /// The request body is never logged, and no response ever carries a password:
 /// the only thing that leaves with the SSID is whether joining it worked.
@@ -39,6 +40,19 @@ public static class SetupValidation
 public static class SetupEndpoints
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// The connectivity probes phones and laptops send when they join a network
+    /// (Android, Apple, Windows). Each is answered with the way to this page —
+    /// never with the reply the probe expects from the Internet — so the device
+    /// treats the setup network as a captive portal and offers the page itself.
+    /// They carry file extensions, which the fallback below does not match.
+    /// </summary>
+    public static readonly IReadOnlyList<string> CaptiveProbes =
+    [
+        "/generate_204", "/gen_204", "/hotspot-detect.html", "/library/test/success.html",
+        "/connecttest.txt", "/ncsi.txt", "/redirect",
+    ];
 
     private const string ContentSecurityPolicy =
         "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; "
@@ -117,10 +131,16 @@ public static class SetupEndpoints
                     statusCode: StatusCodes.Status202Accepted),
                 ConnectRequest.Busy => Results.Json(new { error = "busy" }, Json,
                     statusCode: StatusCodes.Status409Conflict),
-                _ => Results.Json(new { error = "not_in_setup_mode" }, Json,
+                _ => Results.Json(new { error = "unavailable" }, Json,
                     statusCode: StatusCodes.Status409Conflict),
             };
         });
+
+        foreach (var probe in CaptiveProbes) app.MapGet(probe, () => Results.Redirect("/"));
+        // Anything else that is not a file lands on the page too: a phone that
+        // typed a stray address on the setup network still finds it. The page,
+        // its assets and the API above take precedence over this.
+        app.MapFallback(() => Results.Redirect("/"));
         return app;
     }
 

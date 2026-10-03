@@ -61,6 +61,19 @@ public sealed class NetworkManagerCliTests
     }
 
     [Fact]
+    public async Task With_A_Cable_And_A_Wifi_Both_Up_The_Cable_Is_The_Uplink()
+    {
+        var cli = new NetworkManagerCli(Nmcli(
+            "wlan0:wifi:connected:nubarca-wifi-Studio\neth0:ethernet:connected:Wired connection 1\n",
+            new()
+            {
+                ["wlan0"] = "IP4.ADDRESS[1]:192.0.2.20/24\nIP4.GATEWAY:192.0.2.1\n",
+                ["eth0"] = "IP4.ADDRESS[1]:192.0.2.9/24\nIP4.GATEWAY:192.0.2.1\n",
+            }));
+        Assert.Equal("ethernet", (await cli.GetSnapshotAsync(default)).Uplink?.Type);
+    }
+
+    [Fact]
     public async Task The_Setup_Network_Is_Recognised_And_Is_Not_An_Uplink()
     {
         var cli = new NetworkManagerCli(Nmcli(
@@ -87,6 +100,40 @@ public sealed class NetworkManagerCliTests
         Assert.False((await new NetworkManagerCli(Nmcli("", running: false)).GetSnapshotAsync(default)).ManagerAvailable);
         var absent = new NetworkManagerCli(new FakeProcessRunner((file, _) => ProcessResult.Missing(file)));
         Assert.Equal(NetworkSnapshot.Unavailable, await absent.GetSnapshotAsync(default));
+    }
+
+    [Fact]
+    public void The_Wifi_Client_Is_Read_From_Its_Own_Device()
+    {
+        var joined = NmcliTerse.WifiClient(
+            "GENERAL.STATE:100 (connected)\n" + @"GENERAL.CONNECTION:nubarca-wifi-Location\:WiFi" + "\n"
+            + "IP4.ADDRESS[1]:192.0.2.20/24\nIP4.GATEWAY:192.0.2.1\n");
+        Assert.Equal(new WifiClientState(true, "nubarca-wifi-Location:WiFi", "192.0.2.20", true), joined);
+
+        // Still activating: not connected, whatever else is set.
+        Assert.False(NmcliTerse.WifiClient("GENERAL.STATE:50 (connecting (configuring))\nGENERAL.CONNECTION:nubarca-wifi-Studio\n").Connected);
+        // Connected, but no gateway came with the address.
+        var noGateway = NmcliTerse.WifiClient(
+            "GENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:nubarca-wifi-Studio\nIP4.ADDRESS[1]:192.0.2.20/24\nIP4.GATEWAY:--\n");
+        Assert.True(noGateway.Connected);
+        Assert.False(noGateway.HasGateway);
+        // Nothing at all.
+        Assert.Equal(WifiClientState.Disconnected,
+            NmcliTerse.WifiClient("GENERAL.STATE:30 (disconnected)\nGENERAL.CONNECTION:--\n"));
+    }
+
+    [Fact]
+    public async Task The_Wifi_Client_Is_Asked_Of_The_Wifi_Interface_Only()
+    {
+        var runner = new FakeProcessRunner((_, _) => FakeProcessRunner.Ok(
+            "GENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:nubarca-wifi-Studio\nIP4.ADDRESS[1]:192.0.2.20/24\nIP4.GATEWAY:192.0.2.1\n"));
+        var state = await new NetworkManagerCli(runner).GetWifiClientStateAsync("wlan0", default);
+        Assert.Equal("nubarca-wifi-Studio", state.ConnectionName);
+        Assert.Equal(["-t", "-f", "GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS,IP4.GATEWAY", "device", "show", "wlan0"],
+            runner.Calls.Single().Args);
+
+        var failing = new NetworkManagerCli(new FakeProcessRunner((_, _) => FakeProcessRunner.Fail("Error: Device 'wlan0' not found.")));
+        Assert.Equal(WifiClientState.Disconnected, await failing.GetWifiClientStateAsync("wlan0", default));
     }
 
     [Fact]

@@ -15,6 +15,7 @@ public static class PrintAgentServiceRegistration
     {
         services.AddSingleton(options);
         services.AddSingleton<INetworkManager, NetworkManagerCli>();
+        services.AddSingleton<ICaptivePortalRedirect, NftCaptivePortalRedirect>();
         services.AddSingleton<NetworkProvisioningService>();
         services.AddHostedService(sp => sp.GetRequiredService<NetworkProvisioningService>());
         services.AddSingleton<PrintBoxStatusService>();
