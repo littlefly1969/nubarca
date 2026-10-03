@@ -122,8 +122,9 @@ if [[ "$skip_packages" == false ]]; then
   packages=(ca-certificates "$icu" cups cups-ipp-utils printer-driver-gutenprint avahi-daemon iw)
   if [[ "$provisioning" == true ]]; then
     # dnsmasq-base serves addresses on the setup network; polkitd reads the
-    # JavaScript rule below (Debian 12 and later).
-    packages+=(network-manager dnsmasq-base polkitd)
+    # JavaScript rule below (Debian 12 and later); nftables carries nft, which
+    # sends plain http://<gateway>/ on the setup network to the setup page.
+    packages+=(network-manager dnsmasq-base polkitd nftables)
   fi
   apt-get install -y --no-install-recommends "${packages[@]}"
 fi
@@ -278,6 +279,18 @@ Description=NubArca Print Box
 Wants=cups.service NetworkManager.service
 After=cups.service NetworkManager.service
 EOF
+if [[ "$provisioning" == true ]]; then
+  # While the setup network is up, the agent redirects port 80 on it to the
+  # setup page (nft, one table of its own, removed when the setup network
+  # closes). nft needs CAP_NET_ADMIN: this instance only, as an ambient
+  # capability — not root, no sudo, never the simulators' instances.
+  cat > "$dropin_dir/captive-portal.conf" <<'EOF'
+[Service]
+AmbientCapabilities=CAP_NET_ADMIN
+EOF
+else
+  rm -f "$dropin_dir/captive-portal.conf"
+fi
 systemctl daemon-reload
 systemctl enable "$unit"
 systemctl restart "$unit"
@@ -294,7 +307,8 @@ echo "Installed $unit."
 if [[ "$provisioning" == true ]]; then
   echo 'Without a known network the box opens the setup Wi-Fi about 30 seconds after boot. Its name:'
   echo "  journalctl -u $unit | grep 'Setup network'"
-  echo 'Setup page: http://<the setup network gateway>:8080 (NetworkManager usually hands out 10.42.0.x),'
+  echo 'Setup page: http://<the setup network gateway>/ (NetworkManager usually hands out 10.42.0.x),'
+  echo '            or http://<gateway>:8080/, and over Ethernet http://<the box address>:8080/'
   [[ -n "$host_name" ]] && echo "            or http://$host_name.local:8080 where mDNS works."
   if [[ "$open_network" == true ]]; then
     echo 'WARNING: the setup Wi-Fi is OPEN. Re-run without --open-setup-network before installing the box anywhere.' >&2

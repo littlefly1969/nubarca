@@ -88,4 +88,24 @@ public sealed class PrintBoxPlatformTests
         Assert.DoesNotContain("After=network-online.target", unit, StringComparison.Ordinal);
         Assert.DoesNotContain("Wants=network-online.target", unit, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Only_The_Box_Gets_The_Capability_The_Setup_Redirect_Needs()
+    {
+        var linux = Path.Combine(AppContext.BaseDirectory, "linux");
+        var installer = File.ReadAllText(Path.Combine(linux, "install-print-box.sh"));
+        var unit = File.ReadAllText(Path.Combine(linux, "nubarca-print-agent@.service"));
+
+        // nft for the port-80 redirect on the setup network.
+        Assert.Contains("nftables", installer, StringComparison.Ordinal);
+        // CAP_NET_ADMIN, ambient, in the box instance's own drop-in — and in
+        // nothing every instance shares, so a simulator never holds it.
+        Assert.Contains("\"$dropin_dir/captive-portal.conf\"", installer, StringComparison.Ordinal);
+        Assert.Contains("AmbientCapabilities=CAP_NET_ADMIN", installer, StringComparison.Ordinal);
+        Assert.DoesNotContain("AmbientCapabilities", unit, StringComparison.Ordinal);
+        Assert.DoesNotContain("CAP_SYS_ADMIN", installer, StringComparison.Ordinal);
+        // Still never root and still bound by NoNewPrivileges.
+        Assert.Contains("NoNewPrivileges=true", unit, StringComparison.Ordinal);
+        Assert.Contains("User=nubarca-print-%i", unit, StringComparison.Ordinal);
+    }
 }
