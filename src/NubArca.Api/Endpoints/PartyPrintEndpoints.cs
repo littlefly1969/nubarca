@@ -132,8 +132,10 @@ public static class PartyPrintEndpoints
                 new PartyPrintSubmitRequest(
                     body.Product ?? string.Empty,
                     body.Theme ?? "pure",
+                    // Each slot as sent: a placement (the current studio) or the
+                    // four crop fractions (a page from before placements).
                     (body.Slots ?? []).Select(s => new PartyPrintSlotRequest(
-                        s.ItemId, s.CropX, s.CropY, s.CropWidth, s.CropHeight)).ToList(),
+                        s.ItemId, s.CropX, s.CropY, s.CropWidth, s.CropHeight, s.Placement)).ToList(),
                     body.Orientation,
                     body.OverlayText,
                     body.OverlayLogo,
@@ -320,8 +322,14 @@ public sealed record PartyPrintSubmitBody(
     string? Orientation = null, string? OverlayText = null, string? OverlayLogo = null,
     string? PaperSize = null);
 
+/// <summary>
+/// One photograph on the sheet as the studio sends it: a <paramref name="Placement"/>
+/// (the current studio) or the four crop fractions (a page from before
+/// placements). Absent fields stay absent — never a zero crop.
+/// </summary>
 public sealed record PartyPrintSlotBody(
-    Guid ItemId, double CropX, double CropY, double CropWidth, double CropHeight);
+    Guid ItemId, double? CropX = null, double? CropY = null, double? CropWidth = null, double? CropHeight = null,
+    PartyPrintPlacementRequest? Placement = null);
 
 public sealed record PartyPrintAcceptedDto(
     Guid JobId, long PublicSequence, string Product, int RemainingForProduct,
