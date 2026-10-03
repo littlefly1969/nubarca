@@ -1167,6 +1167,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<NubArca.Api.Print.PrintStationService>();
     builder.Services.AddSingleton<NubArca.Api.Print.PrintArtifactRenderer>();
     builder.Services.AddScoped<NubArca.Api.Print.IOwnerPhotoPrintService, NubArca.Api.Print.OwnerPhotoPrintService>();
+    builder.Services.AddScoped<NubArca.Api.Print.IPartyQrCardPrintService, NubArca.Api.Print.PartyQrCardPrintService>();
 
     // Slice 81: admin-only server-side directory import. Reuses the file +
     // folder pipelines; runs as an `admin.import` background job.

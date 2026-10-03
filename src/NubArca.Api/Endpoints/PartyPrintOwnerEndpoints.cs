@@ -47,6 +47,34 @@ public static class PartyPrintOwnerEndpoints
                 profiles, audit, ownerUserId, ownerUserId, albumId, body,
                 httpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
         }).WithName("SetPartyPrintSettings").RequirePartyPrint();
+
+        // The party's QR for its tables: one sheet — two cards the printer
+        // cuts apart — on the printer chosen above. Several sheets are several
+        // requests, each with its own key.
+        app.MapPost("/api/albums/{albumId:guid}/party-print/qr-card", async (
+            Guid albumId,
+            HttpContext httpContext,
+            [FromBody] PartyQrCardPrintRequest? body,
+            [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+            [FromServices] IPartyQrCardPrintService cards,
+            CancellationToken cancellationToken) =>
+        {
+            if (body is null) return Results.BadRequest(new { error = OwnerPhotoPrintErrors.InvalidRequest });
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var result = await cards.SubmitAsync(ownerUserId, albumId, body, idempotencyKey, cancellationToken);
+            if (result.Accepted is { } accepted) return Results.Accepted(value: accepted);
+            var error = result.Error!;
+            return error switch
+            {
+                OwnerPhotoPrintErrors.InvalidRequest or OwnerPhotoPrintErrors.InvalidPlacement =>
+                    Results.BadRequest(new { error }),
+                OwnerPhotoPrintErrors.NotFound or OwnerPhotoPrintErrors.PrinterNotFound =>
+                    Results.NotFound(new { error }),
+                OwnerPhotoPrintErrors.RenderFailed =>
+                    Results.Json(new { error }, statusCode: StatusCodes.Status500InternalServerError),
+                _ => Results.Conflict(new { error }),
+            };
+        }).WithName("CreatePartyQrCardPrint").RequirePartyPrint();
     }
 
     /// <summary>

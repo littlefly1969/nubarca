@@ -39,6 +39,14 @@ public static class PrintJobKinds
     public const string PartyGrid4 = "party-grid4";
     public const string PartyStrip4 = "party-strip4";
 
+    /// <summary>
+    /// The HOST's sheet for the tables: the party's QR under a photograph, two
+    /// cards the printer cuts apart (PrintFormats.Strip2x6Pair). A party's
+    /// sheet but no guest's print — so not in <see cref="Party"/>, which is
+    /// what a guest may ask about.
+    /// </summary>
+    public const string PartyQrCard = "party-qr-card";
+
     /// <summary>Every guest print kind — as a list, so a database query can ask it too.</summary>
     public static readonly string[] Party = [PartyPhoto, PartyGrid4, PartyStrip4];
 

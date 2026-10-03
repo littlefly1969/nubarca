@@ -804,7 +804,8 @@ public sealed class PrintStationService
                 g.GroupBy(r => PrintPapers.RequiredFor(r.Format) ?? r.Format)
                     .OrderBy(p => p.Key, StringComparer.Ordinal)
                     .ToDictionary(p => p.Key, p => p.Sum(r => r.Count)),
-                g.Where(r => PrintJobKinds.IsParty(r.Kind)).Sum(r => r.Count),
+                // A party's sheets: the guests' and the host's QR cards for its tables.
+                g.Where(r => PrintJobKinds.IsParty(r.Kind) || r.Kind == PrintJobKinds.PartyQrCard).Sum(r => r.Count),
                 g.Where(r => r.Kind == PrintJobKinds.OwnerPhoto).Sum(r => r.Count),
                 g.Where(r => r.Kind == PrintJobKinds.Diagnostic).Sum(r => r.Count)))
             .OrderByDescending(u => u.IsYou).ThenByDescending(u => u.Sheets)
