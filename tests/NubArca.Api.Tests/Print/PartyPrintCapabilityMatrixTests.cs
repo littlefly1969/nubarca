@@ -577,6 +577,58 @@ public sealed class PartyPrintCapabilityMatrixTests : IDisposable
         Assert.Contains("idempotency_key_required", await response.Content.ReadAsStringAsync());
     }
 
+    private async Task<HttpResponseMessage> SubmitAsync(Party party, object slot)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/party/{party.PrintToken}/print")
+        {
+            Content = JsonContent.Create(new { product = "photo", theme = "pure", slots = new[] { slot } }),
+        };
+        request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
+        return await _factory.CreateClient().SendAsync(request);
+    }
+
+    [Fact]
+    public async Task The_Studio_Prints_With_A_Placement_Through_The_Endpoint()
+    {
+        // The current studio sends a placement and no crop. It reached the
+        // service without its placement — and with an empty crop in its place —
+        // so every print from it was refused as invalid.
+        var party = await SeedPartyAsync();
+        var placed = await SubmitAsync(party,
+            new { itemId = party.PhotoId, placement = new { centerX = 0.5, centerY = 0.5, zoom = 1.0 } });
+        Assert.Equal(HttpStatusCode.Accepted, placed.StatusCode);
+        var jobId = (await placed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("jobId").GetGuid();
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var source = await db.PrintJobSources.SingleAsync(s => s.PrintJobId == jobId);
+        Assert.Equal(1.0, source.PlacementZoom);
+        Assert.Equal(0.5, source.PlacementCenterX);
+    }
+
+    [Fact]
+    public async Task A_Page_From_Before_Placements_Still_Prints_With_Its_Crop()
+    {
+        var party = await SeedPartyAsync();
+        var cropped = await SubmitAsync(party,
+            new { itemId = party.PhotoId, cropX = 0.0, cropY = 0.0, cropWidth = 1.0, cropHeight = 1.0 });
+        Assert.Equal(HttpStatusCode.Accepted, cropped.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_Slot_With_Both_Or_Neither_Framing_Is_Refused_At_The_Endpoint()
+    {
+        var party = await SeedPartyAsync();
+        var both = await SubmitAsync(party, new
+        {
+            itemId = party.PhotoId, cropX = 0.0, cropY = 0.0, cropWidth = 1.0, cropHeight = 1.0,
+            placement = new { centerX = 0.5, centerY = 0.5, zoom = 1.0 },
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, both.StatusCode);
+        var neither = await SubmitAsync(party, new { itemId = party.PhotoId });
+        Assert.Equal(HttpStatusCode.BadRequest, neither.StatusCode);
+    }
+
     // --- Owner-side helpers, matching the party tests' shapes ---
 
     private async Task<Guid> CreateAlbumAsync(HttpClient owner, string name)
