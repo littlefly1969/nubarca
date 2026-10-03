@@ -1,3 +1,4 @@
+using QRCoder;
 using SixLabors.Fonts;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Drawing;
@@ -153,10 +154,23 @@ public sealed class PartyPrintComposer
             Domain.Print.PartyPrintProducts.Grid4 => RenderGrid4(composition),
             _ => RenderPhoto(composition),
         };
+        return await EncodeAsync(sheet, composition.Calibration, cancellationToken);
+    }
 
+    /// <summary>The party's QR card: the host's own sheet for the tables, cut in two by the printer.</summary>
+    public async Task<byte[]> RenderQrCardAsync(PartyQrCardComposition card, CancellationToken cancellationToken)
+    {
+        using var sheet = RenderQrCard(card);
+        return await EncodeAsync(sheet, card.Calibration, cancellationToken);
+    }
+
+    /// <summary>The sheet as the printer receives it: calibrated, stripped of every source's metadata, a JPEG.</summary>
+    private static async Task<byte[]> EncodeAsync(
+        Image<Rgba32> sheet, PrintCalibration? calibration, CancellationToken cancellationToken)
+    {
         // The printer's compensation, not a filter: the whole sheet, paper and
         // photographs, so that this printer's output matches what was composed.
-        (composition.Calibration ?? PrintCalibration.Neutral).ApplyTo(sheet);
+        (calibration ?? PrintCalibration.Neutral).ApplyTo(sheet);
 
         // Strip everything the sources carried: a printed keepsake must not
         // travel with the GPS coordinates of where it was taken.
@@ -285,15 +299,8 @@ public sealed class PartyPrintComposer
                     DrawFramed(sheet, image, photo, rect, composition.Theme, palette);
                 }
 
-                var stripW = PartyPrintGeometry.StripWidthFraction;
-                var footTop = 1.0 - PartyPrintGeometry.StripMarginFraction
-                    - PartyPrintGeometry.StripFooterFraction;
-                var footX = PartyPrintGeometry.StripMarginFraction
-                    + (strip * (stripW + PartyPrintGeometry.StripGutterFraction));
-                DrawFooter(sheet, composition, palette, new Rectangle(
-                    (int)Math.Round(footX * w), (int)Math.Round(footTop * h),
-                    (int)Math.Round(stripW * w),
-                    (int)Math.Round(PartyPrintGeometry.StripFooterFraction * h)), strip: true);
+                DrawFooter(sheet, composition, palette,
+                    ToPixels(PartyPrintGeometry.StripFooter(strip), w, h), strip: true);
             }
 
             return sheet;
@@ -302,6 +309,105 @@ public sealed class PartyPrintComposer
         {
             foreach (var (_, image) in sources) image.Dispose();
         }
+    }
+
+    // --- The party's QR card, on the twin strip's sheet -------------------------
+
+    /// <summary>
+    /// Two identical cards on the twin strip's sheet, which the printer cuts
+    /// apart: in each strip the host's photograph over the party's QR, the
+    /// line saying what it opens, and the strip's own foot — the party's name
+    /// and the wordmark, and no queue number, since no guest is waiting for it.
+    /// On white paper, because a code is read by its contrast.
+    /// </summary>
+    private Image<Rgba32> RenderQrCard(PartyQrCardComposition card)
+    {
+        const int w = PartyPrintGeometry.PortraitWidth;
+        const int h = PartyPrintGeometry.PortraitHeight;
+        var sheet = new Image<Rgba32>(w, h);
+        var palette = Palette(PartyPrintTheme.Pure);
+        sheet.Mutate(x => x.Fill(palette.Background));
+
+        using var source = LoadOriented(card.Photo);
+        using var code = QrModules(card.Url);
+        var photo = PartyPrintPhoto.Placed(card.Photo, card.Placement);
+        // The foot is the strip's, drawn by the strip's own code: the name, no
+        // host's line, no number.
+        var foot = new PartyPrintComposition(
+            Domain.Print.PartyPrintProducts.TwinStrip4, PartyPrintTheme.Pure, [photo], card.PartyName, FooterText: null);
+        for (var strip = 0; strip < PartyPrintGeometry.StripsPerSheet; strip++)
+        {
+            DrawFramed(sheet, source, photo, ToPixels(PartyPrintGeometry.QrCardCell(strip, 0), w, h),
+                PartyPrintTheme.Pure, palette);
+            DrawQrCell(sheet, code, card.Line, ToPixels(PartyPrintGeometry.QrCardCell(strip, 1), w, h), palette);
+            DrawFooter(sheet, foot, palette, ToPixels(PartyPrintGeometry.StripFooter(strip), w, h), strip: true);
+        }
+        return sheet;
+    }
+
+    /// <summary>
+    /// The code as one pixel per module, its quiet zone included — so that it
+    /// is scaled once, by a whole number, with nothing blurred between modules.
+    /// </summary>
+    private static Image<Rgba32> QrModules(string url)
+    {
+        using var generator = new QRCodeGenerator();
+        using var data = generator.CreateQrCode(url, QRCodeGenerator.ECCLevel.M);
+        var matrix = data.ModuleMatrix;
+        var size = matrix.Count;
+        var image = new Image<Rgba32>(size, size, White);
+        for (var y = 0; y < size; y++)
+            for (var x = 0; x < size; x++)
+                if (matrix[y][x]) image[x, y] = Ink;
+        return image;
+    }
+
+    /// <summary>
+    /// The code's cell: the line that says what it opens, then the code — as
+    /// large a whole number of pixels per module as its width allows — the two
+    /// centred together in the cell.
+    /// </summary>
+    private void DrawQrCell(Image<Rgba32> sheet, Image<Rgba32> modules, string line, Rectangle cell, ThemePalette palette)
+    {
+        var area = QrCodeArea(cell, modules.Width, Math.Min(sheet.Width, sheet.Height));
+        // A little air at the strip's edges: the line is fitted to most of its width.
+        var (text, font) = FitLine(line, _ui, FontStyle.Regular, area.LineSize, area.LineSize * 0.75f, cell.Width * 0.92f);
+        sheet.Mutate(x => x.DrawText(
+            new RichTextOptions(font)
+            {
+                Origin = new PointF(cell.X + (cell.Width / 2f), area.LineMiddle),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+            text, palette.Foreground));
+
+        using var code = modules.Clone(x => x.Resize(new ResizeOptions
+        {
+            Size = new Size(area.Code.Width, area.Code.Height),
+            Sampler = KnownResamplers.NearestNeighbor,
+        }));
+        sheet.Mutate(x => x.DrawImage(code, new Point(area.Code.X, area.Code.Y), 1f));
+    }
+
+    /// <summary>Where the code and the line over it go in a card's code cell.</summary>
+    internal sealed record QrCellArea(Rectangle Code, int Module, float LineSize, float LineMiddle);
+
+    /// <summary>
+    /// The code's square — <paramref name="modules"/> modules a side, quiet zone
+    /// included, each a whole number of pixels — and the line over it, the two
+    /// centred together in <paramref name="cell"/>.
+    /// </summary>
+    internal static QrCellArea QrCodeArea(Rectangle cell, int modules, int shortEdge)
+    {
+        var module = Math.Max(1, (int)(cell.Width * PartyPrintGeometry.QrCardCodeWidthFraction / modules));
+        var codeSize = module * modules;
+        var lineSize = (float)(PartyPrintGeometry.QrCardLineFraction * shortEdge);
+        var textHeight = lineSize * 1.3f;
+        var gap = lineSize * 0.6f;
+        var top = cell.Y + ((cell.Height - (textHeight + gap + codeSize)) / 2f);
+        var code = new Rectangle(
+            cell.X + ((cell.Width - codeSize) / 2), (int)Math.Round(top + textHeight + gap), codeSize, codeSize);
+        return new QrCellArea(code, module, lineSize, top + (textHeight / 2f));
     }
 
     // --- Single photograph, title on it ---------------------------------------

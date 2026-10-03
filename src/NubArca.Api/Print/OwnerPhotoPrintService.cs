@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -342,40 +340,16 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         return new OwnerPhotoPrintDate(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), source);
     }
 
-    private async Task<OwnerPhotoPrintResult?> RepeatAsync(
-        Guid ownerUserId, string keyHash, string fingerprint, CancellationToken cancellationToken)
-    {
-        var existing = await _db.OwnerPhotoPrintRequests.AsNoTracking()
-            .Where(r => r.OwnerUserId == ownerUserId && r.IdempotencyKeyHash == keyHash)
-            .Select(r => new { r.PrintJobId, r.RequestFingerprint })
-            .FirstOrDefaultAsync(cancellationToken);
-        if (existing is null) return null;
-        if (existing.RequestFingerprint != fingerprint)
-            return OwnerPhotoPrintResult.Refuse(OwnerPhotoPrintErrors.IdempotencyConflict);
-        var job = await _db.PrintJobs.AsNoTracking()
-            .Where(j => j.Id == existing.PrintJobId)
-            .Select(j => new { j.PrintStationId, j.PrinterDeviceId })
-            .FirstAsync(cancellationToken);
-        var remaining = await _db.PrinterDevices.AsNoTracking()
-            .Where(d => d.Id == job.PrinterDeviceId).Select(d => d.MediaRemainingPrints).FirstOrDefaultAsync(cancellationToken);
-        return OwnerPhotoPrintResult.Accept(await AcceptedAsync(existing.PrintJobId, job.PrintStationId, remaining, cancellationToken));
-    }
+    private Task<OwnerPhotoPrintResult?> RepeatAsync(
+        Guid ownerUserId, string keyHash, string fingerprint, CancellationToken cancellationToken) =>
+        OwnerPrintRecords.RepeatAsync(_db, ownerUserId, keyHash, fingerprint, cancellationToken);
 
-    private async Task<OwnerPhotoPrintAccepted> AcceptedAsync(
-        Guid jobId, Guid stationId, int? mediaRemaining, CancellationToken cancellationToken)
-    {
-        var state = await _db.PrintJobs.AsNoTracking().Where(j => j.Id == jobId)
-            .Select(j => j.State).FirstAsync(cancellationToken);
-        // The queue a sheet waits in is the machine's, whoever sent the others.
-        var ahead = await _db.PrintJobs.AsNoTracking()
-            .Where(j => j.PrintStationId == stationId && j.Id != jobId && !PrintJobStates.Terminal.Contains(j.State)
-                && j.CreatedAt <= _db.PrintJobs.Where(x => x.Id == jobId).Select(x => x.CreatedAt).First())
-            .CountAsync(cancellationToken);
-        return new OwnerPhotoPrintAccepted(jobId, jobId.ToString("N")[..8], state, ahead, mediaRemaining);
-    }
+    private Task<OwnerPhotoPrintAccepted> AcceptedAsync(
+        Guid jobId, Guid stationId, int? mediaRemaining, CancellationToken cancellationToken) =>
+        OwnerPrintRecords.AcceptedAsync(_db, jobId, stationId, mediaRemaining, cancellationToken);
 
     /// <summary>The display shape of encoded image bytes, from their header and EXIF orientation; null when they are not an image.</summary>
-    private static double? DisplayAspectOf(byte[] bytes)
+    internal static double? DisplayAspectOf(byte[] bytes)
     {
         try
         {
@@ -394,8 +368,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         }
     }
 
-    private static string Hash(string value) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+    private static string Hash(string value) => OwnerPrintRecords.Hash(value);
 
     /// <summary>
     /// The composition a key was used for, as a digest: every choice that

@@ -272,4 +272,51 @@ public static class PartyPrintGeometry
         var (_, _, w, h) = StripSlot(0, 0);
         return (w * PortraitWidth) / (h * PortraitHeight);
     }
+
+    /// <summary>The footer band at the foot of one strip, in sheet fractions.</summary>
+    public static (double X, double Y, double Width, double Height) StripFooter(int stripIndex)
+    {
+        var stripW = StripWidthFraction;
+        return (StripMarginFraction + (stripIndex * (stripW + StripGutterFraction)),
+            1.0 - StripMarginFraction - StripFooterFraction, stripW, StripFooterFraction);
+    }
+
+    // --- The party's QR card, on the twin strip's sheet ------------------------
+
+    /// <summary>
+    /// The party's public QR on paper, for the tables. It is the twin strip's
+    /// sheet — its margins, gutter, footer and the printer's cut — with two
+    /// cells in each strip where the twin strip has four: the photograph in the
+    /// top one and the QR in the bottom one, two over two as the four-photo
+    /// sheet sets them. Both strips are the same card: one sheet, two cards.
+    /// </summary>
+    public const int QrCardCellsPerStrip = 2;
+
+    /// <summary>
+    /// The code's width, quiet zone included, as a fraction of the strip's
+    /// width: about 3.8cm on a 10x15, a module near a millimetre for a party
+    /// address — read at arm's length by any phone.
+    /// </summary>
+    public const double QrCardCodeWidthFraction = 0.84;
+
+    /// <summary>Type size of the line saying what the code is for, short-edge fraction.</summary>
+    public const double QrCardLineFraction = 0.034;
+
+    /// <summary>One cell of a QR card — 0 the photograph, 1 the code — in fractions of the sheet.</summary>
+    public static (double X, double Y, double Width, double Height) QrCardCell(int stripIndex, int cellIndex)
+    {
+        var stripW = StripWidthFraction;
+        var x = StripMarginFraction + (stripIndex * (stripW + StripGutterFraction));
+        var contentHeight = 1.0 - (2 * StripMarginFraction) - StripFooterFraction;
+        var cellH = (contentHeight - (StripSlotGapFraction * (QrCardCellsPerStrip - 1))) / QrCardCellsPerStrip;
+        var y = StripMarginFraction + (cellIndex * (cellH + StripSlotGapFraction));
+        return (x, y, stripW, cellH);
+    }
+
+    /// <summary>The shape the card's photograph is placed in.</summary>
+    public static double QrCardPhotoAspect()
+    {
+        var (_, _, w, h) = QrCardCell(0, 0);
+        return (w * PortraitWidth) / (h * PortraitHeight);
+    }
 }
