@@ -1,5 +1,6 @@
 using NubArca.Api.Domain.Print;
 using NubArca.Api.Print;
+using SixLabors.Fonts;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Drawing.Processing;
@@ -769,6 +770,69 @@ public sealed class PartyPrintComposerTests
         Assert.True(number.Left - wordmark.Right > 300, "the number crowds the wordmark");
     }
 
+    /// <summary>Where the ink of a shipped mark sits vertically in its square, top to bottom, 0 to 1.</summary>
+    private static double InkMiddle(string file)
+    {
+        using var mark = Image.Load<Rgba32>(file);
+        int top = -1, bottom = -1;
+        for (var y = 0; y < mark.Height; y++)
+            for (var x = 0; x < mark.Width; x++)
+                if (mark[x, y].A > 128)
+                {
+                    if (top < 0) top = y;
+                    bottom = y;
+                    break;
+                }
+        return (top + bottom + 1) / 2.0 / mark.Height;
+    }
+
+    private static string RepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "NubArca.sln")))
+            directory = directory.Parent;
+        return directory?.FullName ?? throw new InvalidOperationException("NubArca.sln not found");
+    }
+
+    [Fact]
+    public void Every_Shipped_Mark_Has_Its_Boat_Centred_In_Its_Square()
+    {
+        // The renderer and the studio centre the mark's SQUARE on the name's
+        // capitals; that centres the boat only because the artwork leaves as
+        // much room above it as below. A re-exported mark that did not would
+        // tilt the signature again, so the files themselves are held to it.
+        var files = new[] { PartyPrintOverlayLogo.Light, PartyPrintOverlayLogo.Dark }
+            .Select(logo => Path.Combine(AppContext.BaseDirectory, "Assets", "brand", PartyPrintComposer.SymbolFile(logo)))
+            .Concat(new[] { "nubarca-mark-flat-on-dark-256.png", "nubarca-mark-flat-on-light-256.png" }
+                .Select(name => Path.Combine(RepositoryRoot(), "frontend", "public", "brand", name)));
+        foreach (var file in files)
+            Assert.InRange(InkMiddle(file), 0.49, 0.51);
+    }
+
+    [Theory]
+    [InlineData(true, "MARE")]
+    [InlineData(false, "MARE")]
+    [InlineData(true, "FESTA DI FINE ESTATE AL MARE CON TUTTI NOI")]
+    public void The_Boat_Is_Level_With_The_Name_Printed_Beside_It(bool portrait, string name)
+    {
+        // What a guest saw: the boat a little higher than the name, by about
+        // 2mm on a 10x15 — its square stood on the baseline, and the artwork
+        // is both taller than the capitals and padded below. Now the middle of
+        // the boat's ink is the middle of the name's ink (capitals only, so
+        // that ink IS the capitals), including a long name fitted smaller.
+        var composer = new PartyPrintComposer();
+        var (w, h) = Sheet(portrait);
+        var shortEdge = Math.Min(w, h);
+        var layout = composer.LayoutOverlayText(OnThePhoto([], PartyPrintOverlayText.White,
+            PartyPrintOverlayLogo.Light, "Una notte da ricordare", 27, name), w, h);
+        var file = Path.Combine(AppContext.BaseDirectory, "Assets", "brand",
+            PartyPrintComposer.SymbolFile(PartyPrintOverlayLogo.Light));
+        var boat = layout.Symbol.Top + (layout.Symbol.Height * InkMiddle(file));
+        var words = (layout.Title.Box.Top + layout.Title.Box.Bottom) / 2;
+        Assert.True(Math.Abs(boat - words) <= 0.004 * shortEdge,
+            $"the boat's middle is {words - boat:F1}px above the name's");
+    }
+
     [Theory]
     [InlineData(true, "Una notte da ricordare")]
     [InlineData(false, null)]
@@ -789,8 +853,9 @@ public sealed class PartyPrintComposerTests
         // Just before the name, by the gap, and never touching it.
         Assert.InRange(name.Left - symbol.Right, 0.5 * PartyPrintGeometry.OverlaySymbolGapFraction * shortEdge,
             1.5 * PartyPrintGeometry.OverlaySymbolGapFraction * shortEdge);
-        // On the name's line: standing on its baseline, as tall as the line's capitals and a little more.
-        Assert.InRange(symbol.Bottom, name.Bottom - (0.02f * shortEdge), name.Bottom + 1);
+        // On the name's line: centred on its capitals, and taller than they are.
+        var caps = TextMeasurer.MeasureBounds("H", layout.Title.Options());
+        Assert.Equal((caps.Top + caps.Bottom) / 2f, symbol.Top + (symbol.Height / 2f), 1.0);
         Assert.True(symbol.Top < name.Top, "the symbol is shorter than the name's capitals");
         // Never into the host's line under it, nor into the number.
         if (layout.Footer is { } line) Assert.True(symbol.Bottom < line.Box.Top);

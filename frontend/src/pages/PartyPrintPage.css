@@ -523,11 +523,16 @@
    above them to the foot: the renderer's, value for value. */
 .party-print-sheet-overlay { container-type: inline-size; }
 .party-print-overlay-support { position: absolute; inset-inline: 0; bottom: 0; pointer-events: none; }
-/* The name's line: the symbol, then the name. A baseline row stands the
-   symbol's foot on the name's baseline, as the renderer does. */
+/* The name's line: the symbol, then the name, the symbol centred on the
+   name's capitals as the renderer centres it. A centred row does exactly that
+   for this face: Space Grotesk sets its line from its typo metrics (984/292,
+   USE_TYPO_METRICS), so at the name's line-height of 1.05 the middle of its
+   line is 0.346em above the baseline and the middle of its capitals (700)
+   0.35em — and the boat's ink is centred in its square. It follows a name
+   fitted smaller, too, since the line shrinks with it. */
 .party-print-overlay-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   column-gap: var(--symbol-gap);
   min-width: 0;
 }
