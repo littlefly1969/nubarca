@@ -1,4 +1,5 @@
 import { api, ApiError } from './client';
+import type { OwnerPhotoPrintAccepted, OwnerPhotoPrintError } from './printStations';
 import type {
   AlbumPartyStatus,
   GuestDirectoryPage,
@@ -629,6 +630,32 @@ export function setPartyPrintSettings(
 ): Promise<PartyPrintSettings> {
   return api<PartyPrintSettings>(`/api/albums/${albumId}/party-print-settings`, {
     method: 'PATCH', json: patch, signal,
+  });
+}
+
+// --- The party's QR card ------------------------------------------------------
+
+/**
+ * One sheet of the party's QR for its tables: two cards the printer cuts
+ * apart, a photograph of the host's over the code. The address the code
+ * carries is the server's to put there; the browser names only the photograph,
+ * its framing and the language of the line over the code.
+ */
+export interface PartyQrCardPrintRequest {
+  fileItemId: string;
+  /** The shared PhotoPlacement in the card's photograph cell. */
+  placement: { centerX: number; centerY: number; zoom: number };
+  locale: 'it' | 'en' | 'es' | 'de';
+}
+
+/** Why a QR card is refused: a direct print's reasons, and three of its own. */
+export type PartyQrCardPrintError = OwnerPhotoPrintError | 'party_closed' | 'no_printer' | 'origin_unavailable';
+
+export function submitPartyQrCardPrint(
+  albumId: string, request: PartyQrCardPrintRequest, idempotencyKey: string, signal?: AbortSignal,
+): Promise<OwnerPhotoPrintAccepted> {
+  return api(`/api/albums/${albumId}/party-print/qr-card`, {
+    method: 'POST', json: request, headers: { 'Idempotency-Key': idempotencyKey }, signal,
   });
 }
 

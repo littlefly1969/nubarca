@@ -269,6 +269,43 @@ export function stripSlotAspect(): number {
   return (width * PORTRAIT_WIDTH) / (height * PORTRAIT_HEIGHT);
 }
 
+// --- The party's QR card, on the twin strip's sheet ---------------------------
+
+/**
+ * The host's QR card: the twin strip's sheet, margins, gutter, footer and cut,
+ * with two cells per strip — the photograph over the code. Both strips are the
+ * same card. Mirrors PartyPrintGeometry.QrCard*.
+ */
+export const QR_CARD_CELLS_PER_STRIP = 2;
+/** The code's width, quiet zone included, as a fraction of the strip's width. */
+export const QR_CARD_CODE_WIDTH_FRACTION = 0.84;
+/** Type size of the line over the code, short-edge fraction. */
+export const QR_CARD_LINE_FRACTION = 0.034;
+
+/** One cell of a QR card — 0 the photograph, 1 the code — in fractions of the sheet. */
+export function qrCardCell(stripIndex: number, cellIndex: number): Rect {
+  const stripW = stripWidthFraction();
+  const x = STRIP_MARGIN_FRACTION + stripIndex * (stripW + STRIP_GUTTER_FRACTION);
+  const contentHeight = 1 - 2 * STRIP_MARGIN_FRACTION - STRIP_FOOTER_FRACTION;
+  const cellH = (contentHeight - STRIP_SLOT_GAP_FRACTION * (QR_CARD_CELLS_PER_STRIP - 1)) / QR_CARD_CELLS_PER_STRIP;
+  const y = STRIP_MARGIN_FRACTION + cellIndex * (cellH + STRIP_SLOT_GAP_FRACTION);
+  return { x, y, width: stripW, height: cellH };
+}
+
+/** The shape the card's photograph is placed in. */
+export function qrCardPhotoAspect(): number {
+  const { width, height } = qrCardCell(0, 0);
+  return (width * PORTRAIT_WIDTH) / (height * PORTRAIT_HEIGHT);
+}
+
+/** The line over the code, as the server prints it (PartyQrCardText). */
+export const QR_CARD_LINES: Readonly<Record<'it' | 'en' | 'es' | 'de', string>> = {
+  it: 'Inquadra ed entra nella festa',
+  en: 'Scan to join the party',
+  es: 'Escanea y entra en la fiesta',
+  de: 'Scannen und mitfeiern',
+};
+
 // --- Crop -------------------------------------------------------------------
 
 /** A crop as the server stores it: fractions of the auto-oriented source. */

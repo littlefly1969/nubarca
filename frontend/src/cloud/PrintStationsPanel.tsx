@@ -36,6 +36,7 @@ const KIND_KEYS: Record<string, MessageKey> = {
   'party-photo': 'print.kind.partyPhoto',
   'party-grid4': 'print.kind.partyGrid4',
   'party-strip4': 'print.kind.partyStrip4',
+  'party-qr-card': 'print.kind.partyQrCard',
 };
 
 const STATE_KEYS: Record<string, MessageKey> = {
