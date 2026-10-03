@@ -31,7 +31,8 @@ public static class SetupValidation
 
 /// <summary>
 /// The Print Box's local page: status, visible networks, and one form to join a
-/// network. Nothing else — no account, no server settings, no logs, no shell.
+/// network — in setup mode, or over Ethernet. Nothing else — no account, no
+/// server settings, no logs, no shell.
 ///
 /// The request body is never logged, and no response ever carries a password:
 /// the only thing that leaves with the SSID is whether joining it worked.
@@ -117,7 +118,7 @@ public static class SetupEndpoints
                     statusCode: StatusCodes.Status202Accepted),
                 ConnectRequest.Busy => Results.Json(new { error = "busy" }, Json,
                     statusCode: StatusCodes.Status409Conflict),
-                _ => Results.Json(new { error = "not_in_setup_mode" }, Json,
+                _ => Results.Json(new { error = "unavailable" }, Json,
                     statusCode: StatusCodes.Status409Conflict),
             };
         });

@@ -101,6 +101,8 @@ public sealed class SetupEndpointsTests : IAsyncLifetime
         // The printer's own count of the prints left on its media.
         Assert.Equal(187, status.GetProperty("printer").GetProperty("remainingPrints").GetInt32());
         Assert.Equal("disconnected", status.GetProperty("nubarca").GetString());
+        // In setup mode the page can configure the Wi-Fi.
+        Assert.True(status.GetProperty("wifiConfigurationAvailable").GetBoolean());
         Assert.DoesNotContain("setup-pass", body);
     }
 
@@ -176,8 +178,13 @@ public sealed class SetupEndpointsTests : IAsyncLifetime
         Assert.Equal(ProvisioningMode.Connected, _service.State.Mode);
         Assert.False(_network.AccessPointActive);
 
+        // Now on Wi-Fi: changing network would cut the box off, so it is refused.
         var again = await Connect("""{"ssid":"Studio","password":"another-pass"}""");
         Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+        Assert.Equal("unavailable", JsonDocument.Parse(await again.Content.ReadAsStringAsync())
+            .RootElement.GetProperty("error").GetString());
+        var status = JsonDocument.Parse(await _http.GetStringAsync("/setup/status")).RootElement;
+        Assert.False(status.GetProperty("wifiConfigurationAvailable").GetBoolean());
         Assert.DoesNotContain(Secret, _logs.Provider.All);
     }
 }
