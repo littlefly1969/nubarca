@@ -648,6 +648,18 @@ export interface PartyQrCardPrintRequest {
   locale: 'it' | 'en' | 'es' | 'de';
 }
 
+/** A photograph the card may carry: its id and its display shape, when known. */
+export interface PartyQrCardPhoto {
+  fileItemId: string;
+  width: number | null;
+  height: number | null;
+}
+
+/** Every photograph the party shows, newest first — the guests' print studio's rule, not a page. */
+export function listPartyQrCardPhotos(albumId: string, signal?: AbortSignal): Promise<PartyQrCardPhoto[]> {
+  return api<PartyQrCardPhoto[]>(`/api/albums/${albumId}/party-print/qr-card/photos`, { signal });
+}
+
 /** Why a QR card is refused: a direct print's reasons, and three of its own. */
 export type PartyQrCardPrintError = OwnerPhotoPrintError | 'party_closed' | 'no_printer' | 'origin_unavailable';
 

@@ -830,6 +830,7 @@ const it = {
   'party.qrCard.closed': 'Apri la festa agli ospiti per stampare il suo QR.',
   'party.qrCard.title': 'Stampa il QR della festa',
   'party.qrCard.photo': 'Foto sopra il QR',
+  'party.qrCard.photoNumber': 'Foto {n}',
   'party.qrCard.photosLoading': 'Carico le foto della festa…',
   'party.qrCard.noPhotos': 'Nell’album della festa non ci sono ancora foto.',
   'party.qrCard.photosError': 'Non riesco a leggere le foto della festa.',

@@ -17,6 +17,10 @@ public interface IPartyQrCardPrintService
     Task<OwnerPhotoPrintResult> SubmitAsync(
         Guid ownerUserId, Guid albumId, PartyQrCardPrintRequest request, string? idempotencyKey,
         CancellationToken cancellationToken);
+
+    /// <summary>Every photograph the party shows, newest first; null for an album that is not the caller's.</summary>
+    Task<IReadOnlyList<PartyQrCardPhotoDto>?> ListPhotosAsync(
+        Guid ownerUserId, Guid albumId, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -296,6 +300,32 @@ public sealed class PartyQrCardPrintService : IPartyQrCardPrintService
             _logger.LogInformation("print.party_qr.refused code={Code}", error);
             return OwnerPhotoPrintResult.Refuse(error);
         }
+    }
+
+    public async Task<IReadOnlyList<PartyQrCardPhotoDto>?> ListPhotosAsync(
+        Guid ownerUserId, Guid albumId, CancellationToken cancellationToken)
+    {
+        if (!await _db.Albums.AsNoTracking()
+                .AnyAsync(a => a.Id == albumId && a.OwnerUserId == ownerUserId, cancellationToken))
+        {
+            return null;
+        }
+        // The party's own rule for what it shows — the one the guests' print
+        // studio and the guest book ask (owner's, active, not an unapproved
+        // guest upload) — narrowed to photographs, and ALL of them: a party of
+        // two hundred photographs offers two hundred, not the first page.
+        var rows = await PartyMediaService.DisplayableMembers(_db, ownerUserId, albumId)
+            .Where(x => x.MediaCategory == Domain.MediaCategories.Image)
+            .OrderByDescending(x => x.AddedAt)
+            .ThenBy(x => x.Id)
+            .Select(x => new { x.Id, x.FileWidth, x.FileHeight, x.BlobWidth, x.BlobHeight, x.Orientation })
+            .ToListAsync(cancellationToken);
+        return rows.Select(x =>
+        {
+            var (width, height) = Metadata.ImageDisplayDimensions.Resolve(
+                x.FileWidth ?? x.BlobWidth, x.FileHeight ?? x.BlobHeight, x.Orientation);
+            return new PartyQrCardPhotoDto(x.Id, width, height);
+        }).ToList();
     }
 
     /// <summary>

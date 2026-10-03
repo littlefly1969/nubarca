@@ -75,6 +75,17 @@ public static class PartyPrintOwnerEndpoints
                 _ => Results.Conflict(new { error }),
             };
         }).WithName("CreatePartyQrCardPrint").RequirePartyPrint();
+
+        // The photographs the card may carry: every one the party shows.
+        app.MapGet("/api/albums/{albumId:guid}/party-print/qr-card/photos", async (
+            Guid albumId,
+            HttpContext httpContext,
+            [FromServices] IPartyQrCardPrintService cards,
+            CancellationToken cancellationToken) =>
+        {
+            var photos = await cards.ListPhotosAsync(httpContext.GetCurrentUserId()!.Value, albumId, cancellationToken);
+            return photos is null ? Results.NotFound() : Results.Ok(photos);
+        }).WithName("ListPartyQrCardPhotos").RequirePartyPrint();
     }
 
     /// <summary>

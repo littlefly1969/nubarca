@@ -804,6 +804,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.qrCard.closed': 'Open the party to guests to print its QR.',
   'party.qrCard.title': 'Print the party’s QR',
   'party.qrCard.photo': 'Photograph over the QR',
+  'party.qrCard.photoNumber': 'Photograph {n}',
   'party.qrCard.photosLoading': 'Loading the party’s photographs…',
   'party.qrCard.noPhotos': 'The party’s album has no photographs yet.',
   'party.qrCard.photosError': 'The party’s photographs could not be read.',
