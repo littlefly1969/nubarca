@@ -481,7 +481,7 @@ describe('PartyPrintPage (public print studio)', () => {
     // The dark treatment is the brand's own dark mark, not the light one refilled.
     expect(screen.getByTestId('party-print-overlay-symbol'))
       .toHaveAttribute('src', '/brand/nubarca-mark-flat-on-light-256.png');
-    expect(within(sheet).getByText('Beach Party').parentElement?.style.color)
+    expect((within(sheet).getByText('Beach Party').closest('.party-print-overlay-text') as HTMLElement).style.color)
       .toBe('rgb(209, 31, 46)');
 
     // Black text puts a white whisper under the words instead of a dark one.
@@ -678,7 +678,38 @@ describe('PartyPrintPage (public print studio)', () => {
     await compose(user, 'twinStrip4');
     const marks = container.querySelectorAll<HTMLImageElement>('.party-print-sheet-mark-strip');
     expect(marks).toHaveLength(2);
-    for (const mark of marks) expect(mark.style.width).toBe('27%');
+    for (const mark of marks) expect(mark.style.width).toBe('31%');
+    // The strip's words keep their size; only a photograph's foot grows.
+    expect(container.querySelector('.party-print-sheet-footer')).toHaveClass('is-strip');
+  });
+
+  it('gives a photograph\'s wordmark the width the renderer gives it, a touch larger than it was', async () => {
+    const user = setup();
+    mount();
+    const { container } = render(wrapper());
+    await compose(user, 'photo');
+    const mark = container.querySelector<HTMLImageElement>('.party-print-sheet-mark')!;
+    expect(mark.style.width).toBe('23%');
+    expect(container.querySelector('.party-print-sheet-footer')).not.toHaveClass('is-strip');
+  });
+
+  it('on the photo, sets the symbol just before the name, on its line, not in the corner', async () => {
+    const user = setup();
+    mount();
+    render(wrapper());
+    await compose(user, 'photo');
+    await user.click(screen.getByRole('radio', { name: 'Sulla foto' }));
+    const sheet = screen.getByTestId('party-print-sheet');
+    const symbol = screen.getByTestId('party-print-overlay-symbol');
+    const name = within(sheet).getByText('Beach Party');
+    // The same line, the symbol first.
+    expect(symbol.parentElement).toBe(name.parentElement);
+    expect(symbol.parentElement).toHaveClass('party-print-overlay-head');
+    expect(symbol.nextElementSibling).toBe(name);
+    // Inside the words' block at the foot, sized as the renderer sizes it.
+    expect(screen.getByTestId('party-print-overlay-support')).toContainElement(symbol);
+    expect(symbol.style.left).toBe('');
+    expect(symbol.style.top).toBe('');
   });
 
   it('sizes the framing to the screen, not only to the column', async () => {

@@ -32,6 +32,7 @@ import {
   type CropView, photoLayout, photoSlotAspect, stripFooter, stripSlot,
   STRIP_WORDMARK_WIDTH_FRACTION, gridLayout, gridPortrait, gridSlotAspect, sheet, type PaperSize,
   OVERLAY_LINE_FRACTION, OVERLAY_MARGIN_FRACTION, OVERLAY_SYMBOL_FRACTION, OVERLAY_TITLE_FRACTION,
+  OVERLAY_SYMBOL_GAP_FRACTION, FOOTER_WORDMARK_WIDTH_FRACTION,
   OVERLAY_NUMBER_FRACTION, OVERLAY_TEXT_SUPPORT_PADDING_FRACTION, OVERLAY_HALO_BLUR_FRACTION,
   OVERLAY_HALO_OPACITY, OVERLAY_NUMBER_ROOM, PARTY_NAME_MAX_LENGTH, FOOTER_MAX_LENGTH,
   overlaySlotAspect, overlayTextSupport, printedLine,
@@ -269,7 +270,9 @@ function SheetFooter({
 }) {
   const dark = DARK_THEMES.includes(theme);
   return (
-    <div className="party-print-sheet-footer">
+    // A strip's narrow foot keeps its words' size; under a photograph or four
+    // they are a touch larger, as on paper.
+    <div className={strip ? 'party-print-sheet-footer is-strip' : 'party-print-sheet-footer'}>
       <span className="party-print-sheet-text">
         <span className="party-print-sheet-name">{partyName}</span>
         {footerText && <span className="party-print-sheet-line">{footerText}</span>}
@@ -282,7 +285,7 @@ function SheetFooter({
           className={strip ? 'party-print-sheet-mark party-print-sheet-mark-strip' : 'party-print-sheet-mark'}
           src={dark ? PARTY_WORDMARK_DARK : PARTY_WORDMARK_LIGHT}
           alt={PRODUCT_NAME}
-          style={strip ? { width: pct(STRIP_WORDMARK_WIDTH_FRACTION) } : undefined}
+          style={{ width: pct(strip ? STRIP_WORDMARK_WIDTH_FRACTION : FOOTER_WORDMARK_WIDTH_FRACTION) }}
         />
       </span>
     </div>
@@ -346,15 +349,24 @@ function useFitLine(size: string, floor: number, deps: readonly unknown[]) {
  * bottom line sharing its width with the room kept for the number, and each
  * line fitted into what is left.
  */
-function OverlayWords({ partyName, footerText, orientation }: {
+function OverlayWords({ partyName, footerText, orientation, symbol }: {
   partyName: string; footerText: string | null; orientation: string;
+  /** The NubArca symbol, set on the name's line just before the name. */
+  symbol: ReactNode;
 }) {
   const name = printedLine(partyName, PARTY_NAME_MAX_LENGTH);
   const footer = printedLine(footerText ?? '', FOOTER_MAX_LENGTH);
   // The renderer's floors: the name as small as it must be, the line to 3/4.
   const nameRef = useFitLine('var(--title-size)', 0, [name, footer, orientation]);
   const lineRef = useFitLine('var(--line-size)', 0.75, [footer, orientation]);
-  const nameLine = <span ref={nameRef} className="party-print-overlay-name">{name}</span>;
+  // The symbol first, standing on the name's baseline, then the name in what
+  // it leaves — as the renderer lays the line out.
+  const nameLine = (
+    <span className="party-print-overlay-head">
+      {symbol}
+      <span ref={nameRef} className="party-print-overlay-name">{name}</span>
+    </span>
+  );
   // The number's room is the bottom line's ::after — never text on the page.
   const bottom = (content: ReactNode) => (
     <div
@@ -388,9 +400,8 @@ function SheetPreview(props: SheetProps) {
     const [w, h] = sheet(paper, portrait);
     const short = Math.min(w, h);
     // Everything is a fraction of the short edge, turned into a fraction of the
-    // sheet's width or height, exactly as the renderer measures it.
+    // sheet's width, exactly as the renderer measures it.
     const ofWidth = (fraction: number) => pct((fraction * short) / w);
-    const ofHeight = (fraction: number) => pct((fraction * short) / h);
     const text = OVERLAY_TEXT[props.overlayText];
     return (
       <div
@@ -409,17 +420,6 @@ function SheetPreview(props: SheetProps) {
             onAspect={(width, height) => onAspect(id, width, height)}
           />
         </div>
-        <img
-          className="party-print-overlay-symbol"
-          data-testid="party-print-overlay-symbol"
-          src={OVERLAY_LOGO[props.overlayLogo].mark}
-          alt=""
-          aria-hidden="true"
-          style={{
-            left: ofWidth(OVERLAY_MARGIN_FRACTION), top: ofHeight(OVERLAY_MARGIN_FRACTION),
-            width: ofWidth(OVERLAY_SYMBOL_FRACTION), height: ofHeight(OVERLAY_SYMBOL_FRACTION),
-          }}
-        />
         {/* The support is the words' own box: anchored to the foot, it begins
             one padding above the real block of text, whatever the words turn
             out to be, and the photograph above it keeps every pixel. Padding
@@ -444,12 +444,23 @@ function SheetPreview(props: SheetProps) {
               ['--title-size' as string]: `${((OVERLAY_TITLE_FRACTION * short) / w) * 100}cqw`,
               ['--line-size' as string]: `${((OVERLAY_LINE_FRACTION * short) / w) * 100}cqw`,
               ['--number-size' as string]: `${((OVERLAY_NUMBER_FRACTION * short) / w) * 100}cqw`,
+              ['--symbol-size' as string]: `${((OVERLAY_SYMBOL_FRACTION * short) / w) * 100}cqw`,
+              ['--symbol-gap' as string]: `${((OVERLAY_SYMBOL_GAP_FRACTION * short) / w) * 100}cqw`,
             }}
           >
             <OverlayWords
               partyName={props.partyName}
               footerText={props.footerText}
               orientation={portrait ? 'portrait' : 'landscape'}
+              symbol={(
+                <img
+                  className="party-print-overlay-symbol"
+                  data-testid="party-print-overlay-symbol"
+                  src={OVERLAY_LOGO[props.overlayLogo].mark}
+                  alt=""
+                  aria-hidden="true"
+                />
+              )}
             />
           </div>
         </div>

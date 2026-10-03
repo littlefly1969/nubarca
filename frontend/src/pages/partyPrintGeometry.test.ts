@@ -8,6 +8,7 @@ import {
   STRIP_MARGIN_FRACTION, STRIP_SLOT_GAP_FRACTION, STRIP_WORDMARK_WIDTH_FRACTION, DEFAULT_CROP_VIEW, MAX_ZOOM,
   clampCrop, coverCrop, cropFor, stripSlot, stripWidthFraction,
   OVERLAY_LINE_FRACTION, OVERLAY_MARGIN_FRACTION, OVERLAY_NUMBER_FRACTION, OVERLAY_SYMBOL_FRACTION,
+  OVERLAY_SYMBOL_GAP_FRACTION, FOOTER_WORDMARK_WIDTH_FRACTION,
   OVERLAY_TEXT_SUPPORT_MAX_OPACITY, OVERLAY_TEXT_SUPPORT_PADDING_FRACTION, OVERLAY_TITLE_FRACTION,
   OVERLAY_HALO_BLUR_FRACTION, OVERLAY_HALO_OPACITY, OVERLAY_NUMBER_ROOM,
   PARTY_NAME_MAX_LENGTH, FOOTER_MAX_LENGTH,
@@ -49,6 +50,7 @@ describe('party print geometry', () => {
     expect(constant('StripSlotGapFraction')).toBe(STRIP_SLOT_GAP_FRACTION);
     expect(constant('StripFooterFraction')).toBe(STRIP_FOOTER_FRACTION);
     expect(constant('StripWordmarkWidthFraction')).toBe(STRIP_WORDMARK_WIDTH_FRACTION);
+    expect(constant('FooterWordmarkWidthFraction')).toBe(FOOTER_WORDMARK_WIDTH_FRACTION);
     expect(constant('GridMarginFraction')).toBe(GRID_MARGIN_FRACTION);
     expect(constant('GridGutterFraction')).toBe(GRID_GUTTER_FRACTION);
     expect(constant('GridFooterFraction')).toBe(GRID_FOOTER_FRACTION);
@@ -56,6 +58,7 @@ describe('party print geometry', () => {
     expect(source).not.toContain('CutMarkLengthFraction');
     expect(constant('OverlayMarginFraction')).toBe(OVERLAY_MARGIN_FRACTION);
     expect(constant('OverlaySymbolFraction')).toBe(OVERLAY_SYMBOL_FRACTION);
+    expect(constant('OverlaySymbolGapFraction')).toBe(OVERLAY_SYMBOL_GAP_FRACTION);
     expect(constant('OverlayTitleFraction')).toBe(OVERLAY_TITLE_FRACTION);
     expect(constant('OverlayLineFraction')).toBe(OVERLAY_LINE_FRACTION);
     expect(constant('OverlayNumberFraction')).toBe(OVERLAY_NUMBER_FRACTION);

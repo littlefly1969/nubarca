@@ -489,7 +489,9 @@
 .party-print-sheet-name {
   overflow: hidden;
   font-family: var(--font-heading);
-  font-size: clamp(0.5rem, 3.2cqw, 0.85rem);
+  /* A touch larger under a photograph or four, as on paper; a strip's keep
+     their size (below). */
+  font-size: clamp(0.56rem, 3.6cqw, 0.95rem);
   font-weight: 700;
   line-height: 1.05;
   white-space: nowrap;
@@ -500,24 +502,41 @@
 .party-print-sheet-line {
   overflow: hidden;
   color: var(--sheet-muted);
-  font-size: clamp(0.4rem, 2.2cqw, 0.62rem);
+  font-size: clamp(0.45rem, 2.45cqw, 0.7rem);
   line-height: 1.05;
   white-space: nowrap;
   text-overflow: ellipsis;
   max-width: 100%;
 }
 
-/* Title on the photograph: a full-bleed picture left exactly as it is, the
-   symbol top-left in its own colour (the approved flat mark, one solid colour,
-   drawn from its alpha as the renderer does), and the words bottom-left over
-   a faint support that is their own box — from just above them to the foot —
-   the renderer's, value for value. */
+.party-print-sheet-footer.is-strip .party-print-sheet-name {
+  font-size: clamp(0.5rem, 3.2cqw, 0.85rem);
+}
+
+.party-print-sheet-footer.is-strip .party-print-sheet-line {
+  font-size: clamp(0.4rem, 2.2cqw, 0.62rem);
+}
+
+/* Title on the photograph: a full-bleed picture left exactly as it is, and the
+   words bottom-left — the brand's symbol in its own colours just before the
+   name, on its line — over a faint support that is their own box, from just
+   above them to the foot: the renderer's, value for value. */
 .party-print-sheet-overlay { container-type: inline-size; }
 .party-print-overlay-support { position: absolute; inset-inline: 0; bottom: 0; pointer-events: none; }
+/* The name's line: the symbol, then the name. A baseline row stands the
+   symbol's foot on the name's baseline, as the renderer does. */
+.party-print-overlay-head {
+  display: flex;
+  align-items: baseline;
+  column-gap: var(--symbol-gap);
+  min-width: 0;
+}
 /* The brand's own flat mark in the chosen treatment, placed and scaled —
    never refilled — as the renderer draws it. */
 .party-print-overlay-symbol {
-  position: absolute;
+  flex: none;
+  width: var(--symbol-size);
+  height: var(--symbol-size);
   object-fit: contain;
   pointer-events: none;
 }
@@ -582,7 +601,7 @@
 /* The wordmark is placed and scaled, never redrawn: no filter, no recolour,
    and the on-dark artwork on dark paper. */
 .party-print-sheet-mark {
-  width: 20%;
+  width: 23%;
   min-width: 3rem;
   height: auto;
 }

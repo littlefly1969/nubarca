@@ -143,7 +143,7 @@ Three job kinds distinguish the compositions:
 
 | Kind | Sheet | What comes out |
 |---|---|---|
-| `party-photo` | the loaded paper, following the photograph's own orientation unless the guest turns it | one framed photograph with the party footer — or, in the *On the photo* look, the untouched photograph to the edges with the party's name, host's line and number on it in white, black or red (over a faint support that starts just above the words) and the NubArca symbol, chosen separately: the brand's light or dark flat mark in its own colours |
+| `party-photo` | the loaded paper, following the photograph's own orientation unless the guest turns it | one framed photograph with the party footer — or, in the *On the photo* look, the untouched photograph to the edges with the party's name, host's line and number on it in white, black or red (over a faint support that starts just above the words) and the NubArca symbol just before the name on its line, chosen separately: the brand's light or dark flat mark in its own colours |
 | `party-grid4` | the loaded paper, as it is named: standing on 10×15 and 13×18, lying on 20×15 | **four** different photographs, two by two (1 top left, 2 top right, 3 and 4 below), each with its own crop, and one footer; nothing to cut |
 | `party-strip4` | 10×15 portrait, sent as `2x6x2` | the twin strip: **eight** different photographs as **two strips of four**, 1–4 on the left and 5–8 on the right, cut in two by the printer. It exists only on 10×15 and only on a printer that reports `2x6x2`; a printer that cannot cut has no strips at all, and no sheet carries cut marks |
 
