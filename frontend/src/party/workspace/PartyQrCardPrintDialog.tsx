@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ApiError,
   listAlbumMedia,
@@ -93,6 +93,8 @@ export function PartyQrCardPrintDialog({
   const [done, setDone] = useState<number | null>(null);
   // The keys a composition stands for, one per sheet: a retry keeps them.
   const pendingRef = useRef<{ fingerprint: string; keys: string[] } | null>(null);
+  // The line is fitted to its cell, as the renderer fits it: smaller, never cut.
+  const lineRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -186,6 +188,22 @@ export function PartyQrCardPrintDialog({
   const cardPx = stripWidthFraction() * PORTRAIT_WIDTH;
   const lineSize = `${(QR_CARD_LINE_FRACTION * Math.min(PORTRAIT_WIDTH, PORTRAIT_HEIGHT) / cardPx) * 100}cqw`;
 
+  useLayoutEffect(() => {
+    const el = lineRef.current;
+    if (!el) return undefined;
+    const fit = () => {
+      el.style.fontSize = lineSize;
+      const room = el.clientWidth;
+      const needed = el.scrollWidth;
+      if (needed > room && room > 0) el.style.fontSize = `calc(${lineSize} * ${room / needed})`;
+    };
+    fit();
+    let live = true;
+    // Measured again once the web fonts arrive: they set the real width.
+    void document.fonts?.ready.then(() => { if (live) fit(); });
+    return () => { live = false; };
+  }, [lineSize, locale, photos]);
+
   return (
     <Modal
       title={t('party.qrCard.title')}
@@ -227,7 +245,7 @@ export function PartyQrCardPrintDialog({
                 )}
               </div>
               <div className="party-qr-card-cell party-qr-card-code" style={codeCell}>
-                <span className="party-qr-card-line" style={{ fontSize: lineSize }} data-testid="party-qr-card-line">
+                <span ref={lineRef} className="party-qr-card-line" data-testid="party-qr-card-line">
                   {QR_CARD_LINES[locale]}
                 </span>
                 {qr && (
@@ -258,20 +276,23 @@ export function PartyQrCardPrintDialog({
           <div className="party-qr-card-side">
             <fieldset className="party-qr-card-photos">
               <legend>{t('party.qrCard.photo')}</legend>
-              {photos.map((item) => (
-                <label key={item.id} className={chosen === item.id ? 'is-chosen' : undefined}>
-                  <input
-                    type="radio"
-                    name="party-qr-card-photo"
-                    value={item.id}
-                    checked={chosen === item.id}
-                    disabled={sending}
-                    onChange={() => choose(item)}
-                    aria-label={item.displayName}
-                  />
-                  <img src={item.thumbnailUrl} alt="" loading="lazy" />
-                </label>
-              ))}
+              {/* The scrolling grid is its own box: a fieldset that scrolls lays its rows out unreliably. */}
+              <div className="party-qr-card-photo-grid" data-testid="party-qr-card-photos">
+                {photos.map((item) => (
+                  <label key={item.id} className={chosen === item.id ? 'is-chosen' : undefined}>
+                    <input
+                      type="radio"
+                      name="party-qr-card-photo"
+                      value={item.id}
+                      checked={chosen === item.id}
+                      disabled={sending}
+                      onChange={() => choose(item)}
+                      aria-label={item.displayName}
+                    />
+                    <img src={item.thumbnailUrl} alt="" loading="lazy" />
+                  </label>
+                ))}
+              </div>
             </fieldset>
 
             <label className="party-qr-card-sheets">

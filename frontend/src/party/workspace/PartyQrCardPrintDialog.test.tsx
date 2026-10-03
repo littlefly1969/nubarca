@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -13,6 +16,11 @@ import { QR_CARD_LINES } from '../../pages/partyPrintGeometry';
  * accepted are not printed twice.
  */
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+const dialogCss = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), 'PartyQrCardPrintDialog.css'), 'utf8');
+const rule = (selector: string) =>
+  dialogCss.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
 
 function photo(id: string): ImageMediaItem {
   return {
@@ -56,6 +64,22 @@ describe('PartyQrCardPrintDialog', () => {
     expect(await screen.findByRole('radio', { name: 'Foto p2' })).toBeChecked();
     expect(screen.getByTestId('party-qr-card-line')).toHaveTextContent(QR_CARD_LINES.it);
     expect(screen.getByText('Festa al mare', { selector: 'strong' })).toBeInTheDocument();
+  });
+
+  it('lays the photographs out one per square, each as tall as its own picture', async () => {
+    mount();
+    await screen.findByRole('radio', { name: 'Foto p2' });
+    const grid = screen.getByTestId('party-qr-card-photos');
+    expect(grid.querySelectorAll('label')).toHaveLength(3);
+    // The squares were drawn over one another: the square sat on the label with
+    // the picture at height 100%, and the scrolling fieldset squeezed the rows
+    // into its max-height. Now the picture carries the square and the grid
+    // scrolls in its own box.
+    expect(rule('.party-qr-card-photo-grid img')).toMatch(/aspect-ratio:\s*1/);
+    expect(rule('.party-qr-card-photo-grid img')).toMatch(/height:\s*auto/);
+    expect(rule('.party-qr-card-photo-grid label')).not.toMatch(/aspect-ratio/);
+    expect(rule('.party-qr-card-photo-grid')).toMatch(/overflow-y:\s*auto/);
+    expect(rule('.party-qr-card-photos')).not.toMatch(/max-height|overflow/);
   });
 
   it('without a cover in the album, starts from its first photograph', async () => {
