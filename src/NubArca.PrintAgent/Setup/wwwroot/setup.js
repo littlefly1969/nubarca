@@ -4,6 +4,12 @@
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var attempted = null;
+  var sending = false;
+  // What the box last said: whether the Wi-Fi can be configured now (setup
+  // mode or Ethernet), and whether the page is served over the setup network.
+  var wifiAvailable = true;
+  var onSetupNetwork = false;
+  var UNAVAILABLE = 'Wi-Fi configuration is unavailable while the box is using Wi-Fi.';
 
   var NETWORK = {
     'connected': 'Connected',
@@ -45,15 +51,41 @@
       : s.network === 'connected' ? 'Not reachable yet' : 'Waiting for network',
       s.nubarca === 'connected' ? 'ok' : '');
 
+    onSetupNetwork = s.network === 'access-point';
+    var available = s.wifiConfigurationAvailable === true;
+    var becameAvailable = available && !wifiAvailable;
+    wifiAvailable = available;
+    applyAvailability();
+    if (becameAvailable) refreshNetworks();
+
     var a = s.lastAttempt;
     if (a && a.outcome === 'failed' && (attempted === null || attempted === a.ssid)) {
       message('Connection to ' + a.ssid + ' failed. Check the password and try again.', 'bad');
+      busy(false);
+    } else if (a && a.outcome === 'connected' && attempted === a.ssid && sending) {
+      message('Connected to ' + a.ssid + '.', 'ok');
       busy(false);
     }
   }
 
   function message(text, tone) { show('message', text, tone); }
-  function busy(on) { $('submit').disabled = on; }
+
+  function busy(on) {
+    sending = on;
+    applyAvailability();
+  }
+
+  // The form, the list and the refresh button work only while the box can
+  // configure its Wi-Fi; otherwise they are disabled and say why.
+  function applyAvailability() {
+    $('wifi-unavailable').hidden = wifiAvailable;
+    $('rescan').disabled = !wifiAvailable;
+    $('ssid').disabled = !wifiAvailable;
+    $('password').disabled = !wifiAvailable;
+    $('submit').disabled = !wifiAvailable || sending;
+    var buttons = $('networks').getElementsByTagName('button');
+    for (var i = 0; i < buttons.length; i++) buttons[i].disabled = !wifiAvailable;
+  }
 
   function refreshStatus() {
     fetch('/setup/status', { cache: 'no-store' })
@@ -86,7 +118,8 @@
           li.appendChild(button);
           ul.appendChild(li);
         });
-        $('no-networks').hidden = list.length > 0;
+        $('no-networks').hidden = list.length > 0 || !wifiAvailable;
+        applyAvailability();
       })
       .catch(function () { $('no-networks').hidden = false; });
   }
@@ -109,8 +142,10 @@
       .then(function (r) {
         $('password').value = '';
         if (r.status === 202) {
-          message('Connecting to ' + ssid + '… The NubArca setup network will now close. '
-            + 'If it appears again, the connection failed: join it again and reopen this page.', 'ok');
+          message(onSetupNetwork
+            ? 'Connecting to ' + ssid + '… The NubArca setup network will now close. '
+              + 'If it appears again, the connection failed: join it again and reopen this page.'
+            : 'Connecting to ' + ssid + '… The box stays reachable over Ethernet meanwhile.', 'ok');
           return;
         }
         busy(false);
@@ -118,15 +153,20 @@
           invalid_ssid: 'That Wi-Fi name is not valid.',
           invalid_password: 'A Wi-Fi password has 8 to 63 characters.',
           busy: 'Already connecting. Wait a moment.',
-          not_in_setup_mode: 'The box is already connected to a network.'
+          unavailable: UNAVAILABLE
         };
         message(reasons[r.body && r.body.error] || 'The request was not accepted.', 'bad');
       })
       .catch(function () {
-        // The setup network closed before the answer arrived: that is the
-        // normal hand-off, not an error.
         $('password').value = '';
-        message('Connecting to ' + ssid + '… The NubArca setup network will now close.', 'ok');
+        if (onSetupNetwork) {
+          // The setup network closed before the answer arrived: that is the
+          // normal hand-off, not an error.
+          message('Connecting to ' + ssid + '… The NubArca setup network will now close.', 'ok');
+          return;
+        }
+        busy(false);
+        message('The request could not be sent. Try again.', 'bad');
       });
   });
 
