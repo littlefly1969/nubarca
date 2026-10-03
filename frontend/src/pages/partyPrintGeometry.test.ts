@@ -13,11 +13,14 @@ import {
   OVERLAY_HALO_BLUR_FRACTION, OVERLAY_HALO_OPACITY, OVERLAY_NUMBER_ROOM,
   PARTY_NAME_MAX_LENGTH, FOOTER_MAX_LENGTH,
   overlaySlotAspect, overlayTextSupport, printedLine,
+  QR_CARD_CELLS_PER_STRIP, QR_CARD_CODE_WIDTH_FRACTION, QR_CARD_LINE_FRACTION, QR_CARD_LINES,
+  qrCardCell, qrCardPhotoAspect,
 } from './partyPrintGeometry';
 
 /** Every constant this file mirrors, and where it is mirrored FROM. */
 const SERVER_GEOMETRY = 'src/NubArca.Api/Print/PartyPrintGeometry.cs';
 const SERVER_LIMITS = 'src/NubArca.Api/Domain/Print/PartyPrintProfile.cs';
+const SERVER_QR_CARD = 'src/NubArca.Api/Print/PartyQrCard.cs';
 
 describe('party print geometry', () => {
   it('holds the SAME numbers as the server renderer', async () => {
@@ -67,6 +70,14 @@ describe('party print geometry', () => {
     expect(constant('OverlayHaloBlurFraction')).toBe(OVERLAY_HALO_BLUR_FRACTION);
     expect(constant('OverlayHaloOpacity')).toBe(OVERLAY_HALO_OPACITY);
     expect(constant('PartyNameMaxLength')).toBe(PARTY_NAME_MAX_LENGTH);
+    expect(constant('QrCardCellsPerStrip')).toBe(QR_CARD_CELLS_PER_STRIP);
+    expect(constant('QrCardCodeWidthFraction')).toBe(QR_CARD_CODE_WIDTH_FRACTION);
+    expect(constant('QrCardLineFraction')).toBe(QR_CARD_LINE_FRACTION);
+    // The line over the code: the server's words, language for language.
+    const card = readFileSync(resolve(process.cwd(), '..', SERVER_QR_CARD), 'utf8');
+    for (const [locale, line] of Object.entries(QR_CARD_LINES)) {
+      expect(card).toContain(`["${locale}"] = "${line}"`);
+    }
     // The host's line has one limit, the domain's (PartyPrintLimits), which
     // the settings, the database column and the renderer all use.
     const limits = readFileSync(resolve(process.cwd(), '..', SERVER_LIMITS), 'utf8');
@@ -76,6 +87,24 @@ describe('party print geometry', () => {
     // the fixed band that replaced it: the support follows the words.
     expect(source).not.toContain('OverlayScrimStops');
     expect(source).not.toContain('OverlayTextSupportStartFraction');
+  });
+
+  it('sets the QR card as the twin strip with two cells, the photograph over the code', () => {
+    // The same columns as the twin strip, so the printer's cut falls in the gutter.
+    for (const strip of [0, 1]) {
+      const photo = qrCardCell(strip, 0);
+      const code = qrCardCell(strip, 1);
+      expect(photo.x).toBeCloseTo(stripSlot(strip, 0).x, 12);
+      expect(photo.width).toBeCloseTo(stripWidthFraction(), 12);
+      expect(photo.y).toBeCloseTo(STRIP_MARGIN_FRACTION, 12);
+      expect(code.y).toBeCloseTo(photo.y + photo.height + STRIP_SLOT_GAP_FRACTION, 12);
+      expect(code.y + code.height).toBeCloseTo(stripFooter(strip).y, 12);
+    }
+    // Nothing reaches the middle of the sheet, where the blade runs.
+    expect(qrCardCell(0, 0).x + qrCardCell(0, 0).width).toBeLessThan(0.5);
+    expect(qrCardCell(1, 0).x).toBeGreaterThan(0.5);
+    // A portrait cell: about 5:7.
+    expect(qrCardPhotoAspect()).toBeCloseTo(0.707, 2);
   });
 
   it('puts the title-on-the-photo crop on the whole sheet, with support only under the words', () => {

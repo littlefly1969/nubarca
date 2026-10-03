@@ -14,6 +14,7 @@ import { absoluteGuestUrl } from './PartyShareCard';
 import { usePartyApi } from './partyApi';
 import { Button, EmptyState, LinkRow, Notice, Panel, SectionHead, SwitchRow } from './ui';
 import { PartyTvTargets } from './PartyTvTargets';
+import { PartyQrCardPrintDialog } from './PartyQrCardPrintDialog';
 
 // "SCHERMI E STAMPA" — the party as it appears on something other than a phone.
 //
@@ -41,6 +42,7 @@ export function PartyScreensSection({
   const canPrint = perms.hasAll([PERMISSIONS.partyAccess, PERMISSIONS.partyPrint]);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [printingQr, setPrintingQr] = useState(false);
 
   const albumId = mainMediaSource(party)?.albumId ?? null;
   const partyUrl = albumParty?.partyMode ? albumParty.partyUrl : null;
@@ -137,6 +139,33 @@ export function PartyScreensSection({
           testId="party-print"
         >
           <PartyPrintSettings albumId={albumId} />
+          {/* The host's own sheet for the tables, on the printer chosen
+              above. An owner's: a collaborator runs the evening's printing,
+              not the host's photographs on paper. */}
+          {api.isOwner && (
+            <div className="pw-rows" data-testid="party-qr-card-row">
+              <h4>{t('party.qrCard.heading')}</h4>
+              <p className="pw-small pw-muted">{t('party.qrCard.note')}</p>
+              {partyUrl ? (
+                <div className="pw-panel-actions">
+                  <Button data-testid="party-qr-card-open" onClick={() => setPrintingQr(true)}>
+                    {t('party.qrCard.open')}
+                  </Button>
+                </div>
+              ) : (
+                <p className="pw-small pw-muted" data-testid="party-qr-card-closed">{t('party.qrCard.closed')}</p>
+              )}
+            </div>
+          )}
+          {printingQr && partyUrl && (
+            <PartyQrCardPrintDialog
+              albumId={albumId}
+              partyName={mainMediaSource(party)?.albumName ?? party.title}
+              partyUrl={partyUrl}
+              coverFileItemId={party.liveCoverFileItemId ?? party.invitationCoverFileItemId ?? null}
+              onClose={() => setPrintingQr(false)}
+            />
+          )}
         </Panel>
       ) : (
         <Panel title={t('party.screens.print')} testId="party-print-locked">
