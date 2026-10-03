@@ -51,6 +51,12 @@ is built is described by `ARCHITECTURE.md`.
   name's baseline), not in a corner. The number's measured width
   is reserved, so the host's line never meets it. The preview cuts the name as
   the renderer does and keeps room for `#9999`
+- Party QR card: the host prints the party's public QR for its tables from
+  the print settings — the twin strip's sheet and printer cut, a host's
+  photograph over the code in each strip, two identical cards per sheet
+  (`party-qr-card` jobs, `2x6x2`, owner only, 1–10 sheets as one keyed request
+  each). The code is built on the configured public origin, never the browsing
+  address, and is stored nowhere but on the sheet
 - Printer lending: an owner lends one printer (`PrinterShare`) to another
   account by email, with an optional single sheet ceiling per loan. Every
   "may this user print here?" question goes through `IPrinterAccess` (party
