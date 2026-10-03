@@ -139,13 +139,14 @@ job with `format_unsupported` and prints nothing else instead — the last line 
 defence, not the first. A guest who composed for one paper while the operator
 loaded another is told so, and nothing is printed or spent.
 
-Three job kinds distinguish the compositions:
+Three job kinds distinguish the guests' compositions, and a fourth is the host's:
 
 | Kind | Sheet | What comes out |
 |---|---|---|
 | `party-photo` | the loaded paper, following the photograph's own orientation unless the guest turns it | one framed photograph with the party footer — or, in the *On the photo* look, the untouched photograph to the edges with the party's name, host's line and number on it in white, black or red (over a faint support that starts just above the words) and the NubArca symbol just before the name on its line, chosen separately: the brand's light or dark flat mark in its own colours |
 | `party-grid4` | the loaded paper, as it is named: standing on 10×15 and 13×18, lying on 20×15 | **four** different photographs, two by two (1 top left, 2 top right, 3 and 4 below), each with its own crop, and one footer; nothing to cut |
 | `party-strip4` | 10×15 portrait, sent as `2x6x2` | the twin strip: **eight** different photographs as **two strips of four**, 1–4 on the left and 5–8 on the right, cut in two by the printer. It exists only on 10×15 and only on a printer that reports `2x6x2`; a printer that cannot cut has no strips at all, and no sheet carries cut marks |
+| `party-qr-card` | 10×15 portrait, sent as `2x6x2` | the **host's** QR card for the tables, from the party's print settings (*Stampa il QR*): the twin strip's sheet and cut with two cells per strip — one of the host's photographs over the party's public QR, the line "Inquadra ed entra nella festa" (in the host's language), the party's name and the wordmark, no number — so one sheet is two identical cards. Owner only, one sheet per request (`POST /api/albums/{albumId}/party-print/qr-card`, idempotent through `owner_photo_print_requests`), on the party's chosen printer, which must cut and have 10×15 in. The code carries the installation's `NUBARCA_PUBLIC_ORIGIN` (`Mail__PublicOrigin`), never the address the host browses from; without it the card is refused. The address is drawn on the sheet and kept in no job field or log. Renewing the party's link invalidates printed cards |
 
 Cutting is an extra on top of 10×15, never a substitute for it: a printer
 reporting only `2x6x2` opens no party printing at all. Operators sizing
