@@ -168,7 +168,7 @@ public sealed class NetworkProvisioningService : BackgroundService
         await _gate.WaitAsync(ct);
         try
         {
-            if (snapshot.Uplink is not null) MarkConnected(snapshot);
+            if (snapshot.Uplink is not null) MarkConnected(snapshot.Uplink!);
             else await OpenAccessPointAsync(snapshot, "no network after the grace period", ct);
         }
         finally { _gate.Release(); }
@@ -195,7 +195,7 @@ public sealed class NetworkProvisioningService : BackgroundService
                         // Ethernet plugged in, or NetworkManager found a network by
                         // itself: the setup network has nothing left to do.
                         await _network.StopAccessPointAsync(ct);
-                        MarkConnected(snapshot);
+                        MarkConnected(snapshot.Uplink!);
                     }
                     else if (!snapshot.AccessPointActive)
                     {
@@ -208,7 +208,7 @@ public sealed class NetworkProvisioningService : BackgroundService
                     break;
 
                 case ProvisioningMode.Disconnected:
-                    if (snapshot.Uplink is not null) MarkConnected(snapshot);
+                    if (snapshot.Uplink is not null) MarkConnected(snapshot.Uplink!);
                     else if (now >= _nextRetry) await OpenAccessPointAsync(snapshot, "retrying the setup network", ct);
                     break;
 
@@ -216,7 +216,7 @@ public sealed class NetworkProvisioningService : BackgroundService
                     if (snapshot.Uplink is not null)
                     {
                         if (_lostSince is not null) _logger.LogInformation("Network connected again.");
-                        MarkConnected(snapshot);
+                        MarkConnected(snapshot.Uplink!);
                     }
                     else
                     {
@@ -310,11 +310,15 @@ public sealed class NetworkProvisioningService : BackgroundService
             _logger.LogInformation("Wi-Fi connection attempt to {Ssid}.", ssid);
             await _network.StopAccessPointAsync(ct);
             var activated = await _network.ConnectAsync(snapshot.WifiInterface, ssid, password, ct);
-            var connected = activated ? await WaitForUplinkAsync(_timings.Verify, ct) : null;
-            if (connected is not null)
+            // Joined means THIS interface on THIS attempt's profile, with an
+            // address and a gateway — never that something else carries traffic.
+            var joined = activated
+                ? await WaitForWifiAsync(snapshot.WifiInterface, ssid, requireGateway: true, _timings.Verify, ct)
+                : null;
+            if (joined is not null)
             {
                 _logger.LogInformation("Wi-Fi connection succeeded: {Ssid}.", ssid);
-                MarkConnected(connected);
+                MarkConnected(new NetworkUplink(snapshot.WifiInterface, "wifi", ssid, joined.Address));
                 Finish(ssid, ConnectOutcome.Connected);
                 return;
             }
@@ -335,13 +339,37 @@ public sealed class NetworkProvisioningService : BackgroundService
         var connected = await WaitForUplinkAsync(_timings.Grace, ct);
         if (connected is not null)
         {
-            MarkConnected(connected);
+            MarkConnected(connected.Uplink!);
             return;
         }
         _retryInterval = TimeSpan.FromTicks(Math.Min(_retryInterval.Ticks * 2, _timings.MaxRetry.Ticks));
         await OpenAccessPointAsync(await _network.GetSnapshotAsync(ct), "no known network came back", ct);
     }
 
+    /// <summary>
+    /// Waits for <paramref name="wifiInterface"/> to be connected on this box's
+    /// own profile for <paramref name="ssid"/>, with an address — and, when
+    /// asked, a gateway. Any other uplink, or another Wi-Fi profile, is not it.
+    /// </summary>
+    private async Task<WifiClientState?> WaitForWifiAsync(string wifiInterface, string ssid, bool requireGateway,
+        TimeSpan within, CancellationToken ct)
+    {
+        var profile = NetworkManagerCli.ClientConnectionPrefix + ssid;
+        var deadline = DateTimeOffset.UtcNow + within;
+        while (true)
+        {
+            var state = await _network.GetWifiClientStateAsync(wifiInterface, ct);
+            if (state.Connected && state.ConnectionName == profile && state.Address is not null
+                && (!requireGateway || state.HasGateway))
+            {
+                return state;
+            }
+            if (DateTimeOffset.UtcNow >= deadline) return null;
+            await Task.Delay(_timings.Poll, ct);
+        }
+    }
+
+    /// <summary>Any usable network at all: what retrying the KNOWN networks waits for.</summary>
     private async Task<NetworkSnapshot?> WaitForUplinkAsync(TimeSpan within, CancellationToken ct)
     {
         var deadline = DateTimeOffset.UtcNow + within;
@@ -390,7 +418,7 @@ public sealed class NetworkProvisioningService : BackgroundService
         _logger.LogInformation("Setup network active: {Ssid}.", ssid);
     }
 
-    private void MarkConnected(NetworkSnapshot snapshot)
+    private void MarkConnected(NetworkUplink uplink)
     {
         var wasConnected = State.Mode == ProvisioningMode.Connected;
         _lostSince = null;
@@ -398,12 +426,11 @@ public sealed class NetworkProvisioningService : BackgroundService
         _nextRetry = DateTimeOffset.MaxValue;
         Update(s => s with
         {
-            Mode = ProvisioningMode.Connected, ManagerAvailable = true, Uplink = snapshot.Uplink,
+            Mode = ProvisioningMode.Connected, ManagerAvailable = true, Uplink = uplink,
             AccessPointAddress = null,
         });
         if (!wasConnected)
-            _logger.LogInformation("Network connected: {Type} {Name}.",
-                snapshot.Uplink!.Type, snapshot.Uplink.Name ?? snapshot.Uplink.Device);
+            _logger.LogInformation("Network connected: {Type} {Name}.", uplink.Type, uplink.Name ?? uplink.Device);
     }
 
     private void MarkDisconnected()

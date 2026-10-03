@@ -136,6 +136,45 @@ public sealed class NetworkProvisioningTests
     }
 
     [Fact]
+    public async Task From_Setup_Mode_Success_Means_The_Requested_Wifi_Profile_Itself()
+    {
+        // T8: nmcli reports the join, but the radio ends up on ANOTHER of the
+        // box's profiles — and meanwhile a cable is plugged in. Neither is the
+        // network the person chose.
+        var network = new FakeNetworkManager
+        {
+            WifiAfterJoin = _ => new WifiClientState(true, "nubarca-wifi-Home", "192.0.2.30", true),
+        };
+        var service = Service(network);
+        await service.BootAsync(default);
+        network.Uplink = Ethernet;
+
+        Assert.Equal(ConnectRequest.Accepted, service.RequestConnect("Studio", "correct-horse"));
+        await service.PendingConnect;
+
+        Assert.Equal(ConnectOutcome.Failed, service.State.LastAttempt?.Outcome);
+        Assert.Equal("Studio", network.LastForgotten);
+    }
+
+    [Fact]
+    public async Task From_Setup_Mode_A_Wifi_Without_A_Gateway_Is_Not_Joined()
+    {
+        var network = new FakeNetworkManager
+        {
+            WifiAfterJoin = ssid => new WifiClientState(true, NetworkManagerCli.ClientConnectionPrefix + ssid, "192.0.2.20", false),
+        };
+        var service = Service(network);
+        await service.BootAsync(default);
+
+        Assert.Equal(ConnectRequest.Accepted, service.RequestConnect("Studio", "correct-horse"));
+        await service.PendingConnect;
+
+        Assert.Equal(ConnectOutcome.Failed, service.State.LastAttempt?.Outcome);
+        Assert.Equal(ProvisioningMode.AccessPoint, service.State.Mode);
+        Assert.True(network.AccessPointActive);
+    }
+
+    [Fact]
     public async Task Only_One_Attempt_At_A_Time_And_Only_In_Setup_Mode()
     {
         var connected = Service(new FakeNetworkManager { Uplink = HomeWifi });
