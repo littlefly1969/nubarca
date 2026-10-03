@@ -18,12 +18,26 @@ public sealed record NetworkSnapshot(
 }
 
 /// <summary>
+/// The Wi-Fi interface as a CLIENT, on its own — never inferred from whatever
+/// else carries traffic. A Wi-Fi attempt succeeded only when THIS says so for
+/// the profile the attempt created: an Ethernet cable must not make a wrong
+/// Wi-Fi password look right.
+/// </summary>
+public sealed record WifiClientState(bool Connected, string? ConnectionName, string? Address, bool HasGateway)
+{
+    public static readonly WifiClientState Disconnected = new(false, null, null, false);
+}
+
+/// <summary>
 /// NetworkManager, reduced to what the Print Box needs. The ONLY implementation
 /// that touches the system is <see cref="NetworkManagerCli"/>; tests use a fake.
 /// </summary>
 public interface INetworkManager
 {
     Task<NetworkSnapshot> GetSnapshotAsync(CancellationToken cancellationToken);
+
+    /// <summary>What <paramref name="wifiInterface"/> itself is connected to, as a client.</summary>
+    Task<WifiClientState> GetWifiClientStateAsync(string wifiInterface, CancellationToken cancellationToken);
 
     /// <summary>Visible networks, strongest first, one entry per SSID.</summary>
     Task<IReadOnlyList<WifiNetwork>> ScanAsync(string wifiInterface, CancellationToken cancellationToken);
