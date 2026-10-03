@@ -141,12 +141,17 @@ export function gridSlotAspect(paper: PaperSize): number {
 
 /** Inset of the symbol and the text from the edges, short-edge fraction. */
 export const OVERLAY_MARGIN_FRACTION = 0.06;
-/** Height of the NubArca symbol, top-left, short-edge fraction. */
-export const OVERLAY_SYMBOL_FRACTION = 0.105;
+/**
+ * Height of the NubArca symbol, short-edge fraction. It stands on the party's
+ * name line, just before the name, on the name's baseline.
+ */
+export const OVERLAY_SYMBOL_FRACTION = 0.085;
+/** The space between the symbol and the party's name, short-edge fraction. */
+export const OVERLAY_SYMBOL_GAP_FRACTION = 0.02;
 /** Type size of the party's name, short-edge fraction. */
-export const OVERLAY_TITLE_FRACTION = 0.077;
+export const OVERLAY_TITLE_FRACTION = 0.069;
 /** Type size of the host's line. */
-export const OVERLAY_LINE_FRACTION = 0.036;
+export const OVERLAY_LINE_FRACTION = 0.0325;
 /** Type size of the guest's number, a touch above the host's line. */
 export const OVERLAY_NUMBER_FRACTION = 0.044;
 /**
@@ -221,7 +226,9 @@ export const STRIP_MARGIN_FRACTION = 0.035;
 export const STRIP_SLOT_GAP_FRACTION = 0.012;
 export const STRIP_FOOTER_FRACTION = 0.075;
 /** The wordmark on a strip, as a fraction of the strip's width: as large as its row allows. */
-export const STRIP_WORDMARK_WIDTH_FRACTION = 0.27;
+export const STRIP_WORDMARK_WIDTH_FRACTION = 0.31;
+/** The wordmark under a photograph or four, as a fraction of the footer's width. */
+export const FOOTER_WORDMARK_WIDTH_FRACTION = 0.23;
 
 /** Width of one strip, in sheet fractions. */
 export function stripWidthFraction(): number {

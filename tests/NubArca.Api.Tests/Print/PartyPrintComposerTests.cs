@@ -250,12 +250,11 @@ public sealed class PartyPrintComposerTests
             [new PartyPrintPhoto(photo, 0, 0, 1, 1)], name, footer, number,
             Overlay: new PartyPrintOverlay(text, logo));
 
-    private static Rectangle SymbolBox(Image<Rgba32> sheet)
+    /// <summary>The square the symbol stands in: on the name's line, just before the name.</summary>
+    private static Rectangle SymbolBox(PartyPrintComposition composition, Image<Rgba32> sheet)
     {
-        var shortEdge = Math.Min(sheet.Width, sheet.Height);
-        var margin = (int)Math.Round(PartyPrintGeometry.OverlayMarginFraction * shortEdge);
-        var size = (int)Math.Round(PartyPrintGeometry.OverlaySymbolFraction * shortEdge);
-        return new Rectangle(margin, margin, size, size);
+        var symbol = new PartyPrintComposer().LayoutOverlayText(composition, sheet.Width, sheet.Height).Symbol;
+        return new Rectangle((int)symbol.X, (int)symbol.Y, (int)symbol.Width, (int)symbol.Height);
     }
 
     private static int Distance(Rgba32 a, Rgba32 b) =>
@@ -300,7 +299,7 @@ public sealed class PartyPrintComposerTests
         using var sheet = Image.Load<Rgba32>(await composer.RenderAsync(composition, default));
         Assert.Equal((original.Width, original.Height), (sheet.Width, sheet.Height));
 
-        var symbol = SymbolBox(sheet);
+        var symbol = SymbolBox(composition, sheet);
         var supportTop = (int)PartyPrintComposer.OverlayTextSupportTop(
             composer.LayoutOverlayText(composition, sheet.Width, sheet.Height), sheet.Width, sheet.Height);
 
@@ -355,8 +354,9 @@ public sealed class PartyPrintComposerTests
         foreach (var (top, layout) in new[] { bare, withLine, longest })
         {
             var boxes = new[] { layout.Title, layout.Footer, layout.Number }
-                .Where(x => x is not null).Select(x => x!.Box).ToList();
-            // Every word inside it, with the padding above the highest...
+                .Where(x => x is not null).Select(x => x!.Box).Append(layout.Symbol).ToList();
+            // Every word — and the symbol on the name's line — inside it, with
+            // the padding above the highest...
             foreach (var box in boxes) Assert.True(top <= box.Top - padding + 0.5f, $"{box} is outside the support");
             // ...and not a line more: it starts exactly one padding above the text.
             Assert.Equal(boxes.Min(b => b.Top) - padding, top, 1.0);
@@ -413,7 +413,7 @@ public sealed class PartyPrintComposerTests
 
         // Above its top the grey is grey everywhere but the symbol: no letter,
         // and no halo, escapes the support.
-        var symbol = SymbolBox(sheet);
+        var symbol = SymbolBox(composition, sheet);
         for (var y = 0; y < (int)start - 1; y += 2)
             for (var px = 0; px < sheet.Width; px += 2)
                 if (!symbol.Contains(px, y))
@@ -450,7 +450,7 @@ public sealed class PartyPrintComposerTests
         // brand's light mark (Cloud White, Cyan, Electric Blue) or its dark one
         // (Midnight Navy, Electric Blue) — coloured, never one flat fill — and
         // never red: red is a colour for words on a photograph, not the brand's.
-        var symbol = SymbolBox(sheet);
+        var symbol = SymbolBox(composition, sheet);
         Assert.True(Any(sheet, symbol, IsElectricBlue), $"the {logo} symbol lost its Electric Blue");
         if (logo == PartyPrintOverlayLogo.Light)
         {
@@ -474,28 +474,45 @@ public sealed class PartyPrintComposerTests
     {
         // Not the mark's outline refilled with one colour: the approved file for
         // the treatment, scaled once, laid on the photograph as it is.
-        using var sheet = Image.Load<Rgba32>(await new PartyPrintComposer().RenderAsync(
-            OnThePhoto(SheetPhoto("grey"), PartyPrintOverlayText.White, logo), default));
-        var box = SymbolBox(sheet);
-        using var expected = new Image<Rgba32>(box.Width, box.Height, new Rgba32(128, 128, 128));
-        using (var mark = Image.Load<Rgba32>(Path.Combine(
-            AppContext.BaseDirectory, "Assets", "brand", PartyPrintComposer.SymbolFile(logo))))
+        var composition = OnThePhoto(SheetPhoto("grey"), PartyPrintOverlayText.White, logo);
+        using var sheet = Image.Load<Rgba32>(await new PartyPrintComposer().RenderAsync(composition, default));
+        var box = SymbolBox(composition, sheet);
+        using var mark = Image.Load<Rgba32>(Path.Combine(
+            AppContext.BaseDirectory, "Assets", "brand", PartyPrintComposer.SymbolFile(logo)));
+        mark.Mutate(x => x.Resize(new ResizeOptions
         {
-            mark.Mutate(x => x.Resize(new ResizeOptions
-            {
-                Size = new Size(box.Width, box.Height),
-                Sampler = KnownResamplers.Lanczos3,
-            }));
-            expected.Mutate(x => x.DrawImage(mark, new Point(0, 0), 1f));
-        }
+            Size = new Size(box.Width, box.Height),
+            Sampler = KnownResamplers.Lanczos3,
+        }));
 
+        // The mark stands on the words' faint support now, so only its own
+        // opaque pixels are compared — those are the artwork, whatever is
+        // behind — and only away from its edges, where a JPEG rings on line art.
+        bool Solid(int x, int y)
+        {
+            for (var dy = -1; dy <= 1; dy++)
+                for (var dx = -1; dx <= 1; dx++)
+                {
+                    int px = x + dx, py = y + dy;
+                    if (px < 0 || py < 0 || px >= box.Width || py >= box.Height || mark[px, py].A < 250) return false;
+                }
+            return true;
+        }
         long total = 0;
+        var compared = 0;
         for (var y = 0; y < box.Height; y++)
             for (var x = 0; x < box.Width; x++)
-                total += Distance(sheet[box.X + x, box.Y + y], expected[x, y]);
-        var mean = total / (double)(box.Width * box.Height);
-        // Only the JPEG's rounding between the two.
-        Assert.True(mean < 3, $"the {logo} symbol differs from the artwork by {mean:F1} on average");
+            {
+                var artwork = mark[x, y];
+                if (!Solid(x, y)) continue;
+                total += Distance(sheet[box.X + x, box.Y + y], artwork);
+                compared++;
+            }
+        Assert.True(compared > 300, $"only {compared} solid pixels in the mark");
+        var mean = total / (double)compared;
+        // Only the JPEG's rounding between the two — a few levels on thin
+        // lines; a refilled or recoloured mark is off by tens.
+        Assert.True(mean < 6, $"the {logo} symbol differs from the artwork by {mean:F1} on average");
     }
 
     [Theory]
@@ -658,17 +675,130 @@ public sealed class PartyPrintComposerTests
         Assert.True(ink.Count >= 2, $"expected the wordmark and the number, found {ink.Count} marks");
         var (wordmark, number) = (ink[0], ink[^1]);
 
-        // The wordmark stands as wide as the row lets it: past the old 120px.
-        Assert.InRange(wordmark.Right - wordmark.Left, 0.25 * stripW, 0.28 * stripW);
-        // The number is a size up (0.34 → 0.39 of the row): its digits stand
-        // about 13px of a 51px row, where they stood about 11 — and well clear
-        // of the wordmark.
-        Assert.True(number.Bottom - number.Top >= 0.24 * footH * 0.38,
+        // The wordmark stands as wide as the row lets it: past the old 120px,
+        // and a touch past the 0.27 it once was.
+        Assert.InRange(wordmark.Right - wordmark.Left, 0.29 * stripW, 0.32 * stripW);
+        // The number is half again its old size (0.39 → 0.585 of the row): its
+        // digits stand about 21px of a 51px row, where they stood about 13 —
+        // and well clear of the wordmark.
+        Assert.True(number.Bottom - number.Top >= 0.36 * footH * 0.38,
             $"the number's digits are {number.Bottom - number.Top}px in a {footH * 0.38:F0}px row");
         Assert.True(number.Left - wordmark.Right > 100, "the number crowds the wordmark");
         // Both inside the strip's own foot.
         Assert.True(number.Right < footX + stripW && wordmark.Left >= footX);
         Assert.True(Math.Max(number.Bottom, wordmark.Bottom) < footBottom);
+    }
+
+    [Theory]
+    [InlineData(PartyPrintTheme.Pure, true)]
+    [InlineData(PartyPrintTheme.Event, true)]
+    [InlineData(PartyPrintTheme.Midnight, false)]
+    public void Under_A_Photograph_The_Number_Is_Half_Again_And_The_Words_A_Touch_Larger(
+        PartyPrintTheme theme, bool hasFooter)
+    {
+        // The same band measured as a photograph's or four photographs' foot,
+        // and as a strip's.
+        const int band = 204;
+        var photo = PartyPrintComposer.MeasureFooter(band, theme, hasFooter, strip: false);
+        var strip = PartyPrintComposer.MeasureFooter(band, theme, hasFooter, strip: true);
+        var markRow = band * 0.38f;
+        var nameShare = theme == PartyPrintTheme.Event ? 0.78f : 0.62f;
+
+        // The number: half again what it was, on every sheet (0.34 and 0.39 of the row).
+        Assert.Equal(markRow * 0.34f * 1.5f, photo.NumberSize, 0.01f);
+        Assert.Equal(markRow * 0.39f * 1.5f, strip.NumberSize, 0.01f);
+        // The words: a touch larger under a photograph, unchanged on a strip.
+        Assert.Equal(photo.NameBand * nameShare * 1.12f, photo.NameSize, 0.01f);
+        Assert.Equal(strip.NameBand * nameShare, strip.NameSize, 0.01f);
+        if (hasFooter)
+        {
+            Assert.Equal((photo.TextBand - photo.NameBand) * 0.52f * 1.12f, photo.LineSize, 0.01f);
+            Assert.Equal((strip.TextBand - strip.NameBand) * 0.52f, strip.LineSize, 0.01f);
+        }
+        // Still inside their bands.
+        Assert.True(photo.NameSize < photo.NameBand && photo.NumberSize < photo.MarkBand);
+        // The wordmark a little larger everywhere.
+        Assert.Equal(0.23, photo.WordmarkWidthFraction);
+        Assert.Equal(0.31, strip.WordmarkWidthFraction);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Under_A_Photograph_The_Wordmark_And_The_Number_Sign_The_Foot_Larger(bool portrait)
+    {
+        using var sheet = Image.Load<Rgba32>(await new PartyPrintComposer().RenderAsync(
+            Composition(PartyPrintProducts.Photo, PartyPrintTheme.Pure, 1) with
+            {
+                PublicSequence = 1000,
+                Orientation = portrait ? PartyPrintOrientation.Portrait : PartyPrintOrientation.Landscape,
+            }, default));
+        var (w, h) = (sheet.Width, sheet.Height);
+        var (fx, fy, fw, fh) = PartyPrintGeometry.PhotoFooter(PrintPapers.Photo10x15, portrait);
+        var left = (int)(fx * w);
+        var right = (int)((fx + fw) * w);
+        var bottom = (int)((fy + fh) * h);
+        var rowTop = (int)(bottom - (fh * h * 0.38));
+        var paper = sheet[left + ((right - left) / 2), bottom - 2];
+
+        // Runs of ink a lockup's own gap apart are one mark: the symbol and
+        // "NubArca" stand further apart here than on a strip.
+        var ink = new List<(int Left, int Right, int Top, int Bottom)>();
+        for (var x = left; x < right; x++)
+        {
+            int top = int.MaxValue, low = -1;
+            for (var y = rowTop; y < bottom; y++)
+                if (Distance(sheet[x, y], paper) > 48) { top = Math.Min(top, y); low = Math.Max(low, y); }
+            if (low < 0) continue;
+            if (ink.Count > 0 && x - ink[^1].Right <= 30)
+            {
+                var last = ink[^1];
+                ink[^1] = (last.Left, x, Math.Min(last.Top, top), Math.Max(last.Bottom, low));
+            }
+            else ink.Add((x, x, top, low));
+        }
+        var (wordmark, number) = (ink[0], ink[^1]);
+        var row = fh * h * 0.38;
+        // The wordmark: past the quiet 0.20 of the foot it was (or, lying down,
+        // the old 80% of the row's height).
+        Assert.True(wordmark.Right - wordmark.Left > (portrait ? 0.21 * (right - left) : 230),
+            $"the wordmark is {wordmark.Right - wordmark.Left}px wide");
+        // The number's digits: about a third of the row, where they were about a quarter.
+        Assert.True(number.Bottom - number.Top >= 0.33 * row,
+            $"the number's digits are {number.Bottom - number.Top}px in a {row:F0}px row");
+        Assert.True(number.Left - wordmark.Right > 300, "the number crowds the wordmark");
+    }
+
+    [Theory]
+    [InlineData(true, "Una notte da ricordare")]
+    [InlineData(false, null)]
+    public void On_The_Photo_The_Symbol_Stands_Just_Before_The_Name_On_Its_Line(bool portrait, string? footer)
+    {
+        var composer = new PartyPrintComposer();
+        var (w, h) = Sheet(portrait);
+        var shortEdge = Math.Min(w, h);
+        var layout = composer.LayoutOverlayText(OnThePhoto([], PartyPrintOverlayText.White,
+            PartyPrintOverlayLogo.Light, footer, 27, "Giulia & Matteo"), w, h);
+        var margin = PartyPrintGeometry.OverlayMarginFraction * shortEdge;
+        var symbol = layout.Symbol;
+        var name = layout.Title.Box;
+
+        // Not in the corner any more: at the left margin, down on the name's line.
+        Assert.Equal(margin, symbol.Left, 1.0);
+        Assert.True(symbol.Top > h / 2f, "the symbol is still at the top of the sheet");
+        // Just before the name, by the gap, and never touching it.
+        Assert.InRange(name.Left - symbol.Right, 0.5 * PartyPrintGeometry.OverlaySymbolGapFraction * shortEdge,
+            1.5 * PartyPrintGeometry.OverlaySymbolGapFraction * shortEdge);
+        // On the name's line: standing on its baseline, as tall as the line's capitals and a little more.
+        Assert.InRange(symbol.Bottom, name.Bottom - (0.02f * shortEdge), name.Bottom + 1);
+        Assert.True(symbol.Top < name.Top, "the symbol is shorter than the name's capitals");
+        // Never into the host's line under it, nor into the number.
+        if (layout.Footer is { } line) Assert.True(symbol.Bottom < line.Box.Top);
+        Assert.True(symbol.Right < layout.Number!.Box.Left);
+        // The words a touch smaller than they were (0.077 and 0.036); the number as it was.
+        Assert.Equal(0.069, PartyPrintGeometry.OverlayTitleFraction);
+        Assert.Equal(0.0325, PartyPrintGeometry.OverlayLineFraction);
+        Assert.Equal(0.044, PartyPrintGeometry.OverlayNumberFraction);
     }
 
     // --- Papers and four photographs -------------------------------------------

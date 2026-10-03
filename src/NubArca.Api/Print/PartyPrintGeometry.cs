@@ -84,16 +84,21 @@ public static class PartyPrintGeometry
     public const double OverlayMarginFraction = 0.06;
 
     /// <summary>
-    /// Height of the NubArca symbol, top-left, short-edge fraction. A quiet
-    /// signature: the photograph is the subject (it was 0.12).
+    /// Height of the NubArca symbol, short-edge fraction. It stands on the
+    /// party's name line, just before the name, sitting on the name's baseline
+    /// — one signature with the words rather than a mark in the corner (it was
+    /// 0.105, alone at the top left).
     /// </summary>
-    public const double OverlaySymbolFraction = 0.105;
+    public const double OverlaySymbolFraction = 0.085;
 
-    /// <summary>Type size of the party's name, bottom-left, short-edge fraction (it was 0.085).</summary>
-    public const double OverlayTitleFraction = 0.077;
+    /// <summary>The space between the symbol and the party's name, short-edge fraction.</summary>
+    public const double OverlaySymbolGapFraction = 0.02;
 
-    /// <summary>Type size of the host's line under the name.</summary>
-    public const double OverlayLineFraction = 0.036;
+    /// <summary>Type size of the party's name, bottom-left, short-edge fraction (it was 0.077, before that 0.085).</summary>
+    public const double OverlayTitleFraction = 0.069;
+
+    /// <summary>Type size of the host's line under the name (it was 0.036).</summary>
+    public const double OverlayLineFraction = 0.0325;
 
     /// <summary>
     /// Type size of the guest's number: a touch above the host's line, because
@@ -225,9 +230,17 @@ public static class PartyPrintGeometry
     /// Width of the wordmark on a strip, as a fraction of the strip's width —
     /// as large as its signature row lets it stand. At the brand's 120px
     /// minimum the symbol inside the lockup was ~37px, too small for the ark to
-    /// resolve on paper, and the mark printed as a smudge.
+    /// resolve on paper, and the mark printed as a smudge (0.27, then a touch
+    /// larger with the row's height share).
     /// </summary>
-    public const double StripWordmarkWidthFraction = 0.27;
+    public const double StripWordmarkWidthFraction = 0.31;
+
+    /// <summary>
+    /// Width of the wordmark under a single photograph or four, as a fraction
+    /// of the footer's width: a signature a little more present than the quiet
+    /// 0.20 it was, still the smallest thing on the sheet beside the number.
+    /// </summary>
+    public const double FooterWordmarkWidthFraction = 0.23;
 
     /// <summary>Width of one strip, in sheet fractions.</summary>
     public static double StripWidthFraction =>

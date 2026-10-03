@@ -122,6 +122,16 @@ public sealed class PartyPrintComposer
     /// <summary>Minimum rendered wordmark width, from the brand guidelines.</summary>
     private const int BrandMinWordmarkWidth = 120;
 
+    /// <summary>How much of the signature row the wordmark may stand in (it was 0.80).</summary>
+    private const double WordmarkRowShare = 0.92;
+
+    /// <summary>The guest's number, as a share of the signature row's height (they were 0.34 and 0.39).</summary>
+    private const float FooterNumberRowShare = 0.51f;
+    private const float StripNumberRowShare = 0.585f;
+
+    /// <summary>The party's name and the host's line under a photograph or four, against their bands (a strip: 1).</summary>
+    private const float FooterTextScale = 1.12f;
+
     private readonly FontFamily _display;
     private readonly FontFamily _ui;
     private readonly string _assetRoot;
@@ -298,8 +308,8 @@ public sealed class PartyPrintComposer
 
     /// <summary>
     /// The photograph to the edges of the sheet, exactly as cropped — no tint,
-    /// no scrim, no fade — with the NubArca symbol top-left and the party's name
-    /// bottom-left printed ON it. Legibility is helped only where the words are:
+    /// no scrim, no fade — with the party's name bottom-left printed ON it and
+    /// the NubArca symbol just before the name, on its line. Legibility is helped only where the words are:
     /// a faint gradient across the last fifth of the sheet and a soft halo round
     /// the letters. The photograph stays the subject.
     /// </summary>
@@ -330,11 +340,10 @@ public sealed class PartyPrintComposer
             Palette(PartyPrintTheme.Pure), band: White);
         DrawOverlayTextSupport(sheet, OverlayTextSupportTop(layout, w, h), support);
 
-        var shortEdge = Math.Min(w, h);
-        var margin = (int)Math.Round(PartyPrintGeometry.OverlayMarginFraction * shortEdge);
-        DrawSymbol(sheet, overlay.Logo, new Point(margin, margin),
-            (int)Math.Round(PartyPrintGeometry.OverlaySymbolFraction * shortEdge));
         DrawOverlayText(sheet, layout, ink, support);
+        // After the words: the name's halo reaches toward its neighbour, and
+        // the brand mark is laid over it exactly as shipped, never veiled.
+        DrawSymbol(sheet, overlay.Logo, new Point((int)layout.Symbol.X, (int)layout.Symbol.Y), (int)layout.Symbol.Width);
         return sheet;
     }
 
@@ -353,8 +362,10 @@ public sealed class PartyPrintComposer
     /// </summary>
     internal static float OverlayTextSupportTop(OverlayTextLayout layout, int w, int h)
     {
-        var textTop = new[] { layout.Title, layout.Footer, layout.Number }
-            .Where(x => x is not null).Min(x => x!.Box.Top);
+        // The symbol stands on the name's line now: the support begins over
+        // whichever is higher, the words or the mark beside them.
+        var textTop = Math.Min(layout.Symbol.Top, new[] { layout.Title, layout.Footer, layout.Number }
+            .Where(x => x is not null).Min(x => x!.Box.Top));
         var padding = (float)(PartyPrintGeometry.OverlayTextSupportPaddingFraction * Math.Min(w, h));
         return Math.Max(0f, textTop - padding);
     }
@@ -398,9 +409,12 @@ public sealed class PartyPrintComposer
         sheet.Mutate(x => x.DrawImage(mark, at, 1f));
     }
 
-    /// <summary>Where the words go and how big they are: measured, so nothing meets.</summary>
+    /// <summary>
+    /// Where the words go and how big they are — measured, so nothing meets —
+    /// and the square the symbol stands in, just before the name.
+    /// </summary>
     internal sealed record OverlayTextLayout(
-        OverlayWord Title, OverlayWord? Footer, OverlayWord? Number);
+        OverlayWord Title, OverlayWord? Footer, OverlayWord? Number, RectangleF Symbol);
 
     /// <summary>
     /// One run of text: its font, the bottom origin it is drawn from (right
@@ -426,10 +440,12 @@ public sealed class PartyPrintComposer
     }
 
     /// <summary>
-    /// The name bottom-left, the host's line under it, and the number
-    /// bottom-right on the same line as the host's line. The number's measured
-    /// width — plus a gap — is RESERVED before the line is laid out, and the line
-    /// shrinks, then shortens, to fit what is left, so the two can never touch.
+    /// The name bottom-left with the NubArca symbol just before it on the same
+    /// line, the host's line under them, and the number bottom-right on the
+    /// same line as the host's line. The number's measured width — plus a gap —
+    /// is RESERVED before the line is laid out, and the line shrinks, then
+    /// shortens, to fit what is left, so the two can never touch; the name does
+    /// the same in what the symbol leaves it.
     /// </summary>
     internal OverlayTextLayout LayoutOverlayText(PartyPrintComposition composition, int w, int h)
     {
@@ -463,13 +479,21 @@ public sealed class PartyPrintComposer
         // number leaves when it shares the bottom line.
         var lineTop = Math.Min(footer?.Box.Top ?? bottom, number?.Box.Top ?? bottom);
         var nameBottom = footer is null ? bottom : lineTop - (lineSize * 0.45f);
-        var nameAvailable = w - (2 * margin) - (footer is null ? reserved : 0f);
+        // The symbol takes the head of the name's line; the name starts after it.
+        var symbolSize = (float)Math.Round(PartyPrintGeometry.OverlaySymbolFraction * shortEdge);
+        var nameLeft = margin + symbolSize + (float)Math.Round(PartyPrintGeometry.OverlaySymbolGapFraction * shortEdge);
+        var nameAvailable = w - margin - nameLeft - (footer is null ? reserved : 0f);
         var titleSize = (float)(PartyPrintGeometry.OverlayTitleFraction * shortEdge);
         var (name, titleFont) = FitLine(
             Truncate(composition.PartyName, PartyPrintGeometry.PartyNameMaxLength), _display, FontStyle.Bold,
             titleSize, 12f, nameAvailable);
-        var title = OverlayWord.At(name, titleFont, new PointF(margin, nameBottom), alignRight: false);
-        return new OverlayTextLayout(title, footer, number);
+        var title = OverlayWord.At(name, titleFont, new PointF(nameLeft, nameBottom), alignRight: false);
+        // On the name's baseline — measured on a capital in the name's own
+        // font, so a name with descenders does not move it — like a letter of
+        // the line, never hanging into the gap above the host's line.
+        var baseline = TextMeasurer.MeasureBounds("H", title.Options()).Bottom;
+        var symbol = new RectangleF(margin, baseline - symbolSize, symbolSize, symbolSize);
+        return new OverlayTextLayout(title, footer, number, symbol);
     }
 
     /// <summary>
@@ -611,18 +635,13 @@ public sealed class PartyPrintComposer
         // wordmark ended up drawn on top of each other.
         var footer = Truncate(composition.FooterText ?? string.Empty, Domain.Print.PartyPrintLimits.FooterMaxLength);
         var hasFooter = footer.Length > 0;
+        var sizes = MeasureFooter(area.Height, composition.Theme, hasFooter, strip);
 
-        var markBand = area.Height * 0.38f;
-        var textBand = area.Height - markBand;
-        var nameBand = hasFooter ? textBand * 0.58f : textBand;
-
-        var nameSize = Math.Max(
-            12f, nameBand * (composition.Theme == PartyPrintTheme.Event ? 0.78f : 0.62f));
-        var nameFont = _display.CreateFont(nameSize, FontStyle.Bold);
+        var nameFont = _display.CreateFont(sizes.NameSize, FontStyle.Bold);
         sheet.Mutate(x => x.DrawText(
             new RichTextOptions(nameFont)
             {
-                Origin = new PointF(area.X + (area.Width / 2f), area.Y + (nameBand / 2f)),
+                Origin = new PointF(area.X + (area.Width / 2f), area.Y + (sizes.NameBand / 2f)),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
             },
@@ -630,13 +649,13 @@ public sealed class PartyPrintComposer
 
         if (hasFooter)
         {
-            var footBand = textBand - nameBand;
-            var footFont = _ui.CreateFont(Math.Max(9f, footBand * 0.52f), FontStyle.Regular);
+            var footBand = sizes.TextBand - sizes.NameBand;
+            var footFont = _ui.CreateFont(sizes.LineSize, FontStyle.Regular);
             sheet.Mutate(x => x.DrawText(
                 new RichTextOptions(footFont)
                 {
                     Origin = new PointF(
-                        area.X + (area.Width / 2f), area.Y + nameBand + (footBand / 2f)),
+                        area.X + (area.Width / 2f), area.Y + sizes.NameBand + (footBand / 2f)),
                     HorizontalAlignment = HorizontalAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center,
                 },
@@ -647,13 +666,38 @@ public sealed class PartyPrintComposer
         // baseline so the foot of the sheet reads as one line rather than two
         // things that happen to be near each other.
         var markRow = new Rectangle(
-            area.X, area.Y + (int)textBand, area.Width, (int)markBand);
-        // A strip's row is a third as wide as a photograph's, so there the
-        // wordmark stands as tall as the row allows and the number is set a
-        // size up: at the photograph's proportions both came out too small to
-        // read — the symbol a smudge, the number squinted at.
-        DrawWordmark(sheet, palette, markRow, strip ? PartyPrintGeometry.StripWordmarkWidthFraction : 0.20);
-        DrawSequence(sheet, palette, markRow, composition.PublicSequence, strip ? 0.39f : 0.34f);
+            area.X, area.Y + (int)sizes.TextBand, area.Width, (int)sizes.MarkBand);
+        DrawWordmark(sheet, palette, markRow, sizes.WordmarkWidthFraction);
+        DrawSequence(sheet, palette, markRow, composition.PublicSequence, sizes.NumberSize);
+    }
+
+    /// <summary>How the footer band is shared out, and how large each thing in it is drawn, in pixels.</summary>
+    internal sealed record FooterSizes(
+        float TextBand, float NameBand, float MarkBand, float NameSize, float LineSize,
+        double WordmarkWidthFraction, float NumberSize);
+
+    /// <summary>
+    /// The footer under the photographs, for a band <paramref name="height"/>
+    /// tall: the words above, the signature row below (38%). A strip's row is a
+    /// third as wide as a photograph's, so there the wordmark stands as tall as
+    /// the row allows and the number is set a size up: at the photograph's
+    /// proportions both came out too small to read — the symbol a smudge, the
+    /// number squinted at. The number is what the collection desk reads, so on
+    /// every sheet it is half again the size it was (0.34 and 0.39 of the row);
+    /// the words are a touch larger except on a strip's narrow foot.
+    /// </summary>
+    internal static FooterSizes MeasureFooter(int height, PartyPrintTheme theme, bool hasFooter, bool strip)
+    {
+        var markBand = height * 0.38f;
+        var textBand = height - markBand;
+        var nameBand = hasFooter ? textBand * 0.58f : textBand;
+        var textScale = strip ? 1f : FooterTextScale;
+        var nameSize = Math.Max(12f, nameBand * (theme == PartyPrintTheme.Event ? 0.78f : 0.62f) * textScale);
+        var lineSize = Math.Max(9f, (textBand - nameBand) * 0.52f * textScale);
+        var numberSize = Math.Max(10f, markBand * (strip ? StripNumberRowShare : FooterNumberRowShare));
+        return new FooterSizes(textBand, nameBand, markBand, nameSize, lineSize,
+            strip ? PartyPrintGeometry.StripWordmarkWidthFraction : PartyPrintGeometry.FooterWordmarkWidthFraction,
+            numberSize);
     }
 
     /// <summary>
@@ -691,7 +735,7 @@ public sealed class PartyPrintComposer
         // loudest thing on a keepsake whose subject is the photograph; the
         // brand's 120px minimum rendered width is the floor it never goes below.
         var maxWidth = Math.Max(BrandMinWordmarkWidth, area.Width * widthFraction);
-        var maxHeight = Math.Max(24, area.Height * 0.80);
+        var maxHeight = Math.Max(24, area.Height * WordmarkRowShare);
         var scale = Math.Min(maxWidth / wordmark.Width, maxHeight / wordmark.Height);
         var targetWidth = Math.Max(1, (int)Math.Round(wordmark.Width * scale));
         var targetHeight = Math.Max(1, (int)Math.Round(wordmark.Height * scale));
@@ -716,10 +760,10 @@ public sealed class PartyPrintComposer
     /// waiting for them without anybody reading a name off the paper.
     /// </summary>
     private void DrawSequence(
-        Image<Rgba32> sheet, ThemePalette palette, Rectangle area, long sequence, float scale)
+        Image<Rgba32> sheet, ThemePalette palette, Rectangle area, long sequence, float size)
     {
         if (sequence <= 0) return;
-        var font = _display.CreateFont(Math.Max(10f, area.Height * scale), FontStyle.Bold);
+        var font = _display.CreateFont(size, FontStyle.Bold);
         sheet.Mutate(x => x.DrawText(
             new RichTextOptions(font)
             {

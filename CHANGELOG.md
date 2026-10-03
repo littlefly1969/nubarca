@@ -6,6 +6,17 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Party prints: a number you can read, the logo beside the name
+
+- **The number on a party print is half again as large** — under a photo, under
+  four photos and on the strips — so the collection desk reads it at a glance.
+- **Under a photo or four photos, the party's name and the host's line are a
+  touch larger, and so is the NubArca logo.** On the strips the words keep
+  their size and the logo grows a little within its row.
+- **On the photo, the NubArca symbol now stands just before the party's name,**
+  on the same line, instead of alone in the top corner; the name and the host's
+  line are a little smaller. The number keeps its size.
+
 ### Printing: the prints left, your own photos on paper, the whole photo
 
 - **See how many prints are left on the printer.** A Linux Print Box with a
