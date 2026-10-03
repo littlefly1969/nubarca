@@ -61,6 +61,19 @@ public sealed class NetworkManagerCliTests
     }
 
     [Fact]
+    public async Task With_A_Cable_And_A_Wifi_Both_Up_The_Cable_Is_The_Uplink()
+    {
+        var cli = new NetworkManagerCli(Nmcli(
+            "wlan0:wifi:connected:nubarca-wifi-Studio\neth0:ethernet:connected:Wired connection 1\n",
+            new()
+            {
+                ["wlan0"] = "IP4.ADDRESS[1]:192.0.2.20/24\nIP4.GATEWAY:192.0.2.1\n",
+                ["eth0"] = "IP4.ADDRESS[1]:192.0.2.9/24\nIP4.GATEWAY:192.0.2.1\n",
+            }));
+        Assert.Equal("ethernet", (await cli.GetSnapshotAsync(default)).Uplink?.Type);
+    }
+
+    [Fact]
     public async Task The_Setup_Network_Is_Recognised_And_Is_Not_An_Uplink()
     {
         var cli = new NetworkManagerCli(Nmcli(
