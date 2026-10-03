@@ -55,7 +55,10 @@ public sealed class NetworkManagerCli : INetworkManager
                 apAddress = (await AddressingAsync(device, cancellationToken)).Address;
                 continue;
             }
-            if (uplink is not null || type is not ("ethernet" or "wifi")) continue;
+            if (type is not ("ethernet" or "wifi")) continue;
+            // Ethernet first when both carry traffic: the cable is the steadier
+            // way out, and a Wi-Fi set up over it must not take its place.
+            if (uplink is not null && !(uplink.Type == "wifi" && type == "ethernet")) continue;
             var addressing = await AddressingAsync(device, cancellationToken);
             if (addressing.Address is not null && addressing.HasDefaultRoute)
             {

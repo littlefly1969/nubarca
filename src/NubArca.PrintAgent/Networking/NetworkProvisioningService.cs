@@ -15,7 +15,18 @@ public sealed record ProvisioningState(
     string? AccessPointAddress,
     ConnectAttempt? LastAttempt);
 
-public enum ConnectRequest { Accepted, NotInSetupMode, Busy }
+/// <summary>
+/// Unavailable: the Wi-Fi cannot be configured now — the box is neither in
+/// setup mode nor on Ethernet (on Wi-Fi, changing network would cut its uplink).
+/// </summary>
+public enum ConnectRequest { Accepted, Unavailable, Busy }
+
+/// <summary>
+/// Where a phone's attempt started, fixed when it is accepted: from setup
+/// mode the radio must be handed over and the setup network comes back on
+/// failure; over Ethernet the box stays reachable and nothing else moves.
+/// </summary>
+public enum WifiProvisioningOrigin { AccessPoint, Ethernet }
 
 /// <summary>Timings the service runs on; tests shrink them, production reads the options.</summary>
 public sealed record ProvisioningTimings(
@@ -49,9 +60,13 @@ public sealed record ProvisioningTimings(
 ///   agent's business, not a reason to open one.
 /// - At boot, and after a working network is lost, NetworkManager gets the grace
 ///   period to (re)connect by itself before the setup network opens.
-/// - A phone's connection attempt closes the setup network (one radio), tries,
-///   and on ANY failure removes the failed profile and reopens the setup network:
-///   a wrong password must never leave the box unreachable.
+/// - A phone's connection attempt from the setup network closes it (one
+///   radio), tries, and on ANY failure removes the failed profile and reopens
+///   the setup network: a wrong password must never leave the box unreachable.
+/// - Over Ethernet the Wi-Fi can be set up too, without touching the cable: a
+///   failed attempt only removes its profile — the box is reachable already,
+///   so no setup network opens. On Wi-Fi it cannot: one radio, and changing
+///   network would cut the very connection the page is served over.
 /// - While the setup network is up and nobody is using it, known networks are
 ///   retried now and then with a growing interval, so a router that was merely
 ///   late does not strand the box — and the retries cannot oscillate.
@@ -93,6 +108,16 @@ public sealed class NetworkProvisioningService : BackgroundService
     }
 
     public ProvisioningState State { get { lock (_stateLock) return _state; } }
+
+    /// <summary>
+    /// Whether the page may scan and configure the Wi-Fi now: in setup mode,
+    /// or connected over Ethernet — never while Wi-Fi is the uplink.
+    /// </summary>
+    public bool CanConfigureWifi { get { lock (_stateLock) return CanConfigure(_state); } }
+
+    private static bool CanConfigure(ProvisioningState state) =>
+        state.Mode == ProvisioningMode.AccessPoint
+        || (state.Mode == ProvisioningMode.Connected && state.Uplink?.Type == "ethernet");
 
     /// <summary>The networks last seen; a single radio in setup mode often cannot rescan.</summary>
     public IReadOnlyList<WifiNetwork> Networks { get { lock (_stateLock) return _networks; } }
@@ -240,14 +265,19 @@ public sealed class NetworkProvisioningService : BackgroundService
     /// A phone asked to join <paramref name="ssid"/>. Answers at once: with one
     /// radio the setup network goes down during the attempt, so the phone would
     /// never see a reply that waited for the outcome. It learns the outcome from
-    /// <see cref="State"/> if the setup network comes back.
+    /// <see cref="State"/> — over Ethernet straight away, from setup mode if the
+    /// setup network comes back.
     /// </summary>
     public ConnectRequest RequestConnect(string ssid, string? password)
     {
         lock (_stateLock)
         {
-            if (_state.Mode != ProvisioningMode.AccessPoint) return ConnectRequest.NotInSetupMode;
+            if (!CanConfigure(_state)) return ConnectRequest.Unavailable;
             if (Interlocked.CompareExchange(ref _connecting, 1, 0) != 0) return ConnectRequest.Busy;
+            // Fixed now: by the time the attempt runs the state may have moved.
+            var origin = _state.Mode == ProvisioningMode.AccessPoint
+                ? WifiProvisioningOrigin.AccessPoint
+                : WifiProvisioningOrigin.Ethernet;
             _lastUserActivity = DateTimeOffset.UtcNow;
             _state = _state with { LastAttempt = new ConnectAttempt(ssid, ConnectOutcome.Connecting, DateTimeOffset.UtcNow) };
             _pendingConnect = Task.Run(async () =>
@@ -255,7 +285,7 @@ public sealed class NetworkProvisioningService : BackgroundService
                 try
                 {
                     await Task.Delay(_timings.HandOff);
-                    await ConnectNowAsync(ssid, password, CancellationToken.None);
+                    await ConnectNowAsync(ssid, password, origin, CancellationToken.None);
                 }
                 catch (Exception ex)
                 {
@@ -277,14 +307,14 @@ public sealed class NetworkProvisioningService : BackgroundService
     }
 
     /// <summary>
-    /// Tries a fresh scan in setup mode — the only time the list is needed —
-    /// at most every <see cref="MinScanInterval"/>; otherwise, or when the
-    /// radio cannot scan as an access point, the last list stands.
+    /// Tries a fresh scan whenever the Wi-Fi can be configured — in setup mode
+    /// or over Ethernet — at most every <see cref="MinScanInterval"/>; otherwise,
+    /// or when the radio cannot scan as an access point, the last list stands.
     /// </summary>
     public async Task<IReadOnlyList<WifiNetwork>> RefreshNetworksAsync(CancellationToken ct)
     {
         NoteUserActivity();
-        if (State.Mode != ProvisioningMode.AccessPoint) return Networks;
+        if (!CanConfigureWifi) return Networks;
         var now = Environment.TickCount64;
         var last = Interlocked.Read(ref _lastScanTicks);
         if (last != 0 && now - last < MinScanInterval.TotalMilliseconds) return Networks;
@@ -296,7 +326,8 @@ public sealed class NetworkProvisioningService : BackgroundService
         return Networks;
     }
 
-    private async Task ConnectNowAsync(string ssid, string? password, CancellationToken ct)
+    private async Task ConnectNowAsync(string ssid, string? password, WifiProvisioningOrigin origin,
+        CancellationToken ct)
     {
         await _gate.WaitAsync(ct);
         try
@@ -307,25 +338,38 @@ public sealed class NetworkProvisioningService : BackgroundService
                 Finish(ssid, ConnectOutcome.Failed);
                 return;
             }
-            _logger.LogInformation("Wi-Fi connection attempt to {Ssid}.", ssid);
-            await _network.StopAccessPointAsync(ct);
+            var fromAccessPoint = origin == WifiProvisioningOrigin.AccessPoint;
+            _logger.LogInformation("Wi-Fi connection attempt to {Ssid} ({Origin}).", ssid,
+                fromAccessPoint ? "from the setup network" : "over Ethernet");
+            // From setup mode the one radio is the setup network: hand it over.
+            // Over Ethernet there is no setup network, and the cable is not touched.
+            if (fromAccessPoint) await _network.StopAccessPointAsync(ct);
             var activated = await _network.ConnectAsync(snapshot.WifiInterface, ssid, password, ct);
             // Joined means THIS interface on THIS attempt's profile, with an
-            // address and a gateway — never that something else carries traffic.
+            // address — and, when it is to be the box's only way out, a gateway.
+            // Never that something else (a cable) carries traffic.
             var joined = activated
-                ? await WaitForWifiAsync(snapshot.WifiInterface, ssid, requireGateway: true, _timings.Verify, ct)
+                ? await WaitForWifiAsync(snapshot.WifiInterface, ssid, requireGateway: fromAccessPoint, _timings.Verify, ct)
                 : null;
             if (joined is not null)
             {
                 _logger.LogInformation("Wi-Fi connection succeeded: {Ssid}.", ssid);
-                MarkConnected(new NetworkUplink(snapshot.WifiInterface, "wifi", ssid, joined.Address));
+                // Over Ethernet the cable stays the uplink it was; the state follows
+                // whatever NetworkManager prefers at the next look.
+                if (fromAccessPoint) MarkConnected(new NetworkUplink(snapshot.WifiInterface, "wifi", ssid, joined.Address));
                 Finish(ssid, ConnectOutcome.Connected);
                 return;
             }
 
-            _logger.LogWarning("Wi-Fi connection failed: {Ssid}. Restoring the setup network.", ssid);
             await _network.ForgetAsync(ssid, ct);
             Finish(ssid, ConnectOutcome.Failed);
+            if (!fromAccessPoint)
+            {
+                // Reachable over the cable already: a setup network adds nothing.
+                _logger.LogWarning("Wi-Fi connection failed: {Ssid}. Still connected over Ethernet.", ssid);
+                return;
+            }
+            _logger.LogWarning("Wi-Fi connection failed: {Ssid}. Restoring the setup network.", ssid);
             await OpenAccessPointAsync(await _network.GetSnapshotAsync(ct), "the connection attempt failed", ct);
             if (State.Mode == ProvisioningMode.AccessPoint) _logger.LogInformation("Setup network restored.");
         }
