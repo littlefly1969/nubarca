@@ -488,11 +488,16 @@ public sealed class PartyPrintComposer
             Truncate(composition.PartyName, PartyPrintGeometry.PartyNameMaxLength), _display, FontStyle.Bold,
             titleSize, 12f, nameAvailable);
         var title = OverlayWord.At(name, titleFont, new PointF(nameLeft, nameBottom), alignRight: false);
-        // On the name's baseline — measured on a capital in the name's own
-        // font, so a name with descenders does not move it — like a letter of
-        // the line, never hanging into the gap above the host's line.
-        var baseline = TextMeasurer.MeasureBounds("H", title.Options()).Bottom;
-        var symbol = new RectangleF(margin, baseline - symbolSize, symbolSize, symbolSize);
+        // Centred on the name's capitals — measured on a capital in the name's
+        // own font, so a name with descenders does not move it, and a name
+        // fitted smaller takes the symbol with it. The boat is taller than the
+        // capitals, so it reaches as far above them as below the baseline, the
+        // way a mark sits beside a word; standing on the baseline, it read as
+        // set too high. The artwork's ink is centred in its square (asserted on
+        // the shipped files), so centring the square centres the boat.
+        var caps = TextMeasurer.MeasureBounds("H", title.Options());
+        var capsMiddle = (caps.Top + caps.Bottom) / 2f;
+        var symbol = new RectangleF(margin, capsMiddle - (symbolSize / 2f), symbolSize, symbolSize);
         return new OverlayTextLayout(title, footer, number, symbol);
     }
 

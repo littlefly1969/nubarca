@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -7,6 +10,9 @@ import { containZoom } from '@nubarca/contracts';
 import { photoSlotAspect } from './partyPrintGeometry';
 import { errorResponse, installFetchMock, jsonResponse } from '../test-utils';
 import { I18nProvider } from '../i18n';
+
+const printCss = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), 'PartyPrintPage.css'), 'utf8');
 
 afterEach(() => {
   cleanup();
@@ -710,6 +716,13 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(screen.getByTestId('party-print-overlay-support')).toContainElement(symbol);
     expect(symbol.style.left).toBe('');
     expect(symbol.style.top).toBe('');
+    // Centred on the name's capitals as the renderer centres it — standing on
+    // the baseline, the boat read as set too high.
+    const head = printCss.match(/\.party-print-overlay-head\s*\{([^}]*)\}/)?.[1] ?? '';
+    expect(head).toMatch(/align-items:\s*center/);
+    // ...which holds for the line-height the centring was measured at.
+    const nameRule = printCss.match(/\.party-print-overlay-name\s*\{([^}]*)\}/)?.[1] ?? '';
+    expect(nameRule).toMatch(/line-height:\s*1\.05;/);
   });
 
   it('sizes the framing to the screen, not only to the column', async () => {

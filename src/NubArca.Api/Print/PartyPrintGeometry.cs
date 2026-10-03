@@ -85,7 +85,7 @@ public static class PartyPrintGeometry
 
     /// <summary>
     /// Height of the NubArca symbol, short-edge fraction. It stands on the
-    /// party's name line, just before the name, sitting on the name's baseline
+    /// party's name line, just before the name, centred on the name's capitals
     /// — one signature with the words rather than a mark in the corner (it was
     /// 0.105, alone at the top left).
     /// </summary>

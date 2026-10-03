@@ -359,7 +359,7 @@ function OverlayWords({ partyName, footerText, orientation, symbol }: {
   // The renderer's floors: the name as small as it must be, the line to 3/4.
   const nameRef = useFitLine('var(--title-size)', 0, [name, footer, orientation]);
   const lineRef = useFitLine('var(--line-size)', 0.75, [footer, orientation]);
-  // The symbol first, standing on the name's baseline, then the name in what
+  // The symbol first, centred on the name's capitals, then the name in what
   // it leaves — as the renderer lays the line out.
   const nameLine = (
     <span className="party-print-overlay-head">

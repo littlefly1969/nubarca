@@ -143,7 +143,7 @@ export function gridSlotAspect(paper: PaperSize): number {
 export const OVERLAY_MARGIN_FRACTION = 0.06;
 /**
  * Height of the NubArca symbol, short-edge fraction. It stands on the party's
- * name line, just before the name, on the name's baseline.
+ * name line, just before the name, centred on the name's capitals.
  */
 export const OVERLAY_SYMBOL_FRACTION = 0.085;
 /** The space between the symbol and the party's name, short-edge fraction. */
