@@ -77,6 +77,8 @@ public sealed class NetworkProvisioningService : BackgroundService
     private readonly ILogger<NetworkProvisioningService> _logger;
     private readonly ProvisioningTimings _timings;
     private readonly string? _accessPointPassword;
+    private readonly ICaptivePortalRedirect _captive;
+    private readonly int _webPort;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateLock = new();
 
@@ -96,10 +98,12 @@ public sealed class NetworkProvisioningService : BackgroundService
 
     public NetworkProvisioningService(INetworkManager network, NetworkProvisioningOptions options,
         ILogger<NetworkProvisioningService> logger, ProvisioningTimings? timings = null,
-        string? boxSuffix = null)
+        string? boxSuffix = null, ICaptivePortalRedirect? captive = null)
     {
         _network = network;
         _logger = logger;
+        _captive = captive ?? NoCaptivePortalRedirect.Instance;
+        _webPort = options.WebPort;
         _timings = timings ?? ProvisioningTimings.From(options);
         _retryInterval = _timings.FirstRetry;
         _accessPointPassword = string.IsNullOrEmpty(options.AccessPointPassword) ? null : options.AccessPointPassword;
@@ -165,6 +169,8 @@ public sealed class NetworkProvisioningService : BackgroundService
     /// <summary>Wait for NetworkManager to be there, then give it the grace period.</summary>
     internal async Task BootAsync(CancellationToken ct)
     {
+        // A redirect left behind by a crash belongs to no setup network now.
+        await _captive.DisableAsync(ct);
         NetworkSnapshot snapshot;
         while (!(snapshot = await _network.GetSnapshotAsync(ct)).ManagerAvailable)
         {
@@ -219,7 +225,7 @@ public sealed class NetworkProvisioningService : BackgroundService
                     {
                         // Ethernet plugged in, or NetworkManager found a network by
                         // itself: the setup network has nothing left to do.
-                        await _network.StopAccessPointAsync(ct);
+                        await StopAccessPointAsync(ct);
                         MarkConnected(snapshot.Uplink!);
                     }
                     else if (!snapshot.AccessPointActive)
@@ -343,7 +349,7 @@ public sealed class NetworkProvisioningService : BackgroundService
                 fromAccessPoint ? "from the setup network" : "over Ethernet");
             // From setup mode the one radio is the setup network: hand it over.
             // Over Ethernet there is no setup network, and the cable is not touched.
-            if (fromAccessPoint) await _network.StopAccessPointAsync(ct);
+            if (fromAccessPoint) await StopAccessPointAsync(ct);
             var activated = await _network.ConnectAsync(snapshot.WifiInterface, ssid, password, ct);
             // Joined means THIS interface on THIS attempt's profile, with an
             // address — and, when it is to be the box's only way out, a gateway.
@@ -379,7 +385,7 @@ public sealed class NetworkProvisioningService : BackgroundService
     private async Task RetryKnownNetworksAsync(NetworkSnapshot snapshot, CancellationToken ct)
     {
         _logger.LogInformation("Setup network pausing so NetworkManager can try the known networks.");
-        await _network.StopAccessPointAsync(ct);
+        await StopAccessPointAsync(ct);
         var connected = await WaitForUplinkAsync(_timings.Grace, ct);
         if (connected is not null)
         {
@@ -453,6 +459,14 @@ public sealed class NetworkProvisioningService : BackgroundService
             return;
         }
         var active = await _network.GetSnapshotAsync(ct);
+        // Plain http://<gateway>/ — and the phones' captive probes — reach the
+        // page only once the setup network is really there. Without the
+        // redirect the page is still served on its own port.
+        if (active.AccessPointActive && !await _captive.EnableAsync(snapshot.WifiInterface, _webPort, ct))
+        {
+            _logger.LogError("Setup page reachable only as http://{Address}:{Port}/ (no port 80 redirect).",
+                active.AccessPointAddress ?? "<gateway>", _webPort);
+        }
         Update(s => s with
         {
             Mode = ProvisioningMode.AccessPoint, ManagerAvailable = true, Uplink = null,
@@ -460,6 +474,27 @@ public sealed class NetworkProvisioningService : BackgroundService
         });
         _nextRetry = DateTimeOffset.UtcNow + _retryInterval;
         _logger.LogInformation("Setup network active: {Ssid}.", ssid);
+    }
+
+    /// <summary>The redirect goes before the setup network does: it is never left pointing at nothing.</summary>
+    private async Task StopAccessPointAsync(CancellationToken ct)
+    {
+        await _captive.DisableAsync(ct);
+        await _network.StopAccessPointAsync(ct);
+    }
+
+    /// <summary>Stopping the agent removes the redirect, best-effort; NetworkManager keeps its own state.</summary>
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await base.StopAsync(cancellationToken);
+        try
+        {
+            await _captive.DisableAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Setup page redirect not removed at shutdown ({ExceptionType}).", ex.GetType().Name);
+        }
     }
 
     private void MarkConnected(NetworkUplink uplink)

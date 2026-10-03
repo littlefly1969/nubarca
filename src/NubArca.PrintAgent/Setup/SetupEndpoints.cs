@@ -41,6 +41,19 @@ public static class SetupEndpoints
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
+    /// <summary>
+    /// The connectivity probes phones and laptops send when they join a network
+    /// (Android, Apple, Windows). Each is answered with the way to this page —
+    /// never with the reply the probe expects from the Internet — so the device
+    /// treats the setup network as a captive portal and offers the page itself.
+    /// They carry file extensions, which the fallback below does not match.
+    /// </summary>
+    public static readonly IReadOnlyList<string> CaptiveProbes =
+    [
+        "/generate_204", "/gen_204", "/hotspot-detect.html", "/library/test/success.html",
+        "/connecttest.txt", "/ncsi.txt", "/redirect",
+    ];
+
     private const string ContentSecurityPolicy =
         "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; "
         + "frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
@@ -122,6 +135,12 @@ public static class SetupEndpoints
                     statusCode: StatusCodes.Status409Conflict),
             };
         });
+
+        foreach (var probe in CaptiveProbes) app.MapGet(probe, () => Results.Redirect("/"));
+        // Anything else that is not a file lands on the page too: a phone that
+        // typed a stray address on the setup network still finds it. The page,
+        // its assets and the API above take precedence over this.
+        app.MapFallback(() => Results.Redirect("/"));
         return app;
     }
 

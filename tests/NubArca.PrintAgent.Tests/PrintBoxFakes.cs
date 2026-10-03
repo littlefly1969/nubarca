@@ -77,6 +77,9 @@ public sealed class FakeNetworkManager : INetworkManager
     /// </summary>
     public Func<string, WifiClientState>? WifiAfterJoin { get; set; }
 
+    /// <summary>What happened, in order — shared with a <see cref="FakeCaptivePortalRedirect"/> when given.</summary>
+    public ConcurrentQueue<string> Events { get; set; } = new();
+
     public int AccessPointStarts;
     public int AccessPointStops;
     public int Scans;
@@ -110,6 +113,7 @@ public sealed class FakeNetworkManager : INetworkManager
     public Task<bool> StartAccessPointAsync(string wifiInterface, string ssid, string? password,
         CancellationToken cancellationToken)
     {
+        Events.Enqueue("ap-start");
         lock (_lock)
         {
             AccessPointStarts++;
@@ -124,6 +128,7 @@ public sealed class FakeNetworkManager : INetworkManager
 
     public Task StopAccessPointAsync(CancellationToken cancellationToken)
     {
+        Events.Enqueue("ap-stop");
         lock (_lock)
         {
             AccessPointStops++;
@@ -163,6 +168,27 @@ public sealed class FakeNetworkManager : INetworkManager
     }
 
     public string? LastForgotten;
+}
+
+/// <summary>The port-80 redirect, as a record of what was asked of it.</summary>
+public sealed class FakeCaptivePortalRedirect(ConcurrentQueue<string> events) : ICaptivePortalRedirect
+{
+    public bool Works { get; set; } = true;
+    public bool Active { get; private set; }
+
+    public Task<bool> EnableAsync(string wifiInterface, int targetPort, CancellationToken cancellationToken)
+    {
+        events.Enqueue($"redirect-on {wifiInterface}:{targetPort}");
+        if (Works) Active = true;
+        return Task.FromResult(Works);
+    }
+
+    public Task DisableAsync(CancellationToken cancellationToken)
+    {
+        events.Enqueue("redirect-off");
+        Active = false;
+        return Task.CompletedTask;
+    }
 }
 
 public static class Eventually
