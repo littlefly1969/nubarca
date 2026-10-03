@@ -13,6 +13,9 @@ public sealed record PartyQrCardPrintRequest(
     /// <summary>"it", "en", "es" or "de" — the language of the line over the code.</summary>
     string? Locale);
 
+/// <summary>A photograph the card may carry: its id and its display shape, when known.</summary>
+public sealed record PartyQrCardPhotoDto(Guid FileItemId, int? Width, int? Height);
+
 /// <summary>Everything the composer needs for the QR card, and nothing about who asked.</summary>
 public sealed record PartyQrCardComposition(
     byte[] Photo,

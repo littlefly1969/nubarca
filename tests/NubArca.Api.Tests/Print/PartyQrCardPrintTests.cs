@@ -398,6 +398,67 @@ public sealed class PartyQrCardPrintTests : IDisposable
         Assert.Equal(1, await Db(factory, db => db.PrinterShares.Select(s => s.UsedSheets).SingleAsync()));
     }
 
+    /// <summary>A photograph in the party's album, as the server would know it after ingestion.</summary>
+    private static async Task<Guid> PartyPhotoAsync(SqliteWebApplicationFactory factory, Host host)
+    {
+        var id = await PhotoAsync(factory, host.Client);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var file = await db.FileItems.SingleAsync(f => f.Id == id);
+            var meta = await db.BlobMetadata.SingleOrDefaultAsync(m => m.BlobObjectId == file.BlobObjectId);
+            if (meta is null)
+            {
+                meta = new NubArca.Api.Domain.BlobMetadata { Id = Guid.NewGuid(), BlobObjectId = file.BlobObjectId };
+                db.BlobMetadata.Add(meta);
+            }
+            meta.MediaCategory = NubArca.Api.Domain.MediaCategories.Image;
+            meta.DetectedContentType = "image/jpeg";
+            await db.SaveChangesAsync();
+        }
+        (await host.Client.PostAsJsonAsync($"/api/albums/{host.AlbumId}/items", new { fileItemId = id }))
+            .EnsureSuccessStatusCode();
+        return id;
+    }
+
+    [Fact]
+    public async Task The_Card_Offers_Every_Photograph_The_Party_Shows_Not_A_First_Page()
+    {
+        // The dialog asked the album's paged media list for 60 and stopped
+        // there: parties of 81, 170 and 206 photographs offered 60.
+        var factory = Factory();
+        var host = await HostAsync(factory);
+        var photos = new List<Guid>();
+        for (var i = 0; i < 64; i++) photos.Add(await PartyPhotoAsync(factory, host));
+        // A guest's upload still waiting for the host is not the party's yet.
+        var pending = await PartyPhotoAsync(factory, host);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.PartyUploadItems.Add(new NubArca.Api.Domain.PartyUploadItem
+            {
+                Id = Guid.NewGuid(), OwnerUserId = host.UserId, AlbumId = host.AlbumId, FileItemId = pending,
+                Status = NubArca.Api.Domain.PartyUploadStatuses.Pending, UploadedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var listed = await host.Client.GetFromJsonAsync<JsonElement>(
+            $"/api/albums/{host.AlbumId}/party-print/qr-card/photos");
+        var ids = listed.EnumerateArray().Select(p => p.GetProperty("fileItemId").GetGuid()).ToList();
+        Assert.Equal(64, ids.Count);
+        Assert.Equal(photos.ToHashSet(), ids.ToHashSet());
+        Assert.DoesNotContain(pending, ids);
+        // The shape the framing starts from, as displayed.
+        Assert.Equal(300, listed[0].GetProperty("width").GetInt32());
+        Assert.Equal(400, listed[0].GetProperty("height").GetInt32());
+
+        // Someone else's party lists nothing of it.
+        var stranger = await HostAsync(factory);
+        Assert.Equal(HttpStatusCode.NotFound, (await stranger.Client.GetAsync(
+            $"/api/albums/{host.AlbumId}/party-print/qr-card/photos")).StatusCode);
+    }
+
     [Fact]
     public async Task A_Framing_Further_Out_Than_The_Whole_Photograph_Is_Refused()
     {

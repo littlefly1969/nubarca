@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import type { ImageMediaItem } from '@nubarca/api-client';
 import { PartyQrCardPrintDialog } from './PartyQrCardPrintDialog';
 import { AuthedWrapper, errorResponse, installFetchMock, jsonResponse } from '../../test-utils';
 import { QR_CARD_LINES } from '../../pages/partyPrintGeometry';
@@ -22,14 +21,7 @@ const dialogCss = readFileSync(
 const rule = (selector: string) =>
   dialogCss.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
 
-function photo(id: string): ImageMediaItem {
-  return {
-    id, kind: 'image', name: `${id}.jpg`, title: null, displayName: `Foto ${id}`, mimeType: 'image/jpeg',
-    sizeBytes: 1, width: 3000, height: 4000, createdAt: '2026-10-01T10:00:00Z', updatedAt: null,
-    takenAt: null, favorite: false, rating: null, thumbnailUrl: `/api/files/${id}/thumbnail?size=small`,
-    occurrenceCount: 1, hasDuplicates: false, hasGps: null,
-  };
-}
+const photo = (fileItemId: string) => ({ fileItemId, width: 3000, height: 4000 });
 
 const accepted = { jobId: 'j1', shortCode: 'abc12345', state: 'ready', queueAhead: 0, mediaRemainingPrints: 120 };
 
@@ -37,9 +29,7 @@ function mount(post: Parameters<typeof installFetchMock>[0][string] = () => json
   cover: string | null = 'p2') {
   const onClose = vi.fn();
   const mock = installFetchMock({
-    'GET /api/albums/a1/media': () => jsonResponse({
-      items: [photo('p1'), photo('p2'), photo('p3')], limit: 60, count: 3, nextCursor: null, hasMore: false, total: 3,
-    }),
+    'GET /api/albums/a1/party-print/qr-card/photos': () => jsonResponse([photo('p1'), photo('p2'), photo('p3')]),
     'POST /api/albums/a1/party-print/qr-card': post,
   });
   render(
@@ -59,16 +49,21 @@ const posts = (mock: ReturnType<typeof installFetchMock>) =>
 const keyOf = (call: { init?: RequestInit }) => new Headers(call.init?.headers).get('Idempotency-Key');
 
 describe('PartyQrCardPrintDialog', () => {
-  it('starts from the party’s cover, and shows the card with the server’s line', async () => {
-    mount();
-    expect(await screen.findByRole('radio', { name: 'Foto p2' })).toBeChecked();
+  it('starts from the party’s cover, first in the list, and shows the card with the server’s line', async () => {
+    const { mock } = mount();
+    const first = await screen.findByRole('radio', { name: 'Foto 1' });
+    expect(first).toBeChecked();
+    expect(first).toHaveAttribute('value', 'p2');
+    // Every photograph the party shows, from the party's own list — not a page of the album.
+    expect(mock.calls.some((c) => c.url === '/api/albums/a1/party-print/qr-card/photos')).toBe(true);
+    expect(screen.getAllByRole('radio')).toHaveLength(3);
     expect(screen.getByTestId('party-qr-card-line')).toHaveTextContent(QR_CARD_LINES.it);
     expect(screen.getByText('Festa al mare', { selector: 'strong' })).toBeInTheDocument();
   });
 
   it('lays the photographs out one per square, each as tall as its own picture', async () => {
     mount();
-    await screen.findByRole('radio', { name: 'Foto p2' });
+    await screen.findByRole('radio', { name: 'Foto 1' });
     const grid = screen.getByTestId('party-qr-card-photos');
     expect(grid.querySelectorAll('label')).toHaveLength(3);
     // The squares were drawn over one another: the square sat on the label with
@@ -84,13 +79,15 @@ describe('PartyQrCardPrintDialog', () => {
 
   it('without a cover in the album, starts from its first photograph', async () => {
     mount(undefined, 'elsewhere');
-    expect(await screen.findByRole('radio', { name: 'Foto p1' })).toBeChecked();
+    const first = await screen.findByRole('radio', { name: 'Foto 1' });
+    expect(first).toBeChecked();
+    expect(first).toHaveAttribute('value', 'p1');
   });
 
   it('sends one print per sheet, each with its own key, and names only the photograph and its framing', async () => {
     const user = userEvent.setup();
     const { mock } = mount();
-    await screen.findByRole('radio', { name: 'Foto p2' });
+    await screen.findByRole('radio', { name: 'Foto 1' });
     await user.selectOptions(screen.getByTestId('party-qr-card-sheets'), '3');
     expect(screen.getByText('6 biglietti')).toBeInTheDocument();
     await user.click(screen.getByTestId('party-qr-card-send'));
@@ -111,7 +108,7 @@ describe('PartyQrCardPrintDialog', () => {
       calls += 1;
       return calls === 2 ? errorResponse(409, { error: 'printer_offline' }) : jsonResponse(accepted, 202);
     });
-    await screen.findByRole('radio', { name: 'Foto p2' });
+    await screen.findByRole('radio', { name: 'Foto 1' });
     await user.selectOptions(screen.getByTestId('party-qr-card-sheets'), '2');
     await user.click(screen.getByTestId('party-qr-card-send'));
 
@@ -130,7 +127,7 @@ describe('PartyQrCardPrintDialog', () => {
   it('says why the party’s own conditions refuse a card', async () => {
     const user = userEvent.setup();
     mount(() => errorResponse(409, { error: 'format_unsupported' }));
-    await screen.findByRole('radio', { name: 'Foto p2' });
+    await screen.findByRole('radio', { name: 'Foto 1' });
     await user.click(screen.getByTestId('party-qr-card-send'));
     expect(await screen.findByTestId('party-qr-card-error'))
       .toHaveTextContent('La stampante della festa non taglia le strisce o non ha la carta 10×15.');

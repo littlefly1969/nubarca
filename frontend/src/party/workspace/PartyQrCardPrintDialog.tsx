@@ -1,14 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ApiError,
-  listAlbumMedia,
+  listPartyQrCardPhotos,
   submitPartyQrCardPrint,
-  type ImageMediaItem,
+  type PartyQrCardPhoto,
   type PartyQrCardPrintRequest,
 } from '@nubarca/api-client';
 import { DEFAULT_PHOTO_PLACEMENT, effectiveZoom, type PhotoPlacement } from '@nubarca/contracts';
 import { Modal } from '../../components/Overlay';
-import { mediumPreviewUrl } from '../../components/files/types';
+import { mediumPreviewUrl, smallThumbnailUrl } from '../../components/files/types';
 import { useI18n, type MessageKey } from '../../i18n';
 import {
   PORTRAIT_HEIGHT, PORTRAIT_WIDTH, QR_CARD_CODE_WIDTH_FRACTION, QR_CARD_LINE_FRACTION, QR_CARD_LINES,
@@ -32,8 +32,6 @@ import './PartyQrCardPrintDialog.css';
 // accepted are answered from their records and only the missing ones print.
 
 export const MAX_QR_CARD_SHEETS = 10;
-
-const PHOTO_PAGE = 60;
 
 function newIdempotencyKey(): string {
   const uuid = globalThis.crypto?.randomUUID;
@@ -83,7 +81,7 @@ export function PartyQrCardPrintDialog({
   onClose: () => void;
 }) {
   const { t, tn, lang } = useI18n();
-  const [photos, setPhotos] = useState<ImageMediaItem[] | 'error' | null>(null);
+  const [photos, setPhotos] = useState<PartyQrCardPhoto[] | 'error' | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
   const [aspect, setAspect] = useState(1);
   const [view, setView] = useState<PhotoPlacement>(DEFAULT_PHOTO_PLACEMENT);
@@ -98,13 +96,16 @@ export function PartyQrCardPrintDialog({
 
   useEffect(() => {
     const controller = new AbortController();
-    listAlbumMedia(albumId, { kind: 'image', limit: PHOTO_PAGE }, controller.signal)
-      .then((page) => {
-        const images = page.items.filter((item): item is ImageMediaItem => item.kind === 'image');
-        setPhotos(images);
-        const first = images.find((item) => item.id === coverFileItemId) ?? images[0];
+    // Every photograph the party shows — not a first page of the album — with
+    // the party's cover, when it is one of them, first.
+    listPartyQrCardPhotos(albumId, controller.signal)
+      .then((listed) => {
+        const cover = listed.find((photo) => photo.fileItemId === coverFileItemId);
+        const ordered = cover ? [cover, ...listed.filter((photo) => photo !== cover)] : listed;
+        setPhotos(ordered);
+        const first = ordered[0];
         if (first) {
-          setChosen(first.id);
+          setChosen(first.fileItemId);
           if (first.width && first.height) setAspect(first.width / first.height);
         }
       })
@@ -121,8 +122,8 @@ export function PartyQrCardPrintDialog({
   const qr = useQrSvg(absoluteGuestUrl(partyUrl), 240);
   const sending = progress !== null && done === null && error === null;
 
-  const choose = (item: ImageMediaItem) => {
-    setChosen(item.id);
+  const choose = (item: PartyQrCardPhoto) => {
+    setChosen(item.fileItemId);
     setAspect(item.width && item.height ? item.width / item.height : 1);
     setView(DEFAULT_PHOTO_PLACEMENT);
     setError(null);
@@ -278,18 +279,18 @@ export function PartyQrCardPrintDialog({
               <legend>{t('party.qrCard.photo')}</legend>
               {/* The scrolling grid is its own box: a fieldset that scrolls lays its rows out unreliably. */}
               <div className="party-qr-card-photo-grid" data-testid="party-qr-card-photos">
-                {photos.map((item) => (
-                  <label key={item.id} className={chosen === item.id ? 'is-chosen' : undefined}>
+                {photos.map((item, index) => (
+                  <label key={item.fileItemId} className={chosen === item.fileItemId ? 'is-chosen' : undefined}>
                     <input
                       type="radio"
                       name="party-qr-card-photo"
-                      value={item.id}
-                      checked={chosen === item.id}
+                      value={item.fileItemId}
+                      checked={chosen === item.fileItemId}
                       disabled={sending}
                       onChange={() => choose(item)}
-                      aria-label={item.displayName}
+                      aria-label={t('party.qrCard.photoNumber', { n: index + 1 })}
                     />
-                    <img src={item.thumbnailUrl} alt="" loading="lazy" />
+                    <img src={smallThumbnailUrl(item.fileItemId)} alt="" loading="lazy" />
                   </label>
                 ))}
               </div>
