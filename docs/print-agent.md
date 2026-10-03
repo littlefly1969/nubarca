@@ -351,6 +351,10 @@ The agent does **not** run as root. The installer grants its account exactly the
 NetworkManager actions it needs through a polkit rule
 (`/etc/polkit-1/rules.d/49-nubarca-print-box.rules`: network control, system
 connection profiles, Wi-Fi scan, Wi-Fi sharing) — no sudo, no other service.
+From agent **0.6** the box's own instance also holds one ambient capability,
+`CAP_NET_ADMIN` (drop-in `nubarca-print-agent@box.service.d/captive-portal.conf`),
+so it can redirect port 80 on the setup network with `nft` (next sections);
+the shared unit — and so every simulator instance — has none.
 Printing needs no privilege at all: any local account may submit to CUPS.
 
 ### The two CUPS queues
@@ -395,16 +399,39 @@ one uncut sheet, the same on `NubArca-RX1HS-STRIP` two strips.
   no setup network, whether or not the NubArca server answers.
 - **Otherwise** the box opens `NubArca-Print-XXXX`. XXXX is stable for the box
   (a hash of its machine id); `journalctl -u nubarca-print-agent@box | grep
-  'Setup network'` shows it. Join it, then open `http://10.42.0.1:8080` (the
-  address NetworkManager usually gives the setup network; the page shows it) or
-  `http://nubarca-print.local:8080` where mDNS works.
+  'Setup network'` shows it. Join it, then open **`http://10.42.0.1/`** (the
+  address NetworkManager usually gives the setup network — the gateway your
+  phone shows; the page shows it too). `http://10.42.0.1:8080/` and
+  `http://nubarca-print.local:8080` (where mDNS works) reach the same page.
+- **Port 80** (from agent 0.6): while the setup network is up the agent adds
+  one nftables table of its own, `ip nubarca_setup`, sending tcp/80 arriving on
+  the Wi-Fi interface to the page's port (8080), and removes it before the
+  setup network closes, at boot and when the agent stops — never a lasting
+  rule. If it cannot (no `nft`, no capability) it logs why and the page stays at
+  `:8080`. The page also answers the connectivity probes phones and laptops send
+  (`/generate_204`, `/hotspot-detect.html`, `/connecttest.txt`, …) and any other
+  path with a redirect to itself, never with the reply they expect from the
+  Internet. A phone only sends those probes to the box if it can resolve their
+  names; the setup network has no Internet and the box does not answer DNS for
+  them, so the "sign in to network" prompt may not appear — opening the address
+  by hand always works.
+- **Over Ethernet** (from agent 0.6) the page is at `http://<the box's
+  address>:8080/` and can scan and configure the Wi-Fi as well, without touching
+  the cable: the box stays reachable, a failed attempt only removes its
+  profile (no setup network opens), and a successful one leaves Ethernet the
+  preferred connection. While the box's only connection is Wi-Fi the page
+  cannot change it — one radio, and the change would cut the page off; it says
+  so instead of offering the form.
 - **The page** shows the network, the printer, CUPS and whether NubArca is
   reachable, lists the networks the box saw before it opened the setup network,
   and has one form: network name and password. Nothing else — no account, no
   server settings, no logs.
-- **Connect**: the setup network closes (one radio), the box tries the network,
-  and on success keeps it — the setup network does not come back, which is how
-  the phone knows it worked. On **any** failure — wrong password, no address —
+- **Connect** from the setup network: the setup network closes (one radio), the
+  box tries the network, and on success keeps it — the setup network does not
+  come back, which is how the phone knows it worked. Success means the Wi-Fi
+  interface itself connected on the box's profile for that network
+  (`nubarca-wifi-<SSID>`) with an address and a gateway — a cable plugged in
+  meanwhile does not count. On **any** failure — wrong password, no address —
   the failed profile is removed and the setup network returns within about a
   minute; the page then says the connection failed.
 - **Later**: at the next boot NetworkManager uses the saved network by itself. A
@@ -414,7 +441,7 @@ one uncut sheet, the same on `NubArca-RX1HS-STRIP` two strips.
   was merely late is found again without a phone.
 
 Security notes: set a setup password for every real installation. The page
-accepts a connection request only in setup mode and only as JSON, never logs a
+accepts a connection request only in setup mode or over Ethernet, and only as JSON, never logs a
 request body, and never returns a password. Passwords reach `nmcli` as separate
 arguments, never through a shell; while `nmcli` runs they are visible in the
 process list to other local accounts, which a dedicated box does not have.
