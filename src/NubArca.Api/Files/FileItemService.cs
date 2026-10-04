@@ -3353,11 +3353,18 @@ public sealed class FileItemService : IFileItemService
         meta.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
 
+
         // A newly-derived container date changes the effective capture date of
         // every file referencing the blob (used for gallery sort).
         if (meta.DateTaken is not null)
         {
             await RecomputeEffectiveDatesForBlobAsync(blobObjectId, meta.DateTaken, cancellationToken);
+        }
+        // A video that now has a location appears on the owner's map, exactly
+        // as a photograph with GPS does — after the date its row carries.
+        if (meta.GpsLatitude is not null && meta.GpsLongitude is not null)
+        {
+            await RefreshLocationsForBlobAsync(blobObjectId, cancellationToken);
         }
         return true;
     }
@@ -3389,13 +3396,27 @@ public sealed class FileItemService : IFileItemService
         meta.AudioSampleRate = r.AudioSampleRate;
         meta.Rotation = r.Rotation;
 
-        // Container creation time feeds the shared capture-date field, but only
-        // when present — never clobber an existing DateTaken with null.
+        // The capture date feeds the shared field, in the photographs'
+        // convention (wall clock + offset when the phone states it) — but only
+        // when present: never clobber an existing DateTaken with null.
         if (r.CreationTime is DateTime taken)
         {
             meta.DateTaken = taken;
-            meta.DateTakenSource = "video_creation_time";
+            meta.DateTakenSource = r.CreationTimeSource ?? VideoMetadataExtractionResult.ContainerCreationTimeSource;
+            meta.DateTakenOffset = r.CreationTimeOffset;
         }
+
+        // Where and with what it was shot: owner-private, like a photograph's.
+        // Same rule — what the file does not say leaves what is known alone.
+        if (r.GpsLatitude is double lat && r.GpsLongitude is double lon)
+        {
+            meta.GpsLatitude = lat;
+            meta.GpsLongitude = lon;
+            meta.GpsAltitude = r.GpsAltitude;
+        }
+        if (r.CameraMake is not null) meta.CameraMake = r.CameraMake;
+        if (r.CameraModel is not null) meta.CameraModel = r.CameraModel;
+        if (r.Software is not null) meta.Software = r.Software;
     }
 
     // Slice 94: rebuilds the FileItemLocation rows of every ACTIVE file
