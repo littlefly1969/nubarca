@@ -77,6 +77,21 @@ jobs:
           --configuration Release
           --no-restore
 
+      # The production media tools (FFmpeg 9 — the digest the API Dockerfile
+      # pins), so the HEIC tests decode for real instead of being skipped. The
+      # package is public; nothing to log in to.
+      - name: Install media tools
+        run: |
+          set -euo pipefail
+          owner="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          digest="$(sed -n 's/^ARG MEDIA_TOOLS_IMAGE=.*@\(sha256:[0-9a-f]\{64\}\)$/\1/p' src/NubArca.Api/Dockerfile)"
+          cid="$(docker create "ghcr.io/${owner}/nubarca-media-tools@${digest}" /none)"
+          sudo mkdir -p /opt/nubarca/media
+          sudo docker cp "$cid:/opt/nubarca/media/." /opt/nubarca/media/
+          docker rm "$cid" >/dev/null
+          echo /opt/nubarca/media/bin >> "$GITHUB_PATH"
+          /opt/nubarca/media/bin/ffmpeg -hide_banner -version | head -1
+
       - name: Run fast backend tests
         run: >-
           scripts/test-backend-fast.sh

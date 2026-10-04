@@ -51,6 +51,12 @@ is built is described by `ARCHITECTURE.md`.
   name's baseline), not in a corner. The number's measured width
   is reserved, so the host's line never meets it. The preview cuts the name as
   the renderer does and keeps room for `#9999`
+- Media tools: FFmpeg 9.0.2 built from pinned sources (`scripts/media-tools`,
+  its own image, copied into the API image by digest), replacing Ubuntu's 6.1.
+- HEIC photos: recognised by signature and decoded by FFmpeg through
+  `OriginalImageReader` (upload, thumbnails, print from the original, SigLIP,
+  faces, guest book, aesthetics); stored upright with orientation 1;
+  `media images redetect` recognises the ones uploaded before.
 - Party QR card: the host prints the party's public QR for its tables from
   the print settings — the twin strip's sheet and printer cut, a host's
   photograph over the code in each strip, two identical cards per sheet
