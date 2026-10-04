@@ -31,7 +31,7 @@ public sealed class FaceCoverageService
         }
 
         var eligibleImages = await _db.BlobObjects.AsNoTracking().LongCountAsync(b =>
-            _db.BlobMetadata.Any(m => m.BlobObjectId == b.Id && m.MediaCategory == MediaCategories.Image)
+            _db.BlobMetadata.Any(m => m.BlobObjectId == b.Id && m.MediaCategory == MediaCategories.Image && m.DetectedContentType != null)
             && _db.FileItems.Any(f => f.BlobObjectId == b.Id && f.DeletedAt == null),
             cancellationToken);
 

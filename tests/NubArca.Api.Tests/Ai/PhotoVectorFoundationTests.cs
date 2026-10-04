@@ -224,6 +224,32 @@ public sealed class PhotoVectorFoundationTests
     }
 
     [Fact]
+    public async Task A_File_That_Only_Claims_To_Be_An_Image_Is_Never_An_Embedding_Candidate()
+    {
+        // A font, or a JPEG ruined by a failing card, uploaded with an image
+        // MIME type: "image" by category, nothing the server could recognise.
+        // It used to be picked by every run, fail to decode, and stay pending
+        // in the coverage forever; now it is no candidate at all.
+        using var f = EnabledFactory();
+        await SeedDeterministic1152ProfileAsync(f, "det-1152", "det-image-1152");
+        var (_, client) = await f.CreateAuthenticatedClientAsync();
+        await UploadPngAsync(client, "real.png", 10);
+        var junk = new ByteArrayContent(Enumerable.Repeat((byte)0xAF, 2048).ToArray());
+        junk.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
+        (await client.PostAsync("/api/files", new MultipartFormDataContent { { junk, "file", "P1000308.JPG" } }))
+            .EnsureSuccessStatusCode();
+
+        await RunPhotosBackfillAsync(f, "det-image-1152");
+
+        using var scope = f.Services.CreateScope();
+        var coverage = await scope.ServiceProvider
+            .GetRequiredService<PhotoEmbeddingProfileService>().GetCoverageAsync("det-image-1152");
+        Assert.Equal(1, coverage!.EligibleImages);
+        Assert.Equal(1, coverage.Embedded);
+        Assert.Equal(0, coverage.Missing);
+    }
+
+    [Fact]
     public async Task Legacy_Retirement_Fails_Closed_Without_Complete_1152_Vector_Coverage()
     {
         using var f = EnabledFactory(

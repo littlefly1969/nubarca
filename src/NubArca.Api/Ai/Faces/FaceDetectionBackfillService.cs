@@ -309,7 +309,7 @@ public sealed class FaceDetectionBackfillService
         return _db.BlobObjects.AsNoTracking().Where(b =>
             (targetBlobObjectId == null || b.Id == targetBlobObjectId)
             &&
-            _db.BlobMetadata.Any(m => m.BlobObjectId == b.Id && m.MediaCategory == MediaCategories.Image)
+            _db.BlobMetadata.Any(m => m.BlobObjectId == b.Id && m.MediaCategory == MediaCategories.Image && m.DetectedContentType != null)
             && _db.FileItems.Any(f => f.BlobObjectId == b.Id && f.DeletedAt == null && f.MediaLibraryState == MediaLibraryState.Active)
             && !_db.BlobAiArtifactStatuses.Any(s =>
                 s.BlobObjectId == b.Id && s.ProfileId == profileId

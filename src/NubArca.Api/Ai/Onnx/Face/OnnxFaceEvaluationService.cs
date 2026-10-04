@@ -252,7 +252,7 @@ public sealed class OnnxFaceEvaluationService
         var candidates = await (
             from f in _db.FileItems.AsNoTracking()
             where f.DeletedAt == null
-                && _db.BlobMetadata.Any(m => m.BlobObjectId == f.BlobObjectId && m.MediaCategory == MediaCategories.Image)
+                && _db.BlobMetadata.Any(m => m.BlobObjectId == f.BlobObjectId && m.MediaCategory == MediaCategories.Image && m.DetectedContentType != null)
             orderby f.Id
             select new { f.Id, f.Name, f.BlobObjectId })
             .Take(take)
@@ -319,7 +319,7 @@ public sealed class OnnxFaceEvaluationService
 
     private IQueryable<Guid> EligibleImageBlobs() =>
         from b in _db.BlobObjects.AsNoTracking()
-        where _db.BlobMetadata.Any(m => m.BlobObjectId == b.Id && m.MediaCategory == MediaCategories.Image)
+        where _db.BlobMetadata.Any(m => m.BlobObjectId == b.Id && m.MediaCategory == MediaCategories.Image && m.DetectedContentType != null)
             && _db.FileItems.Any(f => f.BlobObjectId == b.Id && f.DeletedAt == null)
         orderby b.Id
         select b.Id;
