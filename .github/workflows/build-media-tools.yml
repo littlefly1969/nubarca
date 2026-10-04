@@ -1,0 +1,108 @@
+name: Build media tools
+
+# FFmpeg / FFprobe built from the pinned sources in scripts/media-tools, as an
+# image of their own that the API image copies by digest.
+#
+# A pull request that touches the media tools BUILDS and VERIFIES them — the
+# whole build, on the base the API runs on, so a pin that breaks anything
+# NubArca does with them fails the PR. Only a manual run on `main` publishes:
+# like the application images, nothing is pushed by a merge.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - scripts/media-tools/**
+      - .github/workflows/build-media-tools.yml
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-media-tools-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  media-tools:
+    name: Build, verify and publish media tools
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # The tag says what is inside and which source pinned it; the digest is
+      # what the API image names.
+      - name: Resolve image reference
+        id: refs
+        run: |
+          set -euo pipefail
+          owner="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          ffmpeg="$(sed -n 's/^ARG FFMPEG_VERSION=//p' scripts/media-tools/Dockerfile)"
+          short="$(printf '%s' '${{ github.sha }}' | cut -c1-12)"
+          {
+            echo "ffmpeg=$ffmpeg"
+            echo "image=${REGISTRY}/${owner}/nubarca-media-tools:ffmpeg-${ffmpeg}-${short}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the verification image
+        run: >-
+          docker buildx build --load
+          --target verify
+          -f scripts/media-tools/Dockerfile
+          -t nubarca-media-tools-verify:ci
+          .
+
+      - name: Verify on the API's own base
+        run: docker run --rm nubarca-media-tools-verify:ci
+
+      - name: Build the tools image
+        run: >-
+          docker buildx build --load
+          --target tools
+          -f scripts/media-tools/Dockerfile
+          -t ${{ steps.refs.outputs.image }}
+          .
+
+      - name: Log in to GHCR
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        id: push
+        run: |
+          set -euo pipefail
+          docker push '${{ steps.refs.outputs.image }}'
+          digest="$(docker buildx imagetools inspect '${{ steps.refs.outputs.image }}' --format '{{.Manifest.Digest}}')"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Report
+        run: |
+          {
+            echo "## Media tools"
+            echo
+            echo "FFmpeg \`${{ steps.refs.outputs.ffmpeg }}\`, built from pinned, checksum-verified sources and"
+            echo "verified on the API's base: HLS, poster, preview strip, scene detection, ffprobe,"
+            echo "legacy formats, tiled/rotated HEIC, HDR→SDR."
+            echo
+            if [ -n '${{ steps.push.outputs.digest }}' ]; then
+              echo "Published: \`${{ steps.refs.outputs.image }}\`"
+              echo
+              echo "Digest: \`${{ steps.push.outputs.digest }}\` — the value the API Dockerfile pins."
+            else
+              echo "Verified only (not published): publication is a manual run on \`main\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
