@@ -58,7 +58,7 @@ the tested expectation, not a guarantee.
 | Docker Engine | not declared | 29.6.2 | >= 24 | optional per area | not declared | — |
 | Docker Compose | not declared | 5.3.1 | >= 2.20 (compose plugin) | optional per area | not declared | — |
 | **PostgreSQL** | `pgvector/pgvector:pg17` | container image | 17 (with pgvector) | required to run the API | [`docker-compose.yml`](../docker-compose.yml), `docker-compose.prod.yml` | — |
-| FFmpeg | image installs distro `ffmpeg` | 8.1.2 | >= 6 | optional — media derivatives | `src/NubArca.Api/Dockerfile` | host 8.1.2 vs image distro build; see §12 |
+| FFmpeg | media tools image (`scripts/media-tools`), 9.0.2 | 8.1.2 | >= 6 | optional — media derivatives | `src/NubArca.Api/Dockerfile` (`MEDIA_TOOLS_IMAGE` digest) | host 8.1.2 vs image 9.0.2; see §10 |
 | FFprobe | shipped with FFmpeg | 8.1.2 | >= 6 | optional — video metadata | same | — |
 | **ONNX Runtime (managed)** | `1.24.1` | 1.24.1 | must equal ORT ABI | optional — AI | [`src/NubArca.Api/NubArca.Api.csproj`](../src/NubArca.Api/NubArca.Api.csproj) | — |
 | **ONNX Runtime (native, OpenVINO)** | `ORT_OPENVINO_VERSION=1.24.1`, `ORT_ABI_VERSION=1.24.1` | build-time only | exact, SHA-256 verified | optional — OpenVINO only | [`scripts/openvino-direct/onnxruntime-openvino.lock`](../scripts/openvino-direct/onnxruntime-openvino.lock) | — |
@@ -223,7 +223,7 @@ interchangeable:
 
 | Target | Contents | Used by |
 | --- | --- | --- |
-| `runtime-base` | aspnet:10.0 + `libgssapi-krb5-2` + `ffmpeg` | shared base, not deployed directly |
+| `runtime-base` | aspnet:10.0 + `libgssapi-krb5-2` + media tools (FFmpeg/FFprobe) | shared base, not deployed directly |
 | `runtime` | `runtime-base`, nothing added — **default target** | standard api/worker image |
 | `runtime-openvino` | adds the pinned ORT+OpenVINO native stack and Intel GPU userspace | only containers running `Ai__Onnx__ExecutionProvider=openvino-direct` |
 
@@ -242,8 +242,19 @@ container.
 
 ## 10. FFmpeg / FFprobe
 
-Optional locally. The API image already installs `ffmpeg` (which provides
-`ffprobe`). They are only invoked when the optional providers are enabled:
+Optional locally. The API image carries FFmpeg and FFprobe from the **media
+tools image**: built from pinned sources by `scripts/media-tools/Dockerfile`
+(FFmpeg 9.0.2 with dav1d, zimg, x264 and zlib, no network protocols), published
+by the *Build media tools* workflow and copied in by the digest the API
+Dockerfile pins in `MEDIA_TOOLS_IMAGE`. The package is public, so a local
+`docker build` pulls it without credentials. To try another build locally:
+`docker build -f scripts/media-tools/Dockerfile --target tools -t nubarca-media-tools:local .`
+and pass `--build-arg MEDIA_TOOLS_IMAGE=nubarca-media-tools:local`;
+`--target verify` builds an image whose entrypoint runs
+`scripts/media-tools/verify-media-tools.sh`. To move to a new FFmpeg: change the
+pins there, publish, and put the new digest in the API Dockerfile.
+
+They are only invoked when the optional providers are enabled:
 
 - `Media__VideoPosterProvider=ffmpeg` — real poster frames
 - `Media__VideoMetadataProvider=ffprobe` — duration, codecs, dimensions, fps, rotation

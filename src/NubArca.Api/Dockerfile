@@ -1,3 +1,13 @@
+# The media tools — FFmpeg and FFprobe, built from pinned sources by
+# scripts/media-tools and published by the "Build media tools" workflow — taken
+# by DIGEST, so the bytes cannot change under this image and an API build never
+# recompiles FFmpeg. The package is public; the production workflow passes the
+# same reference for its own repository owner. To move to a new FFmpeg: change
+# the pins in scripts/media-tools/Dockerfile, publish, and put the new digest
+# here.
+ARG MEDIA_TOOLS_IMAGE=ghcr.io/littlefly1969/nubarca-media-tools@sha256:d9a37eaaae949af741f4e7d3326c40e6d01a92324fa9c8238a8fe6901cc4093b
+FROM ${MEDIA_TOOLS_IMAGE} AS media-tools
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
@@ -73,7 +83,6 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libgssapi-krb5-2 \
-        ffmpeg \
         tesseract-ocr \
         tesseract-ocr-eng \
         tesseract-ocr-ita \
@@ -103,11 +112,18 @@ RUN apt-get update \
 # enables it never starts the process, and a host WITHOUT the package boots
 # perfectly well — readiness reports `ocr_unavailable` and PDFs that need
 # recognition are retryable rather than permanently refused.
-# ffmpeg (above) also provides ffprobe. Both are used by the OPTIONAL external
-# media providers: Media__VideoPosterProvider=ffmpeg extracts real video poster
-# frames, and Media__VideoMetadataProvider=ffprobe reads container/stream
-# metadata (duration, codecs, dimensions, fps, rotation). With the default
-# providers ("synthetic"/"none") these binaries are present but never invoked.
+# FFmpeg and FFprobe from the media tools image (top of this file), not from
+# apt: the distribution's 6.1 cannot read HEIC and drags in ~240 MB of libraries
+# NubArca never calls. They live in /opt/nubarca/media with their licences and a
+# versions.json, and are linked onto PATH under the names the media options
+# default to ("ffmpeg", "ffprobe"). They are used by the OPTIONAL external media
+# providers: Media__VideoPosterProvider=ffmpeg extracts real video poster frames,
+# and Media__VideoMetadataProvider=ffprobe reads container/stream metadata
+# (duration, codecs, dimensions, fps, rotation). With the default providers
+# ("synthetic"/"none") these binaries are present but never invoked.
+COPY --from=media-tools /opt/nubarca/media /opt/nubarca/media
+RUN ln -s /opt/nubarca/media/bin/ffmpeg /usr/local/bin/ffmpeg \
+    && ln -s /opt/nubarca/media/bin/ffprobe /usr/local/bin/ffprobe
 
 COPY --from=build /app/publish ./
 

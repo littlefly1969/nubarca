@@ -95,6 +95,31 @@ for tool in ffmpeg ffprobe; do
   fi
 done
 
+# They are the media tools build, not a distribution package: the version the
+# manifest records, every library resolved, no network protocol, and an encode
+# that exercises the build (x264).
+media_version="$(probe 'sed -n "s/.*\"ffmpeg\":\"\([^\"]*\)\".*/\1/p" /opt/nubarca/media/versions.json')" || true
+if [ -n "$media_version" ] && contains 'ffmpeg -hide_banner -version' "ffmpeg version $media_version "; then
+  pass "ffmpeg is the media tools build ($media_version)"
+else
+  fail "ffmpeg is not the media tools build (manifest: ${media_version:-missing})"
+fi
+if contains 'ldd /opt/nubarca/media/bin/ffmpeg /opt/nubarca/media/bin/ffprobe | grep -c "not found" || true' '0'; then
+  pass "media tools: every shared library resolves"
+else
+  fail "media tools: a shared library is missing"
+fi
+if contains 'ffmpeg -hide_banner -protocols 2>/dev/null | grep -cxE " +(http|https|tcp)" || true' '0'; then
+  pass "media tools: no network protocols"
+else
+  fail "media tools: a network protocol is built in"
+fi
+if contains 'ffmpeg -hide_banner -nostdin -v error -f lavfi -i testsrc2=size=320x240:rate=5 -frames:v 5 -c:v libx264 -f null - && echo encoded' encoded; then
+  pass "media tools: x264 encode works"
+else
+  fail "media tools: x264 encode failed"
+fi
+
 # --- ONNX Runtime, which differs per variant BY DESIGN ----------------------
 if [ "$variant" = "openvino" ]; then
   # The native layer is staged by fetch-native-libs.sh into a fixed directory
