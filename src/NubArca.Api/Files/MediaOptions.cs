@@ -16,6 +16,15 @@ public class MediaOptions
     // Defaults to "ffprobe" (looked up from PATH).
     public string FfprobePath { get; set; } = "ffprobe";
 
+    // HEIC stills (the iPhone's photo format) are decoded by FFmpeg, which
+    // ImageSharp and libvips cannot do: one frame, as a lossless PNG, read
+    // from the original whenever its pixels are needed (OriginalImageReader).
+    // The bound on the PNG is generous enough for a 48 MP frame at 16 bits a
+    // channel; a decode that would exceed it, or takes longer than the timeout,
+    // is treated as undecodable rather than allowed to exhaust the host.
+    public int HeifDecodeTimeoutSeconds { get; set; } = 120;
+    public int HeifDecodeMaxOutputBytes { get; set; } = 640 * 1024 * 1024; // 640 MB
+
     // Which video-metadata provider to use. "none" (default) disables video
     // probing entirely (the backfill/CLI/post-ingest do no work). "ffprobe"
     // invokes an external ffprobe process to read container/stream metadata.

@@ -6,6 +6,7 @@ using NubArca.Api.Ai.Resolution;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Storage;
+using NubArca.Api.Files;
 
 namespace NubArca.Api.Ai.Onnx;
 
@@ -23,6 +24,7 @@ public sealed class OnnxImageEvaluationService
 {
     private readonly AppDbContext _db;
     private readonly IBlobService _blobs;
+    private readonly IOriginalImageReader? _originals;
     private readonly IAiBackendResolver _resolver;
     private readonly IAiProfileRegistry _registry;
     private readonly IOptions<AiOptions> _options;
@@ -32,8 +34,10 @@ public sealed class OnnxImageEvaluationService
         IBlobService blobs,
         IAiBackendResolver resolver,
         IAiProfileRegistry registry,
-        IOptions<AiOptions> options)
+        IOptions<AiOptions> options,
+        IOriginalImageReader? originals = null)
     {
+        _originals = originals;
         _db = db;
         _blobs = blobs;
         _resolver = resolver;
@@ -235,13 +239,8 @@ public sealed class OnnxImageEvaluationService
         orderby b.Id
         select b.Id;
 
-    private async Task<byte[]> ReadBlobAsync(Guid blobId, CancellationToken cancellationToken)
-    {
-        await using var stream = await _blobs.OpenContentAsync(blobId, cancellationToken);
-        using var ms = new MemoryStream();
-        await stream.CopyToAsync(ms, cancellationToken);
-        return ms.ToArray();
-    }
+    private Task<byte[]> ReadBlobAsync(Guid blobId, CancellationToken cancellationToken) =>
+        OriginalPixels.ReadAsync(_blobs, _originals, blobId, cancellationToken);
 
     private static double Cosine(float[] a, float[] b)
     {

@@ -16,6 +16,7 @@ public sealed class AestheticAnalysisService : IAestheticAnalysisService
     private readonly AppDbContext _db;
     private readonly IJobQueue _jobs;
     private readonly IBlobService _blobs;
+    private readonly IOriginalImageReader? _originals;
     private readonly IAestheticModelClient _client;
     private readonly TimeProvider _clock;
     private readonly ImageProcessingOptions _imageOptions;
@@ -30,8 +31,10 @@ public sealed class AestheticAnalysisService : IAestheticAnalysisService
         TimeProvider clock,
         ILogger<AestheticAnalysisService> logger,
         IOptions<ImageProcessingOptions>? imageOptions = null,
-        IOptions<AestheticsOptions>? options = null)
+        IOptions<AestheticsOptions>? options = null,
+        IOriginalImageReader? originals = null)
     {
+        _originals = originals;
         _db = db;
         _jobs = jobs;
         _blobs = blobs;
@@ -305,13 +308,9 @@ public sealed class AestheticAnalysisService : IAestheticAnalysisService
             // decompression bomb / unsupported format fails without hitting the
             // model. We send the IMMUTABLE original bytes; the sidecar owns the
             // model-specific preprocessing (official-v1 = the checkpoint's own).
-            byte[] bytes;
-            await using (var stream = await _blobs.OpenContentAsync(item.BlobObjectId, cancellationToken))
-            {
-                using var buffer = new MemoryStream();
-                await stream.CopyToAsync(buffer, cancellationToken);
-                bytes = buffer.ToArray();
-            }
+            // HEIC included: its frame decoded losslessly and upright by FFmpeg
+            // (OriginalImageReader) — still the original's pixels.
+            var bytes = await OriginalPixels.ReadAsync(_blobs, _originals, item.BlobObjectId, cancellationToken);
             ImageInfo? info;
             try
             {

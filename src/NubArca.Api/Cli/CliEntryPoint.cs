@@ -187,6 +187,12 @@ public static class CliEntryPoint
                     sp => MediaDerivativesBackfillAsync(rest[1..], sp, stdout, stderr),
                     stderr);
 
+            case ("media", "images") when rest.Length > 0 && rest[0] == "redetect":
+                return await DispatchAsync(
+                    serviceProviderFactory,
+                    sp => MediaImagesRedetectAsync(rest[1..], sp, stdout, stderr),
+                    stderr);
+
             case ("media", "derivatives") when rest.Length > 0 && rest[0] == "failures":
                 return await DispatchAsync(
                     serviceProviderFactory,
@@ -982,6 +988,47 @@ public static class CliEntryPoint
         stdout.WriteLine(
             $"  {b.Name}: images={b.Images} failed={b.Failed} total_ms={b.TotalMillis} "
             + $"avg_ms={b.AvgMillis:0.0} output_bytes={b.TotalOutputBytes}");
+    }
+
+    // ---- subcommand: media images redetect -------------------------------------
+    // Gives originals stored as images the upload could not read (HEIC, before
+    // the server decoded it) a second look. Numbers only, never names or paths.
+    // Derivatives are the derivative backfill's work afterwards.
+    internal static async Task<int> MediaImagesRedetectAsync(
+        string[] args,
+        IServiceProvider services,
+        TextWriter stdout,
+        TextWriter stderr)
+    {
+        var service = services.GetService<ImageRedetectionService>();
+        if (service is null)
+        {
+            stderr.WriteLine("media images redetect: database is not configured. Set ConnectionStrings__Postgres and retry.");
+            return 78; // EX_CONFIG
+        }
+
+        int? limit = null;
+        var limitRaw = ReadOption(args, "--limit");
+        if (limitRaw is not null)
+        {
+            if (!int.TryParse(limitRaw, out var n) || n <= 0)
+            {
+                stderr.WriteLine("media images redetect: --limit must be a positive integer.");
+                return 64;
+            }
+            limit = n;
+        }
+        var dryRun = HasFlag(args, "--dry-run");
+        var result = await service.RunAsync(
+            new ImageRedetectionOptions { Limit = limit, DryRun = dryRun }, CancellationToken.None);
+        stdout.WriteLine(
+            $"media images redetect{(dryRun ? " (dry run)" : "")}: examined={result.Examined} "
+            + $"recognised={result.Recognised} still_unreadable={result.StillUnreadable}");
+        if (result.Recognised > 0 && !dryRun)
+        {
+            stdout.WriteLine("media images redetect: now run `media derivatives backfill` for their thumbnails.");
+        }
+        return 0;
     }
 
     // ---- subcommand: media derivatives verify-bytes / repair-bytes ----------
@@ -2187,6 +2234,7 @@ public static class CliEntryPoint
             });
             services.AddSingleton<IEmbeddedMetadataExtractor, EmbeddedImageMetadataExtractor>();
             services.AddScoped<IBlobService, BlobService>();
+            services.AddScoped<IOriginalImageReader, OriginalImageReader>();
             // FileThumbnailService requires a video poster provider. Mirror the
             // web host's synthetic-or-ffmpeg selection so any handler that pulls
             // in the thumbnail service (media-derivatives backfill, admin import)
@@ -2285,6 +2333,7 @@ public static class CliEntryPoint
             // Slice 63: media-derivatives prewarm. Depends on
             // IFileThumbnailService + DerivativeDiagnosticsService (above).
             services.AddScoped<MediaDerivativesBackfillService>();
+            services.AddScoped<ImageRedetectionService>();
             services.AddScoped<GalleryDerivativesRegenerationService>();
             services.AddScoped<MediumPreviewRegenerationService>();
             // Slice 96: derived-bytes placement audit/repair (media
@@ -4784,6 +4833,7 @@ public static class CliEntryPoint
         stdout.WriteLine("  dotnet NubArca.Api.dll metadata recompute-effective-dates");
         stdout.WriteLine("  dotnet NubArca.Api.dll media derivatives backfill [options]");
         stdout.WriteLine("  dotnet NubArca.Api.dll media derivatives failures");
+        stdout.WriteLine("  dotnet NubArca.Api.dll media images redetect    [--dry-run] [--limit N]");
         stdout.WriteLine("  dotnet NubArca.Api.dll media derivatives benchmark [--limit N]");
         stdout.WriteLine("  dotnet NubArca.Api.dll storage reconcile          [options]");
         stdout.WriteLine("  dotnet NubArca.Api.dll jobs enqueue <job>         [options]");
