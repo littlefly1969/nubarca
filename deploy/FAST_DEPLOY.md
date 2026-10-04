@@ -248,7 +248,9 @@ scripts/verify-production-image.sh <image-ref> <expected-git-sha> [runtime|openv
 
 It checks provenance (`NUBARCA_GIT_SHA` equals the source SHA — the lean
 `runtime` target stamps this too, not only `runtime-openvino`), a startable
-ASP.NET Core runtime with the published application, `ffmpeg`/`ffprobe`, and the
+ASP.NET Core runtime with the published application, `ffmpeg`/`ffprobe` as the
+media tools build (the version its manifest records, every library resolved, no
+network protocol, a working x264 encode), and the
 ONNX Runtime layer each variant is SUPPOSED to carry: the CPU provider beside
 the application for `runtime`, and for `runtime-openvino` the staged
 `libonnxruntime.so.<abi>` under its SONAME, the OpenVINO providers, the CPU and

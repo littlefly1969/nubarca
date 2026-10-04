@@ -48,6 +48,11 @@ jobs:
             echo "runtime=${REGISTRY}/${owner}/nubarca-api:${sha}"
             echo "openvino=${REGISTRY}/${owner}/nubarca-api-openvino:${sha}"
           } >> "$GITHUB_OUTPUT"
+          # The media tools the Dockerfile pins, by digest, under this
+          # repository's owner — never a tag.
+          media_digest="$(sed -n 's/^ARG MEDIA_TOOLS_IMAGE=.*@\(sha256:[0-9a-f]\{64\}\)$/\1/p' src/NubArca.Api/Dockerfile)"
+          [ -n "$media_digest" ] || { echo "src/NubArca.Api/Dockerfile pins no media tools digest" >&2; exit 1; }
+          echo "media_tools=${REGISTRY}/${owner}/nubarca-media-tools@${media_digest}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -67,6 +72,7 @@ jobs:
           docker buildx build --load
           --target runtime
           --build-arg GIT_SHA=${{ steps.refs.outputs.sha }}
+          --build-arg MEDIA_TOOLS_IMAGE=${{ steps.refs.outputs.media_tools }}
           -f src/NubArca.Api/Dockerfile
           -t ${{ steps.refs.outputs.runtime }}
           .
@@ -76,6 +82,7 @@ jobs:
           docker buildx build --load
           --target runtime-openvino
           --build-arg GIT_SHA=${{ steps.refs.outputs.sha }}
+          --build-arg MEDIA_TOOLS_IMAGE=${{ steps.refs.outputs.media_tools }}
           -f src/NubArca.Api/Dockerfile
           -t ${{ steps.refs.outputs.openvino }}
           .
