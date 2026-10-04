@@ -57,6 +57,10 @@ is built is described by `ARCHITECTURE.md`.
   `OriginalImageReader` (upload, thumbnails, print from the original, SigLIP,
   faces, guest book, aesthetics); stored upright with orientation 1;
   `media images redetect` recognises the ones uploaded before.
+- Video capture metadata (extractor v2): Apple's local creation date with its
+  offset (photographs' wall-clock convention), the ISO 6709 location (Apple
+  and Android) into owner-private GPS and the owner's map, make/model.
+  `metadata video-backfill` re-probes every video below v2.
 - Party QR card: the host prints the party's public QR for its tables from
   the print settings — the twin strip's sheet and printer cut, a host's
   photograph over the code in each strip, two identical cards per sheet

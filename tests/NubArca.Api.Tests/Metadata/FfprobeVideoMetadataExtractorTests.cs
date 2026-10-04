@@ -63,6 +63,86 @@ public sealed class FfprobeVideoMetadataExtractorTests
         Assert.Equal(FfprobeVideoMetadataExtractor.Version, result.Version);
     }
 
+    private static string Video(string formatTags) => $$"""
+        {
+          "streams": [ {"codec_type":"video","codec_name":"h264","width":1920,"height":1080,"avg_frame_rate":"30/1"} ],
+          "format": {"duration":"5.0","tags":{{formatTags}}}
+        }
+        """;
+
+    [Fact]
+    public async Task An_Iphone_Video_Keeps_Its_Local_Time_Offset_Place_And_Device()
+    {
+        // The tags an iPhone .mov carries (as found on real uploads): the
+        // container's UTC creation_time AND Apple's local creation date.
+        var result = await Build(Json(Video("""
+            {"creation_time":"2026-10-03T19:15:42.000000Z",
+             "com.apple.quicktime.creationdate":"2026-10-03T21:15:42+0200",
+             "com.apple.quicktime.location.ISO6709":"+45.4642+009.1900+120.000/",
+             "com.apple.quicktime.make":"Apple","com.apple.quicktime.model":"iPhone 13",
+             "com.apple.quicktime.software":"18.0"}
+            """))).ExtractAsync(Blob(), CancellationToken.None);
+
+        // The photographs' convention: the wall clock, as UTC-kind, and its offset.
+        Assert.Equal(new DateTime(2026, 10, 3, 21, 15, 42, DateTimeKind.Utc), result.CreationTime);
+        Assert.Equal("+02:00", result.CreationTimeOffset);
+        Assert.Equal(VideoMetadataExtractionResult.QuickTimeCreationDateSource, result.CreationTimeSource);
+        Assert.Equal(45.4642, result.GpsLatitude);
+        Assert.Equal(9.19, result.GpsLongitude);
+        Assert.Equal(120.0, result.GpsAltitude);
+        Assert.Equal(("Apple", "iPhone 13", "18.0"), (result.CameraMake, result.CameraModel, result.Software));
+        Assert.Equal(2, FfprobeVideoMetadataExtractor.Version);
+    }
+
+    [Fact]
+    public async Task An_Android_Video_Has_Its_Place_And_A_Utc_Time_Without_An_Offset()
+    {
+        var result = await Build(Json(Video("""
+            {"creation_time":"2026-10-03T19:15:42.000000Z","location":"-33.8688+151.2093/",
+             "com.android.manufacturer":"Google","com.android.model":"Pixel 9"}
+            """))).ExtractAsync(Blob(), CancellationToken.None);
+
+        Assert.Equal(new DateTime(2026, 10, 3, 19, 15, 42, DateTimeKind.Utc), result.CreationTime);
+        Assert.Null(result.CreationTimeOffset);
+        Assert.Equal(VideoMetadataExtractionResult.ContainerCreationTimeSource, result.CreationTimeSource);
+        Assert.Equal((-33.8688, 151.2093), (result.GpsLatitude!.Value, result.GpsLongitude!.Value));
+        Assert.Null(result.GpsAltitude);
+        Assert.Equal(("Google", "Pixel 9"), (result.CameraMake, result.CameraModel));
+    }
+
+    [Fact]
+    public async Task A_Negative_Offset_Is_Kept_As_Written()
+    {
+        var result = await Build(Json(Video("""
+            {"com.apple.quicktime.creationdate":"2026-07-04T08:30:00-0500"}
+            """))).ExtractAsync(Blob(), CancellationToken.None);
+        Assert.Equal(new DateTime(2026, 7, 4, 8, 30, 0, DateTimeKind.Utc), result.CreationTime);
+        Assert.Equal("-05:00", result.CreationTimeOffset);
+    }
+
+    [Theory]
+    [InlineData("+00.0000+000.0000/")]   // a device with no fix
+    [InlineData("+95.0000+009.1900/")]   // not a latitude
+    [InlineData("+45.4642+190.0000/")]   // not a longitude
+    [InlineData("somewhere")]
+    public async Task A_Location_That_Is_No_Place_Is_No_Location(string iso6709)
+    {
+        var result = await Build(Json(Video($$"""{"location":"{{iso6709}}"}"""))).ExtractAsync(Blob(), CancellationToken.None);
+        Assert.Null(result.GpsLatitude);
+        Assert.Null(result.GpsLongitude);
+    }
+
+    [Fact]
+    public async Task An_Apple_Date_Without_An_Offset_Falls_Back_To_The_Container_Time()
+    {
+        var result = await Build(Json(Video("""
+            {"creation_time":"2026-10-03T19:15:42.000000Z","com.apple.quicktime.creationdate":"2026-10-03T21:15:42"}
+            """))).ExtractAsync(Blob(), CancellationToken.None);
+        Assert.Equal(new DateTime(2026, 10, 3, 19, 15, 42, DateTimeKind.Utc), result.CreationTime);
+        Assert.Equal(VideoMetadataExtractionResult.ContainerCreationTimeSource, result.CreationTimeSource);
+        Assert.Null(result.CreationTimeOffset);
+    }
+
     [Fact]
     public async Task Video_Only_Has_No_Audio()
     {

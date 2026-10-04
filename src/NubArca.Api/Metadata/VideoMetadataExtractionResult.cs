@@ -45,9 +45,34 @@ public sealed record VideoMetadataExtractionResult
     // Display rotation in degrees, normalized to [0,360).
     public int? Rotation { get; init; }
 
-    // Container creation time (UTC), when present. Mapped onto BlobMetadata's
-    // shared DateTaken field — the same capture-date column the image path uses.
+    // When the video was shot, in the convention photographs use: the camera's
+    // WALL-CLOCK time kept as a UTC-kind value, with its offset beside it when
+    // the file says it. From Apple's com.apple.quicktime.creationdate (local
+    // time with its offset) when present; otherwise the container's
+    // creation_time, which is true UTC and carries no offset.
     public DateTime? CreationTime { get; init; }
+
+    // "+02:00" — only when the file states the offset (Apple's creationdate).
+    public string? CreationTimeOffset { get; init; }
+
+    // Which of the two CreationTime came from: QuickTimeCreationDateSource or
+    // ContainerCreationTimeSource. Stored as BlobMetadata.DateTakenSource.
+    public string? CreationTimeSource { get; init; }
+
+    // Where it was shot, from the ISO 6709 location the phone wrote (Apple's
+    // com.apple.quicktime.location.ISO6709, Android's "location"). Owner-
+    // private like a photograph's GPS: it never leaves the owner's own views.
+    public double? GpsLatitude { get; init; }
+    public double? GpsLongitude { get; init; }
+    public double? GpsAltitude { get; init; }
+
+    // The device, as the phone named it.
+    public string? CameraMake { get; init; }
+    public string? CameraModel { get; init; }
+    public string? Software { get; init; }
+
+    public const string QuickTimeCreationDateSource = "quicktime_creationdate";
+    public const string ContainerCreationTimeSource = "video_creation_time";
 
     public static VideoMetadataExtractionResult ForStatus(string status, string? errorCode, int version)
         => new() { Status = status, ErrorCode = errorCode, Version = version };

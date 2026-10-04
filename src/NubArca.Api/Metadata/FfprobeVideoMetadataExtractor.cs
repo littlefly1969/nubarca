@@ -20,7 +20,9 @@ public sealed class FfprobeVideoMetadataExtractor : IVideoMetadataExtractor
 {
     // Bump when probe arguments or the JSON→field mapping change so a future
     // backfill re-probes older rows.
-    public const int Version = 1;
+    // 2: the phone's own capture metadata — Apple's local creation date with
+    //    its offset, the ISO 6709 location (Apple and Android), make/model.
+    public const int Version = 2;
 
     private readonly IOptions<MediaOptions> _options;
     private readonly IProcessRunner _runner;
@@ -167,8 +169,15 @@ public sealed class FfprobeVideoMetadataExtractor : IVideoMetadataExtractor
             long? videoBitrate = ParseLong(GetString(v, "bit_rate"))
                 ?? (hasFormat ? ParseLong(GetString(format, "bit_rate")) : null);
 
-            DateTime? creationTime = ReadCreationTime(v)
+            // The phone's own wall-clock capture time first; the container's
+            // UTC creation_time only when there is nothing better.
+            var tags = hasFormat ? Tags(format) : default;
+            var streamTags = Tags(v);
+            var local = ReadQuickTimeCreationDate(tags) ?? ReadQuickTimeCreationDate(streamTags);
+            DateTime? creationTime = local?.WallClock
+                ?? ReadCreationTime(v)
                 ?? (hasFormat ? ReadCreationTime(format) : null);
+            var location = ReadIso6709(tags) ?? ReadIso6709(streamTags);
 
             var result = new VideoMetadataExtractionResult
             {
@@ -183,6 +192,16 @@ public sealed class FfprobeVideoMetadataExtractor : IVideoMetadataExtractor
                 VideoBitrate = videoBitrate is > 0 ? videoBitrate : null,
                 Rotation = ReadRotation(v),
                 CreationTime = creationTime,
+                CreationTimeOffset = local?.Offset,
+                CreationTimeSource = creationTime is null ? null
+                    : local is not null ? VideoMetadataExtractionResult.QuickTimeCreationDateSource
+                    : VideoMetadataExtractionResult.ContainerCreationTimeSource,
+                GpsLatitude = location?.Latitude,
+                GpsLongitude = location?.Longitude,
+                GpsAltitude = location?.Altitude,
+                CameraMake = FirstTag(tags, "com.apple.quicktime.make", "com.android.manufacturer", "make"),
+                CameraModel = FirstTag(tags, "com.apple.quicktime.model", "com.android.model", "model"),
+                Software = FirstTag(tags, "com.apple.quicktime.software", "com.android.version"),
                 HasAudio = audio is not null,
                 AudioCodec = audio is { } a ? Trim(GetString(a, "codec_name")) : null,
                 AudioChannels = audio is { } a2 ? ParseInt(a2, "channels") : null,
@@ -240,6 +259,72 @@ public sealed class FfprobeVideoMetadataExtractor : IVideoMetadataExtractor
         return null;
 
         static int Normalize(int deg) => ((deg % 360) + 360) % 360;
+    }
+
+    private static JsonElement Tags(JsonElement el) =>
+        el.ValueKind == JsonValueKind.Object && el.TryGetProperty("tags", out var tags)
+            && tags.ValueKind == JsonValueKind.Object ? tags : default;
+
+    private static string? FirstTag(JsonElement tags, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            var value = Trim(GetString(tags, key));
+            if (value is not null) return value.Length > 128 ? value[..128] : value;
+        }
+        return null;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex OffsetWithoutColon =
+        new(@"([+-]\d{2})(\d{2})$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Apple's com.apple.quicktime.creationdate — "2026-10-03T21:15:42+0200":
+    /// the local time the video was shot and its offset. Kept as the photo
+    /// convention keeps EXIF dates: the wall-clock value as UTC-kind, the
+    /// offset alongside. A value with no offset is not this tag's shape.
+    /// </summary>
+    internal static (DateTime WallClock, string Offset)? ReadQuickTimeCreationDate(JsonElement tags)
+    {
+        var raw = Trim(GetString(tags, "com.apple.quicktime.creationdate"));
+        if (raw is null) return null;
+        var normalised = OffsetWithoutColon.Replace(raw, "$1:$2");
+        if (!System.Text.RegularExpressions.Regex.IsMatch(normalised, @"[+-]\d{2}:\d{2}$|Z$")) return null;
+        if (!DateTimeOffset.TryParse(normalised, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dto))
+            return null;
+        var offset = dto.Offset;
+        var sign = offset < TimeSpan.Zero ? "-" : "+";
+        var text = $"{sign}{Math.Abs(offset.Hours):00}:{Math.Abs(offset.Minutes):00}";
+        return (DateTime.SpecifyKind(dto.DateTime, DateTimeKind.Utc), text);
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex Iso6709 = new(
+        @"^([+-]\d{1,2}(?:\.\d+)?)([+-]\d{1,3}(?:\.\d+)?)([+-]\d+(?:\.\d+)?)?(?:CRS[^/]*)?/?$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// ISO 6709 as phones write it — "+45.4642+009.1900+120.000/": latitude,
+    /// longitude, optional altitude, in degrees. Apple's
+    /// com.apple.quicktime.location.ISO6709, Android's "location". Out-of-range
+    /// values, and the 0,0 a device writes when it has no fix, are no location.
+    /// </summary>
+    internal static (double Latitude, double Longitude, double? Altitude)? ReadIso6709(JsonElement tags)
+    {
+        foreach (var key in new[] { "com.apple.quicktime.location.ISO6709", "location", "location-eng" })
+        {
+            var raw = Trim(GetString(tags, key));
+            if (raw is null) continue;
+            var m = Iso6709.Match(raw);
+            if (!m.Success) continue;
+            var lat = double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+            var lon = double.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
+            if (Math.Abs(lat) > 90 || Math.Abs(lon) > 180 || (lat == 0 && lon == 0)) continue;
+            double? alt = m.Groups[3].Success
+                ? double.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture)
+                : null;
+            return (lat, lon, alt);
+        }
+        return null;
     }
 
     private static DateTime? ReadCreationTime(JsonElement el)

@@ -141,6 +141,39 @@ public sealed class VideoMetadataBackfillServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task An_Iphone_Videos_Local_Time_And_Place_Reach_Its_Date_And_The_Owners_Map()
+    {
+        var owner = await SeedUserAsync();
+        var blob = await UploadVideoAsync(owner, "IMG_0001.MOV");
+        _extractor.Result = new VideoMetadataExtractionResult
+        {
+            Status = MetadataStatuses.Completed,
+            Version = FfprobeVideoMetadataExtractor.Version,
+            Width = 1920, Height = 1080,
+            CreationTime = new DateTime(2026, 10, 3, 21, 15, 42, DateTimeKind.Utc),
+            CreationTimeOffset = "+02:00",
+            CreationTimeSource = VideoMetadataExtractionResult.QuickTimeCreationDateSource,
+            GpsLatitude = 45.4642, GpsLongitude = 9.19, GpsAltitude = 120,
+            CameraMake = "Apple", CameraModel = "iPhone 13",
+        };
+
+        await _backfill.RunAsync(new MetadataBackfillOptions());
+
+        var meta = await _db.BlobMetadata.AsNoTracking().SingleAsync(m => m.BlobObjectId == blob);
+        Assert.Equal(new DateTime(2026, 10, 3, 21, 15, 42), meta.DateTaken!.Value);
+        Assert.Equal("+02:00", meta.DateTakenOffset);
+        Assert.Equal(VideoMetadataExtractionResult.QuickTimeCreationDateSource, meta.DateTakenSource);
+        Assert.Equal((45.4642, 9.19), (meta.GpsLatitude!.Value, meta.GpsLongitude!.Value));
+        Assert.Equal(("Apple", "iPhone 13"), (meta.CameraMake, meta.CameraModel));
+        // On the owner's map, as a photograph with GPS is — and only theirs.
+        var file = await _db.FileItems.AsNoTracking().SingleAsync(f => f.BlobObjectId == blob);
+        var location = await _db.FileItemLocations.AsNoTracking().SingleAsync(l => l.FileItemId == file.Id);
+        Assert.Equal(owner, location.OwnerUserId);
+        // Its gallery date is the moment it was shot, in the local time shown.
+        Assert.Equal(new DateTime(2026, 10, 3, 21, 15, 42), file.EffectiveDateTaken);
+    }
+
+    [Fact]
     public async Task Ignores_Image_Blobs()
     {
         var owner = await SeedUserAsync();
