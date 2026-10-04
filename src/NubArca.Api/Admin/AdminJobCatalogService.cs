@@ -172,7 +172,7 @@ public sealed class AdminJobCatalogService
             var imagesNeedingThumb = await _db.FileItems.AsNoTracking()
                 .Where(f => f.DeletedAt == null
                     && _db.BlobMetadata.Any(m => m.BlobObjectId == f.BlobObjectId
-                        && m.MediaCategory == MediaCategories.Image)
+                        && m.MediaCategory == MediaCategories.Image && m.DetectedContentType != null)
                     && !_db.FileThumbnails.Any(t => t.FileItemId == f.Id && t.Size == ThumbnailSizes.Small)
                     && !_db.DerivativeDiagnostics.Any(d => d.FileItemId == f.Id
                         && d.Size == ThumbnailSizes.Small
@@ -210,7 +210,7 @@ public sealed class AdminJobCatalogService
                     counts["ai-photos-embeddings-backfill"] = await _db.FileItems.AsNoTracking()
                         .Where(f => f.DeletedAt == null
                             && _db.BlobMetadata.Any(m => m.BlobObjectId == f.BlobObjectId
-                                && m.MediaCategory == MediaCategories.Image)
+                                && m.MediaCategory == MediaCategories.Image && m.DetectedContentType != null)
                             && !_db.BlobEmbeddings.Any(e =>
                                 e.BlobObjectId == f.BlobObjectId && e.ProfileId == photoProfile.Id))
                         .Select(f => f.BlobObjectId).Distinct()
@@ -227,7 +227,7 @@ public sealed class AdminJobCatalogService
                     counts["ai-faces-detect-backfill"] = await _db.FileItems.AsNoTracking()
                         .Where(f => f.DeletedAt == null
                             && _db.BlobMetadata.Any(m => m.BlobObjectId == f.BlobObjectId
-                                && m.MediaCategory == MediaCategories.Image)
+                                && m.MediaCategory == MediaCategories.Image && m.DetectedContentType != null)
                             && !_db.BlobAiArtifactStatuses.Any(s =>
                                 s.BlobObjectId == f.BlobObjectId
                                 && s.ProfileId == faceProfile.Id

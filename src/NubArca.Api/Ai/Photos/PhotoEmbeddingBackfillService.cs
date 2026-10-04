@@ -311,7 +311,11 @@ public sealed class PhotoEmbeddingBackfillService
         }
 
         return query.Where(b =>
-            _db.BlobMetadata.Any(m => m.BlobObjectId == b.Id && m.MediaCategory == MediaCategories.Image)
+            // An image the SERVER recognised from its bytes — the Library's own
+            // rule. A file only CLAIMING to be one (its name or MIME type: a
+            // font, a damaged JPEG) can never be decoded, and was retried and
+            // failed on every run; one recognised later (HEIC) joins then.
+            _db.BlobMetadata.Any(m => m.BlobObjectId == b.Id && m.MediaCategory == MediaCategories.Image && m.DetectedContentType != null)
             && _db.FileItems.Any(f => f.BlobObjectId == b.Id && f.DeletedAt == null && f.MediaLibraryState == MediaLibraryState.Active)
             && !_db.BlobEmbeddings.Any(e => e.BlobObjectId == b.Id && e.ProfileId == profileId));
     }

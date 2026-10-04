@@ -238,7 +238,7 @@ public sealed class PhotoEmbeddingProfileService
     // candidate eligibility (minus the per-profile not-yet-indexed filter).
     private IQueryable<Guid> EligibleImageBlobs() =>
         from b in _db.BlobObjects.AsNoTracking()
-        where _db.BlobMetadata.Any(m => m.BlobObjectId == b.Id && m.MediaCategory == MediaCategories.Image)
+        where _db.BlobMetadata.Any(m => m.BlobObjectId == b.Id && m.MediaCategory == MediaCategories.Image && m.DetectedContentType != null)
             && _db.FileItems.Any(f => f.BlobObjectId == b.Id && f.DeletedAt == null)
         select b.Id;
 }

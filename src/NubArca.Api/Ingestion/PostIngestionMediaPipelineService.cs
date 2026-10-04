@@ -83,13 +83,15 @@ public sealed class PostIngestionMediaPipelineService : IPostIngestionMediaPipel
         }
 
         var blobId = file.BlobObjectId;
-        var mediaCategory = await _db.BlobMetadata.AsNoTracking()
+        var media = await _db.BlobMetadata.AsNoTracking()
             .Where(m => m.BlobObjectId == blobId)
-            .Select(m => m.MediaCategory)
+            .Select(m => new { m.MediaCategory, m.DetectedContentType })
             .FirstOrDefaultAsync(cancellationToken);
 
-        var isImage = mediaCategory == MediaCategories.Image;
-        var isVideo = mediaCategory == MediaCategories.Video;
+        // An image only when the server recognised it from its bytes: one that
+        // merely claims to be (by name or MIME type) gets no AI jobs it can never finish.
+        var isImage = media?.MediaCategory == MediaCategories.Image && media.DetectedContentType is not null;
+        var isVideo = media?.MediaCategory == MediaCategories.Video;
         if (!isImage && !isVideo)
         {
             return new PostIngestionEnqueueResult(false, false, false, "non-media", false);
