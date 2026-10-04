@@ -5,6 +5,7 @@ using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Domain.Ai;
 using NubArca.Api.Storage;
+using NubArca.Api.Files;
 
 namespace NubArca.Api.Ai.Faces;
 
@@ -25,12 +26,15 @@ public sealed class FaceDetectionBackfillService
 
     private readonly AppDbContext _db;
     private readonly IBlobService _blobs;
+    private readonly IOriginalImageReader? _originals;
     private readonly IOptions<AiOptions> _options;
     private readonly TimeProvider _clock;
 
     public FaceDetectionBackfillService(
-        AppDbContext db, IBlobService blobs, IOptions<AiOptions> options, TimeProvider clock)
+        AppDbContext db, IBlobService blobs, IOptions<AiOptions> options, TimeProvider clock,
+        IOriginalImageReader? originals = null)
     {
+        _originals = originals;
         _db = db;
         _blobs = blobs;
         _options = options;
@@ -177,10 +181,8 @@ public sealed class FaceDetectionBackfillService
         byte[] bytes;
         try
         {
-            await using var stream = await _blobs.OpenContentAsync(blobId, cancellationToken);
-            using var ms = new MemoryStream();
-            await stream.CopyToAsync(ms, cancellationToken);
-            bytes = ms.ToArray();
+            // HEIC included: its frame decoded upright by FFmpeg (OriginalImageReader).
+            bytes = await OriginalPixels.ReadAsync(_blobs, _originals, blobId, cancellationToken);
         }
         catch (OperationCanceledException)
         {

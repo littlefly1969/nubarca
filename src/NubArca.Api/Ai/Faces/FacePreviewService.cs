@@ -33,6 +33,7 @@ public sealed class FacePreviewService
 
     private readonly AppDbContext _db;
     private readonly IBlobService _blobs;
+    private readonly IOriginalImageReader? _originals;
     private readonly IOptions<AiOptions> _aiOptions;
     private readonly IOptions<ImageProcessingOptions> _imageOptions;
     private readonly TimeProvider _clock;
@@ -44,8 +45,10 @@ public sealed class FacePreviewService
         IOptions<AiOptions> aiOptions,
         IOptions<ImageProcessingOptions> imageOptions,
         TimeProvider clock,
-        ILogger<FacePreviewService> logger)
+        ILogger<FacePreviewService> logger,
+        IOriginalImageReader? originals = null)
     {
+        _originals = originals;
         _db = db;
         _blobs = blobs;
         _aiOptions = aiOptions;
@@ -192,13 +195,9 @@ public sealed class FacePreviewService
                 return false;
             }
 
-            byte[] bytes;
-            await using (var stream = await _blobs.OpenContentAsync(face.BlobObjectId, cancellationToken))
-            using (var ms = new MemoryStream())
-            {
-                await stream.CopyToAsync(ms, cancellationToken);
-                bytes = ms.ToArray();
-            }
+            // The face's box was found on the frame OriginalPixels gives (HEIC
+            // decoded upright), so the crop is cut from that same frame.
+            var bytes = await OriginalPixels.ReadAsync(_blobs, _originals, face.BlobObjectId, cancellationToken);
 
             var info = await Image.IdentifyAsync(new MemoryStream(bytes, writable: false), cancellationToken);
             if (info is null

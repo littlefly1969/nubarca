@@ -5,6 +5,7 @@ using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Domain.Ai;
 using NubArca.Api.Storage;
+using NubArca.Api.Files;
 
 namespace NubArca.Api.Ai.Faces;
 
@@ -25,14 +26,16 @@ public sealed class FaceEmbeddingBackfillService
 
     private readonly AppDbContext _db;
     private readonly IBlobService _blobs;
+    private readonly IOriginalImageReader? _originals;
     private readonly IAiVectorSerializer _serializer;
     private readonly FaceVectorIndexService _vectors;
     private readonly TimeProvider _clock;
 
     public FaceEmbeddingBackfillService(
         AppDbContext db, IBlobService blobs, IAiVectorSerializer serializer,
-        FaceVectorIndexService vectors, TimeProvider clock)
+        FaceVectorIndexService vectors, TimeProvider clock, IOriginalImageReader? originals = null)
     {
+        _originals = originals;
         _db = db;
         _blobs = blobs;
         _serializer = serializer;
@@ -207,10 +210,8 @@ public sealed class FaceEmbeddingBackfillService
         byte[] bytes;
         try
         {
-            await using var stream = await _blobs.OpenContentAsync(blobId, cancellationToken);
-            using var ms = new MemoryStream();
-            await stream.CopyToAsync(ms, cancellationToken);
-            bytes = ms.ToArray();
+            // HEIC included: its frame decoded upright by FFmpeg (OriginalImageReader).
+            bytes = await OriginalPixels.ReadAsync(_blobs, _originals, blobId, cancellationToken);
         }
         catch (OperationCanceledException)
         {

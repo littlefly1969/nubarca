@@ -189,6 +189,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
                 services.AddSingleton(_clockOverride);
             }
             services.AddScoped<IBlobService, BlobService>();
+            services.AddScoped<IOriginalImageReader, OriginalImageReader>();
             services.AddScoped<IUserService, UserService>();
             // Identity & Access. Mirrors Program.cs (Postgres-only block).
             services.AddScoped<NubArca.Api.Access.IRoleService,
@@ -400,6 +401,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             // gating, aggregates) — registered before the backfill that uses it.
             services.AddScoped<DerivativeDiagnosticsService>();
             services.AddScoped<MediaDerivativesBackfillService>();
+            services.AddScoped<ImageRedetectionService>();
             services.AddScoped<GalleryDerivativesRegenerationService>();
             services.AddScoped<MediumPreviewRegenerationService>();
             // Slice 95: poster regeneration.

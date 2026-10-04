@@ -33,6 +33,8 @@ public sealed class FileThumbnailService : IFileThumbnailService
     private readonly MediaDerivativesOptions _mediaOptions;
     private readonly DerivativeDiagnosticsService? _diagnostics;
 
+    private readonly IOriginalImageReader? _originals;
+
     public FileThumbnailService(
         AppDbContext db,
         IBlobService blobService,
@@ -43,8 +45,12 @@ public sealed class FileThumbnailService : IFileThumbnailService
         IOptions<ImageProcessingOptions> options,
         ImageDerivativeRenderer? renderer = null,
         IOptions<MediaDerivativesOptions>? mediaOptions = null,
-        DerivativeDiagnosticsService? diagnostics = null)
+        DerivativeDiagnosticsService? diagnostics = null,
+        // HEIC: decoded by FFmpeg when ImageSharp cannot identify the original.
+        // Optional for direct-construction test sites; null = unreadable, as before.
+        IOriginalImageReader? originals = null)
     {
+        _originals = originals;
         _db = db;
         _blobService = blobService;
         _storage = storage;
@@ -191,7 +197,8 @@ public sealed class FileThumbnailService : IFileThumbnailService
         byte[] source;
         try
         {
-            source = await ReadSourceBytesAsync(sourceBlobId.Value, cancellationToken);
+            // A frame the reader already decoded for identify (HEIC) is not decoded twice.
+            source = identify.Decoded ?? await ReadSourceBytesAsync(sourceBlobId.Value, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -520,7 +527,8 @@ public sealed class FileThumbnailService : IFileThumbnailService
             // allocating the pixel buffer, so a decompression bomb that declares
             // billions of pixels in a few KB cannot exhaust memory here; it will
             // simply fail the limit check below.
-            var info = (await IdentifySourceAsync(sourceBlobId, cancellationToken)).Info;
+            var identified = await IdentifySourceAsync(sourceBlobId, cancellationToken);
+            var info = identified.Info;
             if (info is null)
             {
                 // Not a recognisable image header — same behaviour as before.
@@ -542,7 +550,7 @@ public sealed class FileThumbnailService : IFileThumbnailService
             // ImageSharp fallback). The lazy path stays best-effort: a render
             // failure surfaces as null here (no diagnostic — only the operator
             // backfill records those).
-            var source = await ReadSourceBytesAsync(sourceBlobId, cancellationToken);
+            var source = identified.Decoded ?? await ReadSourceBytesAsync(sourceBlobId, cancellationToken);
             var requests = new[]
             {
                 new DerivativeRequest(normalized, edge, _mediaOptions.QualityFor(normalized)),
@@ -919,6 +927,21 @@ public sealed class FileThumbnailService : IFileThumbnailService
         }
         catch (UnknownImageFormatException)
         {
+            // Not a format ImageSharp reads. HEIC is one FFmpeg does: its
+            // decoded frame — lossless, upright — is identified instead, and
+            // handed on so the render does not decode it a second time.
+            if (_originals is not null
+                && await _originals.ReadForPixelsAsync(blobObjectId, cancellationToken) is { } decoded)
+            {
+                try
+                {
+                    return new IdentifyResult(Image.Identify(decoded), null, decoded);
+                }
+                catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException)
+                {
+                    // The original's own bytes again: still unreadable.
+                }
+            }
             return new IdentifyResult(null, DerivativeErrorCodes.UnsupportedFormat);
         }
         catch (Exception ex) when (
@@ -933,7 +956,7 @@ public sealed class FileThumbnailService : IFileThumbnailService
         }
     }
 
-    private readonly record struct IdentifyResult(ImageInfo? Info, string? FailureCode);
+    private readonly record struct IdentifyResult(ImageInfo? Info, string? FailureCode, byte[]? Decoded = null);
 
     // Slice 68: delegate poster generation to the registered IVideoPosterProvider.
     // The provider returns JPEG bytes (MemoryStream) or null. A null means the

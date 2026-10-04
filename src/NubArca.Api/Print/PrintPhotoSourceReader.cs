@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Data;
-using NubArca.Api.Storage;
+using NubArca.Api.Files;
 
 namespace NubArca.Api.Print;
 
@@ -18,12 +18,12 @@ namespace NubArca.Api.Print;
 public sealed class PrintPhotoSourceReader : IPrintPhotoSourceReader
 {
     private readonly AppDbContext _db;
-    private readonly IBlobStorage _storage;
+    private readonly IOriginalImageReader _originals;
 
-    public PrintPhotoSourceReader(AppDbContext db, IBlobStorage storage)
+    public PrintPhotoSourceReader(AppDbContext db, IOriginalImageReader originals)
     {
         _db = db;
-        _storage = storage;
+        _originals = originals;
     }
 
     public async Task<byte[]?> ReadAsync(
@@ -32,21 +32,20 @@ public sealed class PrintPhotoSourceReader : IPrintPhotoSourceReader
         // Owner-scoped: a print token belongs to one party, and that party's
         // owner is the only person whose files it may ever compose; an owner's
         // own print is their own file. A file in the trash is no source.
-        var storageKey = await _db.FileItems.AsNoTracking()
+        var blobObjectId = await _db.FileItems.AsNoTracking()
             .Where(f => f.Id == fileItemId && f.OwnerUserId == ownerUserId && f.DeletedAt == null)
-            .Join(_db.BlobObjects.AsNoTracking(),
-                f => f.BlobObjectId, b => b.Id, (f, b) => b.StorageKey)
+            .Select(f => (Guid?)f.BlobObjectId)
             .FirstOrDefaultAsync(cancellationToken);
-        if (string.IsNullOrEmpty(storageKey)) return null;
+        if (blobObjectId is null) return null;
 
         try
         {
-            await using var source = await _storage.OpenReadAsync(storageKey, cancellationToken);
-            using var buffer = new MemoryStream();
-            await source.CopyToAsync(buffer, cancellationToken);
-            return buffer.ToArray();
+            // Still the original: its own bytes, or for HEIC its frame decoded
+            // losslessly and upright by FFmpeg at this moment — never a preview.
+            return await _originals.ReadForPixelsAsync(blobObjectId.Value, cancellationToken);
         }
-        catch (FileNotFoundException)
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException
+            || (ex is InvalidOperationException && ex.Message.Contains("was not found", StringComparison.Ordinal)))
         {
             // The row survived its bytes. Nothing to compose: the caller refuses
             // the source rather than printing a blank.

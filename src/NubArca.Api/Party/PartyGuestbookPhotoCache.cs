@@ -38,6 +38,7 @@ public sealed class PartyGuestbookPhotoCache
 
     private readonly AppDbContext _db;
     private readonly IBlobService _blobs;
+    private readonly IOriginalImageReader? _originals;
     private readonly ImageDerivativeRenderer _renderer;
     private readonly ImageProcessingOptions _imageOptions;
     private readonly MediaDerivativesOptions _mediaOptions;
@@ -49,8 +50,10 @@ public sealed class PartyGuestbookPhotoCache
         ImageDerivativeRenderer renderer,
         IOptions<ImageProcessingOptions> imageOptions,
         IOptions<MediaDerivativesOptions> mediaOptions,
-        ILogger<PartyGuestbookPhotoCache> logger)
+        ILogger<PartyGuestbookPhotoCache> logger,
+        IOriginalImageReader? originals = null)
     {
+        _originals = originals;
         _db = db;
         _blobs = blobs;
         _renderer = renderer;
@@ -180,13 +183,8 @@ public sealed class PartyGuestbookPhotoCache
 
         try
         {
-            byte[] source;
-            await using (var stream = await _blobs.OpenContentAsync(blobObjectId, cancellationToken))
-            {
-                using var buffer = new MemoryStream();
-                await stream.CopyToAsync(buffer, cancellationToken);
-                source = buffer.ToArray();
-            }
+            // HEIC included: its frame decoded upright by FFmpeg (OriginalImageReader).
+            var source = await OriginalPixels.ReadAsync(_blobs, _originals, blobObjectId, cancellationToken);
 
             using (var probe = new MemoryStream(source, writable: false))
             {

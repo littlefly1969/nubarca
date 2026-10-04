@@ -35,6 +35,7 @@ public sealed class FileItemService : IFileItemService
     private readonly IDeletedContentTombstoneService? _tombstones;
     private readonly long _defaultUserQuotaBytes;
     private readonly TimeProvider _clock;
+    private readonly IOriginalImageReader? _originals;
 
     public FileItemService(
         AppDbContext db,
@@ -55,9 +56,14 @@ public sealed class FileItemService : IFileItemService
         IDeletedContentTombstoneService? tombstones = null,
         // Video metadata probe (ffprobe). Optional for direct-construction test
         // sites; null defaults to the no-op extractor (provider disabled).
-        IVideoMetadataExtractor? videoMetadataExtractor = null)
+        IVideoMetadataExtractor? videoMetadataExtractor = null,
+        // HEIC (and any format only FFmpeg decodes): optional for direct-
+        // construction test sites; null = such files stay unrecognised, as
+        // before.
+        IOriginalImageReader? originals = null)
     {
         _db = db;
+        _originals = originals;
         _blobService = blobService;
         _thumbnails = thumbnails;
         _clock = clock;
@@ -2968,7 +2974,32 @@ public sealed class FileItemService : IFileItemService
         }
         catch
         {
-            // fall through to video detection
+            // fall through to HEIC, then video detection
+        }
+
+        // HEIC, the iPhone's photo format: ImageSharp cannot identify it, so
+        // it is recognised by its own signature and recognised as a PHOTO only
+        // when FFmpeg actually decodes it — a file it cannot read stays
+        // unrecognised, as before, rather than becoming a broken photograph.
+        // The dimensions are those of the decoded frame: upright, the tile grid
+        // assembled and the container's rotation applied.
+        if (_originals is not null && await IsHeifAsync(blobObjectId, cancellationToken))
+        {
+            var decoded = await _originals.ReadForPixelsAsync(blobObjectId, cancellationToken);
+            if (decoded is not null)
+            {
+                try
+                {
+                    var info = Image.Identify(decoded);
+                    return new BlobImageFacts(
+                        info.Width, info.Height, HeifSignature.Format, HeifSignature.ContentType, BlobMediaKind.Image);
+                }
+                catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException)
+                {
+                    // Not a frame after all: leave it unrecognised.
+                }
+            }
+            return default;
         }
 
         // Slice 62: video signature detection. The stream is reopened (the
@@ -2996,6 +3027,21 @@ public sealed class FileItemService : IFileItemService
         }
 
         return default;
+    }
+
+    private async Task<bool> IsHeifAsync(Guid blobObjectId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var stream = await _blobService.OpenContentAsync(blobObjectId, cancellationToken);
+            var header = new byte[HeifSignature.HeaderLength];
+            var read = await stream.ReadAtLeastAsync(header, header.Length, throwOnEndOfStream: false, cancellationToken);
+            return HeifSignature.IsHeif(header.AsSpan(0, read));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return false;
+        }
     }
 
     // Detected, blob-derived facts. IsImage is the gate for dimension-dependent
@@ -3180,7 +3226,12 @@ public sealed class FileItemService : IFileItemService
         meta.DateTaken = r.DateTaken;
         meta.DateTakenSource = r.DateTakenSource;
         meta.DateTakenOffset = r.DateTakenOffset;
-        meta.Orientation = r.Orientation;
+        // A format whose decoder hands out upright pixels (HEIC: the container
+        // carries the rotation and FFmpeg applies it) is stored as needing none:
+        // its stored dimensions are the displayed ones, and applying the EXIF
+        // value again would turn every portrait photograph sideways. The EXIF
+        // value itself stays in the raw document.
+        meta.Orientation = OriginalImageReader.IsUprightOnDecode(meta.DetectedContentType) ? 1 : r.Orientation;
 
         meta.CameraMake = r.CameraMake;
         meta.CameraModel = r.CameraModel;
