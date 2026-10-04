@@ -254,7 +254,18 @@ and pass `--build-arg MEDIA_TOOLS_IMAGE=nubarca-media-tools:local`;
 `scripts/media-tools/verify-media-tools.sh`. To move to a new FFmpeg: change the
 pins there, publish, and put the new digest in the API Dockerfile.
 
-They are only invoked when the optional providers are enabled:
+FFmpeg also decodes **HEIC** stills (the iPhone's photo format), which
+ImageSharp and libvips cannot read. `OriginalImageReader` is the one way an
+original's pixels are opened — by upload detection, thumbnails, the print
+renderers, the AI and the guest book: a JPEG/PNG/... is its own bytes, a HEIC
+is decoded by FFmpeg from the original into a lossless, upright PNG at the
+moment it is needed (nothing stored). Its stored orientation is 1, because the
+container's rotation is already applied. HEIC uploaded before this was
+decoded can be recognised with `dotnet NubArca.Api.dll media images redetect
+[--dry-run] [--limit N]`, followed by `media derivatives backfill` for their
+thumbnails; the AI backfills pick them up by themselves.
+
+Video posters, metadata and HLS are only invoked when the optional providers are enabled:
 
 - `Media__VideoPosterProvider=ffmpeg` — real poster frames
 - `Media__VideoMetadataProvider=ffprobe` — duration, codecs, dimensions, fps, rotation
