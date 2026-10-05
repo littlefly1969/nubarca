@@ -148,7 +148,9 @@ public sealed class PartyRsvpService : IPartyRsvpService
 
     /// <summary>
     /// "Entra nel Party": the party's own public address, while the party is
-    /// live and only if that address really opens it now — judged by the ONE
+    /// live — and afterwards, when the page is the party's memories, so an
+    /// invitation kept on a home screen still leads somewhere — and only if
+    /// that address really opens it now — judged by the ONE
     /// resolver the QR itself goes through, so a revoked, expired or disabled
     /// link, a host who may no longer run parties, or a party with no QR at all
     /// is simply no button. It hands over nothing the room's QR does not: the
@@ -158,7 +160,7 @@ public sealed class PartyRsvpService : IPartyRsvpService
     private async Task<string?> PublicPartyUrlAsync(
         PartyInvitationAccess access, CancellationToken cancellationToken)
     {
-        if (!access.CanCheckIn)
+        if (!access.CanCheckIn && access.Experience.Phase != PartyGuestPhase.After)
         {
             return null;
         }

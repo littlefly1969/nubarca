@@ -1,5 +1,6 @@
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PRODUCT_NAME } from '../brand/brand';
+import { PartyHomeScreenButton } from './PartyHomeScreenButton';
 
 // The guest hub is a FIXED dark surface — a party cover, not a themed app page —
 // so the approved ON-DARK wordmark is pinned here instead of resolved from the
@@ -14,8 +15,9 @@ const PARTY_WORDMARK = {
 
 // Wordmark + language switcher: the same top row on the hero and on the
 // unavailable/error states, so a guest always knows where they are — on the
-// party's own page and on a personal invitation alike.
-export function PartyHubTopBar() {
+// party's own page and on a personal invitation alike. Where the page is the
+// party's app (`homeScreen`), "Installa" sits beside the language.
+export function PartyHubTopBar({ homeScreen = false }: { homeScreen?: boolean }) {
   return (
     <div className="party-guest-hub-topbar">
       <img
@@ -25,7 +27,10 @@ export function PartyHubTopBar() {
         width={PARTY_WORDMARK.width}
         height={PARTY_WORDMARK.height}
       />
-      <LanguageSwitcher className="language-switcher language-switcher-public" compact />
+      <div className="party-guest-hub-topbar-actions">
+        {homeScreen && <PartyHomeScreenButton />}
+        <LanguageSwitcher className="language-switcher language-switcher-public" compact />
+      </div>
     </div>
   );
 }

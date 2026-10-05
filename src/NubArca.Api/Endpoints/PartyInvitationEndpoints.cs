@@ -481,6 +481,63 @@ public static class PartyInvitationEndpoints
                     httpContext, thumbnails, stripper, cancellationToken);
         }).WithName("GetPartyInvitationCoverMedia").RequireRateLimiting(PartyPublicMediaRateLimitPolicy);
 
+        // THE INVITATION ON A GUEST'S HOME SCREEN: the same app as the party's,
+        // opening this group's own invitation — which leads into the party when
+        // there is nothing left to answer. Its icon is the picture the invitation
+        // opens on. Neither takes an answer nor counts as opening the invitation.
+        app.MapGet("/api/party-invitations/{token}/app-manifest", async (
+            string token,
+            HttpContext httpContext,
+            [FromServices] IPartyRsvpService rsvp,
+            [FromServices] NubArca.Api.Data.AppDbContext db,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var access = await rsvp.ResolveAsync(token, cancellationToken);
+            var party = access is null
+                ? null
+                : await db.Parties.AsNoTracking()
+                    .Where(p => p.Id == access.PartyId)
+                    .Select(p => new { p.Title, p.Version })
+                    .FirstOrDefaultAsync(cancellationToken);
+            if (party is null) return Results.NotFound();
+            var enc = Uri.EscapeDataString(token);
+            return Results.Text(
+                PartyHomeScreenApp.Manifest(
+                    PartyInvitationTokens.InvitationPath(enc), party.Title,
+                    $"/api/party-invitations/{enc}/app-icon", party.Version),
+                PartyHomeScreenApp.ManifestContentType);
+        }).WithName("GetPartyInvitationAppManifest").RequireRateLimiting(PartyPublicRateLimitPolicy);
+
+        app.MapGet("/api/party-invitations/{token}/app-icon/{size:int}", async (
+            string token,
+            int size,
+            bool? maskable,
+            HttpContext httpContext,
+            [FromServices] IPartyRsvpService rsvp,
+            [FromServices] IPartyMediaService partyMedia,
+            [FromServices] IFileThumbnailService thumbnails,
+            [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
+            CancellationToken cancellationToken) =>
+        {
+            if (!PartyHomeScreenApp.IsIconSize(size)) return Results.NotFound();
+            var access = await rsvp.ResolveAsync(token, cancellationToken);
+            if (access is null) return Results.NotFound();
+            // Authorized as the invitation's cover is served: the party's own
+            // choice as it is, the album's only while it is still in the album.
+            (Guid FileId, PartyMediaKind Kind)? cover = null;
+            if (await rsvp.CoverAsync(access, cancellationToken) is { } pick)
+            {
+                var kind = pick.AlbumId is Guid albumId
+                    ? await partyMedia.GetVisibleMediaKindAsync(access.OwnerUserId, albumId, pick.FileId, cancellationToken)
+                    : PartyMediaKind.Image;
+                if (kind is { } k) cover = (pick.FileId, k);
+            }
+            return await PartyEndpoints.ServeHomeScreenIconAsync(
+                access.OwnerUserId, cover, size, maskable == true, httpContext,
+                thumbnails, stripper, cancellationToken);
+        }).WithName("GetPartyInvitationAppIcon").RequireRateLimiting(PartyPublicMediaRateLimitPolicy);
+
         return app;
     }
 

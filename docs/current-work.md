@@ -61,6 +61,14 @@ is built is described by `ARCHITECTURE.md`.
   offset (photographs' wall-clock convention), the ISO 6709 location (Apple
   and Android) into owner-private GPS and the owner's map, make/model.
   `metadata video-backfill` re-probes every video below v2.
+- Party on the home screen: the party page and a personal invitation declare
+  themselves as the party's own web app (`/api/party/{token}/app-manifest`,
+  `/api/party-invitations/{token}/app-manifest`: party title, scope `/party/`,
+  icon = the cover the page opens on, product icon otherwise) and offer
+  "Installa" (Android's own dialog, or Share → Add to Home Screen steps).
+  No service worker: every launch is the party as it is now. An invitation
+  opened again goes straight into the party once everybody coming has
+  arrived, and after the party always (`partyUrl` now also after).
 - Video colour: every picture made from a video (posters, preview strips, HLS
   renditions, AI frames) is BT.709 SDR. `VideoColorFormat` probes the stream;
   HDR (HLG, PQ) is tone-mapped with zscale/mobius at BT.2408's 203-nit white,

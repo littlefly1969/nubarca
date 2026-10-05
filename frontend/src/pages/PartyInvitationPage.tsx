@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import {
   ApiError,
   getPartyInvitation,
@@ -14,6 +14,8 @@ import { useI18n, type MessageKey } from '../i18n';
 import { isOpenablePoster } from '../party/PartyGuestContent';
 import { PartyBeforeHome } from '../party/PartyGuestSurfaces';
 import { PartyHubTopBar } from '../party/PartyHubTopBar';
+import { invitationAppFor, usePartyHomeScreen } from '../party/partyHomeScreen';
+import { invitationEntersParty } from '../party/invitationEntry';
 import { PartyImageViewer } from '../party/PartyImageViewer';
 import {
   PartyRsvpSheet, PartyRsvpSummary, partyRsvpAnswered, type PartyRsvpNotice,
@@ -41,6 +43,12 @@ import './PartyGuestHub.css';
 // "Entra nel Party" leads to the party's ordinary public page — navigation to
 // the same capability the room's QR opens, never an identity carried across.
 //
+// OPENED AGAIN, IT DOES NOT ASK AGAIN. Kept on a home screen, an invitation is
+// opened many times in an evening: once everybody of the group who is coming
+// has arrived — and after the party, always — opening it goes straight into
+// the party. That is decided on the invitation as it LOADED: arriving here, a
+// guest who marks the last of the group sees it done and enters themselves.
+//
 // No login, no polling: an invitation is read, answered, and put away.
 
 type State =
@@ -59,6 +67,9 @@ export function PartyInvitationPage() {
   const [checkingIn, setCheckingIn] = useState<string | null>(null);
   const [checkInNotice, setCheckInNotice] = useState<MessageKey | null>(null);
   const [replying, setReplying] = useState(false);
+  const navigate = useNavigate();
+  // Set once this visit has decided to stay on the invitation.
+  const [staying, setStaying] = useState(false);
 
   const load = useCallback((signal?: AbortSignal) => {
     if (!token) { setState({ kind: 'unavailable' }); return; }
@@ -112,6 +123,15 @@ export function PartyInvitationPage() {
   // "Sono qui" and its undo. The answer is the invitation as it now is, in
   // success and refusal alike — the version does not move, so the reply card
   // keeps whatever it was showing.
+  usePartyHomeScreen(state.kind === 'ready' && token ? invitationAppFor(token, state.view.party.title) : null);
+
+  useEffect(() => {
+    if (state.kind !== 'ready' || staying) return;
+    const partyUrl = state.view.party.partyUrl;
+    if (partyUrl && invitationEntersParty(state.view)) navigate(partyUrl, { replace: true });
+    else setStaying(true);
+  }, [state, staying, navigate]);
+
   const checkIn = useCallback(async (guestId: string, undo: boolean) => {
     if (!token) return;
     setCheckingIn(guestId);
@@ -138,7 +158,9 @@ export function PartyInvitationPage() {
     }
   }, [token]);
 
-  if (state.kind === 'loading') {
+  const entering = state.kind === 'ready' && !staying && invitationEntersParty(state.view);
+
+  if (state.kind === 'loading' || entering) {
     return (
       <main className="party-guest-hub" aria-busy="true">
         <p className="visually-hidden" role="status">{t('common.loading')}</p>
@@ -181,7 +203,7 @@ export function PartyInvitationPage() {
       <main className="party-guest-hub" data-testid="party-invitation" data-phase={party.phase}>
         <PartyBeforeHome
           context={party}
-          topBar={<PartyHubTopBar />}
+          topBar={<PartyHubTopBar homeScreen />}
           eyebrow={eyebrow}
           footnote={t('partyRsvp.footnote')}
           onOpenPoster={setPoster}

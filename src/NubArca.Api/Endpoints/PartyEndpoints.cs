@@ -267,6 +267,54 @@ public static class PartyEndpoints
                 cover), html);
         }).WithName("GetPartyLinkPreview").RequireRateLimiting(PartyPublicRateLimitPolicy);
 
+        // THE PARTY ON A GUEST'S HOME SCREEN: the app manifest of this link and
+        // the icon drawn from the picture the page opens on. A token that opens
+        // no party has no app. Not audited: a browser reading a manifest is not
+        // a guest visiting.
+        app.MapGet("/api/party/{token}/app-manifest", async (
+            string token,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromServices] AppDbContext db,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var access = await party.ResolvePublicAsync(token, cancellationToken);
+            var root = access is null
+                ? null
+                : await db.Parties.AsNoTracking()
+                    .Where(p => p.Id == access.PartyId)
+                    .Select(p => new { p.Title, p.Version })
+                    .FirstOrDefaultAsync(cancellationToken);
+            if (root is null) return Results.NotFound();
+            var enc = Uri.EscapeDataString(token);
+            return Results.Text(
+                NubArca.Api.Party.PartyHomeScreenApp.Manifest(
+                    $"/party/{enc}", root.Title, $"/api/party/{enc}/app-icon", root.Version),
+                NubArca.Api.Party.PartyHomeScreenApp.ManifestContentType);
+        }).WithName("GetPartyAppManifest").RequireRateLimiting(PartyPublicRateLimitPolicy);
+
+        app.MapGet("/api/party/{token}/app-icon/{size:int}", async (
+            string token,
+            int size,
+            bool? maskable,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromServices] NubArca.Api.Party.IPartyMediaService partyMedia,
+            [FromServices] AppDbContext db,
+            [FromServices] IFileThumbnailService thumbnails,
+            [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
+            CancellationToken cancellationToken) =>
+        {
+            if (!NubArca.Api.Party.PartyHomeScreenApp.IsIconSize(size)) return Results.NotFound();
+            var access = await party.ResolvePublicAsync(token, cancellationToken);
+            if (access is null) return Results.NotFound();
+            var cover = await GuestCoverFileAsync(db, access, partyMedia, cancellationToken);
+            return await ServeHomeScreenIconAsync(
+                access.OwnerUserId, cover, size, maskable == true, httpContext,
+                thumbnails, stripper, cancellationToken);
+        }).WithName("GetPartyAppIcon").RequireRateLimiting(PartyPublicMediaRateLimitPolicy);
+
         app.MapGet("/api/party/{token}/challenges", async (
             string token, HttpContext httpContext,
             [FromServices] NubArca.Api.Party.IPartyLinkService party,
@@ -1767,6 +1815,84 @@ public static class PartyEndpoints
             : albumCover is Guid cover
                 ? $"/api/party/{enc}/media/{cover}/preview"
                 : null;
+    }
+
+    /// <summary>
+    /// The FILE behind <see cref="GuestCoverUrlAsync"/>, authorized exactly as
+    /// that address is served: the party's own cover choice, else the album's
+    /// cover — before the party only the one the host chose, and only while it
+    /// is still a displayable member of the album. Null when the page opens on
+    /// no photograph.
+    /// </summary>
+    private static async Task<(Guid FileId, NubArca.Api.Party.PartyMediaKind Kind)?> GuestCoverFileAsync(
+        AppDbContext db,
+        NubArca.Api.Party.PartyAccess access,
+        NubArca.Api.Party.IPartyMediaService partyMedia,
+        CancellationToken cancellationToken)
+    {
+        if (await NubArca.Api.Party.PartyCoverPolicy.ResolveAsync(db, access, cancellationToken) is { } pick)
+        {
+            return (pick.FileId, NubArca.Api.Party.PartyMediaKind.Image);
+        }
+        var header = await partyMedia.GetAlbumAsync(access.OwnerUserId, access.MainAlbumId, cancellationToken);
+        var albumCover = access.Experience.AllowsAlbumMedia
+            ? header?.CoverFileItemId
+            : access.Experience.Phase == NubArca.Api.Domain.PartyGuestPhase.Before
+                ? header?.ChosenCoverFileItemId
+                : null;
+        if (albumCover is not Guid fileId) return null;
+        var kind = await partyMedia.GetVisibleMediaKindAsync(
+            access.OwnerUserId, access.MainAlbumId, fileId, cancellationToken);
+        return kind is { } k ? (fileId, k) : null;
+    }
+
+    /// <summary>
+    /// A party app's icon: the centre square of an ALREADY AUTHORIZED cover's
+    /// derivative — metadata-stripped the one way every party picture is — or,
+    /// when there is none or it cannot be drawn, the product's own icon.
+    /// </summary>
+    internal static async Task<IResult> ServeHomeScreenIconAsync(
+        Guid ownerUserId,
+        (Guid FileId, NubArca.Api.Party.PartyMediaKind Kind)? cover,
+        int size,
+        bool maskable,
+        HttpContext httpContext,
+        IFileThumbnailService thumbnails,
+        NubArca.Api.Metadata.IImageMetadataStripper stripper,
+        CancellationToken cancellationToken)
+    {
+        if (cover is { } picture)
+        {
+            try
+            {
+                var content = await thumbnails.EnsureAsync(
+                    picture.FileId, ownerUserId,
+                    picture.Kind == NubArca.Api.Party.PartyMediaKind.Video ? ThumbnailSizes.Poster : ThumbnailSizes.Small,
+                    cancellationToken);
+                if (content is not null)
+                {
+                    byte[]? icon = null;
+                    await using (content.Content)
+                    {
+                        if (stripper.IsSupported(content.MimeType))
+                        {
+                            using var safe = await stripper.StripAsync(content.Content, content.MimeType, cancellationToken);
+                            icon = await NubArca.Api.Party.PartyHomeScreenApp.RenderIconAsync(safe, size, cancellationToken);
+                        }
+                    }
+                    if (icon is not null)
+                    {
+                        SetPrivateDerivativeCache(httpContext);
+                        return Results.File(icon, "image/png");
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // An icon is never worth an error page: the product's stands in.
+            }
+        }
+        return Results.Redirect(NubArca.Api.Party.PartyHomeScreenApp.BrandIcon(size, maskable));
     }
 
     private static void SetNoStore(HttpContext context)

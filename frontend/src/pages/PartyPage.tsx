@@ -20,6 +20,7 @@ import {
 } from '../party/PartyGuestContent';
 import { PartyGameAffordance } from '../party/PartyGameAffordance';
 import { PartyHubTopBar } from '../party/PartyHubTopBar';
+import { partyAppFor, usePartyHomeScreen } from '../party/partyHomeScreen';
 import { PartyImageViewer } from '../party/PartyImageViewer';
 import {
   PartyAfterHome,
@@ -600,6 +601,10 @@ export function PartyPage() {
     };
   }, [lightbox]);
 
+  // Once the party is in front of the guest, the page is the party's own app:
+  // added to the home screen, it opens this link and nothing else.
+  usePartyHomeScreen(state.kind === 'ready' && token ? partyAppFor(token, state.context.title) : null);
+
   if (state.kind === 'loading') {
     // Shaped like the finished hero — brand bar, title lines, CTA — so the real
     // content lands where the skeleton already reserved room.
@@ -671,7 +676,7 @@ export function PartyPage() {
         {/* The invitation opens on the party's own cover, with the brand row
             inside it, rather than on a padded page above a card. */}
         <PartyBeforeHome
-          context={context} onOpenPoster={openPoster} topBar={<PartyHubTopBar />}
+          context={context} onOpenPoster={openPoster} topBar={<PartyHubTopBar homeScreen />}
         />
         {/* Entering RELOADS: the new surface needs what the old one never asked
             for — an invitation fetched no gallery — so it is fetched now rather
@@ -696,7 +701,7 @@ export function PartyPage() {
     return (
       <main className="party-guest-hub">
         <div className="party-guest-hub-state-page">
-          <PartyHubTopBar />
+          <PartyHubTopBar homeScreen />
           <PartyAfterHome
             context={context}
             onOpenMemories={() => setShowMemories(true)}
@@ -824,7 +829,7 @@ export function PartyPage() {
           style={coverUrl ? { backgroundImage: `url("${coverUrl}")` } : undefined}
           aria-hidden="true"
         />
-        <PartyHubTopBar />
+        <PartyHubTopBar homeScreen />
         <div className="party-guest-hub-headline">
           <p className="party-guest-hub-eyebrow">{PARTY_EYEBROW}</p>
           <h1 className="party-guest-hub-title">{albumName}</h1>

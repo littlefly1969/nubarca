@@ -257,9 +257,10 @@ export interface PartyInvitationView<TContent = unknown> {
     coverUrl: string | null;
     content: TContent[];
     /**
-     * "Entra nel Party": the party's own public page, present only while it is
-     * live and that page really opens. The same capability as the room's QR —
-     * navigation, never an identity carried across.
+     * "Entra nel Party": the party's own public page, present while it is live
+     * and afterwards (its memories), and only when that page really opens. The
+     * same capability as the room's QR — navigation, never an identity carried
+     * across.
      */
     partyUrl: string | null;
   };

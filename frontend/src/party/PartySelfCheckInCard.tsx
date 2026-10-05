@@ -13,7 +13,9 @@ import './PartyRsvp.css';
 // "Entra nel Party" is the party's ordinary public page — the same one the
 // room's QR opens, with the same powers and the same quotas. Following it is
 // navigation, not identity: the phone becomes a browser at the party exactly
-// as any other does, and nothing ties it to the names above.
+// as any other does, and nothing ties it to the names above. Once somebody of
+// the group has arrived, entering is what the group comes back here for, so it
+// leads the card; the rest of the group can still be marked below it.
 
 export function PartySelfCheckInCard({
   invitation, partyUrl, busyGuestId, notice, onCheckIn, onUndo,
@@ -26,10 +28,20 @@ export function PartySelfCheckInCard({
   onUndo(guestId: string): void;
 }) {
   const { t, formatDate } = useI18n();
+  const someoneArrived = invitation.guests.some((guest) => guest.checkedInAt !== null);
+  const enter = partyUrl && (
+    <div className="party-checkin-enter-block" data-placement={someoneArrived ? 'first' : 'last'}>
+      <Link className="party-rsvp-submit party-checkin-enter" to={partyUrl} data-testid="party-checkin-enter">
+        {t('partyRsvp.checkIn.enter')}
+      </Link>
+      <p className="party-rsvp-help">{t('partyRsvp.checkIn.enterHelp')}</p>
+    </div>
+  );
 
   return (
     <section className="party-rsvp party-checkin" data-testid="party-checkin" aria-labelledby="party-checkin-title">
       <h2 className="party-rsvp-title" id="party-checkin-title">{t('partyRsvp.checkIn.heading')}</h2>
+      {someoneArrived && enter}
       {invitation.canCheckIn && <p className="party-rsvp-help">{t('partyRsvp.checkIn.help')}</p>}
       <ul className="party-checkin-people">
         {invitation.guests.map((guest) => (
@@ -72,14 +84,7 @@ export function PartySelfCheckInCard({
           {t(notice)}
         </p>
       )}
-      {partyUrl && (
-        <div className="party-checkin-enter-block">
-          <Link className="party-rsvp-submit party-checkin-enter" to={partyUrl} data-testid="party-checkin-enter">
-            {t('partyRsvp.checkIn.enter')}
-          </Link>
-          <p className="party-rsvp-help">{t('partyRsvp.checkIn.enterHelp')}</p>
-        </div>
-      )}
+      {!someoneArrived && enter}
     </section>
   );
 }
