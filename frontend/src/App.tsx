@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
+import { PartyAppHead } from './party/partyHomeScreen';
 import { I18nProvider } from './i18n';
 import { ThemeProvider } from './theme';
 import { AuthProvider } from './auth/AuthProvider';
@@ -60,6 +61,9 @@ import { BeautyLabUploadPage } from './pages/BeautyLabUploadPage';
 export function App() {
   return (
     <BrowserRouter>
+      {/* A party's page is the party's app, chosen from the address alone —
+          first by the bootstrap in index.html, then on every navigation. */}
+      <PartyAppHead />
       {/* The theme is already painted by the bootstrap in index.html; this
           provider takes ownership of the same value without changing it. */}
       <ThemeProvider>

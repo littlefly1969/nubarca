@@ -56,7 +56,10 @@ is built is described by `ARCHITECTURE.md`.
 - HEIC photos: recognised by signature and decoded by FFmpeg through
   `OriginalImageReader` (upload, bulk import, thumbnails, print from the original, SigLIP,
   faces, guest book, aesthetics); stored upright with orientation 1;
-  `media images redetect` recognises the ones uploaded before.
+  `media images redetect` recognises the ones uploaded before. The frame is a
+  temporary PNG file behind a lease (deleted on dispose, output limit checked
+  on the file), at most `Media:HeifDecodeMaxConcurrency` (2) at once,
+  cancellable down to FFmpeg; detection reads only its header.
 - Video capture metadata (extractor v2): Apple's local creation date with its
   offset (photographs' wall-clock convention), the ISO 6709 location (Apple
   and Android) into owner-private GPS and the owner's map, make/model.
@@ -64,20 +67,25 @@ is built is described by `ARCHITECTURE.md`.
 - Party on the home screen: the party page and a personal invitation declare
   themselves as the party's own web app (`/api/party/{token}/app-manifest`,
   `/api/party-invitations/{token}/app-manifest`: party title, scope `/party/`,
-  icon = the cover the page opens on, product icon otherwise) and offer
+  `id` = a digest of the party (never a token; the invitation app is
+  `<id>/invitation`), `start_url` = the link, icon = the cover the page opens
+  on, product icon otherwise). Which app is chosen from the address alone, by
+  a bootstrap script in index.html and `<PartyAppHead />`. They offer
   "Installa" (Android's own dialog, or Share → Add to Home Screen steps).
   No service worker: every launch is the party as it is now. An invitation
   opened again goes straight into the party once everybody coming has
   arrived, and after the party always (`partyUrl` now also after).
 - Bulk import faces: a finished import (staging upload or admin import)
-  enqueues face detection over the imported photos, like an upload does; a
-  whole detection run that found faces chains one whole recognition
-  (embeddings) run. Grouping into people stays the owner's request.
+  enqueues face detection for exactly the photos it created — chunks of
+  `AdminImport:FaceDetectionBatchSize` (100) blob ids, each chaining
+  recognition for the same blobs — never the library's backlog, which stays
+  an explicit global backfill. Grouping into people stays the owner's request.
 - Video colour: every picture made from a video (posters, preview strips, HLS
   renditions, AI frames) is BT.709 SDR. `VideoColorFormat` probes the stream;
   HDR (HLG, PQ) is tone-mapped with zscale/mobius at BT.2408's 203-nit white,
-  Display P3/BT.2020 SDR is gamut-converted, and H.264 is copied into HLS only
-  when 8-bit 4:2:0 BT.709 SDR (transcoder v3). `media videos
+  Display P3/BT.2020 SDR is gamut-converted (an unstated matrix is bt2020nc
+  for BT.2020), and H.264 is copied into HLS only when the probe positively
+  names 8-bit 4:2:0 BT.709 SDR — an unknown format is re-encoded (transcoder v3). `media videos
   color-regenerate` remakes what existing videos got before.
 - Party QR card: the host prints the party's public QR for its tables from
   the print settings — the twin strip's sheet and printer cut, a host's

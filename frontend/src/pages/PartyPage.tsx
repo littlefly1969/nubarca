@@ -20,7 +20,7 @@ import {
 } from '../party/PartyGuestContent';
 import { PartyGameAffordance } from '../party/PartyGameAffordance';
 import { PartyHubTopBar } from '../party/PartyHubTopBar';
-import { partyAppFor, usePartyHomeScreen } from '../party/partyHomeScreen';
+import { usePartyHomeScreen } from '../party/partyHomeScreen';
 import { PartyImageViewer } from '../party/PartyImageViewer';
 import {
   PartyAfterHome,
@@ -601,9 +601,9 @@ export function PartyPage() {
     };
   }, [lightbox]);
 
-  // Once the party is in front of the guest, the page is the party's own app:
-  // added to the home screen, it opens this link and nothing else.
-  usePartyHomeScreen(state.kind === 'ready' && token ? partyAppFor(token, state.context.title) : null);
+  // The app itself was chosen from the address at bootstrap; its title is the
+  // party's, once it has loaded.
+  usePartyHomeScreen(state.kind === 'ready' ? state.context.title : null);
 
   if (state.kind === 'loading') {
     // Shaped like the finished hero — brand bar, title lines, CTA — so the real

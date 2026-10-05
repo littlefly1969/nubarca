@@ -14,7 +14,7 @@ import { useI18n, type MessageKey } from '../i18n';
 import { isOpenablePoster } from '../party/PartyGuestContent';
 import { PartyBeforeHome } from '../party/PartyGuestSurfaces';
 import { PartyHubTopBar } from '../party/PartyHubTopBar';
-import { invitationAppFor, usePartyHomeScreen } from '../party/partyHomeScreen';
+import { usePartyHomeScreen } from '../party/partyHomeScreen';
 import { invitationEntersParty } from '../party/invitationEntry';
 import { PartyImageViewer } from '../party/PartyImageViewer';
 import {
@@ -123,7 +123,7 @@ export function PartyInvitationPage() {
   // "Sono qui" and its undo. The answer is the invitation as it now is, in
   // success and refusal alike — the version does not move, so the reply card
   // keeps whatever it was showing.
-  usePartyHomeScreen(state.kind === 'ready' && token ? invitationAppFor(token, state.view.party.title) : null);
+  usePartyHomeScreen(state.kind === 'ready' ? state.view.party.title : null);
 
   useEffect(() => {
     if (state.kind !== 'ready' || staying) return;

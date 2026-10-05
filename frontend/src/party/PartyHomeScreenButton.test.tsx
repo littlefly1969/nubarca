@@ -3,7 +3,7 @@ import { act, cleanup, render, renderHook, screen } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { I18nProvider } from '../i18n';
 import { PartyHomeScreenButton } from './PartyHomeScreenButton';
-import { homeScreenPlatform, invitationAppFor, partyAppFor, usePartyHomeScreen } from './partyHomeScreen';
+import { homeScreenPlatform, usePartyHomeScreen } from './partyHomeScreen';
 
 // "INSTALLA": the party kept on a guest's home screen. The browser's own
 // dialog where it offers one, two steps explained where it does not, nothing
@@ -41,39 +41,23 @@ describe('homeScreenPlatform', () => {
 });
 
 describe('usePartyHomeScreen', () => {
-  it('makes the page the party’s app while it is shown, and gives the product its head back after', () => {
-    document.head.innerHTML = `
-      <link rel="manifest" href="/manifest.webmanifest">
-      <link rel="apple-touch-icon" href="/brand/nubarca-apple-touch-icon-180.png">
-      <meta name="apple-mobile-web-app-title" content="NubArca">`;
+  it('names the page and the home-screen app after the party, and gives the product its title back after', () => {
+    document.head.innerHTML = '<meta name="apple-mobile-web-app-title" content="NubArca">';
     document.title = 'NubArca';
 
-    const { unmount } = renderHook(() => usePartyHomeScreen(partyAppFor('qr token', 'Matrimonio di Marta')));
+    const { unmount } = renderHook(() => usePartyHomeScreen('Matrimonio di Marta'));
 
-    expect(document.head.querySelector('link[rel="manifest"]')).toHaveAttribute('href', '/api/party/qr%20token/app-manifest');
-    expect(document.head.querySelector('link[rel="apple-touch-icon"]')).toHaveAttribute('href', '/api/party/qr%20token/app-icon/192');
     expect(document.head.querySelector('meta[name="apple-mobile-web-app-title"]')).toHaveAttribute('content', 'Matrimonio di Marta');
     expect(document.title).toBe('Matrimonio di Marta');
-
     unmount();
-    expect(document.head.querySelector('link[rel="manifest"]')).toHaveAttribute('href', '/manifest.webmanifest');
-    expect(document.head.querySelector('link[rel="apple-touch-icon"]')).toHaveAttribute('href', '/brand/nubarca-apple-touch-icon-180.png');
     expect(document.head.querySelector('meta[name="apple-mobile-web-app-title"]')).toHaveAttribute('content', 'NubArca');
     expect(document.title).toBe('NubArca');
   });
 
-  it('declares an invitation as its own app', () => {
-    expect(invitationAppFor('inv-1', 'Festa')).toEqual({
-      manifestUrl: '/api/party-invitations/inv-1/app-manifest',
-      iconUrl: '/api/party-invitations/inv-1/app-icon/192',
-      title: 'Festa',
-    });
-  });
-
-  it('touches nothing before there is a party', () => {
-    document.head.innerHTML = '<link rel="manifest" href="/manifest.webmanifest">';
+  it('touches nothing before the party has loaded', () => {
+    document.title = 'NubArca';
     renderHook(() => usePartyHomeScreen(null));
-    expect(document.head.querySelector('link[rel="manifest"]')).toHaveAttribute('href', '/manifest.webmanifest');
+    expect(document.title).toBe('NubArca');
   });
 });
 

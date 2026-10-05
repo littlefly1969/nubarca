@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Nodes;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -17,8 +19,16 @@ namespace NubArca.Api.Party;
 ///
 /// <para>Its scope is every party page, so an invitation leads into its party
 /// inside the same app window — and, on an iPhone, in the same storage, where
-/// the guest's anonymous party cookie lives. Its id is the link itself, so two
-/// parties on one phone are two apps.</para>
+/// the guest's anonymous party cookie lives.</para>
+///
+/// <para>Its IDENTITY is the party's, never a link's: a link's token is a
+/// capability, and an app id must authorise nothing, survive a link rotated or
+/// revoked, and be the same for every invitation to one party. Two parties on
+/// one phone are two apps; a party's public page and its invitations are two
+/// apps of that party (one opens the party, the other the group's
+/// invitation). The START URL keeps the token, because relaunching needs it:
+/// an invitation keeps no session of its own, and a party's page is opened by
+/// its own link.</para>
 /// </summary>
 public static class PartyHomeScreenApp
 {
@@ -32,11 +42,23 @@ public static class PartyHomeScreenApp
     public static bool IsIconSize(int size) => size is 192 or 512;
 
     /// <summary>
-    /// The manifest of the app that opens <paramref name="startPath"/>, named
-    /// after the party, with icons on <paramref name="iconBase"/>. The party's
-    /// version is the icons' cache key: choosing a new cover spends one.
+    /// The app's stable, non-authorising identity: a one-way digest of the
+    /// party's id — the same for every link and every invitation to it.
     /// </summary>
-    public static string Manifest(string startPath, string title, string iconBase, int version)
+    public static string AppId(Guid partyId, bool invitation)
+    {
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes($"nubarca-party-app:{partyId:N}"));
+        var key = Convert.ToHexStringLower(digest)[..32];
+        return invitation ? $"/party/app/{key}/invitation" : $"/party/app/{key}";
+    }
+
+    /// <summary>
+    /// The manifest of the app <paramref name="appId"/> that opens
+    /// <paramref name="startPath"/>, named after the party, with icons on
+    /// <paramref name="iconBase"/>. The party's version is the icons' cache
+    /// key: choosing a new cover spends one.
+    /// </summary>
+    public static string Manifest(string appId, string startPath, string title, string iconBase, int version)
     {
         JsonObject Icon(int size, bool maskable) => new()
         {
@@ -47,7 +69,7 @@ public static class PartyHomeScreenApp
         };
         return new JsonObject
         {
-            ["id"] = startPath,
+            ["id"] = appId,
             ["name"] = title,
             ["short_name"] = title,
             ["start_url"] = startPath,

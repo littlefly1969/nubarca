@@ -290,6 +290,7 @@ public static class PartyEndpoints
             var enc = Uri.EscapeDataString(token);
             return Results.Text(
                 NubArca.Api.Party.PartyHomeScreenApp.Manifest(
+                    NubArca.Api.Party.PartyHomeScreenApp.AppId(access!.PartyId, invitation: false),
                     $"/party/{enc}", root.Title, $"/api/party/{enc}/app-icon", root.Version),
                 NubArca.Api.Party.PartyHomeScreenApp.ManifestContentType);
         }).WithName("GetPartyAppManifest").RequireRateLimiting(PartyPublicRateLimitPolicy);
