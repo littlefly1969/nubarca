@@ -82,6 +82,7 @@ public sealed class AdminImportService : IAdminImportService
     // Slice 98: DB batch pipeline dependencies (null = per-file path only).
     private readonly IBlobStorage? _blobStorage;
     private readonly IVideoSignatureDetector? _videoDetector;
+    private readonly IOriginalImageReader? _originals;
     // deleted-content-import-skip: evaluates the two import skip options. Null
     // for direct-construction test sites that don't exercise skipping.
     private readonly IImportSkipEvaluator? _skipEvaluator;
@@ -109,8 +110,12 @@ public sealed class AdminImportService : IAdminImportService
         IImportSkipEvaluator? skipEvaluator = null,
         // Video metadata probe config (ffprobe). Optional; null = disabled, so
         // imports enqueue no video-probe job (matches the default provider).
-        IOptions<MediaOptions>? media = null)
+        IOptions<MediaOptions>? media = null,
+        // HEIC, recognised by the batch pipeline exactly as an upload
+        // recognises it. Optional for direct-construction test sites.
+        IOriginalImageReader? originals = null)
     {
+        _originals = originals;
         _db = db;
         _files = files;
         _folders = folders;
@@ -904,6 +909,21 @@ public sealed class AdminImportService : IAdminImportService
         }
     }
 
+    private async Task<bool> IsHeifAsync(string storageKey)
+    {
+        try
+        {
+            await using var stream = await _blobStorage!.OpenReadAsync(storageKey, CancellationToken.None);
+            var header = new byte[HeifSignature.HeaderLength];
+            var read = await stream.ReadAtLeastAsync(header, header.Length, throwOnEndOfStream: false);
+            return HeifSignature.IsHeif(header.AsSpan(0, read));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     // Slice 93: where a staging-sourced run reads its files from. The session
     // directory is derived from the validated staging root — never persisted.
     private string ResolveStagingSourceDir(Guid stagingSessionId)
@@ -1680,7 +1700,30 @@ public sealed class AdminImportService : IAdminImportService
         }
         catch
         {
-            // fall through to video detection
+            // fall through to HEIC, then video detection
+        }
+
+        // HEIC, the iPhone's photo format, as FileItemService recognises it on
+        // upload: by its signature, and a PHOTO only when FFmpeg decodes its
+        // frame — the decoded, upright dimensions. A file it cannot read stays
+        // unrecognised rather than becoming a broken photograph.
+        if (_originals is not null && await IsHeifAsync(storageKey))
+        {
+            var decoded = await _originals.ReadForPixelsAsync(
+                ct => _blobStorage!.OpenReadAsync(storageKey, ct), CancellationToken.None);
+            if (decoded is not null)
+            {
+                try
+                {
+                    var info = Image.Identify(decoded);
+                    return (info.Width, info.Height, HeifSignature.Format, HeifSignature.ContentType, true, false);
+                }
+                catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException)
+                {
+                    // Not a frame after all: leave it unrecognised.
+                }
+            }
+            return (null, null, null, null, false, false);
         }
 
         if (_videoDetector is not null)

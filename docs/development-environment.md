@@ -256,7 +256,7 @@ pins there, publish, and put the new digest in the API Dockerfile.
 
 FFmpeg also decodes **HEIC** stills (the iPhone's photo format), which
 ImageSharp and libvips cannot read. `OriginalImageReader` is the one way an
-original's pixels are opened — by upload detection, thumbnails, the print
+original's pixels are opened — by upload and bulk-import detection, thumbnails, the print
 renderers, the AI and the guest book: a JPEG/PNG/... is its own bytes, a HEIC
 is decoded by FFmpeg from the original into a lossless, upright PNG at the
 moment it is needed (nothing stored). Its stored orientation is 1, because the
