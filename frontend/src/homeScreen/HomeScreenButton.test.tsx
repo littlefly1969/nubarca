@@ -2,12 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { I18nProvider } from '../i18n';
-import { PartyHomeScreenButton } from './PartyHomeScreenButton';
-import { homeScreenPlatform, usePartyHomeScreen } from './partyHomeScreen';
+import { HomeScreenButton, type HomeScreenSubject } from './HomeScreenButton';
+import { homeScreenPlatform, useHomeScreenTitle } from './homeScreen';
 
-// "INSTALLA": the party kept on a guest's home screen. The browser's own
-// dialog where it offers one, two steps explained where it does not, nothing
-// at all where the party is already opened from the home screen.
+// "INSTALLA": a party, or an album shared by link, kept on a visitor's home
+// screen. The browser's own dialog where it offers one, two steps explained
+// where it does not, nothing at all where it is already opened from the home
+// screen.
 
 const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1';
 const IPAD_AS_MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15';
@@ -26,8 +27,8 @@ function as(userAgent: string) {
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(userAgent);
 }
 
-function button() {
-  return render(<I18nProvider><PartyHomeScreenButton /></I18nProvider>);
+function button(subject: HomeScreenSubject = 'party') {
+  return render(<I18nProvider><HomeScreenButton subject={subject} /></I18nProvider>);
 }
 
 describe('homeScreenPlatform', () => {
@@ -40,12 +41,12 @@ describe('homeScreenPlatform', () => {
   });
 });
 
-describe('usePartyHomeScreen', () => {
+describe('useHomeScreenTitle', () => {
   it('names the page and the home-screen app after the party, and gives the product its title back after', () => {
     document.head.innerHTML = '<meta name="apple-mobile-web-app-title" content="NubArca">';
     document.title = 'NubArca';
 
-    const { unmount } = renderHook(() => usePartyHomeScreen('Matrimonio di Marta'));
+    const { unmount } = renderHook(() => useHomeScreenTitle('Matrimonio di Marta'));
 
     expect(document.head.querySelector('meta[name="apple-mobile-web-app-title"]')).toHaveAttribute('content', 'Matrimonio di Marta');
     expect(document.title).toBe('Matrimonio di Marta');
@@ -56,12 +57,12 @@ describe('usePartyHomeScreen', () => {
 
   it('touches nothing before the party has loaded', () => {
     document.title = 'NubArca';
-    renderHook(() => usePartyHomeScreen(null));
+    renderHook(() => useHomeScreenTitle(null));
     expect(document.title).toBe('NubArca');
   });
 });
 
-describe('PartyHomeScreenButton', () => {
+describe('HomeScreenButton', () => {
   it('is not offered on a computer whose browser offers nothing', () => {
     as(DESKTOP);
     button();
@@ -89,6 +90,22 @@ describe('PartyHomeScreenButton', () => {
     expect(steps).toHaveTextContent('Aggiungi alla schermata Home');
     await userEvent.click(screen.getByRole('button', { name: 'Ho capito' }));
     expect(screen.queryByTestId('party-home-sheet')).not.toBeInTheDocument();
+  });
+
+  it('speaks of the album on an album shared by link, with the same steps', async () => {
+    as(IPHONE);
+    button('album');
+
+    const install = screen.getByTestId('album-home-button');
+    expect(install).toHaveTextContent('Installa album');
+    expect(install).toHaveAccessibleName('Aggiungi l’album alla schermata Home');
+    await userEvent.click(install);
+
+    const steps = await screen.findByTestId('album-home-steps-ios');
+    expect(steps).toHaveTextContent('Aggiungi alla schermata Home');
+    expect(steps).toHaveTextContent('l’icona dell’album');
+    expect(steps).not.toHaveTextContent('festa');
+    expect(screen.getByTestId('album-home-sheet')).not.toHaveTextContent('festa');
   });
 
   it('on Android with no offer from the browser, explains its menu', async () => {

@@ -1,0 +1,51 @@
+/* "Installa" — the home-screen app button and its how-to sheet, on a party's
+   page and on an album shared by link alike. Both pages are the same fixed
+   dark surface; the sheet pins its own palette (PartyRsvp.css). */
+
+/* "Installa": a quiet pill beside the language, the same height as its 44px
+   target — present on every visit, never in the way of the party. */
+.party-home-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.75rem;
+  padding: 0 0.85rem 0 0.7rem;
+  border: 1px solid rgb(245 247 251 / 22%);
+  border-radius: 999px;
+  background: rgb(4 8 16 / 42%);
+  color: var(--brand-cloud-white);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+
+.party-home-button svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.party-home-button:focus-visible {
+  outline: 2px solid var(--brand-cyan-glow);
+  outline-offset: 2px;
+}
+
+.party-home-sheet .party-home-lead {
+  margin: 0 0 1rem;
+  color: var(--party-hub-muted);
+  line-height: 1.5;
+}
+
+.party-home-sheet .party-home-steps {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding-inline-start: 1.4rem;
+  line-height: 1.45;
+}

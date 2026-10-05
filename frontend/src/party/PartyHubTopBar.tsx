@@ -1,6 +1,6 @@
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PRODUCT_NAME } from '../brand/brand';
-import { PartyHomeScreenButton } from './PartyHomeScreenButton';
+import { HomeScreenButton } from '../homeScreen/HomeScreenButton';
 
 // The guest hub is a FIXED dark surface — a party cover, not a themed app page —
 // so the approved ON-DARK wordmark is pinned here instead of resolved from the
@@ -28,7 +28,7 @@ export function PartyHubTopBar({ homeScreen = false }: { homeScreen?: boolean })
         height={PARTY_WORDMARK.height}
       />
       <div className="party-guest-hub-topbar-actions">
-        {homeScreen && <PartyHomeScreenButton />}
+        {homeScreen && <HomeScreenButton subject="party" />}
         <LanguageSwitcher className="language-switcher language-switcher-public" compact />
       </div>
     </div>

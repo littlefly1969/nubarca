@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
-import { PartyAppCanonical, PartyAppHead, partyAppBasename } from './party/partyHomeScreen';
+import { HomeScreenAppCanonical, HomeScreenAppHead, homeScreenAppBasename } from './homeScreen/homeScreen';
 import { I18nProvider } from './i18n';
 import { ThemeProvider } from './theme';
 import { AuthProvider } from './auth/AuthProvider';
@@ -60,16 +60,18 @@ import { PartyGuestbookPublicPage } from './pages/PartyGuestbookPublicPage';
 import { BeautyLabUploadPage } from './pages/BeautyLabUploadPage';
 
 export function App() {
-  // Inside a party's app (/party/app/<key>/…) every route is the same route,
-  // under the app's own path: its scope, which no other party's app shares.
-  // Fixed for the document's lifetime, as the manifest the bootstrap chose is.
-  const [partyAppBase] = useState(() => partyAppBasename(window.location.pathname));
+  // Inside a party's or a shared album's app (/party/app/<key>/…,
+  // /album/app/<key>/…) every route is the same route, under the app's own
+  // path: its scope, which no other app shares. Fixed for the document's
+  // lifetime, as the manifest the bootstrap chose is.
+  const [appBase] = useState(() => homeScreenAppBasename(window.location.pathname));
   return (
-    <PartyAppCanonical basename={partyAppBase}>
-    <BrowserRouter basename={partyAppBase}>
-      {/* A party's page is the party's app, chosen from the address alone —
-          first by the bootstrap in index.html, then on every navigation. */}
-      <PartyAppHead basename={partyAppBase} />
+    <HomeScreenAppCanonical>
+    <BrowserRouter basename={appBase}>
+      {/* A party's or a shared album's page is its own app, chosen from the
+          address alone — first by the bootstrap in index.html, then on every
+          navigation. */}
+      <HomeScreenAppHead basename={appBase} />
       {/* The theme is already painted by the bootstrap in index.html; this
           provider takes ownership of the same value without changing it. */}
       <ThemeProvider>
@@ -95,6 +97,10 @@ export function App() {
               this link is not that link, and a visitor following one has not
               been handed the other. */}
           <Route path="/album/:token" element={<AlbumSharePage />} />
+          {/* The same page inside the album's own app: /album/app/<key>/open/<token>. */}
+          {appBase?.startsWith('/album/app/') && (
+            <Route path="/open/:token" element={<AlbumSharePage />} />
+          )}
           {/* PUBLIC, unauthenticated GUEST BOOK, on the party's VIEW token —
               the one on the QR. Reading the book is part of looking at the
               party, and a host may keep a book while accepting no photographs
@@ -364,6 +370,6 @@ export function App() {
       </I18nProvider>
       </ThemeProvider>
     </BrowserRouter>
-    </PartyAppCanonical>
+    </HomeScreenAppCanonical>
   );
 }
