@@ -291,7 +291,7 @@ public static class PartyEndpoints
             return Results.Text(
                 NubArca.Api.Party.PartyHomeScreenApp.Manifest(
                     access!.PartyId, $"/party/{enc}", root.Title, $"/api/party/{enc}/app-icon", root.Version),
-                NubArca.Api.Party.PartyHomeScreenApp.ManifestContentType);
+                NubArca.Api.HomeScreen.HomeScreenApp.ManifestContentType);
         }).WithName("GetPartyAppManifest").RequireRateLimiting(PartyPublicRateLimitPolicy);
 
         app.MapGet("/api/party/{token}/app-icon/{size:int}", async (
@@ -306,7 +306,7 @@ public static class PartyEndpoints
             [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
             CancellationToken cancellationToken) =>
         {
-            if (!NubArca.Api.Party.PartyHomeScreenApp.IsIconSize(size)) return Results.NotFound();
+            if (!NubArca.Api.HomeScreen.HomeScreenApp.IsIconSize(size)) return Results.NotFound();
             var access = await party.ResolvePublicAsync(token, cancellationToken);
             if (access is null) return Results.NotFound();
             var cover = await GuestCoverFileAsync(db, access, partyMedia, cancellationToken);
@@ -1847,9 +1847,11 @@ public static class PartyEndpoints
     }
 
     /// <summary>
-    /// A party app's icon: the centre square of an ALREADY AUTHORIZED cover's
-    /// derivative — metadata-stripped the one way every party picture is — or,
-    /// when there is none or it cannot be drawn, the product's own icon.
+    /// A home-screen app's icon — a party's, or an album's shared by link: the
+    /// centre square of an ALREADY AUTHORIZED cover's derivative —
+    /// metadata-stripped the one way every public picture is — or, when there
+    /// is none or it cannot be drawn, the product's own icon. <paramref name="noStore"/>
+    /// for a surface whose revoke must take effect on the next request.
     /// </summary>
     internal static async Task<IResult> ServeHomeScreenIconAsync(
         Guid ownerUserId,
@@ -1859,7 +1861,8 @@ public static class PartyEndpoints
         HttpContext httpContext,
         IFileThumbnailService thumbnails,
         NubArca.Api.Metadata.IImageMetadataStripper stripper,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool noStore = false)
     {
         if (cover is { } picture)
         {
@@ -1877,12 +1880,13 @@ public static class PartyEndpoints
                         if (stripper.IsSupported(content.MimeType))
                         {
                             using var safe = await stripper.StripAsync(content.Content, content.MimeType, cancellationToken);
-                            icon = await NubArca.Api.Party.PartyHomeScreenApp.RenderIconAsync(safe, size, cancellationToken);
+                            icon = await NubArca.Api.HomeScreen.HomeScreenApp.RenderIconAsync(safe, size, cancellationToken);
                         }
                     }
                     if (icon is not null)
                     {
-                        SetPrivateDerivativeCache(httpContext);
+                        if (noStore) SetNoStore(httpContext);
+                        else SetPrivateDerivativeCache(httpContext);
                         return Results.File(icon, "image/png");
                     }
                 }
@@ -1892,7 +1896,7 @@ public static class PartyEndpoints
                 // An icon is never worth an error page: the product's stands in.
             }
         }
-        return Results.Redirect(NubArca.Api.Party.PartyHomeScreenApp.BrandIcon(size, maskable));
+        return Results.Redirect(NubArca.Api.HomeScreen.HomeScreenApp.BrandIcon(size, maskable));
     }
 
     private static void SetNoStore(HttpContext context)

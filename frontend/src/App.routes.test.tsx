@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { App } from './App';
 import { installFetchMock, errorResponse, jsonResponse } from './test-utils';
-import { partyAppNavigation } from './party/partyHomeScreen';
+import { homeScreenAppNavigation } from './homeScreen/homeScreen';
 
 function goto(path: string) {
   window.history.replaceState({}, '', path);
@@ -142,12 +142,60 @@ describe('App route table (anonymous)', () => {
       installFetchMock({
         'GET /api/party/token-abc/app-manifest': () => jsonResponse({ scope: `${APP}/` }),
       });
-      const replace = vi.spyOn(partyAppNavigation, 'replace').mockImplementation(() => {});
+      const replace = vi.spyOn(homeScreenAppNavigation, 'replace').mockImplementation(() => {});
       goto('/party/token-abc');
       render(<App />);
       await waitFor(() => {
         expect(replace).toHaveBeenCalledWith(`${APP}/party/token-abc`);
       });
+    });
+  });
+
+  // ONE ALBUM, ONE APP: an album shared by link, inside its own app's path,
+  // is the same public page.
+  describe('inside a shared album\'s app', () => {
+    const APP = '/album/app/1111111111111111aaaaaaaaaaaaaaaa';
+    const album = { albumName: 'Vacanze', coverUrl: null, itemCount: 0, canUpload: false, canDownloadOriginal: false, uploadsRemaining: null };
+
+    afterEach(() => vi.restoreAllMocks());
+
+    it('opens the album at /open/<token>, publicly, once the app is the album\'s', async () => {
+      installFetchMock({
+        'GET /api/album-share/token-abc/app-manifest': () => jsonResponse({ id: APP, scope: `${APP}/` }),
+        'GET /api/album-share/token-abc': () => jsonResponse(album),
+        'GET /api/album-share/token-abc/items': () => jsonResponse({ items: [], nextCursor: null }),
+      });
+      goto(`${APP}/open/token-abc`);
+      render(<App />);
+      expect(await screen.findByText('Vacanze')).toBeInTheDocument();
+      expect(window.location.pathname).toBe(`${APP}/open/token-abc`);
+    });
+
+    it('moves an album\'s own link under the app its manifest names', async () => {
+      installFetchMock({
+        'GET /api/album-share/token-abc/app-manifest': () => jsonResponse({ id: APP, scope: `${APP}/` }),
+      });
+      const replace = vi.spyOn(homeScreenAppNavigation, 'replace').mockImplementation(() => {});
+      goto('/album/token-abc');
+      render(<App />);
+      await waitFor(() => {
+        expect(replace).toHaveBeenCalledWith(`${APP}/open/token-abc`);
+      });
+    });
+
+    it('keeps /album/<token> itself the album when it cannot move', async () => {
+      installFetchMock({
+        'GET /api/album-share/token-abc/app-manifest': () => errorResponse(404),
+        'GET /api/album-share/token-abc': () => jsonResponse(album),
+        'GET /api/album-share/token-abc/items': () => jsonResponse({ items: [], nextCursor: null }),
+      });
+      goto('/album/token-abc');
+      render(<App />);
+      expect(await screen.findByText('Vacanze')).toBeInTheDocument();
+    });
+
+    it('has no /open route outside an album\'s app', async () => {
+      await expectLanded('/open/token-abc');
     });
   });
 

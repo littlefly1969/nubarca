@@ -237,6 +237,74 @@ public static class AlbumShareLinkEndpoints
                 access.MaxUploads == 0 ? null : Math.Max(0, access.MaxUploads - access.UploadCount)));
         }).WithName("GetAlbumShare").RequireRateLimiting(PublicRateLimitPolicy);
 
+        // THE ALBUM ON A VISITOR'S HOME SCREEN (AlbumShareHomeScreenApp). The
+        // manifest is the album's name, so it is answered on exactly the terms
+        // the album is: a protected link without its verified device gets the
+        // same 401 as the page — no name — and a link that opens nothing has
+        // no app. The device cookie is pathed to this link, so it reaches here
+        // when the page asks with credentials. Not audited: a browser reading a
+        // manifest is not a visitor opening the album.
+        app.MapGet("/api/album-share/{token}/app-manifest", async (
+            string token,
+            HttpContext httpContext,
+            [FromServices] IAlbumShareService shares,
+            [FromServices] NubArca.Api.Party.IPartyMediaService media,
+            CancellationToken cancellationToken) =>
+        {
+            NoStore(httpContext);
+            var resolved = await shares.ResolveAsync(token, Device(httpContext, token), cancellationToken);
+            if (resolved.Kind == AlbumShareResolution.NeedsSecondFactor)
+            {
+                return Results.Json(
+                    new { error = AlbumShareErrors.SecondFactorRequired },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+            if (resolved.Access is not { } access) return Results.NotFound();
+            var header = await media.GetAlbumAsync(access.OwnerUserId, access.AlbumId, cancellationToken);
+            if (header is null) return Results.NotFound();
+            return Results.Text(
+                AlbumShareHomeScreenApp.Manifest(access.AlbumId, token, header.Name, header.CoverFileItemId),
+                NubArca.Api.HomeScreen.HomeScreenApp.ManifestContentType);
+        }).WithName("GetAlbumShareAppManifest").RequireRateLimiting(PublicRateLimitPolicy);
+
+        // The icon is the cover the page opens on, through the same authorized
+        // derivative path as every shared picture. A protected link without
+        // its device draws the PRODUCT's icon: a browser may fetch icons
+        // without the cookie, and an installable album must not fail for it —
+        // nor show a picture the second factor is there to protect.
+        app.MapGet("/api/album-share/{token}/app-icon/{size:int}", async (
+            string token,
+            int size,
+            bool? maskable,
+            HttpContext httpContext,
+            [FromServices] IAlbumShareService shares,
+            [FromServices] NubArca.Api.Party.IPartyMediaService media,
+            [FromServices] IFileThumbnailService thumbnails,
+            [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
+            CancellationToken cancellationToken) =>
+        {
+            NoStore(httpContext);
+            if (!NubArca.Api.HomeScreen.HomeScreenApp.IsIconSize(size)) return Results.NotFound();
+            var resolved = await shares.ResolveAsync(token, Device(httpContext, token), cancellationToken);
+            if (resolved.Kind == AlbumShareResolution.NeedsSecondFactor)
+            {
+                return Results.Redirect(NubArca.Api.HomeScreen.HomeScreenApp.BrandIcon(size, maskable == true));
+            }
+            if (resolved.Access is not { } access) return Results.NotFound();
+            var header = await media.GetAlbumAsync(access.OwnerUserId, access.AlbumId, cancellationToken);
+            if (header is null) return Results.NotFound();
+            (Guid, NubArca.Api.Party.PartyMediaKind)? cover = null;
+            if (header.CoverFileItemId is Guid coverId
+                && await media.GetVisibleMediaKindAsync(
+                    access.OwnerUserId, access.AlbumId, coverId, cancellationToken) is { } kind)
+            {
+                cover = (coverId, kind);
+            }
+            return await PartyEndpoints.ServeHomeScreenIconAsync(
+                access.OwnerUserId, cover, size, maskable == true, httpContext,
+                thumbnails, stripper, cancellationToken, noStore: true);
+        }).WithName("GetAlbumShareAppIcon").RequireRateLimiting(MediaRateLimitPolicy);
+
         app.MapGet("/api/album-share/{token}/items", async (
             string token,
             HttpContext httpContext,

@@ -8,6 +8,14 @@
  * Phone first, because a link arrives in a message and a message is read on a
  * phone. Every target is at least 44px, and nothing needs a precise tap. */
 
+/* "Installa album" beside the language, as on a party's page. */
+.album-share-topbar-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .album-share-head {
   display: flex;
   flex-direction: column;

@@ -1,10 +1,11 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { I18nProvider } from '../i18n';
 import { installFetchMock, jsonResponse } from '../test-utils';
 import { AlbumSharePage } from './AlbumSharePage';
+import { HomeScreenAppCanonical, homeScreenAppNavigation } from '../homeScreen/homeScreen';
 
 /**
  * THE PUBLIC PAGE somebody opens from a message.
@@ -23,7 +24,14 @@ import { AlbumSharePage } from './AlbumSharePage';
  *   * the page states the browser limit it cannot beat — closing the tab stops
  *     the upload — rather than letting somebody walk away and lose photographs.
  */
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  window.history.replaceState(null, '', '/');
+  document.title = '';
+  document.head.innerHTML = '';
+});
 
 const TOKEN = 'a-share-token';
 
@@ -206,4 +214,104 @@ it('a protected link asks who you are instead of pretending to be nothing', asyn
   await user.click(screen.getByTestId('album-share-verify'));
 
   expect(await screen.findByText('Vacanze')).toBeInTheDocument();
+});
+
+// ── The album's own home-screen app ────────────────────────────────────────
+
+describe('inside the album\'s own app', () => {
+  const APP = '/album/app/1111111111111111aaaaaaaaaaaaaaaa';
+  const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1';
+
+  function mountInApp() {
+    render(
+      <I18nProvider>
+        <MemoryRouter basename={APP} initialEntries={[`${APP}/open/${TOKEN}`]}>
+          <Routes><Route path="/open/:token" element={<AlbumSharePage />} /></Routes>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+  }
+
+  it('is the same page, asking the same API, with every picture and download where it always was', async () => {
+    const { calls } = serve();
+    mountInApp();
+
+    expect(await screen.findByText('Vacanze')).toBeInTheDocument();
+    expect(screen.getByTestId('album-share-item-i1').querySelector('img'))
+      .toHaveAttribute('src', `/api/album-share/${TOKEN}/media/i1/thumbnail`);
+    expect(calls.map((c) => c.url)).toEqual([`/api/album-share/${TOKEN}`, `/api/album-share/${TOKEN}/items`]);
+
+    await userEvent.click(screen.getByTestId('album-share-item-i1'));
+    expect(screen.getByRole('link', { name: /scarica/i }))
+      .toHaveAttribute('href', `/api/album-share/${TOKEN}/media/i1/download`);
+  });
+
+  it('names the page and the app after the album, and offers to install it', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(IPHONE);
+    document.head.innerHTML = '<meta name="apple-mobile-web-app-title" content="NubArca">';
+    serve();
+    mountInApp();
+
+    expect(await screen.findByTestId('album-home-button')).toHaveTextContent('Installa album');
+    expect(document.title).toBe('Vacanze');
+    expect(document.head.querySelector('meta[name="apple-mobile-web-app-title"]')).toHaveAttribute('content', 'Vacanze');
+  });
+
+  it('offers nothing to install while the album is not open', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(IPHONE);
+    installFetchMock({
+      [`GET /api/album-share/${TOKEN}`]: () => new Response(JSON.stringify({ error: 'second_factor_required' }), { status: 401 }),
+    });
+    mountInApp();
+
+    expect(await screen.findByTestId('album-share-gate')).toBeInTheDocument();
+    expect(screen.queryByTestId('album-home-button')).toBeNull();
+  });
+
+  it('shows another album\'s token as unavailable, asking the album for nothing', async () => {
+    window.history.replaceState(null, '', `${APP}/open/${TOKEN}`);
+    const replace = vi.spyOn(homeScreenAppNavigation, 'replace').mockImplementation(() => {});
+    const { calls } = installFetchMock({
+      [`GET /api/album-share/${TOKEN}/app-manifest`]: () => jsonResponse({
+        id: '/album/app/2222222222222222bbbbbbbbbbbbbbbb',
+        scope: '/album/app/2222222222222222bbbbbbbbbbbbbbbb/',
+      }),
+    });
+    render(
+      <HomeScreenAppCanonical>
+        <I18nProvider>
+          <MemoryRouter basename={APP} initialEntries={[`${APP}/open/${TOKEN}`]}>
+            <Routes><Route path="/open/:token" element={<AlbumSharePage />} /></Routes>
+          </MemoryRouter>
+        </I18nProvider>
+      </HomeScreenAppCanonical>,
+    );
+
+    expect(await screen.findByTestId('album-share-gone')).toBeInTheDocument();
+    expect(screen.queryByText('Vacanze')).toBeNull();
+    expect(calls.map((c) => c.url)).toEqual([`/api/album-share/${TOKEN}/app-manifest`]);
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it('starts again once a protected album is verified, so the app is resolved with the grant', async () => {
+    const user = userEvent.setup();
+    window.history.replaceState(null, '', `/album/${TOKEN}`);
+    const reload = vi.spyOn(homeScreenAppNavigation, 'reload').mockImplementation(() => {});
+    installFetchMock({
+      [`GET /api/album-share/${TOKEN}`]: () =>
+        new Response(JSON.stringify({ error: 'second_factor_required' }), { status: 401 }),
+      [`POST /api/album-share/${TOKEN}/challenge`]: () => new Response(null, { status: 202 }),
+      [`POST /api/album-share/${TOKEN}/verify`]: () => new Response(null, { status: 204 }),
+    });
+    mount();
+
+    await screen.findByTestId('album-share-gate');
+    await user.type(screen.getByTestId('album-share-email'), 'zia@example.com');
+    await user.click(screen.getByTestId('album-share-ask'));
+    await screen.findByTestId('album-share-sent');
+    await user.type(screen.getByTestId('album-share-code'), '123456');
+    await user.click(screen.getByTestId('album-share-verify'));
+
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+  });
 });

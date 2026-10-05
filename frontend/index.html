@@ -107,44 +107,67 @@
       })();
     </script>
     <script>
-      // Party app bootstrap — a party's page is the party's own app. There is
-      // no static manifest link: this script CREATES the apple-touch-icon and
-      // the manifest links, each born with its final address, so a browser
-      // judging the page installable never sees another app's manifest first.
-      // Which app is decided from the address alone. It mirrors, verbatim,
-      // partyAppForPath and PRODUCT_APP in src/party/partyHomeScreen.ts:
-      //   * a party's app lives under /party/app/<32 hex>/; that prefix is set
-      //     aside and the rest of the address read as below
+      // Home-screen app bootstrap — a party's page, a personal invitation and an
+      // album shared by link are each their own app. There is no static
+      // manifest link: this script CREATES the apple-touch-icon and the
+      // manifest links, each born with its final address, so a browser judging
+      // the page installable never sees another app's manifest first. Which app
+      // is decided from the address alone. It mirrors, verbatim,
+      // homeScreenAppForPath and PRODUCT_APP in src/homeScreen/homeScreen.ts:
+      //   * an app lives under /party/app/<32 hex>/ or /album/app/<32 hex>/;
+      //     that prefix is set aside and the rest of the address read as below,
+      //     a party's rules inside a party's app and an album's inside an album's
       //   * /party/<token>         => /api/party/<token>/app-manifest
       //   * /party/invite/<token>  => /api/party-invitations/<token>/app-manifest
-      //   * a token is [A-Za-z0-9_-]+, 'crew', 'invite' and 'app' are not tokens, and
-      //     nothing may follow it but one slash
-      //   * any other page of a party's app => no manifest at all
+      //   * /album/<token>, and /open/<token> inside an album's app
+      //                            => /api/album-share/<token>/app-manifest,
+      //                               asked for with the visitor's cookie
+      //   * a token is [A-Za-z0-9_-]+; 'crew', 'invite' and 'app' are not a
+      //     party's tokens, 'app' is not an album's; nothing may follow a
+      //     token but one slash
+      //   * any other page of an app => no manifest at all
       //   * any other page         => /manifest.webmanifest (the product's)
-      // <PartyAppHead /> keeps the same choice on in-app navigation.
+      // <HomeScreenAppHead /> keeps the same choice on in-app navigation.
       (function () {
         var manifest = '/manifest.webmanifest';
+        var credentials = false;
         var icon = '/brand/nubarca-apple-touch-icon-180.png';
         var path = window.location.pathname;
-        var app = /^\/party\/app\/[0-9a-f]{32}(?=\/|$)/.exec(path);
+        var app = /^\/(party|album)\/app\/[0-9a-f]{32}(?=\/|$)/.exec(path);
+        var api = null;
+        var match;
         if (app) {
           manifest = null;
           path = path.slice(app[0].length) || '/';
         }
-        var match = /^\/party\/(?:(invite)\/)?([A-Za-z0-9_-]+)\/?$/.exec(path);
-        if (match && (match[1] || (match[2] !== 'crew' && match[2] !== 'invite' && match[2] !== 'app'))) {
-          var base = (match[1] ? '/api/party-invitations/' : '/api/party/') + encodeURIComponent(match[2]);
-          manifest = base + '/app-manifest';
-          icon = base + '/app-icon/192';
+        if (!app || app[1] === 'party') {
+          match = /^\/party\/(?:(invite)\/)?([A-Za-z0-9_-]+)\/?$/.exec(path);
+          if (match && (match[1] || (match[2] !== 'crew' && match[2] !== 'invite' && match[2] !== 'app'))) {
+            api = (match[1] ? '/api/party-invitations/' : '/api/party/') + encodeURIComponent(match[2]);
+          }
         }
-        var link = function (rel, href) {
+        if (!api && (!app || app[1] === 'album')) {
+          match = app
+            ? /^\/open\/([A-Za-z0-9_-]+)\/?$/.exec(path)
+            : /^\/album\/([A-Za-z0-9_-]+)\/?$/.exec(path);
+          if (match && match[1] !== 'app') {
+            api = '/api/album-share/' + encodeURIComponent(match[1]);
+            credentials = true;
+          }
+        }
+        if (api) {
+          manifest = api + '/app-manifest';
+          icon = api + '/app-icon/192';
+        }
+        var link = function (rel, href, crossOrigin) {
           var element = document.createElement('link');
           element.setAttribute('rel', rel);
+          if (crossOrigin) element.setAttribute('crossorigin', crossOrigin);
           element.setAttribute('href', href);
           document.head.appendChild(element);
         };
-        link('apple-touch-icon', icon);
-        if (manifest) link('manifest', manifest);
+        link('apple-touch-icon', icon, null);
+        if (manifest) link('manifest', manifest, credentials ? 'use-credentials' : null);
       })();
     </script>
   </head>

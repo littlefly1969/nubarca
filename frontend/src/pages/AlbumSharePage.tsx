@@ -14,6 +14,10 @@ import {
 import { useI18n } from '../i18n';
 import { PRODUCT_NAME } from '../brand/brand';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
+import { HomeScreenButton } from '../homeScreen/HomeScreenButton';
+import {
+  restartAlbumShareApp, useHomeScreenAppMismatch, useHomeScreenTitle,
+} from '../homeScreen/homeScreen';
 import { useUploadWakeLock } from '../uploads/useUploadWakeLock';
 import { fileKey, loadDone, markDone, partition } from '../uploads/uploadQueueStore';
 import './PartyContribution.css';
@@ -30,6 +34,11 @@ import './AlbumShare.css';
 //
 // Three things happen here and nothing else: look, take, add. There is no way
 // to remove a photograph, because the route does not exist on the server.
+//
+// The same page is the album's home-screen app (src/homeScreen): opened by its
+// link it moves under /album/app/<key>/open/<token>, the album's own scope, and
+// offers "Installa album". The app opens the link and nothing more — a revoked
+// or rotated link closes it, and a protected album still asks for its code.
 
 const WORDMARK = {
   src: '/brand/nubarca-wordmark-on-dark-480w.png',
@@ -46,7 +55,11 @@ type Status =
 export function AlbumSharePage() {
   const { token = '' } = useParams<{ token: string }>();
   const { t } = useI18n();
-  const [status, setStatus] = useState<Status>({ kind: 'loading' });
+  // An album's app whose key is not this token's album: a made-up address,
+  // shown as unavailable rather than as another album inside this one's app.
+  const mismatch = useHomeScreenAppMismatch();
+  const [status, setStatus] = useState<Status>(mismatch ? { kind: 'gone' } : { kind: 'loading' });
+  useHomeScreenTitle(status.kind === 'ready' ? status.album.albumName : null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -64,10 +77,11 @@ export function AlbumSharePage() {
   }, [token]);
 
   useEffect(() => {
+    if (mismatch) return undefined;
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load]);
+  }, [load, mismatch]);
 
   return (
     <main className="party-contribution album-share">
@@ -80,7 +94,10 @@ export function AlbumSharePage() {
             width={WORDMARK.width}
             height={WORDMARK.height}
           />
-          <LanguageSwitcher className="language-switcher language-switcher-public" compact />
+          <div className="album-share-topbar-actions">
+            {status.kind === 'ready' && <HomeScreenButton subject="album" />}
+            <LanguageSwitcher className="language-switcher language-switcher-public" compact />
+          </div>
         </div>
 
         {status.kind === 'loading' && (
@@ -95,7 +112,9 @@ export function AlbumSharePage() {
         )}
 
         {status.kind === 'locked' && (
-          <SecondFactorGate token={token} onVerified={() => void load()} />
+          // Verified: an album page starts again WITH the grant, so it moves
+          // under its app (or its app checks its key) — elsewhere, it reloads.
+          <SecondFactorGate token={token} onVerified={() => { if (!restartAlbumShareApp()) void load(); }} />
         )}
 
         {status.kind === 'ready' && (

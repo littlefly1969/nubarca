@@ -506,7 +506,7 @@ public static class PartyInvitationEndpoints
                 PartyHomeScreenApp.Manifest(
                     access!.PartyId, PartyInvitationTokens.InvitationPath(enc), party.Title,
                     $"/api/party-invitations/{enc}/app-icon", party.Version),
-                PartyHomeScreenApp.ManifestContentType);
+                NubArca.Api.HomeScreen.HomeScreenApp.ManifestContentType);
         }).WithName("GetPartyInvitationAppManifest").RequireRateLimiting(PartyPublicRateLimitPolicy);
 
         app.MapGet("/api/party-invitations/{token}/app-icon/{size:int}", async (
@@ -520,7 +520,7 @@ public static class PartyInvitationEndpoints
             [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
             CancellationToken cancellationToken) =>
         {
-            if (!PartyHomeScreenApp.IsIconSize(size)) return Results.NotFound();
+            if (!NubArca.Api.HomeScreen.HomeScreenApp.IsIconSize(size)) return Results.NotFound();
             var access = await rsvp.ResolveAsync(token, cancellationToken);
             if (access is null) return Results.NotFound();
             // Authorized as the invitation's cover is served: the party's own

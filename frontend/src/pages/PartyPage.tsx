@@ -20,7 +20,7 @@ import {
 } from '../party/PartyGuestContent';
 import { PartyGameAffordance } from '../party/PartyGameAffordance';
 import { PartyHubTopBar } from '../party/PartyHubTopBar';
-import { usePartyHomeScreen } from '../party/partyHomeScreen';
+import { useHomeScreenTitle } from '../homeScreen/homeScreen';
 import { PartyImageViewer } from '../party/PartyImageViewer';
 import {
   PartyAfterHome,
@@ -603,7 +603,7 @@ export function PartyPage() {
 
   // The app itself was chosen from the address at bootstrap; its title is the
   // party's, once it has loaded.
-  usePartyHomeScreen(state.kind === 'ready' ? state.context.title : null);
+  useHomeScreenTitle(state.kind === 'ready' ? state.context.title : null);
 
   if (state.kind === 'loading') {
     // Shaped like the finished hero — brand bar, title lines, CTA — so the real
