@@ -32,6 +32,7 @@ public sealed class VideoHlsGenerateJobHandler : IJobHandler
 
         var outcome = await _service.EnsureGeneratedAsync(
             payload.BlobObjectId, payload.Force, cancellationToken);
-        context.Log($"hls generate: blob {payload.BlobObjectId:N} → {outcome}");
+        // The outcome only: a blob id never goes into a log.
+        context.Log($"hls generate: {outcome}");
     }
 }
