@@ -70,13 +70,21 @@ is built is described by `ARCHITECTURE.md`.
   `metadata video-backfill` re-probes every video below v2.
 - Party on the home screen: the party page and a personal invitation declare
   themselves as the party's own web app (`/api/party/{token}/app-manifest`,
-  `/api/party-invitations/{token}/app-manifest`: party title, scope `/party/`,
-  `id` = a digest of the party (never a token; the invitation app is
-  `<id>/invitation`), `start_url` = the link, icon = the cover the page opens
-  on, product icon otherwise). Which app is chosen from the address alone: the
-  bootstrap script in index.html CREATES the manifest and icon links with
-  their final addresses (index.html has no static manifest link), and
-  `<PartyAppHead />` keeps them in step on navigation. They offer
+  `/api/party-invitations/{token}/app-manifest`: party title, icon = the cover
+  the page opens on). ONE PARTY, ONE APP, ITS OWN SCOPE: `id` =
+  `/party/app/<32 hex digest of the party>` (never a token), `scope` = id +
+  `/`, `start_url` = id + the link; a party's page and its invitations are one
+  app. Never a shared `/party/` scope: Android captures links and judges
+  "installed" by scope, so it made every later party uninstallable. A guest's
+  link (`/party/<token>`, `/party/invite/<token>`) is in no scope: opened in a
+  browser it moves under its app's path (`<PartyAppCanonical />`, client-side,
+  no proxy rule), where the router runs with that path as basename. Which
+  manifest is chosen from the address alone: the bootstrap script in
+  index.html CREATES the links with their final addresses (no static manifest
+  link; a non-entry page of a party's app gets none), and `<PartyAppHead />`
+  keeps them in step outside a party's app. Installs from the #177 manifest
+  (`scope: /party/`) are not updated in place and must be removed by hand.
+  Real-device Android QA (PR #180, Tests 1–4) gates the merge. They offer
   "Installa" (Android's own dialog, or Share → Add to Home Screen steps).
   No service worker: every launch is the party as it is now. An invitation
   opened again goes straight into the party once everybody coming has
