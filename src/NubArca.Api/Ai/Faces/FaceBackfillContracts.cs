@@ -10,6 +10,10 @@ public sealed record FaceBackfillOptions
     // Optional single-blob scope used by the post-ingestion fast path. Null
     // preserves the existing global, keyset-paged backfill behaviour.
     public Guid? TargetBlobObjectId { get; init; }
+
+    // Optional bounded set scope: exactly these blobs (a bulk import's chunk),
+    // never the library's backlog. Null or empty means no set scope.
+    public IReadOnlyList<Guid>? TargetBlobObjectIds { get; init; }
 }
 
 public sealed record FaceBackfillResult(

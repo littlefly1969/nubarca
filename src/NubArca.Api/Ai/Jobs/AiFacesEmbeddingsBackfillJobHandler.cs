@@ -88,6 +88,7 @@ public sealed class AiFacesEmbeddingsBackfillJobHandler : IJobHandler
             Limit = payload.Limit,
             DryRun = payload.DryRun,
             TargetBlobObjectId = payload.BlobObjectId,
+            TargetBlobObjectIds = payload.BlobObjectIds,
         };
 
         var result = await _service.RunAsync(

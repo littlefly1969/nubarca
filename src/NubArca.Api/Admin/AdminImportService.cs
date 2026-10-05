@@ -878,20 +878,18 @@ public sealed class AdminImportService : IAdminImportService
             log($"admin-import: enqueued photo embeddings job {embeddingsJob.Id}");
         }
 
-        // Faces, as an upload gets them: detection over the imported photos,
-        // which chains recognition (embeddings) itself once it has found faces.
-        // Grouping them into people stays the owner's own request.
+        // Faces, as an upload gets them — for exactly the photos THIS run
+        // created, never the library's backlog: detection chunk by chunk,
+        // each chaining recognition for its own blobs. Catching up the whole
+        // library stays an explicit global backfill, and grouping faces into
+        // people stays the owner's own request.
         if (ai.Enabled
             && ai.FaceDetectionEnabled
             && counters.Imported > 0
             && status is AdminImportStatuses.Succeeded or AdminImportStatuses.Partial)
         {
-            var facesJob = await _jobs.EnqueueAsync(
-                JobTypes.AiFacesDetectBackfill,
-                new AiBackfillJobPayload(ProfileKey: ai.FaceProfileKey),
-                idempotencyKey: $"ai-faces-detect:import:{state.RunId:N}",
-                cancellationToken: CancellationToken.None);
-            log($"admin-import: enqueued face detection job {facesJob.Id}");
+            var chunks = await EnqueueImportedFaceDetectionAsync(state.RunId, ai.FaceProfileKey, CancellationToken.None);
+            log($"admin-import: enqueued face detection for the imported photos ({chunks} job(s))");
         }
 
         // Slice 93: a staging-sourced run reports its outcome back to the
@@ -923,6 +921,50 @@ public sealed class AdminImportService : IAdminImportService
         {
             throw new OperationCanceledException(cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// Face detection for the recognised photos one run imported: their
+    /// distinct blobs, keyset-paged so no import is ever loaded whole, in
+    /// chunks of <see cref="AdminImportOptions.FaceDetectionBatchSize"/>. The
+    /// chunk index is part of the idempotency key, so finishing a run twice
+    /// queues nothing twice; a blob already detected is skipped by the job
+    /// itself. Returns the number of chunks.
+    /// </summary>
+    internal async Task<int> EnqueueImportedFaceDetectionAsync(
+        Guid runId, string? profileKey, CancellationToken cancellationToken)
+    {
+        var batchSize = Math.Clamp(_options.Value.FaceDetectionBatchSize, 1, 500);
+        var chunks = 0;
+        Guid? after = null;
+        while (true)
+        {
+            var ids = await (
+                    from item in _db.AdminImportItems
+                    where item.ImportRunId == runId
+                        && item.Status == AdminImportItemStatuses.Imported
+                        && item.FileItemId != null
+                    join file in _db.FileItems on item.FileItemId equals file.Id
+                    join meta in _db.BlobMetadata on file.BlobObjectId equals meta.BlobObjectId
+                    where file.DeletedAt == null
+                        && meta.MediaCategory == MediaCategories.Image
+                        && meta.DetectedContentType != null
+                        && (after == null || file.BlobObjectId.CompareTo(after.Value) > 0)
+                    select file.BlobObjectId)
+                .Distinct()
+                .OrderBy(id => id)
+                .Take(batchSize)
+                .ToListAsync(cancellationToken);
+            if (ids.Count == 0) break;
+            await _jobs.EnqueueAsync(
+                JobTypes.AiFacesDetectBackfill,
+                new AiBackfillJobPayload(ProfileKey: profileKey, BlobObjectIds: ids),
+                idempotencyKey: $"ai-faces-detect:import:{runId:N}:{chunks}",
+                cancellationToken: cancellationToken);
+            chunks++;
+            after = ids[^1];
+        }
+        return chunks;
     }
 
     private async Task<bool> IsHeifAsync(string storageKey)
