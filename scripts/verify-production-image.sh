@@ -119,6 +119,13 @@ if contains 'ffmpeg -hide_banner -nostdin -v error -f lavfi -i testsrc2=size=320
 else
   fail "media tools: x264 encode failed"
 fi
+# HDR video becomes SDR through zscale (zimg) and tonemap: the chain the API
+# builds for an iPhone's HLG (VideoColorFormat), on frames with no colour tags.
+if contains 'ffmpeg -hide_banner -nostdin -v error -f lavfi -i testsrc2=size=320x240:rate=5 -frames:v 2 -vf "format=yuv420p10le,zscale=tin=arib-std-b67:pin=bt2020:min=bt2020nc:rin=tv:t=linear:p=bt2020:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=mobius:param=0.5:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p" -f null - && echo tonemapped' tonemapped; then
+  pass "media tools: HDR tone-maps to SDR"
+else
+  fail "media tools: HDR tone mapping failed"
+fi
 
 # --- ONNX Runtime, which differs per variant BY DESIGN ----------------------
 if [ "$variant" = "openvino" ]; then

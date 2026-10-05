@@ -193,6 +193,12 @@ public static class CliEntryPoint
                     sp => MediaImagesRedetectAsync(rest[1..], sp, stdout, stderr),
                     stderr);
 
+            case ("media", "videos") when rest.Length > 0 && rest[0] == "color-regenerate":
+                return await DispatchAsync(
+                    serviceProviderFactory,
+                    sp => MediaVideosColorRegenerateAsync(rest[1..], sp, stdout, stderr),
+                    stderr);
+
             case ("media", "derivatives") when rest.Length > 0 && rest[0] == "failures":
                 return await DispatchAsync(
                     serviceProviderFactory,
@@ -1028,6 +1034,44 @@ public static class CliEntryPoint
         {
             stdout.WriteLine("media images redetect: now run `media derivatives backfill` for their thumbnails.");
         }
+        return 0;
+    }
+
+    // ---- subcommand: media videos color-regenerate ---------------------------
+    // Remakes the posters, preview strips and HLS ladders an HDR or wide-gamut
+    // video got before its colours were converted. Numbers only, never names or
+    // paths. The ladders are queued for the worker.
+    internal static async Task<int> MediaVideosColorRegenerateAsync(
+        string[] args,
+        IServiceProvider services,
+        TextWriter stdout,
+        TextWriter stderr)
+    {
+        var service = services.GetService<VideoColorRegenerationService>();
+        if (service is null)
+        {
+            stderr.WriteLine("media videos color-regenerate: database is not configured. Set ConnectionStrings__Postgres and retry.");
+            return 78; // EX_CONFIG
+        }
+
+        int? limit = null;
+        var limitRaw = ReadOption(args, "--limit");
+        if (limitRaw is not null)
+        {
+            if (!int.TryParse(limitRaw, out var n) || n <= 0)
+            {
+                stderr.WriteLine("media videos color-regenerate: --limit must be a positive integer.");
+                return 64;
+            }
+            limit = n;
+        }
+        var dryRun = HasFlag(args, "--dry-run");
+        var result = await service.RunAsync(
+            new VideoColorRegenerationOptions { Limit = limit, DryRun = dryRun }, CancellationToken.None);
+        stdout.WriteLine(
+            $"media videos color-regenerate{(dryRun ? " (dry run)" : "")}: examined={result.Examined} "
+            + $"converted={result.Converted} pictures_replaced={result.PicturesReplaced} "
+            + $"pictures_failed={result.PicturesFailed} ladders_queued={result.LaddersQueued}");
         return 0;
     }
 
@@ -2252,6 +2296,7 @@ public static class CliEntryPoint
                 sp => sp.GetRequiredService<VipsDerivativeBackend>());
             services.AddSingleton<ImageDerivativeRenderer>();
             services.AddSingleton<IProcessRunner, SystemProcessRunner>();
+            services.AddSingleton<IVideoColorProbe, FfprobeVideoColorProbe>();
             // Slice 98: web-host parity — without this the worker silently
             // skipped video signature detection (no DetectedContentType, so
             // playback gates never opened for worker-imported videos).
@@ -2334,6 +2379,7 @@ public static class CliEntryPoint
             // IFileThumbnailService + DerivativeDiagnosticsService (above).
             services.AddScoped<MediaDerivativesBackfillService>();
             services.AddScoped<ImageRedetectionService>();
+            services.AddScoped<VideoColorRegenerationService>();
             services.AddScoped<GalleryDerivativesRegenerationService>();
             services.AddScoped<MediumPreviewRegenerationService>();
             // Slice 96: derived-bytes placement audit/repair (media
@@ -4834,6 +4880,7 @@ public static class CliEntryPoint
         stdout.WriteLine("  dotnet NubArca.Api.dll media derivatives backfill [options]");
         stdout.WriteLine("  dotnet NubArca.Api.dll media derivatives failures");
         stdout.WriteLine("  dotnet NubArca.Api.dll media images redetect    [--dry-run] [--limit N]");
+        stdout.WriteLine("  dotnet NubArca.Api.dll media videos color-regenerate [--dry-run] [--limit N]");
         stdout.WriteLine("  dotnet NubArca.Api.dll media derivatives benchmark [--limit N]");
         stdout.WriteLine("  dotnet NubArca.Api.dll storage reconcile          [options]");
         stdout.WriteLine("  dotnet NubArca.Api.dll jobs enqueue <job>         [options]");

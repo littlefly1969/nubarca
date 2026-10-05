@@ -23,6 +23,8 @@ public sealed record VideoHlsTranscodeRequest(
     string OutputDirectory,
     // True → the "high" rendition stream-copies the source video (already
     // H.264 at/below the height cap); false → re-encode capped at the cap.
+    // The transcoder still re-encodes a source whose colour format a player
+    // cannot take as it is (VideoColorFormat.CanStreamCopy).
     bool CopyVideo,
     // True → copy the source audio into "high" (already AAC); false → encode
     // AAC. Ignored when HasAudio is false.

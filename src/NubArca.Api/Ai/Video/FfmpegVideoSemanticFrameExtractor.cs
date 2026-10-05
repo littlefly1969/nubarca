@@ -25,7 +25,8 @@ namespace NubArca.Api.Ai.Video;
 //     (`pipe:1`), so there is no output filename at all;
 //   * the filter graph is a CONSTANT with exactly one interpolated value, the
 //     caller-supplied validator-bounded integer frameMaxEdge — no user-controlled
-//     filters. The VALUE belongs to the calling pipeline (VSEM-02 and VFACE-01
+//     filters — preceded, for an HDR or wide-gamut video, by the conversion to
+//     BT.709 SDR that VideoColorFormat builds from its fixed allowlists. The VALUE belongs to the calling pipeline (VSEM-02 and VFACE-01
 //     have independent resolution settings); only the process/output caps below
 //     are shared transport limits;
 //   * autorotation stays enabled (FFmpeg default; `-noautorotate` is never
@@ -41,17 +42,20 @@ public sealed class FfmpegVideoSemanticFrameExtractor
     private readonly IOptions<VideoVisualEmbeddingOptions> _options;
     private readonly IOptions<MediaOptions> _media;
     private readonly IProcessRunner _runner;
+    private readonly IVideoColorProbe _color;
     private readonly ILogger<FfmpegVideoSemanticFrameExtractor> _logger;
 
     public FfmpegVideoSemanticFrameExtractor(
         IOptions<VideoVisualEmbeddingOptions> options,
         IOptions<MediaOptions> media,
         IProcessRunner runner,
+        IVideoColorProbe color,
         ILogger<FfmpegVideoSemanticFrameExtractor> logger)
     {
         _options = options;
         _media = media;
         _runner = runner;
+        _color = color;
         _logger = logger;
     }
 
@@ -109,6 +113,9 @@ public sealed class FfmpegVideoSemanticFrameExtractor
                 return stagingError;
             }
 
+            // The model sees what a person sees: HDR tone-mapped, wide gamut
+            // in BT.709 — not the flat, grey picture of HDR read as SDR.
+            var color = await _color.ProbeAsync(tempFile, cancellationToken);
             string? startFailure = null;
 
             foreach (var request in requests)
@@ -137,7 +144,7 @@ public sealed class FfmpegVideoSemanticFrameExtractor
                     run = await _runner.RunAsync(
                         new ProcessRunRequest(
                             _media.Value.FfmpegPath,
-                            BuildFrameArguments(tempFile, request.TimestampMilliseconds, frameMaxEdge),
+                            BuildFrameArguments(tempFile, request.TimestampMilliseconds, frameMaxEdge, color),
                             options.FrameTimeoutSeconds,
                             options.MaximumFrameOutputBytes),
                         cancellationToken);
@@ -241,7 +248,7 @@ public sealed class FfmpegVideoSemanticFrameExtractor
 
     // Separate tokens only — handed to ProcessStartInfo.ArgumentList verbatim.
     internal static IReadOnlyList<string> BuildFrameArguments(
-        string inputPath, long timestampMilliseconds, int frameMaxEdge)
+        string inputPath, long timestampMilliseconds, int frameMaxEdge, VideoColorFormat? color = null)
     {
         // Integral milliseconds → invariant seconds ("12.345"): no culture, no
         // floating-point drift.
@@ -259,7 +266,8 @@ public sealed class FfmpegVideoSemanticFrameExtractor
             // Fit within the box, source aspect preserved — no crop, no pad,
             // no stretch. Autorotation is on by default, so iw/ih are already
             // the display-rotated dimensions.
-            "-vf", $"scale={frameMaxEdge}:{frameMaxEdge}:force_original_aspect_ratio=decrease,setsar=1",
+            "-vf", (color ?? VideoColorFormat.Unknown).ToBt709Then(
+                $"scale={frameMaxEdge}:{frameMaxEdge}:force_original_aspect_ratio=decrease,setsar=1"),
             "-f", "image2",
             "-q:v", "2",
             // The frame goes to stdout: no output filename exists at all.

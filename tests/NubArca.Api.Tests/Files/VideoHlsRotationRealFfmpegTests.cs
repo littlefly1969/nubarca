@@ -67,6 +67,9 @@ public sealed class VideoHlsRotationRealFfmpegTests : IDisposable
         var transcoder = new FfmpegVideoHlsTranscoder(
             Options.Create(new MediaOptions { VideoHlsProvider = "ffmpeg" }),
             new SystemProcessRunner(),
+            new FfprobeVideoColorProbe(
+                Options.Create(new MediaOptions()), new SystemProcessRunner(),
+                NullLogger<FfprobeVideoColorProbe>.Instance),
             NullLogger<FfmpegVideoHlsTranscoder>.Instance);
         var result = await transcoder.TranscodeAsync(
             new VideoHlsTranscodeRequest(

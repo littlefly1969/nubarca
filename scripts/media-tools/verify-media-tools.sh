@@ -129,11 +129,12 @@ dims="$(probe -select_streams v:0 -show_entries stream=width,height -of csv=p=0:
 ok "HEIC: tiled grid assembled and rotation applied (600x800)"
 
 # HDR as an iPhone records it (HEVC 10-bit, HLG, BT.2020), converted to SDR
-# BT.709 8-bit — what HLS, posters and previews must show instead of grey.
+# BT.709 8-bit — what HLS, posters and previews must show instead of grey —
+# by the chain the API builds for it (VideoColorFormat).
 transfer="$(probe -select_streams v:0 -show_entries stream=color_transfer -of csv=p=0 "$FIXTURES/hdr-hlg-10bit.mov")"
 [ "$transfer" = "arib-std-b67" ] || fail "HDR fixture reads as HLG (got $transfer)"
 ff -i "$FIXTURES/hdr-hlg-10bit.mov" \
-   -vf "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p" \
+   -vf "zscale=tin=arib-std-b67:pin=bt2020:min=bt2020nc:rin=tv:t=linear:p=bt2020:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=mobius:param=0.5:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p" \
    -c:v libx264 -color_primaries bt709 -color_trc bt709 -colorspace bt709 -frames:v 10 "$WORK/sdr.mp4"
 sdr="$(probe -select_streams v:0 -show_entries stream=pix_fmt,color_transfer -of csv=p=0 "$WORK/sdr.mp4")"
 [ "$sdr" = "yuv420p,bt709" ] || fail "HDR to SDR (got $sdr)"

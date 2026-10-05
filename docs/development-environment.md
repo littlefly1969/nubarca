@@ -265,6 +265,21 @@ decoded can be recognised with `dotnet NubArca.Api.dll media images redetect
 [--dry-run] [--limit N]`, followed by `media derivatives backfill` for their
 thumbnails; the AI backfills pick them up by themselves.
 
+Every picture made from a video is **BT.709 SDR**: posters, preview strips,
+the H.264 HLS renditions and the frames the AI sees. Before converting one,
+the API asks ffprobe for the stream's colours (`VideoColorFormat`). HDR — HLG,
+which phones record (an iPhone's Dolby Vision 8.4 is HLG underneath), or PQ —
+is tone-mapped with zscale (zimg) and `tonemap`, SDR white at BT.2408's 203
+nits: shadows and mid-tones as that standard maps them, highlights rolled off
+(mobius) rather than clipped. SDR in Display P3 or BT.2020 is converted to
+BT.709. An H.264 source is copied into a rendition only when it is 8-bit 4:2:0
+BT.709 SDR. Videos converted before this keep their washed-out pictures until
+`dotnet NubArca.Api.dll media videos color-regenerate [--dry-run] [--limit N]`
+probes every video and remakes the posters and strips of those that need
+converting, and queues their HLS ladders (and those of copied H.264 that
+players cannot decode) for the worker. What the AI took from them is left as
+it was.
+
 Video posters, metadata and HLS are only invoked when the optional providers are enabled:
 
 - `Media__VideoPosterProvider=ffmpeg` — real poster frames
@@ -272,8 +287,9 @@ Video posters, metadata and HLS are only invoked when the optional providers are
 
 Both default to `synthetic` / `none`, so the binaries are present but unused
 unless explicitly turned on. Required filters for the pipeline: `scale`,
-`setsar`, autorotation, thumbnail extraction and container probing — all present
-in any standard build from version 6 onward.
+`setsar`, autorotation, thumbnail extraction and container probing, and for HDR
+`zscale` (an FFmpeg built with zimg) and `tonemap`. The production image's
+verifier checks the tone mapping.
 
 ## 11. ONNX Runtime and OpenVINO
 

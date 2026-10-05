@@ -1444,6 +1444,8 @@ builder.Services.AddSingleton<IVideoSignatureDetector, VideoSignatureDetector>()
 // FFmpeg provider too, and is the default when no FFmpeg is configured).
 builder.Services.Configure<MediaOptions>(builder.Configuration.GetSection("Media"));
 builder.Services.AddSingleton<IProcessRunner, SystemProcessRunner>();
+// What every FFmpeg conversion of a video asks first: is it HDR or wide gamut?
+builder.Services.AddSingleton<IVideoColorProbe, FfprobeVideoColorProbe>();
 builder.Services.AddSingleton<SyntheticVideoPosterProvider>();
 var posterProvider = builder.Configuration["Media:VideoPosterProvider"] ?? "synthetic";
 if (string.Equals(posterProvider, "ffmpeg", StringComparison.OrdinalIgnoreCase))

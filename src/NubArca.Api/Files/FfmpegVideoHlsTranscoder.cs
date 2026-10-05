@@ -28,19 +28,25 @@ public sealed class FfmpegVideoHlsTranscoder : IVideoHlsTranscoder
     // v2: aspect-aware scaling — the height caps apply to the SHORT side
     // (portrait 1080×1920 stays full-res instead of being downscaled to
     // 608×1080), matching the conventional meaning of "1080p"/"480p".
-    public const int Version = 2;
+    // v3: HDR is tone-mapped and wide-gamut colour converted to BT.709 SDR
+    // (VideoColorFormat); an H.264 source is copied only when it is 8-bit
+    // 4:2:0 BT.709 SDR, which every player decodes.
+    public const int Version = 3;
 
     private readonly IOptions<MediaOptions> _options;
     private readonly IDirectoryProcessRunner _runner;
+    private readonly IVideoColorProbe _color;
     private readonly ILogger<FfmpegVideoHlsTranscoder> _logger;
 
     public FfmpegVideoHlsTranscoder(
         IOptions<MediaOptions> options,
         IDirectoryProcessRunner runner,
+        IVideoColorProbe color,
         ILogger<FfmpegVideoHlsTranscoder> logger)
     {
         _options = options;
         _runner = runner;
+        _color = color;
         _logger = logger;
     }
 
@@ -50,7 +56,8 @@ public sealed class FfmpegVideoHlsTranscoder : IVideoHlsTranscoder
         var opts = _options.Value;
         try
         {
-            var args = BuildArguments(request, opts);
+            var color = await _color.ProbeAsync(request.SourceFilePath, cancellationToken);
+            var args = BuildArguments(request, opts, color);
             var result = await _runner.RunAsync(
                 new ProcessDirectoryRunRequest(
                     opts.FfmpegPath,
@@ -98,9 +105,15 @@ public sealed class FfmpegVideoHlsTranscoder : IVideoHlsTranscoder
 
     // Pure and internal for tests. Args are a list — no shell interpolation.
     internal static IReadOnlyList<string> BuildArguments(
-        VideoHlsTranscodeRequest r, MediaOptions o)
+        VideoHlsTranscodeRequest r, MediaOptions o, VideoColorFormat? color = null)
     {
         var inv = CultureInfo.InvariantCulture;
+        // HDR and wide-gamut sources become BT.709 SDR after the scale — at
+        // the rendition's size, not the source's, and on the even dimensions
+        // the -2 below guarantees. Such a source is never copied: its high
+        // rung would disagree with the converted low one.
+        var toSdr = color?.ToBt709Filter() is string filter ? "," + filter : "";
+        var copyVideo = r.CopyVideo && (color?.CanStreamCopy ?? true);
         var args = new List<string> { "-y", "-i", r.SourceFilePath };
 
         // One -map pair (video[, audio]) PER RENDITION, in var_stream_map order.
@@ -120,7 +133,7 @@ public sealed class FfmpegVideoHlsTranscoder : IVideoHlsTranscoder
             inv, $"expr:gte(t,n_forced*{o.VideoHlsSegmentSeconds})");
 
         // ---- high (v:0) ----
-        if (r.CopyVideo)
+        if (copyVideo)
         {
             args.AddRange(["-c:v:0", "copy"]);
         }
@@ -133,7 +146,7 @@ public sealed class FfmpegVideoHlsTranscoder : IVideoHlsTranscoder
             // real run); -2 keeps the other side even, as x264 requires.
             args.AddRange([
                 "-filter:v:0", string.Create(inv,
-                    $"scale=w='if(gt(a,1),-2,min({o.VideoHlsHighMaxHeight},iw))':h='if(gt(a,1),min({o.VideoHlsHighMaxHeight},ih),-2)'"),
+                    $"scale=w='if(gt(a,1),-2,min({o.VideoHlsHighMaxHeight},iw))':h='if(gt(a,1),min({o.VideoHlsHighMaxHeight},ih),-2)'{toSdr}"),
                 "-c:v:0", "libx264", "-preset:v:0", "veryfast", "-pix_fmt:v:0", "yuv420p",
                 "-crf:v:0", o.VideoHlsHighCrf.ToString(inv),
                 "-maxrate:v:0", string.Create(inv, $"{o.VideoHlsHighMaxRateKbps}k"),
@@ -162,7 +175,7 @@ public sealed class FfmpegVideoHlsTranscoder : IVideoHlsTranscoder
         {
             args.AddRange([
                 "-filter:v:1", string.Create(inv,
-                    $"scale=w='if(gt(a,1),-2,{o.VideoHlsLowHeight})':h='if(gt(a,1),{o.VideoHlsLowHeight},-2)'"),
+                    $"scale=w='if(gt(a,1),-2,{o.VideoHlsLowHeight})':h='if(gt(a,1),{o.VideoHlsLowHeight},-2)'{toSdr}"),
                 "-c:v:1", "libx264", "-preset:v:1", "veryfast", "-pix_fmt:v:1", "yuv420p",
                 "-crf:v:1", o.VideoHlsLowCrf.ToString(inv),
                 "-maxrate:v:1", string.Create(inv, $"{o.VideoHlsLowMaxRateKbps}k"),
