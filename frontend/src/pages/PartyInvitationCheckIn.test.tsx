@@ -82,12 +82,14 @@ describe('PartyInvitationPage while the party is live', () => {
   });
 
   it('takes back the group’s own mark, and leaves the one made at the door alone', async () => {
+    // Anna is still on her way, so the invitation is still where the group is.
+    const anna = person('anna', 'Anna', 'attending');
     const mock = installFetchMock({
       [`GET ${VIEW_URL}`]: () => jsonResponse(view({
-        invitation: { guests: [person('mario', 'Mario', 'attending', AT, 'invitation'), person('laura', 'Laura', 'declined', AT, 'owner')] },
+        invitation: { guests: [person('mario', 'Mario', 'attending', AT, 'invitation'), person('laura', 'Laura', 'declined', AT, 'owner'), anna] },
       })),
       [`DELETE ${CHECK_IN('mario')}`]: () => jsonResponse(view({
-        invitation: { guests: [person('mario', 'Mario', 'attending'), person('laura', 'Laura', 'declined', AT, 'owner')] },
+        invitation: { guests: [person('mario', 'Mario', 'attending'), person('laura', 'Laura', 'declined', AT, 'owner'), anna] },
       })),
     });
     render(page());
@@ -102,14 +104,15 @@ describe('PartyInvitationPage while the party is live', () => {
   });
 
   it('says so when the mark was the host’s, adopting the invitation the refusal carries', async () => {
+    const anna = person('anna', 'Anna', 'attending');
     installFetchMock({
       [`GET ${VIEW_URL}`]: () => jsonResponse(view({
-        invitation: { guests: [person('mario', 'Mario', 'attending', AT, 'invitation'), person('laura', 'Laura', 'declined')] },
+        invitation: { guests: [person('mario', 'Mario', 'attending', AT, 'invitation'), person('laura', 'Laura', 'declined'), anna] },
       })),
       [`DELETE ${CHECK_IN('mario')}`]: () => jsonResponse({
         error: 'attendance_recorded_by_host',
         invitation: view({
-          invitation: { guests: [person('mario', 'Mario', 'attending', AT, 'owner'), person('laura', 'Laura', 'declined')] },
+          invitation: { guests: [person('mario', 'Mario', 'attending', AT, 'owner'), person('laura', 'Laura', 'declined'), anna] },
         }),
       }, 409),
     });
@@ -133,6 +136,52 @@ describe('PartyInvitationPage while the party is live', () => {
     expect(await screen.findByTestId('public-party')).toBeInTheDocument();
   });
 
+  it('opened again once everybody coming has arrived, goes straight into the party', async () => {
+    // Mario is here; Laura said she would not come. Nothing is left to ask.
+    installFetchMock({
+      [`GET ${VIEW_URL}`]: () => jsonResponse(view({
+        invitation: { guests: [person('mario', 'Mario', 'attending', AT, 'invitation'), person('laura', 'Laura', 'declined')] },
+      })),
+    });
+    render(page());
+
+    expect(await screen.findByTestId('public-party')).toBeInTheDocument();
+    expect(screen.queryByTestId('party-checkin')).not.toBeInTheDocument();
+  });
+
+  it('with somebody still arriving, stays — and entering leads the card', async () => {
+    installFetchMock({
+      [`GET ${VIEW_URL}`]: () => jsonResponse(view({
+        invitation: { guests: [person('mario', 'Mario', 'attending', AT, 'invitation'), person('anna', 'Anna', 'pending')] },
+      })),
+    });
+    render(page());
+
+    const card = await screen.findByTestId('party-checkin');
+    const enter = within(card).getByTestId('party-checkin-enter');
+    expect(enter.closest('.party-checkin-enter-block')).toHaveAttribute('data-placement', 'first');
+    // The enter block comes before the people still to mark.
+    expect(enter.compareDocumentPosition(within(card).getByTestId('party-checkin-here-anna'))
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('marking the last of the group shows it done and leaves entering to the guest', async () => {
+    installFetchMock({
+      [`GET ${VIEW_URL}`]: () => jsonResponse(view()),
+      [`PUT ${CHECK_IN('mario')}`]: () => jsonResponse(view({
+        invitation: { guests: [person('mario', 'Mario', 'attending', AT, 'invitation'), person('laura', 'Laura', 'declined')] },
+      })),
+    });
+    render(page());
+
+    await userEvent.click(await screen.findByTestId('party-checkin-here-mario'));
+
+    await waitFor(() => expect(screen.getByTestId('party-checkin-person-mario')).toHaveTextContent(/Arrivo alle/));
+    expect(screen.queryByTestId('public-party')).not.toBeInTheDocument();
+    expect(screen.getByTestId('party-checkin-enter').closest('.party-checkin-enter-block'))
+      .toHaveAttribute('data-placement', 'first');
+  });
+
   it('offers "Sono qui" without "Entra nel Party" when the party’s page is not open', async () => {
     installFetchMock({ [`GET ${VIEW_URL}`]: () => jsonResponse(view({ party: { partyUrl: null } })) });
     render(page());
@@ -143,6 +192,31 @@ describe('PartyInvitationPage while the party is live', () => {
 });
 
 describe('PartyInvitationPage outside the party', () => {
+  it('after the party, opens the party’s memories', async () => {
+    installFetchMock({
+      [`GET ${VIEW_URL}`]: () => jsonResponse(view({
+        party: { phase: 'after' },
+        invitation: { canCheckIn: false },
+      })),
+    });
+    render(page());
+
+    expect(await screen.findByTestId('public-party')).toBeInTheDocument();
+  });
+
+  it('after the party, with no page to open, stays an invitation', async () => {
+    installFetchMock({
+      [`GET ${VIEW_URL}`]: () => jsonResponse(view({
+        party: { phase: 'after', partyUrl: null },
+        invitation: { canCheckIn: false },
+      })),
+    });
+    render(page());
+
+    expect(await screen.findByTestId('party-invitation')).toHaveAttribute('data-phase', 'after');
+    expect(screen.queryByTestId('public-party')).not.toBeInTheDocument();
+  });
+
   it('shows nothing to check in before the party starts', async () => {
     installFetchMock({
       [`GET ${VIEW_URL}`]: () => jsonResponse(view({
