@@ -55,7 +55,13 @@ public sealed class SystemProcessRunner : IProcessRunner, IDirectoryProcessRunne
             // Outer cancellation: kill the child before propagating so a
             // cancelled job never leaves an orphan ffmpeg running.
             try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
+            await WaitForKilledExitAsync(process);
             throw;
+        }
+
+        if (timedOut)
+        {
+            await WaitForKilledExitAsync(process);
         }
 
         try { await stdoutTask; } catch { /* ignore */ }
@@ -96,41 +102,93 @@ public sealed class SystemProcessRunner : IProcessRunner, IDirectoryProcessRunne
         using var process = new Process { StartInfo = psi };
         process.Start();
 
-        // Read stdout as bytes with a cap. Do not log stderr (may contain
-        // paths or other sensitive invocation details); discard it.
+        // Read stdout as bytes with a cap. stderr is drained and discarded,
+        // never retained: it may contain paths or other invocation details.
         var stdoutTask = ReadCappedAsync(process.StandardOutput.BaseStream,
             request.MaxStdoutBytes, cts.Token);
-        var stderrTask = process.StandardError.ReadToEndAsync(cts.Token);
+        var stderrTask = DrainAsync(process.StandardError.BaseStream, cts.Token);
+        var exitTask = process.WaitForExitAsync(cts.Token);
 
-        bool timedOut = false;
+        var outcome = RunOutcome.Exited;
         try
         {
-            await process.WaitForExitAsync(cts.Token);
+            // OUTPUT LIMIT EXCEEDED: the reader stops draining the pipe as soon
+            // as the cap is passed, and a child that keeps writing — FFmpeg —
+            // would then block on the full pipe until the timeout. It is killed
+            // at once instead, and its partial output is never used.
+            if (await Task.WhenAny(stdoutTask, exitTask) == stdoutTask
+                && stdoutTask.IsCompletedSuccessfully && stdoutTask.Result.Truncated)
+            {
+                outcome = RunOutcome.OutputLimitExceeded;
+                Kill(process);
+            }
+            await exitTask;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             // Timed out (not the outer cancellation token).
-            timedOut = true;
-            try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
+            if (outcome != RunOutcome.OutputLimitExceeded) outcome = RunOutcome.TimedOut;
+            Kill(process);
+        }
+        catch (OperationCanceledException)
+        {
+            // Outer cancellation: kill the child before propagating so a
+            // cancelled job never leaves an orphan FFmpeg running.
+            Kill(process);
+            await WaitForKilledExitAsync(process);
+            try { await stdoutTask; } catch { /* ignore */ }
+            try { await stderrTask; } catch { /* ignore */ }
+            throw;
         }
 
-        byte[] stdout;
-        var truncated = false;
-        try
+        if (outcome != RunOutcome.Exited)
         {
-            var captured = await stdoutTask;
-            stdout = captured.Bytes;
-            truncated = captured.Truncated;
-        }
-        catch
-        {
-            stdout = [];
+            await WaitForKilledExitAsync(process);
         }
 
-        // Discard stderr without reading sensitive content into logs.
+        byte[] stdout = [];
+        if (outcome == RunOutcome.Exited)
+        {
+            try
+            {
+                var captured = await stdoutTask;
+                stdout = captured.Truncated ? [] : captured.Bytes;
+                if (captured.Truncated) outcome = RunOutcome.OutputLimitExceeded;
+            }
+            catch
+            {
+                stdout = [];
+            }
+        }
+        else
+        {
+            try { await stdoutTask; } catch { /* ignore */ }
+        }
         try { await stderrTask; } catch { /* ignore */ }
 
-        return new ProcessRunResult(timedOut ? -1 : process.ExitCode, stdout, timedOut, truncated);
+        return outcome switch
+        {
+            RunOutcome.TimedOut => new ProcessRunResult(-1, [], TimedOut: true),
+            // Distinct from a timeout and from a failing exit code: the
+            // process was stopped because it wrote more than it may.
+            RunOutcome.OutputLimitExceeded => new ProcessRunResult(-1, [], TimedOut: false, OutputTruncated: true),
+            _ => new ProcessRunResult(process.ExitCode, stdout, TimedOut: false),
+        };
+    }
+
+    private enum RunOutcome { Exited, TimedOut, OutputLimitExceeded }
+
+    private static void Kill(Process process)
+    {
+        try { process.Kill(entireProcessTree: true); } catch { /* already gone */ }
+    }
+
+    // After a kill the process ends at once; the wait is bounded all the same,
+    // so a stuck reaper can never hold a caller.
+    private static async Task WaitForKilledExitAsync(Process process)
+    {
+        using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try { await process.WaitForExitAsync(wait.Token); } catch { /* bounded */ }
     }
 
     private static async Task<(byte[] Bytes, bool Truncated)> ReadCappedAsync(

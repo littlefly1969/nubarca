@@ -15,10 +15,12 @@ public sealed record ProcessRunRequest(
     int TimeoutSeconds,
     int MaxStdoutBytes);
 
-// `OutputTruncated` distinguishes "the process wrote more than MaxStdoutBytes"
-// (StdoutBytes is empty AND unusable) from "the process wrote nothing", which
-// are legitimately different outcomes for a caller that parses stdout. Optional
-// with a false default so existing callers and test fakes are unaffected.
+// `OutputTruncated` is OUTPUT LIMIT EXCEEDED: the process wrote more than
+// MaxStdoutBytes and was killed at once (process tree included) — StdoutBytes
+// is empty, never a partial prefix, and ExitCode is -1 with TimedOut false, so
+// it is told apart from a timeout, from a failing exit code and from "the
+// process wrote nothing". Optional with a false default so existing callers and
+// test fakes are unaffected.
 public sealed record ProcessRunResult(
     int ExitCode,
     byte[] StdoutBytes,
