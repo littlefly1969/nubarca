@@ -136,6 +136,44 @@ public sealed class FaceSubstrateTests
         }
     }
 
+    [Fact]
+    public async Task A_Whole_Detection_Run_That_Finds_Faces_Chains_Recognition_Once()
+    {
+        // A bulk import, or an operator, runs detection over everything: the
+        // faces it finds are recognised without a second request.
+        using var f = FacesEnabledFactory();
+        await SeedProfilesAsync(f);
+        var (_, client) = await f.CreateAuthenticatedClientAsync("bulk@example.com");
+        await UploadPngAsync(client, "a.png", 48);
+        await UploadPngAsync(client, "b.png", 48);
+
+        Assert.Equal(JobStatuses.Succeeded, await RunDetectWithoutFollowingEnqueuedJobsAsync(f));
+
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var chained = await db.BackgroundJobs.SingleAsync(j => j.Type == JobTypes.AiFacesEmbeddingsBackfill);
+            Assert.Equal(JobStatuses.Queued, chained.Status);
+            Assert.StartsWith("faces:embed:after-detect:", chained.IdempotencyKey);
+            Assert.Null(System.Text.Json.JsonSerializer.Deserialize<AiBackfillJobPayload>(chained.PayloadJson)?.BlobObjectId);
+            Assert.False(await db.FaceEmbeddings.AnyAsync());
+        }
+
+        for (var i = 0; i < 20; i++)
+        {
+            using var scope = f.Services.CreateScope();
+            if (await scope.ServiceProvider.GetRequiredService<JobProcessor>().ProcessAvailableAsync(10) == 0) break;
+        }
+
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.Equal(
+                await db.FaceDetections.CountAsync(),
+                await db.FaceEmbeddings.CountAsync(e => e.EmbeddingStatus == NubArca.Api.Domain.Ai.AiArtifactStatuses.Completed));
+        }
+    }
+
     private static Task<string> RunDetectAsync(SqliteWebApplicationFactory f) => RunJobAsync(f, JobTypes.AiFacesDetectBackfill);
     private static Task<string> RunEmbedAsync(SqliteWebApplicationFactory f) => RunJobAsync(f, JobTypes.AiFacesEmbeddingsBackfill);
 
