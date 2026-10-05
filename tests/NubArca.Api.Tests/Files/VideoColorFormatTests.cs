@@ -66,10 +66,40 @@ public sealed class VideoColorFormatTests
     }
 
     [Fact]
-    public void A_Probe_That_Could_Not_Answer_Changes_Nothing()
+    public void A_Probe_That_Could_Not_Answer_Is_Never_Copied()
     {
+        // Fail-closed: nothing is converted on a guess, and nothing is copied
+        // into a rendition unverified — a conservative re-encode.
         Assert.Null(VideoColorFormat.Unknown.ToBt709Filter());
-        Assert.True(VideoColorFormat.Unknown.CanStreamCopy);
+        Assert.False(VideoColorFormat.Unknown.CanStreamCopy);
+        Assert.False(new VideoColorFormat(null, "tv", "bt709", "bt709", "bt709").CanStreamCopy);
+    }
+
+    [Theory]
+    [InlineData("yuv420p", true)]
+    [InlineData("yuvj420p", true)]
+    [InlineData("yuv422p", false)]
+    [InlineData("yuv444p", false)]
+    [InlineData("yuv420p10le", false)]
+    [InlineData("nv12", false)]
+    public void Only_A_Recognised_8_Bit_4_2_0_Bt709_Sdr_Stream_Is_Copied(string pixelFormat, bool copied)
+    {
+        Assert.Equal(copied, new VideoColorFormat(pixelFormat, "tv", "bt709", "bt709", "bt709").CanStreamCopy);
+    }
+
+    [Fact]
+    public void An_Hdr_Stream_In_4_2_0_Is_Still_Transcoded()
+    {
+        Assert.False(new VideoColorFormat("yuv420p", "tv", "bt2020nc", "arib-std-b67", "bt2020").CanStreamCopy);
+        Assert.False(new VideoColorFormat("yuv420p", "tv", "bt709", "bt709", "smpte432").CanStreamCopy);
+    }
+
+    [Fact]
+    public void Bt2020_Sdr_With_No_Matrix_Is_Read_As_Bt2020_Non_Constant_Luminance()
+    {
+        var filter = new VideoColorFormat("yuv420p", "tv", null, "bt709", "bt2020").ToBt709Filter();
+
+        Assert.StartsWith("zscale=tin=bt709:pin=bt2020:min=bt2020nc:rin=tv:", filter);
     }
 
     [Theory]
@@ -102,6 +132,7 @@ public sealed class VideoColorFormatTests
         Assert.StartsWith(
             "zscale=tin=arib-std-b67:pin=bt2020:min=bt2020nc:rin=tv:",
             new VideoColorFormat("yuv420p10le", null, null, "arib-std-b67", "bt2020").ToBt709Filter());
+        // Display P3 is coded by phones with the BT.709 matrix.
         Assert.StartsWith(
             "zscale=tin=bt709:pin=smpte432:min=bt709:rin=tv:",
             new VideoColorFormat("yuv420p", null, null, "bt709", "smpte432").ToBt709Filter());

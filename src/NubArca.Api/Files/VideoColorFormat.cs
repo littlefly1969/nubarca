@@ -37,13 +37,14 @@ public sealed record VideoColorFormat(
         && Primaries is not null && WidePrimaries.Contains(Primaries);
 
     /// <summary>
-    /// False when an H.264 stream must be re-encoded rather than copied into a
-    /// rendition: HDR or wide-gamut colours, or anything but 8-bit 4:2:0 —
-    /// which browsers do not play. A probe that could not answer changes
-    /// nothing: the stream is copied as it always was.
+    /// True only when an H.264 stream is KNOWN to be what every player decodes
+    /// as it is — 8-bit 4:2:0, neither HDR nor wide-gamut — and may be copied
+    /// into a rendition. Fail-closed: a probe that could not answer, or a pixel
+    /// format it did not name, means a conservative re-encode, never a copy of
+    /// something unverified.
     /// </summary>
     public bool CanStreamCopy =>
-        !IsHdr && !IsWideGamut && PixelFormat is null or "yuv420p" or "yuvj420p";
+        !IsHdr && !IsWideGamut && PixelFormat is "yuv420p" or "yuvj420p";
 
     /// <summary>
     /// The filters that turn this picture into BT.709 SDR, or null when it is
@@ -67,7 +68,11 @@ public sealed record VideoColorFormat(
         }
         if (IsWideGamut)
         {
-            return string.Concat(Input(Primaries!, "bt709"), ",format=gbrpf32le,zscale=p=bt709,", Output);
+            // An unsaid matrix is the one the primaries imply: BT.2020's own
+            // non-constant-luminance for BT.2020 colours, BT.709 for Display P3
+            // (which phones code with the BT.709 matrix).
+            var matrix = Primaries == "bt2020" ? "bt2020nc" : "bt709";
+            return string.Concat(Input(Primaries!, matrix), ",format=gbrpf32le,zscale=p=bt709,", Output);
         }
         return null;
     }

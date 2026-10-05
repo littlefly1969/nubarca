@@ -105,15 +105,16 @@ public sealed class FfmpegVideoHlsTranscoder : IVideoHlsTranscoder
 
     // Pure and internal for tests. Args are a list — no shell interpolation.
     internal static IReadOnlyList<string> BuildArguments(
-        VideoHlsTranscodeRequest r, MediaOptions o, VideoColorFormat? color = null)
+        VideoHlsTranscodeRequest r, MediaOptions o, VideoColorFormat color)
     {
         var inv = CultureInfo.InvariantCulture;
         // HDR and wide-gamut sources become BT.709 SDR after the scale — at
         // the rendition's size, not the source's, and on the even dimensions
         // the scale below always produces. Such a source is never copied: its
         // high rung would disagree with the converted low one.
-        var toSdr = color?.ToBt709Filter() is string filter ? "," + filter : "";
-        var copyVideo = r.CopyVideo && (color?.CanStreamCopy ?? true);
+        var toSdr = color.ToBt709Filter() is string filter ? "," + filter : "";
+        // Fail-closed: only a stream KNOWN to be plain 8-bit 4:2:0 SDR is copied.
+        var copyVideo = r.CopyVideo && color.CanStreamCopy;
         var args = new List<string> { "-y", "-i", r.SourceFilePath };
 
         // One -map pair (video[, audio]) PER RENDITION, in var_stream_map order.
