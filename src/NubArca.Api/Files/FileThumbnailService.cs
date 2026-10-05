@@ -930,16 +930,22 @@ public sealed class FileThumbnailService : IFileThumbnailService
             // Not a format ImageSharp reads. HEIC is one FFmpeg does: its
             // decoded frame — lossless, upright — is identified instead, and
             // handed on so the render does not decode it a second time.
-            if (_originals is not null
-                && await _originals.ReadForPixelsAsync(blobObjectId, cancellationToken) is { } decoded)
+            if (_originals is not null)
             {
-                try
+                await using var pixels = await _originals.OpenForPixelsAsync(blobObjectId, cancellationToken);
+                if (pixels is { IsDecodedFrame: true })
                 {
-                    return new IdentifyResult(Image.Identify(decoded), null, decoded);
-                }
-                catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException)
-                {
-                    // The original's own bytes again: still unreadable.
+                    try
+                    {
+                        // Identified from the frame's header; its bytes are read
+                        // once, for the renderer, whose API takes them whole.
+                        var info = await Image.IdentifyAsync(pixels.Content, cancellationToken);
+                        return new IdentifyResult(info, null, await pixels.ReadAllBytesAsync(cancellationToken));
+                    }
+                    catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException)
+                    {
+                        // Not a frame after all: still unreadable.
+                    }
                 }
             }
             return new IdentifyResult(null, DerivativeErrorCodes.UnsupportedFormat);

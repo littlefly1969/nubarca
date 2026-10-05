@@ -24,6 +24,8 @@ public class MediaOptions
     // is treated as undecodable rather than allowed to exhaust the host.
     public int HeifDecodeTimeoutSeconds { get; set; } = 120;
     public int HeifDecodeMaxOutputBytes { get; set; } = 640 * 1024 * 1024; // 640 MB
+    // How many HEIC frames may be decoded (and held, as temporary files) at once.
+    public int HeifDecodeMaxConcurrency { get; set; } = 2;
 
     // Which video-metadata provider to use. "none" (default) disables video
     // probing entirely (the backfill/CLI/post-ingest do no work). "ffprobe"

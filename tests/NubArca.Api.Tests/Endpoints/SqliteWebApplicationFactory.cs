@@ -189,6 +189,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
                 services.AddSingleton(_clockOverride);
             }
             services.AddScoped<IBlobService, BlobService>();
+            services.AddSingleton<HeifDecodeGate>();
             services.AddScoped<IOriginalImageReader, OriginalImageReader>();
             services.AddScoped<IUserService, UserService>();
             // Identity & Access. Mirrors Program.cs (Postgres-only block).

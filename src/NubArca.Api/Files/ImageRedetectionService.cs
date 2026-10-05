@@ -86,30 +86,17 @@ public sealed class ImageRedetectionService
 
     private async Task<(int Width, int Height)?> DecodedSizeAsync(Guid blobId, CancellationToken cancellationToken)
     {
-        byte[]? pixels;
         try
         {
             // HEIC only, by its signature: a file that is not one is left as
             // it is, whatever else might happen to read it.
-            await using (var stream = await _blobs.OpenContentAsync(blobId, cancellationToken))
-            {
-                var header = new byte[HeifSignature.HeaderLength];
-                var read = await stream.ReadAtLeastAsync(header, header.Length, throwOnEndOfStream: false, cancellationToken);
-                if (!HeifSignature.IsHeif(header.AsSpan(0, read))) return null;
-            }
-            pixels = await _originals.ReadForPixelsAsync(blobId, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return null;
-        }
-        if (pixels is null) return null;
-        try
-        {
-            var info = Image.Identify(pixels);
+            await using var pixels = await _originals.OpenForPixelsAsync(blobId, cancellationToken);
+            if (pixels is not { IsDecodedFrame: true }) return null;
+            // The decoded frame's header is all that is read.
+            var info = await Image.IdentifyAsync(pixels.Content, cancellationToken);
             return (info.Width, info.Height);
         }
-        catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return null;
         }

@@ -51,40 +51,134 @@ public static class HeifSignature
 
 /// <summary>
 /// The ONE way an original's pixels are opened: by the derivative pipeline, the
-/// print renderers, the AI and the upload's own detection.
+/// print renderers, the AI and the upload's and bulk import's own detection.
 ///
 /// For every format ImageSharp and libvips read, that is the original's own
 /// bytes, as it always was. For HEIC, which neither can read, it is a LOSSLESS
-/// PNG of the original's frame, decoded by FFmpeg from the original file at the
-/// moment it is asked for — nothing is stored, and a print is still a print of
-/// the original, not of a derivative. FFmpeg assembles the tile grid and applies
-/// the container's rotation, so the pixels come out upright and carry no EXIF:
-/// nothing downstream may rotate them again (see <see cref="IsUprightOnDecode"/>).
+/// PNG of the original's frame, decoded by FFmpeg from the original file into a
+/// bounded TEMPORARY FILE at the moment it is asked for — never a whole PNG
+/// held in memory by the reader, nothing stored, and a print is still a print
+/// of the original, not of a derivative. FFmpeg assembles the tile grid and
+/// applies the container's rotation, so the pixels come out upright and carry
+/// no EXIF: nothing downstream may rotate them again (see
+/// <see cref="OriginalImageReader.IsUprightOnDecode"/>).
 /// </summary>
 public interface IOriginalImageReader
 {
-    /// <summary>The bytes to decode, or null when the original cannot be opened or decoded.</summary>
-    Task<byte[]?> ReadForPixelsAsync(Guid blobObjectId, CancellationToken cancellationToken);
+    /// <summary>
+    /// The original's pixels to read, or null when it cannot be opened or
+    /// decoded. The caller owns the lease and disposes it: that closes the
+    /// stream, deletes a decoded frame's temporary file and frees its decode
+    /// slot.
+    /// </summary>
+    Task<OriginalPixelsLease?> OpenForPixelsAsync(Guid blobObjectId, CancellationToken cancellationToken);
 
     /// <summary>
     /// The same, for an original that has no blob row yet — a file a bulk
     /// import has written to storage and is still recognising.
     /// </summary>
-    Task<byte[]?> ReadForPixelsAsync(Func<CancellationToken, Task<Stream>> openContent, CancellationToken cancellationToken);
+    Task<OriginalPixelsLease?> OpenForPixelsAsync(
+        Func<CancellationToken, Task<Stream>> openContent, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// An original's pixels, opened. For HEIC, <see cref="Content"/> reads a
+/// temporary PNG file that is deleted when the lease is disposed, and the lease
+/// holds one of the bounded decode slots until then.
+/// </summary>
+public sealed class OriginalPixelsLease : IAsyncDisposable
+{
+    private IDisposable? _slot;
+
+    internal OriginalPixelsLease(Stream content, bool isDecodedFrame, IDisposable? slot = null)
+    {
+        Content = content;
+        IsDecodedFrame = isDecodedFrame;
+        _slot = slot;
+    }
+
+    /// <summary>The bytes to decode, from the start.</summary>
+    public Stream Content { get; }
+
+    /// <summary>True for a HEIC frame FFmpeg decoded; false for the original's own bytes.</summary>
+    public bool IsDecodedFrame { get; }
+
+    /// <summary>
+    /// The whole content in memory, from the start — only for a consumer whose
+    /// own API takes bytes (the derivative renderer, the AI backends, the print
+    /// composer). Readers of the header alone use <see cref="Content"/>.
+    /// </summary>
+    public async Task<byte[]> ReadAllBytesAsync(CancellationToken cancellationToken)
+    {
+        if (Content.CanSeek) Content.Position = 0;
+        using var buffer = Content.CanSeek ? new MemoryStream((int)Math.Min(Content.Length, int.MaxValue)) : new MemoryStream();
+        await Content.CopyToAsync(buffer, cancellationToken);
+        return buffer.ToArray();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await Content.DisposeAsync();
+        Interlocked.Exchange(ref _slot, null)?.Dispose();
+    }
+}
+
+/// <summary>
+/// How many HEIC frames may be decoded — and held as decoded frames — at once
+/// in this process (<see cref="MediaOptions.HeifDecodeMaxConcurrency"/>). A
+/// 48-megapixel frame is ~150 MB of PNG: without a bound, a burst of uploads,
+/// a bulk import and the AI backfills could each hold several at a time.
+/// </summary>
+public sealed class HeifDecodeGate
+{
+    private readonly SemaphoreSlim _slots;
+
+    public HeifDecodeGate(IOptions<MediaOptions> options)
+    {
+        Capacity = Math.Max(1, options.Value.HeifDecodeMaxConcurrency);
+        _slots = new SemaphoreSlim(Capacity, Capacity);
+    }
+
+    public int Capacity { get; }
+
+    /// <summary>Slots free right now.</summary>
+    public int Available => _slots.CurrentCount;
+
+    /// <summary>Waits for a free slot; cancellable while waiting.</summary>
+    public async Task<IDisposable> EnterAsync(CancellationToken cancellationToken)
+    {
+        await _slots.WaitAsync(cancellationToken);
+        return new Slot(_slots);
+    }
+
+    private sealed class Slot(SemaphoreSlim slots) : IDisposable
+    {
+        private int _released;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0) slots.Release();
+        }
+    }
 }
 
 public sealed class OriginalImageReader : IOriginalImageReader
 {
+    private static int _swept;
+
     private readonly IBlobService _blobs;
-    private readonly IProcessRunner _runner;
+    private readonly IDirectoryProcessRunner _runner;
+    private readonly HeifDecodeGate _gate;
     private readonly IOptions<MediaOptions> _options;
     private readonly ILogger<OriginalImageReader> _logger;
 
     public OriginalImageReader(
-        IBlobService blobs, IProcessRunner runner, IOptions<MediaOptions> options, ILogger<OriginalImageReader> logger)
+        IBlobService blobs, IDirectoryProcessRunner runner, HeifDecodeGate gate,
+        IOptions<MediaOptions> options, ILogger<OriginalImageReader> logger)
     {
         _blobs = blobs;
         _runner = runner;
+        _gate = gate;
         _options = options;
         _logger = logger;
     }
@@ -97,67 +191,108 @@ public sealed class OriginalImageReader : IOriginalImageReader
     public static bool IsUprightOnDecode(string? detectedContentType) =>
         string.Equals(detectedContentType, HeifSignature.ContentType, StringComparison.OrdinalIgnoreCase);
 
-    public Task<byte[]?> ReadForPixelsAsync(Guid blobObjectId, CancellationToken cancellationToken) =>
-        ReadForPixelsAsync(ct => _blobs.OpenContentAsync(blobObjectId, ct), cancellationToken);
+    public Task<OriginalPixelsLease?> OpenForPixelsAsync(Guid blobObjectId, CancellationToken cancellationToken) =>
+        OpenForPixelsAsync(ct => _blobs.OpenContentAsync(blobObjectId, ct), cancellationToken);
 
-    public async Task<byte[]?> ReadForPixelsAsync(
+    public async Task<OriginalPixelsLease?> OpenForPixelsAsync(
         Func<CancellationToken, Task<Stream>> openContent, CancellationToken cancellationToken)
     {
-        await using var source = await openContent(cancellationToken);
-        var header = new byte[HeifSignature.HeaderLength];
-        var read = await source.ReadAtLeastAsync(header, header.Length, throwOnEndOfStream: false, cancellationToken);
-        if (!HeifSignature.IsHeif(header.AsSpan(0, read)))
-        {
-            using var copy = new MemoryStream();
-            await copy.WriteAsync(header.AsMemory(0, read), cancellationToken);
-            await source.CopyToAsync(copy, cancellationToken);
-            return copy.ToArray();
-        }
-        return await DecodeHeifAsync(source, header.AsMemory(0, read), cancellationToken);
-    }
-
-    private async Task<byte[]?> DecodeHeifAsync(
-        Stream source, ReadOnlyMemory<byte> header, CancellationToken cancellationToken)
-    {
-        // HEIF needs a seekable file: its item locations point anywhere in it.
-        // Production storage hands out the read-only FileStream itself, and
-        // FFmpeg reads that path; anything else is copied to a temp file first.
-        string? temp = null;
-        var input = source is FileStream file && File.Exists(file.Name) ? file.Name : null;
+        var source = await openContent(cancellationToken);
+        bool heif;
         try
         {
-            if (input is null)
+            var header = new byte[HeifSignature.HeaderLength];
+            var read = await source.ReadAtLeastAsync(header, header.Length, throwOnEndOfStream: false, cancellationToken);
+            heif = HeifSignature.IsHeif(header.AsSpan(0, read));
+            if (!heif)
             {
-                temp = Path.Combine(Path.GetTempPath(), $"nubarca-heif-{Guid.NewGuid():N}");
-                await using (var destination = File.Create(temp))
+                // The original's own bytes, from the start: the stream itself
+                // when it can rewind (storage's FileStream), else opened again.
+                if (source.CanSeek)
                 {
-                    // The header was already read off the stream: it goes first.
-                    await destination.WriteAsync(header, cancellationToken);
-                    await source.CopyToAsync(destination, cancellationToken);
+                    source.Position = 0;
+                    var own = source;
+                    source = null!;
+                    return new OriginalPixelsLease(own, isDecodedFrame: false);
                 }
-                input = temp;
+            }
+        }
+        finally
+        {
+            if (source is not null) await source.DisposeAsync();
+        }
+        return heif
+            ? await DecodeHeifAsync(openContent, cancellationToken)
+            : new OriginalPixelsLease(await openContent(cancellationToken), isDecodedFrame: false);
+    }
+
+    private async Task<OriginalPixelsLease?> DecodeHeifAsync(
+        Func<CancellationToken, Task<Stream>> openContent, CancellationToken cancellationToken)
+    {
+        var options = _options.Value;
+        // Waiting for a slot is cancellable; holding one ends with the lease.
+        var slot = await _gate.EnterAsync(cancellationToken);
+        string? inputCopy = null;
+        string? output = null;
+        try
+        {
+            var directory = WorkDirectory();
+            var name = Guid.NewGuid().ToString("N");
+
+            // HEIF needs a seekable file: its item locations point anywhere in
+            // it. Production storage hands out the read-only FileStream itself,
+            // and FFmpeg reads that path; anything else is copied first.
+            string input;
+            await using (var source = await openContent(cancellationToken))
+            {
+                if (source is FileStream file && File.Exists(file.Name))
+                {
+                    input = file.Name;
+                }
+                else
+                {
+                    inputCopy = Path.Combine(directory, name + ".heic");
+                    await using (var copy = File.Create(inputCopy))
+                    {
+                        await source.CopyToAsync(copy, cancellationToken);
+                    }
+                    input = inputCopy;
+                }
             }
 
-            var options = _options.Value;
-            var result = await _runner.RunAsync(new ProcessRunRequest(
+            output = Path.Combine(directory, name + ".png");
+            var result = await _runner.RunAsync(new ProcessDirectoryRunRequest(
                 options.FfmpegPath,
                 [
-                    "-v", "error", "-nostdin", "-i", input, "-frames:v", "1",
+                    "-v", "error", "-nostdin", "-y", "-i", input, "-frames:v", "1",
                     // Lossless and quick to write: a PNG with no compression.
                     "-c:v", "png", "-compression_level", "0", "-pred", "none",
-                    "-f", "image2pipe", "-",
+                    "-f", "image2", "-update", "1", output,
                 ],
-                options.HeifDecodeTimeoutSeconds,
-                options.HeifDecodeMaxOutputBytes), cancellationToken);
-            if (result.ExitCode != 0 || result.TimedOut || result.OutputTruncated || result.StdoutBytes.Length == 0)
+                directory,
+                options.HeifDecodeTimeoutSeconds), cancellationToken);
+
+            // The output limit: a frame larger than it is refused, deleted and
+            // never read — the file can only reach one frame before that.
+            var length = File.Exists(output) ? new FileInfo(output).Length : 0;
+            if (result.ExitCode != 0 || result.TimedOut || length == 0 || length > options.HeifDecodeMaxOutputBytes)
             {
                 // Never the path: only what happened.
                 _logger.LogWarning(
-                    "HEIF decode failed (exit {ExitCode}, timed out {TimedOut}, truncated {Truncated}).",
-                    result.ExitCode, result.TimedOut, result.OutputTruncated);
+                    "HEIF decode failed (exit {ExitCode}, timed out {TimedOut}, over the output limit {OverLimit}).",
+                    result.ExitCode, result.TimedOut, length > options.HeifDecodeMaxOutputBytes);
                 return null;
             }
-            return result.StdoutBytes;
+
+            // From here the lease owns the file (deleted when its stream
+            // closes) and the slot (freed when it is disposed).
+            var frame = new FileStream(
+                output, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 81920,
+                FileOptions.Asynchronous | FileOptions.SequentialScan | FileOptions.DeleteOnClose);
+            output = null;
+            var lease = new OriginalPixelsLease(frame, isDecodedFrame: true, slot);
+            slot = null;
+            return lease;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -166,20 +301,46 @@ public sealed class OriginalImageReader : IOriginalImageReader
         }
         finally
         {
-            if (temp is not null)
+            // Every path that did not hand a frame to a lease — failure,
+            // refusal, cancellation — leaves nothing behind.
+            TryDelete(inputCopy);
+            TryDelete(output);
+            slot?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// The decoder's own temporary directory. Its files live only as long as a
+    /// decode or a lease; the first use in a process clears what a crash may
+    /// have left there.
+    /// </summary>
+    internal static string WorkDirectory()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "nubarca-heif");
+        Directory.CreateDirectory(directory);
+        if (Interlocked.Exchange(ref _swept, 1) == 0)
+        {
+            foreach (var stale in Directory.EnumerateFiles(directory))
             {
-                try { File.Delete(temp); } catch (IOException) { }
+                if (File.GetLastWriteTimeUtc(stale) < DateTime.UtcNow.AddHours(-1)) TryDelete(stale);
             }
         }
+        return directory;
+    }
+
+    private static void TryDelete(string? path)
+    {
+        if (path is null) return;
+        try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 }
 
 /// <summary>
-/// The original's pixels for a consumer that also runs without the reader —
-/// the AI services, whose direct-construction test sites predate it. With a
-/// reader, HEIC is decoded; without, the original's own bytes, as before. A
-/// frame that cannot be decoded throws, which every caller already treats as
-/// unreadable bytes.
+/// The original's pixels as bytes for a consumer that also runs without the
+/// reader — the AI services, whose direct-construction test sites predate it,
+/// and whose backends take bytes. With a reader, HEIC is decoded; without, the
+/// original's own bytes, as before. A frame that cannot be decoded throws,
+/// which every caller already treats as unreadable bytes.
 /// </summary>
 public static class OriginalPixels
 {
@@ -188,8 +349,9 @@ public static class OriginalPixels
     {
         if (originals is not null)
         {
-            return await originals.ReadForPixelsAsync(blobObjectId, cancellationToken)
+            await using var pixels = await originals.OpenForPixelsAsync(blobObjectId, cancellationToken)
                 ?? throw new InvalidDataException("The original's pixels could not be decoded.");
+            return await pixels.ReadAllBytesAsync(cancellationToken);
         }
         await using var stream = await blobs.OpenContentAsync(blobObjectId, cancellationToken);
         using var buffer = new MemoryStream();
