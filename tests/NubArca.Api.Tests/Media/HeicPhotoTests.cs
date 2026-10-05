@@ -227,6 +227,54 @@ public sealed class HeicPhotoTests
     }
 
     [SkippableFact]
+    public async Task A_Bulk_Import_Recognises_A_Heic_As_An_Upload_Does()
+    {
+        // The bulk upload (a staging session) and the administrator's import
+        // both run the import's batch pipeline, which recognises files itself
+        // before any database row exists.
+        RequireHeicFfmpeg();
+        var root = Directory.CreateTempSubdirectory("nubarca-heic-import-").FullName;
+        try
+        {
+            File.Copy(Fixture(), Path.Combine(root, "IMG_0001.HEIC"));
+            using var factory = new SqliteWebApplicationFactory(new Dictionary<string, string?>
+            {
+                ["AdminImport:Enabled"] = "true",
+                ["AdminImport:Roots:0"] = root,
+            });
+            factory.EnsureDatabaseCreated();
+            var adminId = await factory.SeedUserAsync("admin@example.com");
+            await factory.PromoteToAdminAsync(adminId);
+            var admin = await factory.LoginAsync("admin@example.com");
+            var targetId = await factory.SeedUserAsync("iphone@example.com");
+            var roots = await admin.GetFromJsonAsync<NubArca.Api.Admin.AdminImportRootsResponse>("/api/admin/import/roots");
+            (await admin.PostAsJsonAsync("/api/admin/import/run", new
+            {
+                rootId = roots!.Roots[0].RootId, relativePath = "", targetUserId = targetId,
+                destinationFolderId = (Guid?)null,
+            })).EnsureSuccessStatusCode();
+            await using (var run = factory.Services.CreateAsyncScope())
+            {
+                await run.ServiceProvider.GetRequiredService<NubArca.Api.Jobs.JobProcessor>().ProcessAvailableAsync(1);
+            }
+
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var file = await db.FileItems.SingleAsync(f => f.OwnerUserId == targetId);
+            var meta = await db.BlobMetadata.SingleAsync(m => m.BlobObjectId == file.BlobObjectId);
+            Assert.Equal("image/heic", meta.DetectedContentType);
+            Assert.Equal(MediaCategories.Image, meta.MediaCategory);
+            Assert.Equal((600, 800), (meta.Width!.Value, meta.Height!.Value));
+            Assert.True(await db.FileItems.Where(f => f.Id == file.Id)
+                .Where(NubArca.Api.MediaLibrary.LibraryPhotoRule.IsPhoto(db)).AnyAsync());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [SkippableFact]
     public async Task An_Iphone_Heic_Whose_Exif_Still_Says_Six_Is_Not_Turned_A_Second_Time()
     {
         // As an iPhone writes it: the container rotates the 800x600 grid 90

@@ -54,7 +54,7 @@ is built is described by `ARCHITECTURE.md`.
 - Media tools: FFmpeg 9.0.2 built from pinned sources (`scripts/media-tools`,
   its own image, copied into the API image by digest), replacing Ubuntu's 6.1.
 - HEIC photos: recognised by signature and decoded by FFmpeg through
-  `OriginalImageReader` (upload, thumbnails, print from the original, SigLIP,
+  `OriginalImageReader` (upload, bulk import, thumbnails, print from the original, SigLIP,
   faces, guest book, aesthetics); stored upright with orientation 1;
   `media images redetect` recognises the ones uploaded before.
 - Video capture metadata (extractor v2): Apple's local creation date with its

@@ -65,6 +65,12 @@ public interface IOriginalImageReader
 {
     /// <summary>The bytes to decode, or null when the original cannot be opened or decoded.</summary>
     Task<byte[]?> ReadForPixelsAsync(Guid blobObjectId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The same, for an original that has no blob row yet — a file a bulk
+    /// import has written to storage and is still recognising.
+    /// </summary>
+    Task<byte[]?> ReadForPixelsAsync(Func<CancellationToken, Task<Stream>> openContent, CancellationToken cancellationToken);
 }
 
 public sealed class OriginalImageReader : IOriginalImageReader
@@ -91,9 +97,13 @@ public sealed class OriginalImageReader : IOriginalImageReader
     public static bool IsUprightOnDecode(string? detectedContentType) =>
         string.Equals(detectedContentType, HeifSignature.ContentType, StringComparison.OrdinalIgnoreCase);
 
-    public async Task<byte[]?> ReadForPixelsAsync(Guid blobObjectId, CancellationToken cancellationToken)
+    public Task<byte[]?> ReadForPixelsAsync(Guid blobObjectId, CancellationToken cancellationToken) =>
+        ReadForPixelsAsync(ct => _blobs.OpenContentAsync(blobObjectId, ct), cancellationToken);
+
+    public async Task<byte[]?> ReadForPixelsAsync(
+        Func<CancellationToken, Task<Stream>> openContent, CancellationToken cancellationToken)
     {
-        await using var source = await _blobs.OpenContentAsync(blobObjectId, cancellationToken);
+        await using var source = await openContent(cancellationToken);
         var header = new byte[HeifSignature.HeaderLength];
         var read = await source.ReadAtLeastAsync(header, header.Length, throwOnEndOfStream: false, cancellationToken);
         if (!HeifSignature.IsHeif(header.AsSpan(0, read)))
