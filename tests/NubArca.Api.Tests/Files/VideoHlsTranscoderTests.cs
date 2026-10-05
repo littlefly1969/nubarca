@@ -68,7 +68,8 @@ public sealed class VideoHlsTranscoderTests : IDisposable
 
         Assert.Contains("-c:v:0 libx264", joined);
         // v2 aspect-aware cap: landscape caps the height, portrait the width.
-        Assert.Contains("scale=w='if(gt(a,1),-2,min(1080,iw))':h='if(gt(a,1),min(1080,ih),-2)'", joined);
+        // Both sides even: the capped one is rounded down, as 4:2:0 requires.
+        Assert.Contains("scale=w='if(gt(a,1),-2,min(1080,trunc(iw/2)*2))':h='if(gt(a,1),min(1080,trunc(ih/2)*2),-2)'", joined);
         Assert.Contains("-pix_fmt:v:0 yuv420p", joined);
         Assert.Contains("-var_stream_map v:0,name:high", joined);
         Assert.DoesNotContain("0:a:0", joined);

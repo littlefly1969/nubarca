@@ -93,6 +93,45 @@ public sealed class HdrVideoTests : IDisposable
         Assert.Contains("color_space=bt709", stream);
     }
 
+    [SkippableFact]
+    public async Task A_Display_P3_Video_Narrower_Than_The_Cap_And_Odd_Is_Converted_On_Even_Dimensions()
+    {
+        // A phone video of 465×892 in Display P3: the stream copy used to carry
+        // its odd width untouched; converted, the rendition must be even.
+        RequireZscaleFfmpeg();
+        var source = Path.Combine(_dir, "odd-p3.mkv");
+        await RunAsync("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=0x3366cc:s=465x892:r=10", "-t", "1",
+            "-vf", "format=yuv420p,setparams=color_primaries=smpte432:color_trc=bt709:colorspace=bt709:range=tv",
+            "-c:v", "ffv1", source);
+        var output = Path.Combine(_dir, "odd-ladder");
+        Directory.CreateDirectory(output);
+        var transcoder = new FfmpegVideoHlsTranscoder(
+            Options.Create(new MediaOptions { VideoHlsProvider = "ffmpeg" }),
+            new SystemProcessRunner(),
+            new FfprobeVideoColorProbe(
+                Options.Create(new MediaOptions()), new SystemProcessRunner(),
+                NullLogger<FfprobeVideoColorProbe>.Instance),
+            NullLogger<FfmpegVideoHlsTranscoder>.Instance);
+
+        var result = await transcoder.TranscodeAsync(
+            new VideoHlsTranscodeRequest(source, output, CopyVideo: true, CopyAudio: true, HasAudio: false, IncludeLowRendition: false),
+            default);
+
+        Assert.True(result.Success, result.ErrorCode);
+        var high = Path.Combine(output, "high");
+        var start = Path.Combine(_dir, "odd-start.mp4");
+        await File.WriteAllBytesAsync(start, [
+            .. await File.ReadAllBytesAsync(Directory.EnumerateFiles(high, "init*.mp4").Single()),
+            .. await File.ReadAllBytesAsync(Path.Combine(high, "seg-0.m4s")),
+        ]);
+        var stream = await RunAsync("ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height,color_primaries", "-of", "default=noprint_wrappers=1", start);
+        Assert.Contains("width=464", stream);
+        // The other side follows the aspect, even too.
+        Assert.Contains("height=890", stream);
+        Assert.Contains("color_primaries=bt709", stream);
+    }
+
     private async Task<(string Reference, string Hlg)> SceneAsync()
     {
         var reference = Path.Combine(_dir, "scene.png");

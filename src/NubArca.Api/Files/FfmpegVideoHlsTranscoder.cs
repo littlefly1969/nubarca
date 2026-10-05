@@ -110,8 +110,8 @@ public sealed class FfmpegVideoHlsTranscoder : IVideoHlsTranscoder
         var inv = CultureInfo.InvariantCulture;
         // HDR and wide-gamut sources become BT.709 SDR after the scale — at
         // the rendition's size, not the source's, and on the even dimensions
-        // the -2 below guarantees. Such a source is never copied: its high
-        // rung would disagree with the converted low one.
+        // the scale below always produces. Such a source is never copied: its
+        // high rung would disagree with the converted low one.
         var toSdr = color?.ToBt709Filter() is string filter ? "," + filter : "";
         var copyVideo = r.CopyVideo && (color?.CanStreamCopy ?? true);
         var args = new List<string> { "-y", "-i", r.SourceFilePath };
@@ -143,10 +143,13 @@ public sealed class FfmpegVideoHlsTranscoder : IVideoHlsTranscoder
             // the height, portrait caps the width, so a 1080×1920 phone video
             // keeps its full resolution. The inner single quotes are ffmpeg
             // filter-level quoting for the expressions (validated against a
-            // real run); -2 keeps the other side even, as x264 requires.
+            // real run). Both sides come out even, as 4:2:0 — x264, zscale —
+            // requires: -2 for the scaled side, and the capped side rounded
+            // down, for a phone video narrower than the cap is often odd
+            // (465×892), which the stream copy used to carry untouched.
             args.AddRange([
                 "-filter:v:0", string.Create(inv,
-                    $"scale=w='if(gt(a,1),-2,min({o.VideoHlsHighMaxHeight},iw))':h='if(gt(a,1),min({o.VideoHlsHighMaxHeight},ih),-2)'{toSdr}"),
+                    $"scale=w='if(gt(a,1),-2,min({o.VideoHlsHighMaxHeight},trunc(iw/2)*2))':h='if(gt(a,1),min({o.VideoHlsHighMaxHeight},trunc(ih/2)*2),-2)'{toSdr}"),
                 "-c:v:0", "libx264", "-preset:v:0", "veryfast", "-pix_fmt:v:0", "yuv420p",
                 "-crf:v:0", o.VideoHlsHighCrf.ToString(inv),
                 "-maxrate:v:0", string.Create(inv, $"{o.VideoHlsHighMaxRateKbps}k"),
