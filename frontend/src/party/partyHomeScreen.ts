@@ -6,10 +6,10 @@ import { useLocation } from 'react-router';
 // A party's page is the party's own app: its manifest (named after the party,
 // its cover as the icon, opening this very link) stands in for the product's,
 // and the iPhone's own tags follow. WHICH app is decided from the ADDRESS
-// ALONE — at bootstrap by the script in index.html, before any manifest is
-// read, and on in-app navigation by <PartyAppHead /> with the same rules —
-// never after a fetch: a browser may judge a page installable before React
-// has run. Only the title waits for the party to load. Nothing is cached: the
+// ALONE — at bootstrap by the script in index.html, which CREATES the manifest
+// and icon links with their final addresses (there is no static one to be
+// read first), and on in-app navigation by <PartyAppHead /> with the same
+// rules — never after a fetch. Only the title waits for the party to load. Nothing is cached: the
 // app opens the link, and the link asks the server for the party as it is now.
 //
 // Android's browsers offer to install a page whose manifest qualifies, through
@@ -50,10 +50,23 @@ export function PartyAppHead(): null {
   const { pathname } = useLocation();
   useEffect(() => {
     const app = partyAppForPath(pathname) ?? PRODUCT_APP;
-    setHead('link[rel="manifest"]', 'href', app.manifestUrl);
-    setHead('link[rel="apple-touch-icon"]', 'href', app.iconUrl);
+    headLink('manifest', app.manifestUrl);
+    headLink('apple-touch-icon', app.iconUrl);
   }, [pathname]);
   return null;
+}
+
+/** The ONE link of this rel in the head, pointed at `href` — created only if the bootstrap's is missing. */
+function headLink(rel: string, href: string): void {
+  const existing = document.head.querySelector(`link[rel="${rel}"]`);
+  if (existing) {
+    if (existing.getAttribute('href') !== href) existing.setAttribute('href', href);
+    return;
+  }
+  const element = document.createElement('link');
+  element.setAttribute('rel', rel);
+  element.setAttribute('href', href);
+  document.head.appendChild(element);
 }
 
 /** The party's name as the page's and the home-screen app's title, once the party has loaded. */

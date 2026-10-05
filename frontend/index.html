@@ -27,8 +27,8 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="/brand/favicon-48.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/brand/nubarca-pwa-192.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/brand/nubarca-apple-touch-icon-180.png" />
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- The apple-touch-icon and the manifest are not here: the party app
+         bootstrap at the end of <head> creates them, each with its final address. -->
     <script>
       // Theme bootstrap — runs BEFORE the stylesheet paints and before React
       // mounts, so a light-theme flash is impossible. It mirrors, verbatim, the
@@ -107,26 +107,35 @@
       })();
     </script>
     <script>
-      // Party app bootstrap — a party's page is the party's own app, so its
-      // manifest and icon must be in the head BEFORE the browser reads them to
-      // judge the page installable, and that is decided from the address alone.
-      // It mirrors, verbatim, partyAppForPath in src/party/partyHomeScreen.ts:
+      // Party app bootstrap — a party's page is the party's own app. There is
+      // no static manifest link: this script CREATES the apple-touch-icon and
+      // the manifest links, each born with its final address, so a browser
+      // judging the page installable never sees another app's manifest first.
+      // Which app is decided from the address alone. It mirrors, verbatim,
+      // partyAppForPath and PRODUCT_APP in src/party/partyHomeScreen.ts:
       //   * /party/<token>         => /api/party/<token>/app-manifest
       //   * /party/invite/<token>  => /api/party-invitations/<token>/app-manifest
       //   * a token is [A-Za-z0-9_-]+, 'crew' and 'invite' are not tokens, and
       //     nothing may follow it but one slash
+      //   * any other page         => /manifest.webmanifest (the product's)
       // <PartyAppHead /> keeps the same choice on in-app navigation.
       (function () {
+        var manifest = '/manifest.webmanifest';
+        var icon = '/brand/nubarca-apple-touch-icon-180.png';
         var match = /^\/party\/(?:(invite)\/)?([A-Za-z0-9_-]+)\/?$/.exec(window.location.pathname);
-        if (!match) return;
-        var invite = match[1];
-        var token = match[2];
-        if (!invite && (token === 'crew' || token === 'invite')) return;
-        var base = (invite ? '/api/party-invitations/' : '/api/party/') + encodeURIComponent(token);
-        var manifest = document.querySelector('link[rel="manifest"]');
-        if (manifest) manifest.setAttribute('href', base + '/app-manifest');
-        var icon = document.querySelector('link[rel="apple-touch-icon"]');
-        if (icon) icon.setAttribute('href', base + '/app-icon/192');
+        if (match && (match[1] || (match[2] !== 'crew' && match[2] !== 'invite'))) {
+          var base = (match[1] ? '/api/party-invitations/' : '/api/party/') + encodeURIComponent(match[2]);
+          manifest = base + '/app-manifest';
+          icon = base + '/app-icon/192';
+        }
+        var link = function (rel, href) {
+          var element = document.createElement('link');
+          element.setAttribute('rel', rel);
+          element.setAttribute('href', href);
+          document.head.appendChild(element);
+        };
+        link('apple-touch-icon', icon);
+        link('manifest', manifest);
       })();
     </script>
   </head>

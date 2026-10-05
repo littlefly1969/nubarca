@@ -6,38 +6,37 @@ import { act, cleanup, render } from '@testing-library/react';
 import { MemoryRouter, useNavigate } from 'react-router';
 import { PRODUCT_APP, PartyAppHead, partyAppForPath } from './partyHomeScreen';
 
-// WHICH APP a page is, decided from its address alone: by the bootstrap in
-// index.html before any manifest is read, and by <PartyAppHead /> on in-app
-// navigation. The two are held to one table here — the script is extracted
-// from the real index.html and run against the same addresses.
+// WHICH APP a page is, decided from its address alone — and the link a browser
+// reads to install it BORN with that address. index.html carries no manifest
+// link of its own: its bootstrap creates it. These tests run the real script
+// from index.html, hold it to partyAppForPath's table, and follow
+// <PartyAppHead /> through in-app navigation.
 
 const here = dirname(fileURLToPath(import.meta.url));
-const INDEX_HTML = resolve(here, '../../index.html');
+const INDEX_HTML = readFileSync(resolve(here, '../../index.html'), 'utf8');
 
 function bootstrapSource(): string {
-  const html = readFileSync(INDEX_HTML, 'utf8');
-  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  const scripts = [...INDEX_HTML.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
   const party = scripts.find((s) => s.includes('Party app bootstrap'));
   if (!party) throw new Error('index.html no longer contains the party app bootstrap.');
   return party;
 }
 
-function productHead(): void {
-  document.head.innerHTML = `
-    <link rel="apple-touch-icon" href="${PRODUCT_APP.iconUrl}">
-    <link rel="manifest" href="${PRODUCT_APP.manifestUrl}">`;
-}
-
-function headAfterBootstrapAt(pathname: string) {
-  productHead();
+/** The head as index.html's own markup leaves it — scripts aside — then the bootstrap, at `pathname`. */
+function bootAt(pathname: string): MutationRecord[] {
+  document.head.innerHTML = '';
   window.history.replaceState(null, '', pathname);
+  const observer = new MutationObserver(() => {});
+  observer.observe(document.head, { childList: true, subtree: true, attributes: true });
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   new Function(bootstrapSource())();
-  return {
-    manifestUrl: document.head.querySelector('link[rel="manifest"]')!.getAttribute('href'),
-    iconUrl: document.head.querySelector('link[rel="apple-touch-icon"]')!.getAttribute('href'),
-  };
+  const records = observer.takeRecords();
+  observer.disconnect();
+  return records;
 }
+
+const links = (rel: string) => [...document.head.querySelectorAll(`link[rel="${rel}"]`)];
+const href = (rel: string) => links(rel)[0]?.getAttribute('href');
 
 const TABLE: [string, ReturnType<typeof partyAppForPath>][] = [
   ['/party/QrToken_-123', { manifestUrl: '/api/party/QrToken_-123/app-manifest', iconUrl: '/api/party/QrToken_-123/app-icon/192' }],
@@ -61,21 +60,37 @@ afterEach(() => {
   document.head.innerHTML = '';
 });
 
-describe('the party app chosen from the address', () => {
+describe('index.html carries no app of its own', () => {
+  it('has no static manifest or apple-touch-icon link for a browser to read first', () => {
+    const markup = INDEX_HTML.replace(/<script>[\s\S]*?<\/script>/g, '');
+    expect(markup).not.toMatch(/<link[^>]*rel="manifest"/);
+    expect(markup).not.toMatch(/<link[^>]*rel="apple-touch-icon"/);
+  });
+
+  it('runs the bootstrap in the head, before the application bundle', () => {
+    const bootstrap = INDEX_HTML.indexOf('Party app bootstrap');
+    expect(bootstrap).toBeGreaterThan(-1);
+    expect(bootstrap).toBeLessThan(INDEX_HTML.indexOf('</head>'));
+    expect(bootstrap).toBeLessThan(INDEX_HTML.indexOf('src="/src/main.tsx"'));
+  });
+});
+
+describe('the bootstrap creates the app the address names', () => {
   it.each(TABLE)('%s', (pathname, expected) => {
-    expect(partyAppForPath(pathname)).toEqual(expected);
-  });
+    const records = bootAt(pathname);
+    const app = expected ?? PRODUCT_APP;
 
-  it.each(TABLE)('index.html bootstrap agrees at %s', (pathname, expected) => {
-    expect(headAfterBootstrapAt(pathname)).toEqual(expected ?? PRODUCT_APP);
-  });
-
-  it('is in place before React runs: the bootstrap is an inline script in the head', () => {
-    const html = readFileSync(INDEX_HTML, 'utf8');
-    const bootstrap = html.indexOf('Party app bootstrap');
-    expect(bootstrap).toBeGreaterThan(html.indexOf('<link rel="manifest"'));
-    expect(bootstrap).toBeLessThan(html.indexOf('</head>'));
-    expect(bootstrap).toBeLessThan(html.indexOf('src="/src/main.tsx"'));
+    // Exactly one of each…
+    expect(links('manifest')).toHaveLength(1);
+    expect(links('apple-touch-icon')).toHaveLength(1);
+    // …already pointing where it must…
+    expect(href('manifest')).toBe(app.manifestUrl);
+    expect(href('apple-touch-icon')).toBe(app.iconUrl);
+    // …from the moment it exists: added once, never re-pointed afterwards.
+    expect(records.filter((r) => r.type === 'attributes')).toEqual([]);
+    expect(records.flatMap((r) => [...r.addedNodes])).toHaveLength(2);
+    // And it is partyAppForPath's answer, row for row.
+    expect(partyAppForPath(pathname) ?? PRODUCT_APP).toEqual({ manifestUrl: href('manifest'), iconUrl: href('apple-touch-icon') });
   });
 });
 
@@ -86,8 +101,8 @@ describe('<PartyAppHead />', () => {
     return null;
   }
 
-  it('follows in-app navigation into and out of a party, from the address alone', () => {
-    productHead();
+  it('follows in-app navigation, from the address alone, keeping one link of each', () => {
+    bootAt('/party/invite/InviteTok');
     const navigate: { current: ((path: string) => void) | null } = { current: null };
     render(
       <MemoryRouter initialEntries={['/party/invite/InviteTok']}>
@@ -95,14 +110,36 @@ describe('<PartyAppHead />', () => {
         <Navigator to={navigate} />
       </MemoryRouter>,
     );
-    const manifest = () => document.head.querySelector('link[rel="manifest"]')!.getAttribute('href');
-    expect(manifest()).toBe('/api/party-invitations/InviteTok/app-manifest');
+    expect(href('manifest')).toBe('/api/party-invitations/InviteTok/app-manifest');
 
     // "Entra nel Party": the invitation leads into the party's own page.
     act(() => navigate.current!('/party/QrToken'));
-    expect(manifest()).toBe('/api/party/QrToken/app-manifest');
+    expect(href('manifest')).toBe('/api/party/QrToken/app-manifest');
+    expect(href('apple-touch-icon')).toBe('/api/party/QrToken/app-icon/192');
 
     act(() => navigate.current!('/albums'));
-    expect(manifest()).toBe(PRODUCT_APP.manifestUrl);
+    expect(href('manifest')).toBe(PRODUCT_APP.manifestUrl);
+    expect(href('apple-touch-icon')).toBe(PRODUCT_APP.iconUrl);
+
+    act(() => navigate.current!('/party/invite/Other'));
+    expect(href('manifest')).toBe('/api/party-invitations/Other/app-manifest');
+    expect(links('manifest')).toHaveLength(1);
+    expect(links('apple-touch-icon')).toHaveLength(1);
+  });
+
+  it('creates the links once if a page somehow has none, never twice', () => {
+    document.head.innerHTML = '';
+    const { rerender } = render(
+      <MemoryRouter initialEntries={['/party/QrToken']}>
+        <PartyAppHead />
+      </MemoryRouter>,
+    );
+    rerender(
+      <MemoryRouter initialEntries={['/party/QrToken']}>
+        <PartyAppHead />
+      </MemoryRouter>,
+    );
+    expect(links('manifest')).toHaveLength(1);
+    expect(href('manifest')).toBe('/api/party/QrToken/app-manifest');
   });
 });
