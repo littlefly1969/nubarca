@@ -197,7 +197,9 @@ public sealed class FacePreviewService
 
             // The face's box was found on the frame OriginalPixels gives (HEIC
             // decoded upright), so the crop is cut from that same frame.
-            var bytes = await OriginalPixels.ReadAsync(_blobs, _originals, face.BlobObjectId, cancellationToken);
+            // Held until the crop is cut: a HEIC frame keeps its decode slot.
+            await using var pixels = await OriginalPixels.OpenAsync(_blobs, _originals, face.BlobObjectId, cancellationToken);
+            var bytes = pixels.Bytes;
 
             var info = await Image.IdentifyAsync(new MemoryStream(bytes, writable: false), cancellationToken);
             if (info is null

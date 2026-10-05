@@ -52,3 +52,34 @@ public sealed record ProcessDirectoryRunRequest(
 public sealed record ProcessDirectoryRunResult(
     int ExitCode,
     bool TimedOut);
+
+/// <summary>
+/// Runs a process whose stdout is ONE large output — a decoded frame — and
+/// streams it to a file, never holding it in memory. The byte cap is enforced
+/// WHILE the output arrives: one byte past MaxOutputBytes and the process tree
+/// is killed at once and the file deleted, so neither memory nor disk can grow
+/// past the cap. A timeout or a cancellation also kills the tree and deletes
+/// the file; only a normal exit within the cap leaves it in place.
+/// </summary>
+public interface IProcessFileRunner
+{
+    Task<ProcessFileRunResult> RunAsync(ProcessFileRunRequest request, CancellationToken cancellationToken);
+}
+
+public sealed record ProcessFileRunRequest(
+    string Executable,
+    IReadOnlyList<string> Arguments,
+    string OutputPath,
+    long MaxOutputBytes,
+    int TimeoutSeconds);
+
+/// <summary>
+/// ExitCode is -1 when the process was stopped (TimedOut or
+/// OutputLimitExceeded); in both cases, and on a non-zero exit, the output
+/// file is not to be used — after a stop it no longer exists.
+/// </summary>
+public sealed record ProcessFileRunResult(
+    int ExitCode,
+    bool TimedOut,
+    bool OutputLimitExceeded,
+    long BytesWritten);

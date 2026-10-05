@@ -170,6 +170,7 @@ public sealed class FileThumbnailService : IFileThumbnailService
 
         var identifyStart = Stopwatch.GetTimestamp();
         var identify = await IdentifySourceAsync(sourceBlobId.Value, cancellationToken);
+        await using var frame = identify.Frame;
         timings.IdentifyMillis += (long)Stopwatch.GetElapsedTime(identifyStart).TotalMilliseconds;
         var info = identify.Info;
         if (info is null)
@@ -198,7 +199,9 @@ public sealed class FileThumbnailService : IFileThumbnailService
         try
         {
             // A frame the reader already decoded for identify (HEIC) is not decoded twice.
-            source = identify.Decoded ?? await ReadSourceBytesAsync(sourceBlobId.Value, cancellationToken);
+            source = frame is not null
+                ? await frame.ReadAllBytesAsync(cancellationToken)
+                : await ReadSourceBytesAsync(sourceBlobId.Value, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -528,6 +531,7 @@ public sealed class FileThumbnailService : IFileThumbnailService
             // billions of pixels in a few KB cannot exhaust memory here; it will
             // simply fail the limit check below.
             var identified = await IdentifySourceAsync(sourceBlobId, cancellationToken);
+            await using var frame = identified.Frame;
             var info = identified.Info;
             if (info is null)
             {
@@ -550,7 +554,9 @@ public sealed class FileThumbnailService : IFileThumbnailService
             // ImageSharp fallback). The lazy path stays best-effort: a render
             // failure surfaces as null here (no diagnostic — only the operator
             // backfill records those).
-            var source = identified.Decoded ?? await ReadSourceBytesAsync(sourceBlobId, cancellationToken);
+            var source = frame is not null
+                ? await frame.ReadAllBytesAsync(cancellationToken)
+                : await ReadSourceBytesAsync(sourceBlobId, cancellationToken);
             var requests = new[]
             {
                 new DerivativeRequest(normalized, edge, _mediaOptions.QualityFor(normalized)),
@@ -932,20 +938,27 @@ public sealed class FileThumbnailService : IFileThumbnailService
             // handed on so the render does not decode it a second time.
             if (_originals is not null)
             {
-                await using var pixels = await _originals.OpenForPixelsAsync(blobObjectId, cancellationToken);
-                if (pixels is { IsDecodedFrame: true })
+                var pixels = await _originals.OpenForPixelsAsync(blobObjectId, cancellationToken);
+                var handedOver = false;
+                try
                 {
-                    try
+                    if (pixels is { IsDecodedFrame: true })
                     {
-                        // Identified from the frame's header; its bytes are read
-                        // once, for the renderer, whose API takes them whole.
+                        // Identified from the frame's header. The frame — its
+                        // file and its decode slot — goes to the caller, which
+                        // reads it once for the render and disposes it after.
                         var info = await Image.IdentifyAsync(pixels.Content, cancellationToken);
-                        return new IdentifyResult(info, null, await pixels.ReadAllBytesAsync(cancellationToken));
+                        handedOver = true;
+                        return new IdentifyResult(info, null, pixels);
                     }
-                    catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException)
-                    {
-                        // Not a frame after all: still unreadable.
-                    }
+                }
+                catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException)
+                {
+                    // Not a frame after all: still unreadable.
+                }
+                finally
+                {
+                    if (!handedOver && pixels is not null) await pixels.DisposeAsync();
                 }
             }
             return new IdentifyResult(null, DerivativeErrorCodes.UnsupportedFormat);
@@ -962,7 +975,9 @@ public sealed class FileThumbnailService : IFileThumbnailService
         }
     }
 
-    private readonly record struct IdentifyResult(ImageInfo? Info, string? FailureCode, byte[]? Decoded = null);
+    // Frame: a decoded HEIC frame, owned by the caller — read for the render,
+    // disposed after it, so its decode slot covers the bytes' whole use.
+    private readonly record struct IdentifyResult(ImageInfo? Info, string? FailureCode, OriginalPixelsLease? Frame = null);
 
     // Slice 68: delegate poster generation to the registered IVideoPosterProvider.
     // The provider returns JPEG bytes (MemoryStream) or null. A null means the

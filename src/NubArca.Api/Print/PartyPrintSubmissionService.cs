@@ -275,16 +275,19 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         {
             // 5. Compose. Reading the originals is a server-side act: their
             // bytes never travel to the browser.
-            var photos = new List<PartyPrintPhoto>(request.Slots.Count);
-            foreach (var slot in request.Slots)
+            // Held until the sheet is drawn: HEIC frames keep their decode slots.
+            await using var sources = await _sources.OpenAsync(
+                access.OwnerUserId, request.Slots.Select(s => s.ItemId).ToList(), cancellationToken);
+            if (sources is null)
             {
-                var bytes = await _sources.ReadAsync(
-                    access.OwnerUserId, slot.ItemId, cancellationToken);
-                if (bytes is null)
-                {
-                    await ReleaseUnlessAcceptedAsync();
-                    return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.InvalidSource);
-                }
+                await ReleaseUnlessAcceptedAsync();
+                return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.InvalidSource);
+            }
+            var photos = new List<PartyPrintPhoto>(request.Slots.Count);
+            for (var i = 0; i < request.Slots.Count; i++)
+            {
+                var slot = request.Slots[i];
+                var bytes = sources.Photos[i];
                 photos.Add(slot.Placement is { } placement
                     ? PartyPrintPhoto.Placed(bytes, placement.ToPlacement())
                     : new PartyPrintPhoto(bytes, slot.CropX!.Value, slot.CropY!.Value,
@@ -525,5 +528,23 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
 /// </summary>
 public interface IPrintPhotoSourceReader
 {
-    Task<byte[]?> ReadAsync(Guid ownerUserId, Guid fileItemId, CancellationToken cancellationToken);
+    /// <summary>
+    /// The originals of one print's photographs, in order — held until the
+    /// sheet has been composed, then disposed — or null when any of them cannot
+    /// be read.
+    /// </summary>
+    Task<PrintPhotoSources?> OpenAsync(
+        Guid ownerUserId, IReadOnlyList<Guid> fileItemIds, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// A print's originals, as the composer takes them: bytes. Disposing it ends
+/// what holds them — for HEIC, the decoded frames' files and decode slots — so
+/// the composer must be done with the bytes first.
+/// </summary>
+public sealed class PrintPhotoSources(IReadOnlyList<byte[]> photos, IAsyncDisposable? held = null) : IAsyncDisposable
+{
+    public IReadOnlyList<byte[]> Photos { get; } = photos;
+
+    public ValueTask DisposeAsync() => held?.DisposeAsync() ?? ValueTask.CompletedTask;
 }

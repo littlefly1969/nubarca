@@ -207,11 +207,11 @@ public sealed class FaceEmbeddingBackfillService
 
         var now = _clock.GetUtcNow().UtcDateTime;
 
-        byte[] bytes;
+        OriginalPixelsBytes pixels;
         try
         {
             // HEIC included: its frame decoded upright by FFmpeg (OriginalImageReader).
-            bytes = await OriginalPixels.ReadAsync(_blobs, _originals, blobId, cancellationToken);
+            pixels = await OriginalPixels.OpenAsync(_blobs, _originals, blobId, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -226,6 +226,9 @@ public sealed class FaceEmbeddingBackfillService
                 AiArtifactStatuses.Failed, FaceEmbeddingErrorCodes.Unknown, now, cancellationToken);
             return new BlobEmbedOutcome(0, 0, f, 0, 0);
         }
+        // Held while the bytes are in use: a HEIC frame keeps its decode slot.
+        await using var held = pixels;
+        var bytes = pixels.Bytes;
 
         var landmarks = pending
             .Select(p => (IReadOnlyList<Backends.FaceLandmark>)(FaceLandmarksJson.Deserialize(p.LandmarksJson) ?? Array.Empty<Backends.FaceLandmark>()))

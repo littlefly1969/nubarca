@@ -184,7 +184,9 @@ public sealed class PartyGuestbookPhotoCache
         try
         {
             // HEIC included: its frame decoded upright by FFmpeg (OriginalImageReader).
-            var source = await OriginalPixels.ReadAsync(_blobs, _originals, blobObjectId, cancellationToken);
+            // Held until the render is done: a HEIC frame keeps its decode slot.
+            await using var original = await OriginalPixels.OpenAsync(_blobs, _originals, blobObjectId, cancellationToken);
+            var source = original.Bytes;
 
             using (var probe = new MemoryStream(source, writable: false))
             {

@@ -8,7 +8,7 @@ namespace NubArca.Api.Files;
 /// the requested timeout. Also implements IDirectoryProcessRunner (video-hls
 /// slice 1) for processes whose output is files in a working directory.
 /// </summary>
-public sealed class SystemProcessRunner : IProcessRunner, IDirectoryProcessRunner
+public sealed class SystemProcessRunner : IProcessRunner, IDirectoryProcessRunner, IProcessFileRunner
 {
     public async Task<ProcessDirectoryRunResult> RunAsync(
         ProcessDirectoryRunRequest request,
@@ -189,6 +189,118 @@ public sealed class SystemProcessRunner : IProcessRunner, IDirectoryProcessRunne
     {
         using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         try { await process.WaitForExitAsync(wait.Token); } catch { /* bounded */ }
+    }
+
+    public async Task<ProcessFileRunResult> RunAsync(
+        ProcessFileRunRequest request,
+        CancellationToken cancellationToken)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(request.TimeoutSeconds));
+
+        var psi = new ProcessStartInfo(request.Executable)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = false,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var arg in request.Arguments)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+
+        using var process = new Process { StartInfo = psi };
+        process.Start();
+
+        var copyTask = CopyCappedToFileAsync(
+            process.StandardOutput.BaseStream, request.OutputPath, request.MaxOutputBytes, cts.Token);
+        var stderrTask = DrainAsync(process.StandardError.BaseStream, cts.Token);
+        var exitTask = process.WaitForExitAsync(cts.Token);
+
+        var outcome = RunOutcome.Exited;
+        try
+        {
+            // The cap is checked as the bytes arrive: past it, the producer is
+            // stopped now, not when it is done or when the timeout fires.
+            if (await Task.WhenAny(copyTask, exitTask) == copyTask
+                && copyTask.IsCompletedSuccessfully && copyTask.Result.Exceeded)
+            {
+                outcome = RunOutcome.OutputLimitExceeded;
+                Kill(process);
+            }
+            await exitTask;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            if (outcome != RunOutcome.OutputLimitExceeded) outcome = RunOutcome.TimedOut;
+            Kill(process);
+        }
+        catch (OperationCanceledException)
+        {
+            Kill(process);
+            await WaitForKilledExitAsync(process);
+            try { await copyTask; } catch { /* ignore */ }
+            try { await stderrTask; } catch { /* ignore */ }
+            TryDeleteFile(request.OutputPath);
+            throw;
+        }
+
+        if (outcome != RunOutcome.Exited)
+        {
+            await WaitForKilledExitAsync(process);
+        }
+
+        long written = 0;
+        try
+        {
+            // After a normal exit the copy finishes what is still in the pipe —
+            // and can still find the cap passed at the very end.
+            var copied = await copyTask;
+            written = copied.Written;
+            if (copied.Exceeded) outcome = RunOutcome.OutputLimitExceeded;
+        }
+        catch
+        {
+            if (outcome == RunOutcome.Exited) outcome = RunOutcome.TimedOut;
+        }
+        try { await stderrTask; } catch { /* ignore */ }
+
+        if (outcome != RunOutcome.Exited)
+        {
+            // Never a partial output: what was written is deleted.
+            TryDeleteFile(request.OutputPath);
+            return new ProcessFileRunResult(-1, outcome == RunOutcome.TimedOut,
+                outcome == RunOutcome.OutputLimitExceeded, written);
+        }
+        return new ProcessFileRunResult(process.ExitCode, false, false, written);
+    }
+
+    private static async Task<(long Written, bool Exceeded)> CopyCappedToFileAsync(
+        Stream source, string path, long maxBytes, CancellationToken ct)
+    {
+        await using var file = new FileStream(
+            path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous);
+        var buffer = new byte[81920];
+        long written = 0;
+        int read;
+        while ((read = await source.ReadAsync(buffer, ct)) > 0)
+        {
+            if (written + read > maxBytes)
+            {
+                // Over the cap: not one byte of this chunk is written.
+                return (written, true);
+            }
+            await file.WriteAsync(buffer.AsMemory(0, read), ct);
+            written += read;
+        }
+        return (written, false);
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
     private static async Task<(byte[] Bytes, bool Truncated)> ReadCappedAsync(

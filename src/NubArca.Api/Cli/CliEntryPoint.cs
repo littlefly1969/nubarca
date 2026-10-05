@@ -2279,6 +2279,7 @@ public static class CliEntryPoint
             services.AddSingleton<IEmbeddedMetadataExtractor, EmbeddedImageMetadataExtractor>();
             services.AddScoped<IBlobService, BlobService>();
             services.AddSingleton<HeifDecodeGate>();
+            services.AddSingleton<IProcessFileRunner, SystemProcessRunner>();
             services.AddScoped<IOriginalImageReader, OriginalImageReader>();
             // FileThumbnailService requires a video poster provider. Mirror the
             // web host's synthetic-or-ffmpeg selection so any handler that pulls

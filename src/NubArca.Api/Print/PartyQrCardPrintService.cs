@@ -189,7 +189,9 @@ public sealed class PartyQrCardPrintService : IPartyQrCardPrintService
         try
         {
             // 9. The original, read inside the server.
-            var bytes = await _sources.ReadAsync(ownerUserId, fileItemId, cancellationToken);
+            // Held until the sheet is drawn: a HEIC frame keeps its decode slot.
+            await using var sources = await _sources.OpenAsync(ownerUserId, [fileItemId], cancellationToken);
+            var bytes = sources?.Photos[0];
             if (bytes is null)
             {
                 await ReturnUnlessAcceptedAsync();

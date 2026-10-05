@@ -199,11 +199,11 @@ public sealed class PhotoEmbeddingBackfillService
     private async Task<IndexResult> IndexBlobAsync(
         IImageEmbedder embedder, AiProfile profile, Guid blobId, CancellationToken cancellationToken)
     {
-        byte[] bytes;
+        OriginalPixelsBytes pixels;
         try
         {
             // HEIC included: its frame decoded upright by FFmpeg (OriginalImageReader).
-            bytes = await OriginalPixels.ReadAsync(_blobs, _originals, blobId, cancellationToken);
+            pixels = await OriginalPixels.OpenAsync(_blobs, _originals, blobId, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -215,6 +215,9 @@ public sealed class PhotoEmbeddingBackfillService
             // record a status row; leave the blob eligible for a future run.
             return new IndexResult(BlobOutcome.Failed, VectorUpsertOutcome.SkippedUnavailable);
         }
+        // Held while the bytes are in use: a HEIC frame keeps its decode slot.
+        await using var held = pixels;
+        var bytes = pixels.Bytes;
 
         AiEmbeddingResult embedding;
         try

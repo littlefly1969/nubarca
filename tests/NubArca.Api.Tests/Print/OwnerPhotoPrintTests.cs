@@ -503,7 +503,8 @@ public sealed class OwnerPhotoPrintTests : IDisposable
 
     private sealed class GarbageSources : IPrintPhotoSourceReader
     {
-        public Task<byte[]?> ReadAsync(Guid o, Guid f, CancellationToken c) => Task.FromResult<byte[]?>([1, 2, 3, 4]);
+        public Task<PrintPhotoSources?> OpenAsync(Guid o, IReadOnlyList<Guid> f, CancellationToken c) =>
+            Task.FromResult<PrintPhotoSources?>(new PrintPhotoSources(f.Select(_ => new byte[] { 1, 2, 3, 4 }).ToList()));
     }
 
     private sealed class FailingStore : NubArca.Api.Storage.IDerivedBlobStorage
