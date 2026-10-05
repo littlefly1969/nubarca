@@ -43,7 +43,7 @@ public sealed class VideoHlsTranscoderTests : IDisposable
     [Fact]
     public void Copy_With_Audio_And_Low_Builds_Two_Rendition_Copy_Ladder()
     {
-        var args = FfmpegVideoHlsTranscoder.BuildArguments(Request(_tempDir), Options());
+        var args = FfmpegVideoHlsTranscoder.BuildArguments(Request(_tempDir), Options(), FixedVideoColorProbe.PlainSdr);
         var joined = string.Join(" ", args);
 
         Assert.Contains("-c:v:0 copy", joined);
@@ -63,7 +63,7 @@ public sealed class VideoHlsTranscoderTests : IDisposable
     {
         var args = FfmpegVideoHlsTranscoder.BuildArguments(
             Request(_tempDir, copyVideo: false, copyAudio: false, hasAudio: false, includeLow: false),
-            Options());
+            Options(), FixedVideoColorProbe.PlainSdr);
         var joined = string.Join(" ", args);
 
         Assert.Contains("-c:v:0 libx264", joined);
@@ -82,7 +82,7 @@ public sealed class VideoHlsTranscoderTests : IDisposable
     public void Copy_Video_With_NonAac_Audio_Encodes_Audio_Only()
     {
         var args = FfmpegVideoHlsTranscoder.BuildArguments(
-            Request(_tempDir, copyVideo: true, copyAudio: false), Options());
+            Request(_tempDir, copyVideo: true, copyAudio: false), Options(), FixedVideoColorProbe.PlainSdr);
         var joined = string.Join(" ", args);
 
         Assert.Contains("-c:v:0 copy", joined);
@@ -124,6 +124,22 @@ public sealed class VideoHlsTranscoderTests : IDisposable
     }
 
     [Fact]
+    public void A_Source_Whose_Format_The_Probe_Could_Not_Name_Is_Encoded_Not_Copied()
+    {
+        // Fail-closed: the plan may say "H.264 under the cap", but an
+        // unverified stream is never copied into a rendition.
+        var args = FfmpegVideoHlsTranscoder.BuildArguments(
+            Request(_tempDir, copyVideo: true), Options(), VideoColorFormat.Unknown);
+        var joined = string.Join(" ", args);
+
+        Assert.Contains("-c:v:0 libx264", joined);
+        Assert.DoesNotContain("-c:v:0 copy", joined);
+        // Even dimensions on the encode (#179), and no conversion on a guess.
+        Assert.Contains("trunc(iw/2)*2", joined);
+        Assert.DoesNotContain("zscale", joined);
+    }
+
+    [Fact]
     public async Task The_Source_Is_Probed_And_Its_Colours_Converted()
     {
         var runner = new FakeDirectoryProcessRunner(new ProcessDirectoryRunResult(1, TimedOut: false));
@@ -138,7 +154,7 @@ public sealed class VideoHlsTranscoderTests : IDisposable
     [Fact]
     public void Arguments_Never_Use_Shell_Interpolation_Sensitive_Master_Name()
     {
-        var args = FfmpegVideoHlsTranscoder.BuildArguments(Request(_tempDir), Options());
+        var args = FfmpegVideoHlsTranscoder.BuildArguments(Request(_tempDir), Options(), FixedVideoColorProbe.PlainSdr);
         // Fixed, non-derived output names only.
         Assert.Contains("master.m3u8", args);
         Assert.Contains("%v/seg-%d.m4s", args);

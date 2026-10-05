@@ -101,6 +101,20 @@ public sealed class VideoColorRegenerationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Video_Whose_Probe_Could_Not_Answer_Is_Left_Alone()
+    {
+        // A forced ladder for it could fail and leave a playable video
+        // unplayable: an unknown format redoes nothing.
+        Seed("UNREADABLE", "h264", liveFiles: 1, ladder: true);
+
+        var result = await Service().RunAsync(new VideoColorRegenerationOptions(), default);
+
+        Assert.Equal(new VideoColorRegenerationResult(1, 0, 0, 0, 0), result);
+        Assert.Empty(_thumbnails.Calls);
+        Assert.Empty(_jobs.Enqueued);
+    }
+
+    [Fact]
     public async Task A_Dry_Run_Counts_And_Changes_Nothing()
     {
         Seed("HDR", "hevc", liveFiles: 1, ladder: true);
@@ -173,6 +187,7 @@ public sealed class VideoColorRegenerationServiceTests : IDisposable
                 "HDR" => new VideoColorFormat("yuv420p10le", "tv", "bt2020nc", "arib-std-b67", "bt2020"),
                 "P3" => new VideoColorFormat("yuvj420p", "pc", "bt709", "bt709", "smpte432"),
                 "444" => new VideoColorFormat("yuv444p", "tv", "bt709", "bt709", "bt709"),
+                "UNREADABLE" => VideoColorFormat.Unknown,
                 _ => new VideoColorFormat("yuv420p", "tv", "bt709", "bt709", "bt709"),
             };
     }

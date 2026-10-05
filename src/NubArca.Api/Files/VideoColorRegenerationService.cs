@@ -75,6 +75,10 @@ public sealed class VideoColorRegenerationService
                 examined++;
                 after = video.BlobObjectId;
                 var format = await ProbeAsync(video.BlobObjectId, cancellationToken);
+                // A probe that could not answer says nothing about the video:
+                // nothing is redone on its account — a forced ladder that then
+                // failed would leave a playable video unplayable.
+                if (format.PixelFormat is null) continue;
                 var pictures = format.ToBt709Filter() is not null;
                 var ladder = pictures
                     || (string.Equals(video.VideoCodec, "h264", StringComparison.OrdinalIgnoreCase) && !format.CanStreamCopy);
