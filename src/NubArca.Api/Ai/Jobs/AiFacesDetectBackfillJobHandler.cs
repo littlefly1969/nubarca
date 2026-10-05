@@ -131,5 +131,18 @@ public sealed class AiFacesDetectBackfillJobHandler : IJobHandler
                     cancellationToken: cancellationToken);
             }
         }
+        else if (payload.BlobObjectId is null && !payload.DryRun
+            && result.ProducedTotal > 0 && options.FaceEmbeddingsEnabled)
+        {
+            // A whole run — a bulk import's, or an operator's — chains the
+            // whole recognition backfill the same way, once, at its end: the
+            // faces it found are recognised without anybody having to ask.
+            await _jobs.EnqueueAsync(
+                JobTypes.AiFacesEmbeddingsBackfill,
+                new AiBackfillJobPayload(ProfileKey: profile.Key),
+                priority: context.Priority,
+                idempotencyKey: $"faces:embed:after-detect:{profile.Key}",
+                cancellationToken: cancellationToken);
+        }
     }
 }

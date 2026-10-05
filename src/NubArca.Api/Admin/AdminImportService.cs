@@ -878,6 +878,22 @@ public sealed class AdminImportService : IAdminImportService
             log($"admin-import: enqueued photo embeddings job {embeddingsJob.Id}");
         }
 
+        // Faces, as an upload gets them: detection over the imported photos,
+        // which chains recognition (embeddings) itself once it has found faces.
+        // Grouping them into people stays the owner's own request.
+        if (ai.Enabled
+            && ai.FaceDetectionEnabled
+            && counters.Imported > 0
+            && status is AdminImportStatuses.Succeeded or AdminImportStatuses.Partial)
+        {
+            var facesJob = await _jobs.EnqueueAsync(
+                JobTypes.AiFacesDetectBackfill,
+                new AiBackfillJobPayload(ProfileKey: ai.FaceProfileKey),
+                idempotencyKey: $"ai-faces-detect:import:{state.RunId:N}",
+                cancellationToken: CancellationToken.None);
+            log($"admin-import: enqueued face detection job {facesJob.Id}");
+        }
+
         // Slice 93: a staging-sourced run reports its outcome back to the
         // remote-upload session (and reclaims the staging directory after a
         // FULLY successful import when cleanup is enabled).

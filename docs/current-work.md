@@ -69,6 +69,10 @@ is built is described by `ARCHITECTURE.md`.
   No service worker: every launch is the party as it is now. An invitation
   opened again goes straight into the party once everybody coming has
   arrived, and after the party always (`partyUrl` now also after).
+- Bulk import faces: a finished import (staging upload or admin import)
+  enqueues face detection over the imported photos, like an upload does; a
+  whole detection run that found faces chains one whole recognition
+  (embeddings) run. Grouping into people stays the owner's request.
 - Video colour: every picture made from a video (posters, preview strips, HLS
   renditions, AI frames) is BT.709 SDR. `VideoColorFormat` probes the stream;
   HDR (HLG, PQ) is tone-mapped with zscale/mobius at BT.2408's 203-nit white,
