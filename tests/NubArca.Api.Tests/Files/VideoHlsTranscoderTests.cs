@@ -90,6 +90,51 @@ public sealed class VideoHlsTranscoderTests : IDisposable
     }
 
     [Fact]
+    public void An_Hdr_Source_Is_Encoded_And_Tone_Mapped_In_Every_Rendition()
+    {
+        var hdr = new VideoColorFormat("yuv420p10le", "tv", "bt2020nc", "arib-std-b67", "bt2020");
+
+        // Even an H.264 source the plan would copy: its high rung must agree
+        // with the converted low one.
+        var args = FfmpegVideoHlsTranscoder.BuildArguments(Request(_tempDir, copyVideo: true), Options(), hdr);
+        var joined = string.Join(" ", args);
+
+        Assert.Contains("-c:v:0 libx264", joined);
+        Assert.DoesNotContain("-c:v:0 copy", joined);
+        var high = args[args.ToList().IndexOf("-filter:v:0") + 1];
+        var low = args[args.ToList().IndexOf("-filter:v:1") + 1];
+        // Scaled first — converting at the rendition's size, not the source's.
+        Assert.StartsWith("scale=w=", high);
+        Assert.EndsWith("," + hdr.ToBt709Filter(), high);
+        Assert.StartsWith("scale=w=", low);
+        Assert.EndsWith("," + hdr.ToBt709Filter(), low);
+    }
+
+    [Fact]
+    public void An_H264_Source_That_Is_Not_8_Bit_4_2_0_Is_Encoded_Not_Copied()
+    {
+        var args = FfmpegVideoHlsTranscoder.BuildArguments(
+            Request(_tempDir, copyVideo: true), Options(),
+            new VideoColorFormat("yuv444p", "tv", "bt709", "bt709", "bt709"));
+        var joined = string.Join(" ", args);
+
+        Assert.Contains("-c:v:0 libx264", joined);
+        Assert.DoesNotContain("zscale", joined);
+    }
+
+    [Fact]
+    public async Task The_Source_Is_Probed_And_Its_Colours_Converted()
+    {
+        var runner = new FakeDirectoryProcessRunner(new ProcessDirectoryRunResult(1, TimedOut: false));
+        var color = FixedVideoColorProbe.IphoneHdr();
+
+        await Transcoder(runner, color).TranscodeAsync(Request(_tempDir), default);
+
+        Assert.Equal(1, color.Calls);
+        Assert.Contains(runner.LastRequest!.Arguments, a => a.Contains("tonemap=tonemap=mobius"));
+    }
+
+    [Fact]
     public void Arguments_Never_Use_Shell_Interpolation_Sensitive_Master_Name()
     {
         var args = FfmpegVideoHlsTranscoder.BuildArguments(Request(_tempDir), Options());
@@ -148,10 +193,11 @@ public sealed class VideoHlsTranscoderTests : IDisposable
 
     // ---- TranscodeAsync outcome mapping ------------------------------------
 
-    private FfmpegVideoHlsTranscoder Transcoder(FakeDirectoryProcessRunner runner)
+    private FfmpegVideoHlsTranscoder Transcoder(FakeDirectoryProcessRunner runner, IVideoColorProbe? color = null)
         => new(
             Microsoft.Extensions.Options.Options.Create(Options()),
             runner,
+            color ?? FixedVideoColorProbe.Sdr(),
             NullLogger<FfmpegVideoHlsTranscoder>.Instance);
 
     [Fact]

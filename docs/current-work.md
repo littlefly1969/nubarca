@@ -61,6 +61,12 @@ is built is described by `ARCHITECTURE.md`.
   offset (photographs' wall-clock convention), the ISO 6709 location (Apple
   and Android) into owner-private GPS and the owner's map, make/model.
   `metadata video-backfill` re-probes every video below v2.
+- Video colour: every picture made from a video (posters, preview strips, HLS
+  renditions, AI frames) is BT.709 SDR. `VideoColorFormat` probes the stream;
+  HDR (HLG, PQ) is tone-mapped with zscale/mobius at BT.2408's 203-nit white,
+  Display P3/BT.2020 SDR is gamut-converted, and H.264 is copied into HLS only
+  when 8-bit 4:2:0 BT.709 SDR (transcoder v3). `media videos
+  color-regenerate` remakes what existing videos got before.
 - Party QR card: the host prints the party's public QR for its tables from
   the print settings — the twin strip's sheet and printer cut, a host's
   photograph over the code in each strip, two identical cards per sheet

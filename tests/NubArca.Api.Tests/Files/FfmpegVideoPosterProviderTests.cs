@@ -25,7 +25,8 @@ public sealed class FfmpegVideoPosterProviderTests
     private static FfmpegVideoPosterProvider BuildProvider(
         IProcessRunner runner,
         MediaOptions? opts = null,
-        MediaDerivativesOptions? derivatives = null)
+        MediaDerivativesOptions? derivatives = null,
+        IVideoColorProbe? color = null)
     {
         var options = Options.Create(opts ?? DefaultOpts);
         var derivativeOptions = Options.Create(derivatives ?? new MediaDerivativesOptions());
@@ -33,6 +34,7 @@ public sealed class FfmpegVideoPosterProviderTests
         return new FfmpegVideoPosterProvider(
             options,
             runner,
+            color ?? FixedVideoColorProbe.Sdr(),
             synthetic,
             NullLogger<FfmpegVideoPosterProvider>.Instance,
             derivativeOptions);
@@ -125,6 +127,54 @@ public sealed class FfmpegVideoPosterProviderTests
         Assert.DoesNotContain("gblur", filter);
         Assert.DoesNotContain("crop", filter);
         Assert.DoesNotContain("overlay", filter);
+    }
+
+    [Fact]
+    public async Task An_Hdr_Poster_Is_Tone_Mapped_Before_It_Is_Scaled()
+    {
+        var runner = new FakeProcessRunner(new ProcessRunResult(0, MinimalJpeg(), false));
+        var color = FixedVideoColorProbe.IphoneHdr();
+
+        var result = await BuildProvider(runner, color: color).TryGetPosterAsync(EmptyVideoFactory(), default);
+
+        Assert.Equal(VideoPosterSources.Ffmpeg, result!.Source);
+        Assert.Equal(1, color.Calls);
+        var args = runner.LastRequest!.Arguments;
+        var filter = args[args.ToList().IndexOf("-vf") + 1];
+        Assert.StartsWith("scale=trunc(iw/2)*2:trunc(ih/2)*2,zscale=tin=arib-std-b67:", filter);
+        Assert.EndsWith(",format=yuv420p,scale=1280:1280:force_original_aspect_ratio=decrease,setsar=1", filter);
+    }
+
+    [Fact]
+    public async Task Every_Frame_Of_An_Hdr_Preview_Strip_Is_Tone_Mapped()
+    {
+        var runner = new FakeProcessRunner(new ProcessRunResult(0, MinimalJpeg(), false));
+
+        await BuildProvider(runner, color: FixedVideoColorProbe.IphoneHdr())
+            .TryGetPreviewStripAsync(EmptyVideoFactory(), durationSeconds: 60, default);
+
+        var args = runner.LastRequest!.Arguments.ToList();
+        var filter = args[args.IndexOf("-filter_complex") + 1];
+        var spec = new MediaDerivativesOptions().VideoPreviewStripSize;
+        for (var index = 0; index < spec.FrameCount; index++)
+        {
+            Assert.Contains($"[{index}:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,zscale=tin=arib-std-b67:", filter);
+        }
+        Assert.Equal(spec.FrameCount, filter.Split("tonemap=tonemap=mobius").Length - 1);
+        Assert.Contains(",format=yuv420p,split=2[bg0][fg0]", filter);
+    }
+
+    [Fact]
+    public async Task An_Sdr_Poster_Keeps_Its_Plain_Filter()
+    {
+        var runner = new FakeProcessRunner(new ProcessRunResult(0, MinimalJpeg(), false));
+
+        await BuildProvider(runner).TryGetPosterAsync(EmptyVideoFactory(), default);
+
+        var args = runner.LastRequest!.Arguments;
+        Assert.Equal(
+            "scale=1280:1280:force_original_aspect_ratio=decrease,setsar=1",
+            args[args.ToList().IndexOf("-vf") + 1]);
     }
 
     [Fact]

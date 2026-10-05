@@ -23,11 +23,12 @@ public sealed class VideoSemanticFrameExtractorTests
     private const int Edge = 768;
 
     private static FfmpegVideoSemanticFrameExtractor Build(
-        IProcessRunner runner, VideoVisualEmbeddingOptions? options = null)
+        IProcessRunner runner, VideoVisualEmbeddingOptions? options = null, IVideoColorProbe? color = null)
         => new(
             Options.Create(options ?? new VideoVisualEmbeddingOptions()),
             Options.Create(new MediaOptions { FfmpegPath = "ffmpeg" }),
             runner,
+            color ?? FixedVideoColorProbe.Sdr(),
             NullLogger<FfmpegVideoSemanticFrameExtractor>.Instance);
 
     private static Func<CancellationToken, Task<Stream>> Content(byte[]? bytes = null)
@@ -96,6 +97,27 @@ public sealed class VideoSemanticFrameExtractorTests
         Assert.Equal("scale=768:768:force_original_aspect_ratio=decrease,setsar=1", filter);
         Assert.DoesNotContain("crop", filter);
         Assert.DoesNotContain("pad", filter);
+    }
+
+    [Fact]
+    public async Task Hdr_Frames_Reach_The_Model_Tone_Mapped_With_One_Probe_Per_Video()
+    {
+        var runner = new SequencedProcessRunner(
+            new ProcessRunResult(0, Jpeg, false), new ProcessRunResult(0, Jpeg, false));
+        var color = FixedVideoColorProbe.IphoneHdr();
+
+        var batch = await Build(runner, color: color).ExtractFramesAsync(
+            Content(), [Request(500), Request(1500)], Edge, default);
+
+        Assert.Equal(2, batch.Frames.Count);
+        Assert.Equal(1, color.Calls);
+        foreach (var request in runner.Requests)
+        {
+            var args = request.Arguments.ToList();
+            var filter = args[args.IndexOf("-vf") + 1];
+            Assert.StartsWith("scale=trunc(iw/2)*2:trunc(ih/2)*2,zscale=tin=arib-std-b67:", filter);
+            Assert.EndsWith($",scale={Edge}:{Edge}:force_original_aspect_ratio=decrease,setsar=1", filter);
+        }
     }
 
     [Theory]

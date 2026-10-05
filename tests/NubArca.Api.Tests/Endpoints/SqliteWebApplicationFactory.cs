@@ -377,6 +377,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton<IVideoPosterProvider>(
                 sp => sp.GetRequiredService<SyntheticVideoPosterProvider>());
             services.AddSingleton<IProcessRunner, SystemProcessRunner>();
+            services.AddSingleton<IVideoColorProbe, FfprobeVideoColorProbe>();
             services.AddSingleton<IVideoMetadataExtractor, NoopVideoMetadataExtractor>();
             // Video-hls slice 1: same defaults as the web host with
             // Media:VideoHlsProvider unset (no-op transcoder; the generation
@@ -402,6 +403,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<DerivativeDiagnosticsService>();
             services.AddScoped<MediaDerivativesBackfillService>();
             services.AddScoped<ImageRedetectionService>();
+            services.AddScoped<VideoColorRegenerationService>();
             services.AddScoped<GalleryDerivativesRegenerationService>();
             services.AddScoped<MediumPreviewRegenerationService>();
             // Slice 95: poster regeneration.

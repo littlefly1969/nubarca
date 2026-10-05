@@ -25,6 +25,7 @@ public sealed class FfmpegVideoPosterProvider : IVideoPosterProvider
 
     private readonly IOptions<MediaOptions> _options;
     private readonly IProcessRunner _runner;
+    private readonly IVideoColorProbe _color;
     private readonly SyntheticVideoPosterProvider _fallback;
     private readonly ILogger<FfmpegVideoPosterProvider> _logger;
     private readonly MediaDerivativesOptions _derivatives;
@@ -32,12 +33,14 @@ public sealed class FfmpegVideoPosterProvider : IVideoPosterProvider
     public FfmpegVideoPosterProvider(
         IOptions<MediaOptions> options,
         IProcessRunner runner,
+        IVideoColorProbe color,
         SyntheticVideoPosterProvider fallback,
         ILogger<FfmpegVideoPosterProvider> logger,
         IOptions<MediaDerivativesOptions>? derivatives = null)
     {
         _options = options;
         _runner = runner;
+        _color = color;
         _fallback = fallback;
         _logger = logger;
         _derivatives = derivatives?.Value ?? new MediaDerivativesOptions();
@@ -61,10 +64,13 @@ public sealed class FfmpegVideoPosterProvider : IVideoPosterProvider
             // square poster. No 16:9 staging and no baked-in backdrop: the client
             // draws the blurred backdrop behind a `contain` foreground, so the
             // tile can use the video's real shape (task: proportional media wall).
-            // Arguments are passed as a list — no shell interpolation.
+            // An HDR or wide-gamut frame is first made BT.709 SDR, which is
+            // what a JPEG is shown as. Arguments are passed as a list — no
+            // shell interpolation.
             var maxEdge = Math.Max(posterSize.Width, posterSize.Height);
-            var posterFilter =
-                $"scale={maxEdge}:{maxEdge}:force_original_aspect_ratio=decrease,setsar=1";
+            var color = await _color.ProbeAsync(inputFile, cancellationToken);
+            var posterFilter = color.ToBt709Then(
+                $"scale={maxEdge}:{maxEdge}:force_original_aspect_ratio=decrease,setsar=1");
             var args = new[]
             {
                 "-y",
@@ -184,6 +190,7 @@ public sealed class FfmpegVideoPosterProvider : IVideoPosterProvider
                     (0.05 + (index + 0.5) * 0.90 / stripSpec.FrameCount))
                 .ToArray();
 
+            var color = await _color.ProbeAsync(inputFile, cancellationToken);
             var args = new List<string> { "-y" };
             foreach (var timestamp in timestamps)
             {
@@ -198,7 +205,7 @@ public sealed class FfmpegVideoPosterProvider : IVideoPosterProvider
             for (var index = 0; index < stripSpec.FrameCount; index++)
             {
                 filterParts.Add(
-                    $"[{index}:v]split=2[bg{index}][fg{index}];"
+                    $"[{index}:v]{color.ToBt709Then("split=2")}[bg{index}][fg{index}];"
                     + $"[bg{index}]scale={stripSpec.FrameWidth}:{stripSpec.FrameHeight}:force_original_aspect_ratio=increase,"
                     + $"crop={stripSpec.FrameWidth}:{stripSpec.FrameHeight},gblur=sigma=10[back{index}];"
                     + $"[fg{index}]scale={stripSpec.FrameWidth}:{stripSpec.FrameHeight}:force_original_aspect_ratio=decrease[front{index}];"
