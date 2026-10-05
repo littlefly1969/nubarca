@@ -137,28 +137,42 @@ public sealed class FaceSubstrateTests
     }
 
     [Fact]
-    public async Task A_Whole_Detection_Run_That_Finds_Faces_Chains_Recognition_Once()
+    public async Task A_Whole_Library_Detection_Run_Chains_Nothing()
     {
-        // A bulk import, or an operator, runs detection over everything: the
-        // faces it finds are recognised without a second request.
+        // Catching up the whole library is an explicit operation, detection
+        // and recognition each asked for: a global run queues no second one.
         using var f = FacesEnabledFactory();
         await SeedProfilesAsync(f);
-        var (_, client) = await f.CreateAuthenticatedClientAsync("bulk@example.com");
+        var (_, client) = await f.CreateAuthenticatedClientAsync("library@example.com");
         await UploadPngAsync(client, "a.png", 48);
-        await UploadPngAsync(client, "b.png", 48);
 
         Assert.Equal(JobStatuses.Succeeded, await RunDetectWithoutFollowingEnqueuedJobsAsync(f));
 
+        using var scope = f.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.True(await db.FaceDetections.AnyAsync());
+        Assert.Equal(0, await db.BackgroundJobs.CountAsync(j => j.Type == JobTypes.AiFacesEmbeddingsBackfill));
+    }
+
+    [Fact]
+    public async Task A_Set_Of_Blobs_Is_Detected_Alone_And_Chains_Recognition_For_That_Set()
+    {
+        using var f = FacesEnabledFactory();
+        await SeedProfilesAsync(f);
+        var (_, client) = await f.CreateAuthenticatedClientAsync("set@example.com");
+        var inSet = new[] { await UploadPngAsync(client, "a.png", 48), await UploadPngAsync(client, "b.png", 49) };
+        var outside = await UploadPngAsync(client, "c.png", 50);
+
+        Guid jobId;
+        List<Guid> set;
         using (var scope = f.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var chained = await db.BackgroundJobs.SingleAsync(j => j.Type == JobTypes.AiFacesEmbeddingsBackfill);
-            Assert.Equal(JobStatuses.Queued, chained.Status);
-            Assert.StartsWith("faces:embed:after-detect:", chained.IdempotencyKey);
-            Assert.Null(System.Text.Json.JsonSerializer.Deserialize<AiBackfillJobPayload>(chained.PayloadJson)?.BlobObjectId);
-            Assert.False(await db.FaceEmbeddings.AnyAsync());
+            await db.BackgroundJobs.ExecuteDeleteAsync();
+            set = await db.FileItems.Where(x => inSet.Contains(x.Id)).Select(x => x.BlobObjectId).ToListAsync();
+            jobId = (await scope.ServiceProvider.GetRequiredService<IJobQueue>().EnqueueAsync(
+                JobTypes.AiFacesDetectBackfill, new AiBackfillJobPayload(BlobObjectIds: set))).Id;
         }
-
         for (var i = 0; i < 20; i++)
         {
             using var scope = f.Services.CreateScope();
@@ -168,6 +182,14 @@ public sealed class FaceSubstrateTests
         using (var scope = f.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var outsideBlob = await db.FileItems.Where(x => x.Id == outside).Select(x => x.BlobObjectId).SingleAsync();
+            Assert.Equal(set.OrderBy(x => x), (await db.FaceDetections.Select(d => d.BlobObjectId).Distinct().ToListAsync()).OrderBy(x => x));
+            Assert.False(await db.FaceDetections.AnyAsync(d => d.BlobObjectId == outsideBlob));
+            var chained = await db.BackgroundJobs.SingleAsync(j => j.Type == JobTypes.AiFacesEmbeddingsBackfill);
+            Assert.Equal($"faces:embed:after:{jobId:N}", chained.IdempotencyKey);
+            Assert.Equal(
+                set.OrderBy(x => x),
+                System.Text.Json.JsonSerializer.Deserialize<AiBackfillJobPayload>(chained.PayloadJson)!.BlobObjectIds!.OrderBy(x => x));
             Assert.Equal(
                 await db.FaceDetections.CountAsync(),
                 await db.FaceEmbeddings.CountAsync(e => e.EmbeddingStatus == NubArca.Api.Domain.Ai.AiArtifactStatuses.Completed));

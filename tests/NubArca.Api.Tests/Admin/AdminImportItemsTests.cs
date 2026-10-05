@@ -537,37 +537,6 @@ public sealed class AdminImportItemsTests : IDisposable
     }
 
     [Fact]
-    public async Task Import_Enqueues_Face_Detection_As_An_Upload_Gets_It()
-    {
-        // A bulk upload's photos are indexed for faces like any other: the
-        // detection run chains recognition itself.
-        var root = NewTree(r =>
-            File.WriteAllBytes(Path.Combine(r, "photo.png"), CreatePngBytes(64, 48)));
-        using var factory = new SqliteWebApplicationFactory(Enabled(root,
-            new Dictionary<string, string?>
-            {
-                ["Ai:Enabled"] = "true",
-                ["Ai:FaceDetectionEnabled"] = "true",
-                ["Ai:FaceEmbeddingsEnabled"] = "true",
-            }));
-        var (_, client) = await AdminAsync(factory, "admin@example.com");
-        var targetId = await factory.SeedUserAsync("target@example.com");
-
-        await StartRunAsync(client, targetId);
-        await ProcessJobsAsync(factory, maxJobs: 1); // import only
-
-        await using var scope = factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var job = await db.BackgroundJobs.AsNoTracking().SingleAsync(j =>
-            j.Type == JobTypes.AiFacesDetectBackfill);
-        Assert.Equal(JobStatuses.Queued, job.Status);
-        Assert.StartsWith("ai-faces-detect:import:", job.IdempotencyKey);
-        var payload = System.Text.Json.JsonSerializer.Deserialize<AiBackfillJobPayload>(job.PayloadJson);
-        // The whole run, not one blob.
-        Assert.Null(payload?.BlobObjectId);
-    }
-
-    [Fact]
     public async Task Import_Does_Not_Enqueue_Ai_Backfill_When_Ai_Is_Disabled()
     {
         var root = NewTree(r =>

@@ -74,4 +74,9 @@ public sealed class AdminImportOptions
     // batch falls back to the per-file path for exactly that batch, so unique
     // constraints remain the final authority either way.
     public int DbBatchSize { get; set; } = 100;
+
+    // How many imported photos one face-detection job covers. Each chunk is
+    // its own job, so a very large import is detected in bounded pieces and
+    // only ever its own photos.
+    public int FaceDetectionBatchSize { get; set; } = 100;
 }

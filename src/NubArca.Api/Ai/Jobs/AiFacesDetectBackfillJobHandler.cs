@@ -98,6 +98,7 @@ public sealed class AiFacesDetectBackfillJobHandler : IJobHandler
             Limit = payload.Limit,
             DryRun = payload.DryRun,
             TargetBlobObjectId = payload.BlobObjectId,
+            TargetBlobObjectIds = payload.BlobObjectIds,
         };
 
         var result = await _service.RunAsync(
@@ -131,17 +132,18 @@ public sealed class AiFacesDetectBackfillJobHandler : IJobHandler
                     cancellationToken: cancellationToken);
             }
         }
-        else if (payload.BlobObjectId is null && !payload.DryRun
+        else if (payload.BlobObjectIds is { Count: > 0 } ids && !payload.DryRun
             && result.ProducedTotal > 0 && options.FaceEmbeddingsEnabled)
         {
-            // A whole run — a bulk import's, or an operator's — chains the
-            // whole recognition backfill the same way, once, at its end: the
-            // faces it found are recognised without anybody having to ask.
+            // A bounded set — a bulk import's chunk — chains recognition for
+            // exactly the same blobs once detection is done. A blob that failed
+            // keeps its recorded status and is not retried by a rerun; the
+            // whole-library backfill stays a separate, explicit operation.
             await _jobs.EnqueueAsync(
                 JobTypes.AiFacesEmbeddingsBackfill,
-                new AiBackfillJobPayload(ProfileKey: profile.Key),
+                new AiBackfillJobPayload(ProfileKey: profile.Key, BlobObjectIds: ids),
                 priority: context.Priority,
-                idempotencyKey: $"faces:embed:after-detect:{profile.Key}",
+                idempotencyKey: $"faces:embed:after:{context.JobId:N}",
                 cancellationToken: cancellationToken);
         }
     }

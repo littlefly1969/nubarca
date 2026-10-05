@@ -59,7 +59,7 @@ public sealed class FaceDetectionBackfillService
 
         if (options.DryRun)
         {
-            var pending = await CandidateQuery(profileId, options.TargetBlobObjectId).CountAsync(cancellationToken);
+            var pending = await CandidateQuery(profileId, options.TargetBlobObjectId, options.TargetBlobObjectIds).CountAsync(cancellationToken);
             if (options.Limit is int lim && pending > lim)
             {
                 pending = lim;
@@ -100,7 +100,7 @@ public sealed class FaceDetectionBackfillService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var page = await CandidateQuery(profileId, options.TargetBlobObjectId)
+            var page = await CandidateQuery(profileId, options.TargetBlobObjectId, options.TargetBlobObjectIds)
                 .Where(b => b.Id > cursor)
                 .OrderBy(b => b.Id)
                 .Select(b => b.Id)
@@ -304,10 +304,13 @@ public sealed class FaceDetectionBackfillService
 
     // Eligible, not-yet-detected candidates: image blobs referenced by an active
     // NON-VAULT FileItem, with no terminal face-detection status for this profile.
-    private IQueryable<BlobObject> CandidateQuery(Guid profileId, Guid? targetBlobObjectId)
+    private IQueryable<BlobObject> CandidateQuery(
+        Guid profileId, Guid? targetBlobObjectId, IReadOnlyList<Guid>? targetBlobObjectIds)
     {
+        var targets = targetBlobObjectIds is { Count: > 0 } ? targetBlobObjectIds.ToList() : null;
         return _db.BlobObjects.AsNoTracking().Where(b =>
             (targetBlobObjectId == null || b.Id == targetBlobObjectId)
+            && (targets == null || targets.Contains(b.Id))
             &&
             _db.BlobMetadata.Any(m => m.BlobObjectId == b.Id && m.MediaCategory == MediaCategories.Image && m.DetectedContentType != null)
             && _db.FileItems.Any(f => f.BlobObjectId == b.Id && f.DeletedAt == null && f.MediaLibraryState == MediaLibraryState.Active)

@@ -61,7 +61,7 @@ public sealed class FaceEmbeddingBackfillService
 
         if (options.DryRun)
         {
-            var pending = await CandidateBlobQuery(profileId, options.TargetBlobObjectId).CountAsync(cancellationToken);
+            var pending = await CandidateBlobQuery(profileId, options.TargetBlobObjectId, options.TargetBlobObjectIds).CountAsync(cancellationToken);
             if (options.Limit is int lim && pending > lim)
             {
                 pending = lim;
@@ -103,7 +103,7 @@ public sealed class FaceEmbeddingBackfillService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var page = await CandidateBlobQuery(profileId, options.TargetBlobObjectId)
+            var page = await CandidateBlobQuery(profileId, options.TargetBlobObjectId, options.TargetBlobObjectIds)
                 .Where(b => b.Id > cursor)
                 .OrderBy(b => b.Id)
                 .Select(b => b.Id)
@@ -479,10 +479,13 @@ public sealed class FaceEmbeddingBackfillService
     // Blobs with >=1 pending (landmarked) face for this profile — no terminal
     // (completed/skipped) row; a prior transient FAILED row is retryable. Still
     // referenced by an active NON-VAULT FileItem.
-    private IQueryable<BlobObject> CandidateBlobQuery(Guid profileId, Guid? targetBlobObjectId)
+    private IQueryable<BlobObject> CandidateBlobQuery(
+        Guid profileId, Guid? targetBlobObjectId, IReadOnlyList<Guid>? targetBlobObjectIds)
     {
+        var targets = targetBlobObjectIds is { Count: > 0 } ? targetBlobObjectIds.ToList() : null;
         return _db.BlobObjects.AsNoTracking().Where(b =>
             (targetBlobObjectId == null || b.Id == targetBlobObjectId)
+            && (targets == null || targets.Contains(b.Id))
             &&
             _db.FileItems.Any(f => f.BlobObjectId == b.Id && f.DeletedAt == null && f.MediaLibraryState == MediaLibraryState.Active)
             && _db.FaceDetections.Any(d =>
