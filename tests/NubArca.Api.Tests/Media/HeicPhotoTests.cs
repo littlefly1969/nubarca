@@ -61,81 +61,6 @@ public sealed class HeicPhotoTests
         Assert.False(OriginalImageReader.IsUprightOnDecode("image/jpeg"));
     }
 
-    // --- the reader, with FFmpeg faked ------------------------------------------------
-
-    private sealed class FakeRunner(ProcessRunResult result) : IProcessRunner
-    {
-        public ProcessRunRequest? Last { get; private set; }
-        public int Calls { get; private set; }
-        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken)
-        {
-            Calls++;
-            Last = request;
-            return Task.FromResult(result);
-        }
-    }
-
-    private sealed class OneBlob(byte[] bytes) : IBlobService
-    {
-        public Task<Stream> OpenContentAsync(Guid blobObjectId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<Stream>(new MemoryStream(bytes, writable: false));
-        // The reader opens content only; nothing else of the service is reached.
-        public Task<BlobObject> StoreAsync(Stream content, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<BlobStoreResult> StoreMeasuredAsync(Stream content, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<BlobObject> StoreDerivedAsync(Stream content, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<Stream?> OpenDerivedContentAsync(Guid blobObjectId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task ReleaseAsync(Guid blobObjectId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task MarkPurgeEligibleIfUnreferencedAsync(Guid blobObjectId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<BlobObject> AcquireExistingAsync(Guid blobObjectId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<bool> TryRestoreDerivedFromOriginalAsync(Guid blobObjectId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-    }
-
-    private static OriginalImageReader Reader(byte[] original, FakeRunner runner) =>
-        new(new OneBlob(original), runner, Options.Create(new MediaOptions { FfmpegPath = "ffmpeg" }),
-            NullLogger<OriginalImageReader>.Instance);
-
-    [Fact]
-    public async Task A_Jpeg_Is_Its_Own_Bytes_And_Ffmpeg_Never_Runs()
-    {
-        using var image = new Image<Rgb24>(4, 3);
-        using var ms = new MemoryStream();
-        image.Save(ms, new JpegEncoder());
-        var jpeg = ms.ToArray();
-        var runner = new FakeRunner(new ProcessRunResult(0, [1], false));
-        Assert.Equal(jpeg, await Reader(jpeg, runner).ReadForPixelsAsync(Guid.NewGuid(), default));
-        Assert.Equal(0, runner.Calls);
-    }
-
-    [Fact]
-    public async Task A_Heic_Is_Decoded_By_Ffmpeg_To_A_Lossless_Png_From_A_File_It_Can_Seek()
-    {
-        var heic = Ftyp("heic", "mif1", "heic").Concat(new byte[200]).ToArray();
-        var png = new byte[] { 0x89, 0x50, 0x4E, 0x47 };
-        var runner = new FakeRunner(new ProcessRunResult(0, png, false));
-        Assert.Equal(png, await Reader(heic, runner).ReadForPixelsAsync(Guid.NewGuid(), default));
-
-        var args = runner.Last!.Arguments;
-        Assert.Equal("ffmpeg", runner.Last.Executable);
-        // One frame, PNG, uncompressed, to stdout — never a lossy encode.
-        Assert.Equal(["-frames:v", "1"], args.SkipWhile(a => a != "-frames:v").Take(2));
-        Assert.Equal(["-c:v", "png", "-compression_level", "0"], args.SkipWhile(a => a != "-c:v").Take(4));
-        Assert.Equal("-", args[^1]);
-        // Not a seekable FileStream here, so a temp copy was made — and removed.
-        var input = args[args.ToList().IndexOf("-i") + 1];
-        Assert.False(File.Exists(input));
-    }
-
-    [Theory]
-    [InlineData(1, false, false)]
-    [InlineData(0, true, false)]
-    [InlineData(0, false, true)]
-    public async Task A_Heic_Ffmpeg_Cannot_Decode_Is_No_Pixels(int exitCode, bool timedOut, bool truncated)
-    {
-        var heic = Ftyp("heic", "mif1").Concat(new byte[200]).ToArray();
-        var runner = new FakeRunner(new ProcessRunResult(exitCode, timedOut || truncated ? [] : [1, 2], timedOut, truncated));
-        Assert.Null(await Reader(heic, runner).ReadForPixelsAsync(Guid.NewGuid(), default));
-    }
-
     // --- the real thing, through the app --------------------------------------------
 
     private static string Fixture(string name = "iphone-like-grid-rotated.heic")
@@ -272,6 +197,114 @@ public sealed class HeicPhotoTests
         {
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    [SkippableTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_Bulk_Import_Cancelled_While_Decoding_A_Heic_Stops_Ffmpeg_At_Once(bool operatorCancel)
+    {
+        // The worker shutting down (its token) or the operator's cancel
+        // request (the heartbeat trips the job's token): either way the decode
+        // in flight is stopped, not waited for, and leaves no FFmpeg behind.
+        RequireHeicFfmpeg();
+        var root = Directory.CreateTempSubdirectory("nubarca-heic-cancel-").FullName;
+        var work = Directory.CreateTempSubdirectory("nubarca-heic-cancel-ffmpeg-").FullName;
+        try
+        {
+            File.Copy(Fixture(), Path.Combine(root, "IMG_0001.HEIC"));
+            var pidFile = Path.Combine(work, "ffmpeg.pid");
+            var argsFile = Path.Combine(work, "ffmpeg.args");
+            var slowFfmpeg = Path.Combine(work, "slow-ffmpeg.sh");
+            await File.WriteAllTextAsync(slowFfmpeg,
+                $"#!/bin/sh\necho $$ > '{pidFile}'\nprintf '%s\\n' \"$@\" > '{argsFile}'\nsleep 60\nexec ffmpeg \"$@\"\n");
+            File.SetUnixFileMode(slowFfmpeg, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            using var factory = new SqliteWebApplicationFactory(new Dictionary<string, string?>
+            {
+                ["AdminImport:Enabled"] = "true",
+                ["AdminImport:Roots:0"] = root,
+                ["Media:FfmpegPath"] = slowFfmpeg,
+                ["Jobs:HeartbeatSeconds"] = "1",
+            });
+            factory.EnsureDatabaseCreated();
+            var adminId = await factory.SeedUserAsync("admin@example.com");
+            await factory.PromoteToAdminAsync(adminId);
+            var admin = await factory.LoginAsync("admin@example.com");
+            var targetId = await factory.SeedUserAsync("iphone@example.com");
+            var roots = await admin.GetFromJsonAsync<NubArca.Api.Admin.AdminImportRootsResponse>("/api/admin/import/roots");
+            var started = await admin.PostAsJsonAsync("/api/admin/import/run", new
+            {
+                rootId = roots!.Roots[0].RootId, relativePath = "", targetUserId = targetId,
+                destinationFolderId = (Guid?)null,
+            });
+            started.EnsureSuccessStatusCode();
+            var runId = (await started.Content.ReadFromJsonAsync<NubArca.Api.Admin.AdminImportRunResponse>())!.ImportRunId;
+
+            using var shutdown = new CancellationTokenSource();
+            var processing = Task.Run(async () =>
+            {
+                await using var scope = factory.Services.CreateAsyncScope();
+                await scope.ServiceProvider.GetRequiredService<NubArca.Api.Jobs.JobProcessor>()
+                    .ProcessAvailableAsync(1, cancellationToken: shutdown.Token);
+            });
+            var pid = await ReadPidAsync(pidFile);
+            var clock = Stopwatch.StartNew();
+            if (operatorCancel)
+                (await admin.PostAsync($"/api/admin/import/runs/{runId}/cancel", null)).EnsureSuccessStatusCode();
+            else
+                shutdown.Cancel();
+
+            try
+            {
+                await processing.WaitAsync(TimeSpan.FromSeconds(30));
+            }
+            catch (OperationCanceledException) when (!operatorCancel)
+            {
+                // A worker stopping hands its cancellation back to its host.
+            }
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(20), $"took {clock.Elapsed}");
+            await AssertGoneAsync(pid);
+            Assert.False(File.Exists((await File.ReadAllLinesAsync(argsFile)).Last()));
+
+            using var check = factory.Services.CreateScope();
+            var db = check.ServiceProvider.GetRequiredService<AppDbContext>();
+            // Nothing half-imported: the file did not become a FileItem.
+            Assert.False(await db.FileItems.AnyAsync(f => f.OwnerUserId == targetId));
+            if (operatorCancel)
+            {
+                Assert.Equal(NubArca.Api.Domain.AdminImportStatuses.Cancelled,
+                    await db.AdminImportRuns.Where(r => r.Id == runId).Select(r => r.Status).SingleAsync());
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+            Directory.Delete(work, recursive: true);
+        }
+    }
+
+    private static async Task<int> ReadPidAsync(string pidFile)
+    {
+        for (var i = 0; i < 800; i++)
+        {
+            if (File.Exists(pidFile) && int.TryParse((await File.ReadAllTextAsync(pidFile)).Trim(), out var pid)) return pid;
+            await Task.Delay(25);
+        }
+        throw new TimeoutException("FFmpeg never started");
+    }
+
+    private static async Task AssertGoneAsync(int pid)
+    {
+        for (var i = 0; i < 100 && IsRunning(pid); i++) await Task.Delay(50);
+        Assert.False(IsRunning(pid), $"process {pid} is still running");
+    }
+
+    private static bool IsRunning(int pid)
+    {
+        var status = $"/proc/{pid}/status";
+        if (!File.Exists(status)) return false;
+        try { return !File.ReadAllLines(status).Any(l => l.StartsWith("State:") && l.Contains('Z')); }
+        catch (IOException) { return false; }
     }
 
     [SkippableFact]

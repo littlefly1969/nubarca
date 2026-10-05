@@ -42,7 +42,9 @@ public sealed class PrintPhotoSourceReader : IPrintPhotoSourceReader
         {
             // Still the original: its own bytes, or for HEIC its frame decoded
             // losslessly and upright by FFmpeg at this moment — never a preview.
-            return await _originals.ReadForPixelsAsync(blobObjectId.Value, cancellationToken);
+            // The composer takes bytes; the frame's file is gone once read.
+            await using var pixels = await _originals.OpenForPixelsAsync(blobObjectId.Value, cancellationToken);
+            return pixels is null ? null : await pixels.ReadAllBytesAsync(cancellationToken);
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException
             || (ex is InvalidOperationException && ex.Message.Contains("was not found", StringComparison.Ordinal)))

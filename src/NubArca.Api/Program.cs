@@ -913,6 +913,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // Application services that depend on AppDbContext are only registered when Postgres is configured.
     builder.Services.AddScoped<IBlobService, BlobService>();
     // The one way an original's pixels are opened (HEIC through FFmpeg).
+    builder.Services.AddSingleton<HeifDecodeGate>();
     builder.Services.AddScoped<IOriginalImageReader, OriginalImageReader>();
     builder.Services.AddScoped<IUserService, UserService>();
     // Identity & Access: the role catalogue, effective-permission resolution

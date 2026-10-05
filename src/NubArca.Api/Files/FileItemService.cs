@@ -2985,12 +2985,13 @@ public sealed class FileItemService : IFileItemService
         // assembled and the container's rotation applied.
         if (_originals is not null && await IsHeifAsync(blobObjectId, cancellationToken))
         {
-            var decoded = await _originals.ReadForPixelsAsync(blobObjectId, cancellationToken);
-            if (decoded is not null)
+            // The decoded frame's header is all that is read: its dimensions.
+            await using var pixels = await _originals.OpenForPixelsAsync(blobObjectId, cancellationToken);
+            if (pixels is { IsDecodedFrame: true })
             {
                 try
                 {
-                    var info = Image.Identify(decoded);
+                    var info = await Image.IdentifyAsync(pixels.Content, cancellationToken);
                     return new BlobImageFacts(
                         info.Width, info.Height, HeifSignature.Format, HeifSignature.ContentType, BlobMediaKind.Image);
                 }

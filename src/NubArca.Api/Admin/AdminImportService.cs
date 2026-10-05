@@ -967,13 +967,13 @@ public sealed class AdminImportService : IAdminImportService
         return chunks;
     }
 
-    private async Task<bool> IsHeifAsync(string storageKey)
+    private async Task<bool> IsHeifAsync(string storageKey, CancellationToken cancellationToken)
     {
         try
         {
-            await using var stream = await _blobStorage!.OpenReadAsync(storageKey, CancellationToken.None);
+            await using var stream = await _blobStorage!.OpenReadAsync(storageKey, cancellationToken);
             var header = new byte[HeifSignature.HeaderLength];
-            var read = await stream.ReadAtLeastAsync(header, header.Length, throwOnEndOfStream: false);
+            var read = await stream.ReadAtLeastAsync(header, header.Length, throwOnEndOfStream: false, cancellationToken);
             return HeifSignature.IsHeif(header.AsSpan(0, read));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -1317,7 +1317,26 @@ public sealed class AdminImportService : IAdminImportService
 
                 if (batching)
                 {
-                    var stagedFile = await TryStageFileAsync(item, state, timings, throttle, folderCache);
+                    StagedFile? stagedFile;
+                    try
+                    {
+                        stagedFile = await TryStageFileAsync(item, state, timings, throttle, folderCache, cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Worker shutdown or a lost lease: propagate, as before.
+                        if (!await IsJobCancelRequestedAsync(state.JobId)) throw;
+                        // The cancel request reached this file mid-read or
+                        // mid-decode (the job's token is tripped by it): stop
+                        // exactly as the between-files check does — the batch
+                        // so far is committed, this file and the rest of the
+                        // page go back to pending. Its bytes, if written,
+                        // dedup by content on a later run.
+                        await FlushStagedAsync();
+                        state.Cancelled = true;
+                        await UnclaimAfterAsync(state, pageIds, item.Ordinal - 1);
+                        return;
+                    }
                     if (stagedFile is not null)
                     {
                         staged.Add(stagedFile);
@@ -1677,7 +1696,7 @@ public sealed class AdminImportService : IAdminImportService
     // itself (skip/fail) and returns null when there is nothing to persist.
     private async Task<StagedFile?> TryStageFileAsync(
         AdminImportItem item, ImportState state, FileCreateTimings timings,
-        ImportThrottle throttle, Dictionary<string, Guid?> folderCache)
+        ImportThrottle throttle, Dictionary<string, Guid?> folderCache, CancellationToken cancellationToken)
     {
         var prepared = await TryPrepareFileAsync(item, state, folderCache);
         if (prepared is null)
@@ -1711,7 +1730,7 @@ public sealed class AdminImportService : IAdminImportService
             timings.WriteMillis += write.WriteMillis;
 
             var detectStart = Stopwatch.GetTimestamp();
-            var facts = await DetectStagedFactsAsync(write.StorageKey);
+            var facts = await DetectStagedFactsAsync(write.StorageKey, cancellationToken);
             timings.DetectMillis += (long)Stopwatch.GetElapsedTime(detectStart).TotalMilliseconds;
 
             return new StagedFile(
@@ -1742,19 +1761,24 @@ public sealed class AdminImportService : IAdminImportService
 
     // Mirror of FileItemService.TryDetectImageFactsAsync reading straight from
     // the blob store by key (the BlobObject row does not exist yet at staging
-    // time). Best-effort; any failure resolves to "no media facts".
+    // time). Best-effort; any failure resolves to "no media facts" — except a
+    // cancellation, which stops the read (and a HEIC decode) where it is.
     private async Task<(int? Width, int? Height, string? Format, string? ContentType, bool IsImage, bool IsVideo)>
-        DetectStagedFactsAsync(string storageKey)
+        DetectStagedFactsAsync(string storageKey, CancellationToken cancellationToken)
     {
         try
         {
-            await using var stream = await _blobStorage!.OpenReadAsync(storageKey, CancellationToken.None);
-            var info = await Image.IdentifyAsync(stream, CancellationToken.None);
+            await using var stream = await _blobStorage!.OpenReadAsync(storageKey, cancellationToken);
+            var info = await Image.IdentifyAsync(stream, cancellationToken);
             if (info is not null)
             {
                 var format = info.Metadata.DecodedImageFormat;
                 return (info.Width, info.Height, format?.Name, format?.DefaultMimeType, true, false);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {
@@ -1765,15 +1789,16 @@ public sealed class AdminImportService : IAdminImportService
         // upload: by its signature, and a PHOTO only when FFmpeg decodes its
         // frame — the decoded, upright dimensions. A file it cannot read stays
         // unrecognised rather than becoming a broken photograph.
-        if (_originals is not null && await IsHeifAsync(storageKey))
+        if (_originals is not null && await IsHeifAsync(storageKey, cancellationToken))
         {
-            var decoded = await _originals.ReadForPixelsAsync(
-                ct => _blobStorage!.OpenReadAsync(storageKey, ct), CancellationToken.None);
-            if (decoded is not null)
+            // The decoded frame's header is all that is read: its dimensions.
+            await using var pixels = await _originals.OpenForPixelsAsync(
+                ct => _blobStorage!.OpenReadAsync(storageKey, ct), cancellationToken);
+            if (pixels is { IsDecodedFrame: true })
             {
                 try
                 {
-                    var info = Image.Identify(decoded);
+                    var info = await Image.IdentifyAsync(pixels.Content, cancellationToken);
                     return (info.Width, info.Height, HeifSignature.Format, HeifSignature.ContentType, true, false);
                 }
                 catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException)
@@ -1788,12 +1813,16 @@ public sealed class AdminImportService : IAdminImportService
         {
             try
             {
-                await using var stream = await _blobStorage!.OpenReadAsync(storageKey, CancellationToken.None);
-                var sig = await _videoDetector.InspectAsync(stream, CancellationToken.None);
+                await using var stream = await _blobStorage!.OpenReadAsync(storageKey, cancellationToken);
+                var sig = await _videoDetector.InspectAsync(stream, cancellationToken);
                 if (sig is not null)
                 {
                     return (null, null, sig.Container, sig.ContentType, false, true);
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch
             {
