@@ -914,6 +914,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<IBlobService, BlobService>();
     // The one way an original's pixels are opened (HEIC through FFmpeg).
     builder.Services.AddSingleton<HeifDecodeGate>();
+    builder.Services.AddSingleton<IProcessFileRunner, SystemProcessRunner>();
     builder.Services.AddScoped<IOriginalImageReader, OriginalImageReader>();
     builder.Services.AddScoped<IUserService, UserService>();
     // Identity & Access: the role catalogue, effective-permission resolution

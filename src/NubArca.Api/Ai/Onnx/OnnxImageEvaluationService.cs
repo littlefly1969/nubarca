@@ -88,9 +88,9 @@ public sealed class OnnxImageEvaluationService
             attempted++;
             try
             {
-                var bytes = await ReadBlobAsync(blobId, cancellationToken);
+                await using var pixels = await ReadBlobAsync(blobId, cancellationToken);
                 var sw = Stopwatch.StartNew();
-                var result = await embedder!.EmbedImageAsync(bytes, profile, cancellationToken);
+                var result = await embedder!.EmbedImageAsync(pixels.Bytes, profile, cancellationToken);
                 sw.Stop();
                 times.Add(sw.Elapsed.TotalMilliseconds);
                 dimension = result.Dimension;
@@ -130,9 +130,9 @@ public sealed class OnnxImageEvaluationService
             return new OnnxEmbedTestResult(true, null, false, null, null, null, null);
         }
 
-        var bytes = await ReadBlobAsync(blobId.Value, cancellationToken);
+        await using var pixels = await ReadBlobAsync(blobId.Value, cancellationToken);
         var sw = Stopwatch.StartNew();
-        var result = await embedder!.EmbedImageAsync(bytes, profile!, cancellationToken);
+        var result = await embedder!.EmbedImageAsync(pixels.Bytes, profile!, cancellationToken);
         sw.Stop();
 
         double sumSq = 0;
@@ -165,8 +165,11 @@ public sealed class OnnxImageEvaluationService
             return new OnnxCompareResult(true, null, false, false, Array.Empty<OnnxSimilarItem>());
         }
 
-        var queryBytes = await ReadBlobAsync(query.BlobObjectId, cancellationToken);
-        var queryVec = (await embedder!.EmbedImageAsync(queryBytes, profile!, cancellationToken)).Vector;
+        float[] queryVec;
+        await using (var queryPixels = await ReadBlobAsync(query.BlobObjectId, cancellationToken))
+        {
+            queryVec = (await embedder!.EmbedImageAsync(queryPixels.Bytes, profile!, cancellationToken)).Vector;
+        }
 
         // Owner-scoped candidate sample: the query owner's OTHER image files.
         // Cross-owner candidates are impossible. Bounded by candidateLimit and
@@ -189,8 +192,8 @@ public sealed class OnnxImageEvaluationService
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var bytes = await ReadBlobAsync(c.BlobObjectId, cancellationToken);
-                var vec = (await embedder.EmbedImageAsync(bytes, profile!, cancellationToken)).Vector;
+                await using var pixels = await ReadBlobAsync(c.BlobObjectId, cancellationToken);
+                var vec = (await embedder.EmbedImageAsync(pixels.Bytes, profile!, cancellationToken)).Vector;
                 if (vec.Length == queryVec.Length)
                 {
                     scored.Add(new OnnxSimilarItem(c.Name, Math.Round(Cosine(queryVec, vec), 6)));
@@ -239,8 +242,9 @@ public sealed class OnnxImageEvaluationService
         orderby b.Id
         select b.Id;
 
-    private Task<byte[]> ReadBlobAsync(Guid blobId, CancellationToken cancellationToken) =>
-        OriginalPixels.ReadAsync(_blobs, _originals, blobId, cancellationToken);
+    // Held by each caller while the embedder has them: a HEIC frame keeps its decode slot.
+    private Task<OriginalPixelsBytes> ReadBlobAsync(Guid blobId, CancellationToken cancellationToken) =>
+        OriginalPixels.OpenAsync(_blobs, _originals, blobId, cancellationToken);
 
     private static double Cosine(float[] a, float[] b)
     {

@@ -310,7 +310,9 @@ public sealed class AestheticAnalysisService : IAestheticAnalysisService
             // model-specific preprocessing (official-v1 = the checkpoint's own).
             // HEIC included: its frame decoded losslessly and upright by FFmpeg
             // (OriginalImageReader) — still the original's pixels.
-            var bytes = await OriginalPixels.ReadAsync(_blobs, _originals, item.BlobObjectId, cancellationToken);
+            // Held until the sidecar has had them: a HEIC frame keeps its decode slot.
+            await using var pixels = await OriginalPixels.OpenAsync(_blobs, _originals, item.BlobObjectId, cancellationToken);
+            var bytes = pixels.Bytes;
             ImageInfo? info;
             try
             {

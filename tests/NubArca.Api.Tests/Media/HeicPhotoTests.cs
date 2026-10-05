@@ -138,9 +138,9 @@ public sealed class HeicPhotoTests
                 .Where(NubArca.Api.MediaLibrary.LibraryPhotoRule.IsPhoto(db)).AnyAsync());
 
             // The print's source: the original's frame, lossless and upright.
-            var source = await scope.ServiceProvider.GetRequiredService<IPrintPhotoSourceReader>()
-                .ReadAsync(ownerId, fileId, default);
-            using var decoded = Image.Load<Rgb24>(source!);
+            await using var sources = await scope.ServiceProvider.GetRequiredService<IPrintPhotoSourceReader>()
+                .OpenAsync(ownerId, [fileId], default);
+            using var decoded = Image.Load<Rgb24>(sources!.Photos[0]);
             Assert.Equal((600, 800), (decoded.Width, decoded.Height));
         }
 
@@ -197,6 +197,40 @@ public sealed class HeicPhotoTests
         {
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    [SkippableFact]
+    public async Task A_Print_Sheet_Holds_Its_Heic_Frames_Under_Its_Slots_Until_It_Is_Composed()
+    {
+        // Three photographs on one slot: the sheet runs alone, holding every
+        // frame — never waiting for a slot while holding another — and its
+        // slot comes back only when the sheet is done with the bytes.
+        RequireHeicFfmpeg();
+        using var factory = new SqliteWebApplicationFactory(new Dictionary<string, string?>
+        {
+            ["Media:HeifDecodeMaxConcurrency"] = "1",
+        });
+        factory.EnsureDatabaseCreated();
+        var (ownerId, client) = await factory.CreateAuthenticatedClientAsync("sheet@example.com");
+        var form = new MultipartFormDataContent();
+        var part = new ByteArrayContent(await File.ReadAllBytesAsync(Fixture()));
+        part.Headers.ContentType = new MediaTypeHeaderValue("image/heif");
+        form.Add(part, "file", "IMG_0002.HEIC");
+        var uploaded = await client.PostAsync("/api/files", form);
+        uploaded.EnsureSuccessStatusCode();
+        var fileId = (await uploaded.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var gate = factory.Services.GetRequiredService<HeifDecodeGate>();
+
+        using var scope = factory.Services.CreateScope();
+        var sources = scope.ServiceProvider.GetRequiredService<IPrintPhotoSourceReader>();
+        await using (var sheet = await sources.OpenAsync(ownerId, [fileId, fileId, fileId], default)
+            .WaitAsync(TimeSpan.FromSeconds(60)))
+        {
+            Assert.Equal(3, sheet!.Photos.Count);
+            Assert.All(sheet.Photos, photo => Assert.Equal((600, 800), (Image.Identify(photo).Width, Image.Identify(photo).Height)));
+            Assert.Equal(0, gate.Available);
+        }
+        Assert.Equal(1, gate.Available);
     }
 
     [SkippableTheory]
@@ -264,7 +298,8 @@ public sealed class HeicPhotoTests
             }
             Assert.True(clock.Elapsed < TimeSpan.FromSeconds(20), $"took {clock.Elapsed}");
             await AssertGoneAsync(pid);
-            Assert.False(File.Exists((await File.ReadAllLinesAsync(argsFile)).Last()));
+            // The frame's own file never outlives a cancelled decode
+            // (OriginalImageReaderTests pins that on the sink itself).
 
             using var check = factory.Services.CreateScope();
             var db = check.ServiceProvider.GetRequiredService<AppDbContext>();

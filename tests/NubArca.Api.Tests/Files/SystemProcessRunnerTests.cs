@@ -121,6 +121,86 @@ public sealed class SystemProcessRunnerTests : IDisposable
         Assert.Empty(result.StdoutBytes);
     }
 
+    // --- stdout streamed to a file, capped as it arrives ----------------------
+
+    private ProcessFileRunRequest ToFile(string script, long maxBytes = Limit, int timeoutSeconds = 30) =>
+        new("/bin/sh", ["-c", script], Path.Combine(_dir, $"out-{Guid.NewGuid():N}"), maxBytes, timeoutSeconds);
+
+    [SkippableTheory]
+    [InlineData(999)]
+    [InlineData(Limit)]
+    public async Task Output_Up_To_The_Limit_Is_Streamed_To_The_File_Whole(int bytes)
+    {
+        Skip.IfNot(OperatingSystem.IsLinux());
+        var request = ToFile($"head -c {bytes} /dev/zero");
+
+        var result = await _runner.RunAsync(request, default);
+
+        Assert.Equal(new ProcessFileRunResult(0, false, false, bytes), result);
+        Assert.Equal(bytes, new FileInfo(request.OutputPath).Length);
+    }
+
+    [SkippableFact]
+    public async Task One_Byte_Past_The_Limit_Stops_And_Leaves_No_File()
+    {
+        Skip.IfNot(OperatingSystem.IsLinux());
+        var request = ToFile($"head -c {Limit + 1} /dev/zero");
+
+        var result = await _runner.RunAsync(request, default);
+
+        Assert.True(result.OutputLimitExceeded);
+        Assert.False(result.TimedOut);
+        Assert.Equal(-1, result.ExitCode);
+        Assert.True(result.BytesWritten <= Limit);
+        Assert.False(File.Exists(request.OutputPath));
+    }
+
+    [SkippableFact]
+    public async Task A_Writer_That_Never_Stops_Is_Stopped_By_The_File_Cap_At_Once_With_Its_Tree()
+    {
+        Skip.IfNot(OperatingSystem.IsLinux());
+        var pidFile = Path.Combine(_dir, "file-writer.pid");
+        var request = ToFile($"yes & echo $! > '{pidFile}'; wait", maxBytes: 1024 * 1024, timeoutSeconds: 60);
+        var clock = Stopwatch.StartNew();
+
+        var result = await _runner.RunAsync(request, default);
+
+        Assert.True(result.OutputLimitExceeded);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), $"took {clock.Elapsed}");
+        Assert.False(File.Exists(request.OutputPath));
+        await AssertGoneAsync(await ReadPidAsync(pidFile));
+    }
+
+    [SkippableFact]
+    public async Task A_Cancelled_File_Run_Kills_Its_Tree_And_Deletes_The_File()
+    {
+        Skip.IfNot(OperatingSystem.IsLinux());
+        var pidFile = Path.Combine(_dir, "file-sleeper.pid");
+        var request = ToFile($"head -c 10 /dev/zero; sleep 60 & echo $! > '{pidFile}'; wait", timeoutSeconds: 120);
+        using var cancel = new CancellationTokenSource();
+
+        var run = _runner.RunAsync(request, cancel.Token);
+        var pid = await ReadPidAsync(pidFile);
+        cancel.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+        await AssertGoneAsync(pid);
+        Assert.False(File.Exists(request.OutputPath));
+    }
+
+    [SkippableFact]
+    public async Task A_File_Run_That_Times_Out_Leaves_No_File()
+    {
+        Skip.IfNot(OperatingSystem.IsLinux());
+        var request = ToFile("head -c 10 /dev/zero; sleep 30", timeoutSeconds: 1);
+
+        var result = await _runner.RunAsync(request, default);
+
+        Assert.True(result.TimedOut);
+        Assert.False(result.OutputLimitExceeded);
+        Assert.False(File.Exists(request.OutputPath));
+    }
+
     private static async Task<int> ReadPidAsync(string pidFile)
     {
         for (var i = 0; i < 200; i++)

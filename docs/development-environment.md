@@ -259,9 +259,12 @@ ImageSharp and libvips cannot read. `OriginalImageReader` is the one way an
 original's pixels are opened — by upload and bulk-import detection, thumbnails, the print
 renderers, the AI and the guest book: a JPEG/PNG/... is its own bytes, a HEIC
 is decoded by FFmpeg from the original into a lossless, upright PNG at the
-moment it is needed — a temporary file behind a lease, deleted when the lease
-is disposed, with at most `Media:HeifDecodeMaxConcurrency` (default 2) frames
-decoded and held at once (nothing stored). Its stored orientation is 1, because the
+moment it is needed — streamed from FFmpeg's stdout to a temporary file with
+`Media:HeifDecodeMaxOutputBytes` enforced as it arrives, behind a lease deleted
+when it is disposed (nothing stored). At most `Media:HeifDecodeMaxConcurrency`
+(default 2) frames are decoded and held at once; a consumer whose API takes
+bytes (the renderer, the AI, the print composer) reads them into one array
+and keeps the slot until it has finished with them. Its stored orientation is 1, because the
 container's rotation is already applied. HEIC uploaded before this was
 decoded can be recognised with `dotnet NubArca.Api.dll media images redetect
 [--dry-run] [--limit N]`, followed by `media derivatives backfill` for their

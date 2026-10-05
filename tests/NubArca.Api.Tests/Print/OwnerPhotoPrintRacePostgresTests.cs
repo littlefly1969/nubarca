@@ -163,12 +163,13 @@ public sealed class OwnerPhotoPrintRacePostgresTests : IAsyncLifetime
 
     private sealed class Sources : IPrintPhotoSourceReader
     {
-        public Task<byte[]?> ReadAsync(Guid owner, Guid fileItemId, CancellationToken c)
+        public Task<PrintPhotoSources?> OpenAsync(Guid owner, IReadOnlyList<Guid> fileItemIds, CancellationToken c)
         {
             using var image = new Image<Rgba32>(600, 400, new Rgba32(0xC9, 0x20, 0x20));
             using var ms = new MemoryStream();
             image.SaveAsJpeg(ms);
-            return Task.FromResult<byte[]?>(ms.ToArray());
+            var jpeg = ms.ToArray();
+            return Task.FromResult<PrintPhotoSources?>(new PrintPhotoSources(fileItemIds.Select(_ => jpeg).ToList()));
         }
     }
 

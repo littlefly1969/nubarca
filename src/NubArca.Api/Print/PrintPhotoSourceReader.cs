@@ -19,39 +19,90 @@ public sealed class PrintPhotoSourceReader : IPrintPhotoSourceReader
 {
     private readonly AppDbContext _db;
     private readonly IOriginalImageReader _originals;
+    private readonly HeifDecodeGate _gate;
 
-    public PrintPhotoSourceReader(AppDbContext db, IOriginalImageReader originals)
+    public PrintPhotoSourceReader(AppDbContext db, IOriginalImageReader originals, HeifDecodeGate gate)
     {
         _db = db;
         _originals = originals;
+        _gate = gate;
     }
 
-    public async Task<byte[]?> ReadAsync(
-        Guid ownerUserId, Guid fileItemId, CancellationToken cancellationToken)
+    public async Task<PrintPhotoSources?> OpenAsync(
+        Guid ownerUserId, IReadOnlyList<Guid> fileItemIds, CancellationToken cancellationToken)
     {
         // Owner-scoped: a print token belongs to one party, and that party's
         // owner is the only person whose files it may ever compose; an owner's
         // own print is their own file. A file in the trash is no source.
-        var blobObjectId = await _db.FileItems.AsNoTracking()
-            .Where(f => f.Id == fileItemId && f.OwnerUserId == ownerUserId && f.DeletedAt == null)
-            .Select(f => (Guid?)f.BlobObjectId)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (blobObjectId is null) return null;
+        var ids = fileItemIds.Distinct().ToList();
+        var blobByFile = await _db.FileItems.AsNoTracking()
+            .Where(f => ids.Contains(f.Id) && f.OwnerUserId == ownerUserId && f.DeletedAt == null)
+            .ToDictionaryAsync(f => f.Id, f => f.BlobObjectId, cancellationToken);
+        if (fileItemIds.Any(id => !blobByFile.ContainsKey(id))) return null;
+        var blobs = fileItemIds.Select(id => blobByFile[id]).ToList();
 
+        // The sheet's frames are decoded and HELD together — the composer
+        // takes them all at once — so their decode slots are taken together:
+        // as many as the sheet has frames that may need decoding (HEIC, or not
+        // yet recognised), at most all of them, never one by one while
+        // holding others.
+        var distinct = blobs.Distinct().ToList();
+        var maybeFrames = (await _db.BlobMetadata.AsNoTracking()
+                .Where(m => distinct.Contains(m.BlobObjectId)
+                    && (m.DetectedContentType == null || m.DetectedContentType == HeifSignature.ContentType))
+                .Select(m => m.BlobObjectId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+        var frames = blobs.Count(maybeFrames.Contains);
+        var slots = frames > 0 ? await _gate.EnterAsync(frames, cancellationToken) : null;
+
+        var leases = new List<OriginalPixelsLease>(blobs.Count);
+        var held = new Held(leases, slots);
         try
         {
-            // Still the original: its own bytes, or for HEIC its frame decoded
-            // losslessly and upright by FFmpeg at this moment — never a preview.
-            // The composer takes bytes; the frame's file is gone once read.
-            await using var pixels = await _originals.OpenForPixelsAsync(blobObjectId.Value, cancellationToken);
-            return pixels is null ? null : await pixels.ReadAllBytesAsync(cancellationToken);
+            var photos = new List<byte[]>(blobs.Count);
+            foreach (var blob in blobs)
+            {
+                // Still the original: its own bytes, or for HEIC its frame
+                // decoded losslessly and upright by FFmpeg — never a preview.
+                var lease = slots is null
+                    ? await _originals.OpenForPixelsAsync(blob, cancellationToken)
+                    : await _originals.OpenForPixelsAsync(blob, slots, cancellationToken);
+                if (lease is null)
+                {
+                    await held.DisposeAsync();
+                    return null;
+                }
+                leases.Add(lease);
+                photos.Add(await lease.ReadAllBytesAsync(cancellationToken));
+            }
+            return new PrintPhotoSources(photos, held);
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException
             || (ex is InvalidOperationException && ex.Message.Contains("was not found", StringComparison.Ordinal)))
         {
             // The row survived its bytes. Nothing to compose: the caller refuses
             // the source rather than printing a blank.
+            await held.DisposeAsync();
             return null;
+        }
+        catch
+        {
+            await held.DisposeAsync();
+            throw;
+        }
+    }
+
+    /// <summary>The sheet's leases, then its slots.</summary>
+    private sealed class Held(List<OriginalPixelsLease> leases, IDisposable? slots) : IAsyncDisposable
+    {
+        private int _disposed;
+
+        public async ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            foreach (var lease in leases) await lease.DisposeAsync();
+            slots?.Dispose();
         }
     }
 }

@@ -864,7 +864,7 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         {
             // The same guest's other request, with the same key, commits first.
             winner = await AcceptedTwinAsync(sheet, albumId, "k");
-            return await new FakeSources().ReadAsync(Guid.Empty, Guid.Empty, default);
+            return (await new FakeSources().OpenAsync(Guid.Empty, [Guid.Empty], default))!.Photos[0];
         }
         byte[]? GoAway()
         {
@@ -966,25 +966,35 @@ public sealed class PartyPrintSubmissionTests : IDisposable
 
     private sealed class FakeSources : IPrintPhotoSourceReader
     {
-        public Task<byte[]?> ReadAsync(Guid owner, Guid fileItemId, CancellationToken c)
+        public Task<PrintPhotoSources?> OpenAsync(Guid owner, IReadOnlyList<Guid> fileItemIds, CancellationToken c)
         {
             using var image = new Image<Rgba32>(1200, 900);
             image.Mutate(x => x.Fill(new Rgba32(0xC9, 0x76, 0x2F)));
             using var ms = new MemoryStream();
             image.SaveAsJpeg(ms);
-            return Task.FromResult<byte[]?>(ms.ToArray());
+            var jpeg = ms.ToArray();
+            return Task.FromResult<PrintPhotoSources?>(new PrintPhotoSources(fileItemIds.Select(_ => jpeg).ToList()));
         }
     }
 
     private sealed class ScriptedSources(Func<CancellationToken, Task<byte[]?>> read) : IPrintPhotoSourceReader
     {
-        public Task<byte[]?> ReadAsync(Guid owner, Guid fileItemId, CancellationToken c) => read(c);
+        public async Task<PrintPhotoSources?> OpenAsync(Guid owner, IReadOnlyList<Guid> fileItemIds, CancellationToken c)
+        {
+            var photos = new List<byte[]>();
+            foreach (var _ in fileItemIds)
+            {
+                if (await read(c) is not { } bytes) return null;
+                photos.Add(bytes);
+            }
+            return new PrintPhotoSources(photos);
+        }
     }
 
     private sealed class BrokenSources : IPrintPhotoSourceReader
     {
-        public Task<byte[]?> ReadAsync(Guid owner, Guid fileItemId, CancellationToken c) =>
-            Task.FromResult<byte[]?>([0x00, 0x01, 0x02, 0x03]);
+        public Task<PrintPhotoSources?> OpenAsync(Guid owner, IReadOnlyList<Guid> fileItemIds, CancellationToken c) =>
+            Task.FromResult<PrintPhotoSources?>(new PrintPhotoSources(fileItemIds.Select(_ => new byte[] { 0x00, 0x01, 0x02, 0x03 }).ToList()));
     }
 
     /// <summary>Accepts the artifact and remembers nothing: the store is not what
