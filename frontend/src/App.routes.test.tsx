@@ -8,10 +8,11 @@
 // Everything here runs in the anonymous auth state on purpose: ProtectedRoute
 // short-circuits before any protected page renders, so the route table can be
 // asserted without standing up ~30 pages' worth of API mocks.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { App } from './App';
-import { installFetchMock, errorResponse } from './test-utils';
+import { installFetchMock, errorResponse, jsonResponse } from './test-utils';
+import { partyAppNavigation } from './party/partyHomeScreen';
 
 function goto(path: string) {
   window.history.replaceState({}, '', path);
@@ -108,6 +109,45 @@ describe('App route table (anonymous)', () => {
     render(<App />);
     await waitFor(() => {
       expect(window.location.pathname).toBe('/party/token-abc');
+    });
+  });
+
+  // ONE PARTY, ONE APP: under a party app's own path every route is the same
+  // route, and nothing the router does leaves that path.
+  describe('inside a party app', () => {
+    const APP = '/party/app/0123456789abcdef0123456789abcdef';
+
+    afterEach(() => vi.restoreAllMocks());
+
+    it('serves the party landing route under the app\'s path, publicly, asking the API by token', async () => {
+      const { calls } = installFetchMock({ '* ': () => errorResponse(401) });
+      goto(`${APP}/party/token-abc`);
+      render(<App />);
+      await waitFor(() => {
+        expect(calls.some((c) => c.url.startsWith('/api/party/token-abc'))).toBe(true);
+      });
+      expect(window.location.pathname).toBe(`${APP}/party/token-abc`);
+      expect(calls.filter((c) => c.url.includes('/party/app/'))).toEqual([]);
+    });
+
+    it('keeps the catch-all, and the sign-in it leads to, inside the app', async () => {
+      goto(`${APP}/definitely-not-a-route`);
+      render(<App />);
+      await waitFor(() => {
+        expect(window.location.pathname).toBe(`${APP}/login`);
+      });
+    });
+
+    it('moves a party\'s own link under the app its manifest names', async () => {
+      installFetchMock({
+        'GET /api/party/token-abc/app-manifest': () => jsonResponse({ scope: `${APP}/` }),
+      });
+      const replace = vi.spyOn(partyAppNavigation, 'replace').mockImplementation(() => {});
+      goto('/party/token-abc');
+      render(<App />);
+      await waitFor(() => {
+        expect(replace).toHaveBeenCalledWith(`${APP}/party/token-abc`);
+      });
     });
   });
 

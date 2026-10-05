@@ -844,9 +844,12 @@ export function PartyPage() {
           {/* Only rendered when the backend actually returned a contribution
               URL — an album with guest uploads closed shows no dead action. */}
           {contributionUrl && (
-            <a
+            // A whole new page, as before — but through the router, so inside
+            // a party's app it stays under the app's own path.
+            <Link
+              reloadDocument
               className="party-guest-hub-cta"
-              href={contributionUrl}
+              to={contributionUrl}
               data-testid="party-hub-cta"
             >
               <span className="party-guest-hub-cta-icon">
@@ -857,7 +860,7 @@ export function PartyPage() {
                 <span>{t('partyHub.shareMomentHelp')}</span>
               </span>
               <ChevronIcon className="party-guest-hub-cta-chevron" />
-            </a>
+            </Link>
           )}
         </div>
       </header>

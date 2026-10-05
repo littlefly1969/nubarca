@@ -198,6 +198,26 @@ describe('PartyPage (public party landing)', () => {
     expect(screen.getByTestId('party-hub-cta')).toHaveAttribute('href', '/party/upload-token/upload');
   });
 
+  it('keeps the way to contribute inside the party\'s own app', async () => {
+    const app = '/party/app/0123456789abcdef0123456789abcdef';
+    installFetchMock({
+      'GET /api/party/tok-1': () => jsonResponse(context()),
+      'GET /api/party/tok-1/items': () => jsonResponse(items),
+    });
+    render(
+      <I18nProvider>
+        <MemoryRouter basename={app} initialEntries={[`${app}/party/tok-1`]}>
+          <Routes>
+            <Route path="/party/:token" element={<PartyPage />} />
+          </Routes>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+    // Under the app's path, so the installed app never hands the guest to the
+    // browser to upload. (The dock's way in: PartyGuestDock.test.tsx.)
+    expect(await screen.findByTestId('party-hub-cta')).toHaveAttribute('href', `${app}/party/upload-token/upload`);
+  });
+
   it('shows NO contribution CTA when the backend returns no contribution URL', async () => {
     installFetchMock({
       'GET /api/party/tok-1': () => jsonResponse(context({ contributionUrl: null })),

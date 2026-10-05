@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
-import { PartyAppHead } from './party/partyHomeScreen';
+import { PartyAppCanonical, PartyAppHead, partyAppBasename } from './party/partyHomeScreen';
 import { I18nProvider } from './i18n';
 import { ThemeProvider } from './theme';
 import { AuthProvider } from './auth/AuthProvider';
@@ -59,11 +60,16 @@ import { PartyGuestbookPublicPage } from './pages/PartyGuestbookPublicPage';
 import { BeautyLabUploadPage } from './pages/BeautyLabUploadPage';
 
 export function App() {
+  // Inside a party's app (/party/app/<key>/…) every route is the same route,
+  // under the app's own path: its scope, which no other party's app shares.
+  // Fixed for the document's lifetime, as the manifest the bootstrap chose is.
+  const [partyAppBase] = useState(() => partyAppBasename(window.location.pathname));
   return (
-    <BrowserRouter>
+    <PartyAppCanonical basename={partyAppBase}>
+    <BrowserRouter basename={partyAppBase}>
       {/* A party's page is the party's app, chosen from the address alone —
           first by the bootstrap in index.html, then on every navigation. */}
-      <PartyAppHead />
+      <PartyAppHead basename={partyAppBase} />
       {/* The theme is already painted by the bootstrap in index.html; this
           provider takes ownership of the same value without changing it. */}
       <ThemeProvider>
@@ -358,5 +364,6 @@ export function App() {
       </I18nProvider>
       </ThemeProvider>
     </BrowserRouter>
+    </PartyAppCanonical>
   );
 }

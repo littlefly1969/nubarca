@@ -8,33 +8,34 @@ using SixLabors.ImageSharp.Processing;
 namespace NubArca.Api.Party;
 
 /// <summary>
-/// A party on a guest's home screen: the web app manifest of one party link and
-/// the icon drawn from the party's cover.
+/// A party on a guest's home screen: the web app manifest of one party and the
+/// icon drawn from the party's cover.
 ///
-/// <para>The app opens the link it was added from — the party's public page or
-/// a group's personal invitation — and nothing else: no permission rides on it
-/// that the link itself does not carry, and nothing about it is stored. Every
-/// launch asks the server for the party as it is now; there is no service
-/// worker and no cached page to show yesterday's party.</para>
+/// <para>ONE PARTY, ONE APP, ITS OWN SCOPE. Every party's app lives under its
+/// own canonical path, <c>/party/app/&lt;key&gt;/</c>, the key a one-way digest
+/// of the party's id: that path is the app's id and its scope. Scopes of two
+/// parties never overlap, so installing one party never claims another's
+/// links — Android hands a link to the installed app whose scope contains it,
+/// and judges "already installed" by it too, which is why a scope of all of
+/// <c>/party/</c> made every party after the first look installed.</para>
 ///
-/// <para>Its scope is every party page, so an invitation leads into its party
-/// inside the same app window — and, on an iPhone, in the same storage, where
-/// the guest's anonymous party cookie lives.</para>
+/// <para>The id authorises nothing: no link's token is in it, it survives a
+/// link rotated or revoked, and it is the same for the party's page and every
+/// invitation to it — they are one app, whose pages (the invitation leading
+/// into the party included) all stay inside its scope. The START URL carries
+/// the link the app was added from, under the canonical path
+/// (<c>&lt;scope&gt;party/&lt;token&gt;</c> or
+/// <c>&lt;scope&gt;party/invite/&lt;token&gt;</c>), because relaunching needs
+/// it: an invitation keeps no session of its own, and a party's page is opened
+/// by its own link.</para>
 ///
-/// <para>Its IDENTITY is the party's, never a link's: a link's token is a
-/// capability, and an app id must authorise nothing, survive a link rotated or
-/// revoked, and be the same for every invitation to one party. Two parties on
-/// one phone are two apps; a party's public page and its invitations are two
-/// apps of that party (one opens the party, the other the group's
-/// invitation). The START URL keeps the token, because relaunching needs it:
-/// an invitation keeps no session of its own, and a party's page is opened by
-/// its own link.</para>
+/// <para>The app opens the link and nothing else: no permission rides on it
+/// that the link does not carry, and nothing about it is stored. There is no
+/// service worker and no cached page to show yesterday's party.</para>
 /// </summary>
 public static class PartyHomeScreenApp
 {
     public const string ManifestContentType = "application/manifest+json";
-
-    private const string Scope = "/party/";
 
     // The party pages' own fixed dark surface, and the product's.
     private const string Background = "#0a0f1a";
@@ -42,23 +43,30 @@ public static class PartyHomeScreenApp
     public static bool IsIconSize(int size) => size is 192 or 512;
 
     /// <summary>
-    /// The app's stable, non-authorising identity: a one-way digest of the
-    /// party's id — the same for every link and every invitation to it.
+    /// The party's app: its stable, non-authorising identity — a one-way
+    /// digest of the party's id — which is also the root of its scope.
     /// </summary>
-    public static string AppId(Guid partyId, bool invitation)
+    public static string AppPath(Guid partyId)
     {
         var digest = SHA256.HashData(Encoding.UTF8.GetBytes($"nubarca-party-app:{partyId:N}"));
-        var key = Convert.ToHexStringLower(digest)[..32];
-        return invitation ? $"/party/app/{key}/invitation" : $"/party/app/{key}";
+        return "/party/app/" + Convert.ToHexStringLower(digest)[..32];
     }
 
+    /// <summary>The app's scope: its own path, and nothing of any other party's.</summary>
+    public static string Scope(Guid partyId) => AppPath(partyId) + "/";
+
     /// <summary>
-    /// The manifest of the app <paramref name="appId"/> that opens
-    /// <paramref name="startPath"/>, named after the party, with icons on
-    /// <paramref name="iconBase"/>. The party's version is the icons' cache
-    /// key: choosing a new cover spends one.
+    /// The link the app was added from, under its canonical path:
+    /// <paramref name="linkPath"/> is the link's own path (<c>/party/&lt;token&gt;</c>).
     /// </summary>
-    public static string Manifest(string appId, string startPath, string title, string iconBase, int version)
+    public static string StartUrl(Guid partyId, string linkPath) => AppPath(partyId) + linkPath;
+
+    /// <summary>
+    /// The manifest of the party's app, opening <paramref name="linkPath"/>,
+    /// named after the party, with icons on <paramref name="iconBase"/>. The
+    /// party's version is the icons' cache key: choosing a new cover spends one.
+    /// </summary>
+    public static string Manifest(Guid partyId, string linkPath, string title, string iconBase, int version)
     {
         JsonObject Icon(int size, bool maskable) => new()
         {
@@ -69,11 +77,11 @@ public static class PartyHomeScreenApp
         };
         return new JsonObject
         {
-            ["id"] = appId,
+            ["id"] = AppPath(partyId),
             ["name"] = title,
             ["short_name"] = title,
-            ["start_url"] = startPath,
-            ["scope"] = Scope,
+            ["start_url"] = StartUrl(partyId, linkPath),
+            ["scope"] = Scope(partyId),
             ["display"] = "standalone",
             ["background_color"] = Background,
             ["theme_color"] = Background,

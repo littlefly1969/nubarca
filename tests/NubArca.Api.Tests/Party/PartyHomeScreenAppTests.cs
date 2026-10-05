@@ -41,14 +41,14 @@ public sealed class PartyHomeScreenAppTests : IDisposable
         var manifest = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("50 anni di \"Cesare\"", manifest.GetProperty("name").GetString());
         Assert.Equal("50 anni di \"Cesare\"", manifest.GetProperty("short_name").GetString());
-        Assert.Equal($"/party/{party.Token}", manifest.GetProperty("start_url").GetString());
-        // The app's identity is the party's, never the link's token.
+        // The app's identity is the party's, never the link's token; its scope
+        // is its own path; it starts on the link, under that path.
         var id = manifest.GetProperty("id").GetString()!;
         Assert.Matches("^/party/app/[0-9a-f]{32}$", id);
         Assert.DoesNotContain(party.Token, id);
-        Assert.Equal(NubArca.Api.Party.PartyHomeScreenApp.AppId(party.PartyId, invitation: false), id);
-        // Every party page: an invitation's "Entra nel Party" stays in the app.
-        Assert.Equal("/party/", manifest.GetProperty("scope").GetString());
+        Assert.Equal(NubArca.Api.Party.PartyHomeScreenApp.AppPath(party.PartyId), id);
+        Assert.Equal(id + "/", manifest.GetProperty("scope").GetString());
+        Assert.Equal($"{id}/party/{party.Token}", manifest.GetProperty("start_url").GetString());
         Assert.Equal("standalone", manifest.GetProperty("display").GetString());
         var version = await VersionAsync(party);
         Assert.Equal(
@@ -120,13 +120,14 @@ public sealed class PartyHomeScreenAppTests : IDisposable
 
         var manifest = await client.GetFromJsonAsync<JsonElement>($"/api/party-invitations/{token}/app-manifest");
         Assert.Equal("Matrimonio di Marta", manifest.GetProperty("name").GetString());
-        // Relaunching needs the invitation's token — it keeps no session — so
-        // the start URL carries it; the app's identity never does.
-        Assert.Equal($"/party/invite/{token}", manifest.GetProperty("start_url").GetString());
+        // The party's own app — same identity, same scope — starting on this
+        // invitation: relaunching needs its token (it keeps no session), the
+        // identity never carries it.
         var id = manifest.GetProperty("id").GetString()!;
-        Assert.Matches("^/party/app/[0-9a-f]{32}/invitation$", id);
+        Assert.Equal(NubArca.Api.Party.PartyHomeScreenApp.AppPath(party.PartyId), id);
         Assert.DoesNotContain(token, id);
-        Assert.Equal("/party/", manifest.GetProperty("scope").GetString());
+        Assert.Equal(id + "/", manifest.GetProperty("scope").GetString());
+        Assert.Equal($"{id}/party/invite/{token}", manifest.GetProperty("start_url").GetString());
         // Never the guest's own name: the app is the party's.
         Assert.DoesNotContain("Sara", manifest.GetRawText());
 
@@ -140,28 +141,79 @@ public sealed class PartyHomeScreenAppTests : IDisposable
     }
 
     [Fact]
-    public async Task Two_Invitations_To_One_Party_Are_One_App_And_Another_Party_Is_Another()
+    public async Task Two_Parties_Are_Two_Apps_Whose_Scopes_Never_Claim_Each_Others_Links()
+    {
+        // Android hands a link to the installed app whose scope contains it,
+        // and judges "already installed" by it: party A's app must not contain
+        // a single page of party B — its public page or any invitation to it.
+        var a = await SeedPartyAsync();
+        var b = await SeedPartyAsync();
+        var inviteA = await InviteTokenAsync(a, "Sara");
+        var inviteB = await InviteTokenAsync(b, "Luca");
+        var client = _factory.CreateClient();
+        async Task<(string Id, string Scope, string Start)> AppAsync(string url)
+        {
+            var m = await client.GetFromJsonAsync<JsonElement>(url);
+            return (m.GetProperty("id").GetString()!, m.GetProperty("scope").GetString()!, m.GetProperty("start_url").GetString()!);
+        }
+
+        var partyA = await AppAsync($"/api/party/{a.Token}/app-manifest");
+        var invitationA = await AppAsync($"/api/party-invitations/{inviteA}/app-manifest");
+        var partyB = await AppAsync($"/api/party/{b.Token}/app-manifest");
+        var invitationB = await AppAsync($"/api/party-invitations/{inviteB}/app-manifest");
+
+        Assert.NotEqual(partyA.Id, partyB.Id);
+        Assert.NotEqual(partyA.Scope, partyB.Scope);
+        foreach (var (app, own, other) in new[]
+        {
+            (partyA, partyA.Scope, partyB.Scope), (invitationA, partyA.Scope, partyB.Scope),
+            (partyB, partyB.Scope, partyA.Scope), (invitationB, partyB.Scope, partyA.Scope),
+        })
+        {
+            Assert.Equal(own, app.Scope);
+            Assert.True(InScope(app.Start, own), $"{app.Start} outside its own scope");
+            Assert.False(InScope(app.Start, other), $"{app.Start} inside another party's scope");
+            // Never the whole of /party/: one installed party would claim them all.
+            Assert.NotEqual("/party/", app.Scope);
+            Assert.Matches("^/party/app/[0-9a-f]{32}/$", app.Scope);
+        }
+        // Neither scope contains the other.
+        Assert.False(InScope(partyA.Scope, partyB.Scope));
+        Assert.False(InScope(partyB.Scope, partyA.Scope));
+        // A party's page and its invitations: one app — the invitation leading
+        // into the party stays inside it.
+        Assert.Equal(partyA.Id, invitationA.Id);
+        Assert.Equal(partyB.Id, invitationB.Id);
+        // The legacy links the guests hold (QR, WhatsApp) belong to no app's
+        // scope: opened in a browser, they are never another party's.
+        Assert.False(InScope($"/party/{b.Token}", partyA.Scope));
+        Assert.False(InScope($"/party/invite/{inviteB}", partyA.Scope));
+    }
+
+    [Fact]
+    public async Task Two_Invitations_To_One_Party_Are_One_App()
     {
         var party = await SeedPartyAsync();
         var sara = await InviteTokenAsync(party, "Sara");
         var luca = await InviteTokenAsync(party, "Luca");
-        var other = await SeedPartyAsync();
         var client = _factory.CreateClient();
+        async Task<JsonElement> ManifestAsync(string url) => await client.GetFromJsonAsync<JsonElement>(url);
 
-        async Task<string> IdAsync(string url) =>
-            (await client.GetFromJsonAsync<JsonElement>(url)).GetProperty("id").GetString()!;
+        var first = await ManifestAsync($"/api/party-invitations/{sara}/app-manifest");
+        var second = await ManifestAsync($"/api/party-invitations/{luca}/app-manifest");
 
-        var saraApp = await IdAsync($"/api/party-invitations/{sara}/app-manifest");
-        Assert.Equal(saraApp, await IdAsync($"/api/party-invitations/{luca}/app-manifest"));
+        Assert.Equal(first.GetProperty("id").GetString(), second.GetProperty("id").GetString());
+        Assert.Equal(first.GetProperty("scope").GetString(), second.GetProperty("scope").GetString());
         // Stable: asked again, the same.
-        Assert.Equal(saraApp, await IdAsync($"/api/party-invitations/{sara}/app-manifest"));
-        // The party's page and its invitations: two apps of the same party.
-        var partyApp = await IdAsync($"/api/party/{party.Token}/app-manifest");
-        Assert.NotEqual(saraApp, partyApp);
-        Assert.StartsWith(partyApp + "/", saraApp);
-        // Another party: another app.
-        Assert.NotEqual(partyApp, await IdAsync($"/api/party/{other.Token}/app-manifest"));
+        Assert.Equal(first.GetProperty("id").GetString(),
+            (await ManifestAsync($"/api/party-invitations/{sara}/app-manifest")).GetProperty("id").GetString());
+        // Each starts on its own group's invitation.
+        Assert.EndsWith($"/party/invite/{sara}", first.GetProperty("start_url").GetString());
+        Assert.EndsWith($"/party/invite/{luca}", second.GetProperty("start_url").GetString());
     }
+
+    /// <summary>A manifest scope's path-prefix rule.</summary>
+    private static bool InScope(string url, string scope) => url.StartsWith(scope, StringComparison.Ordinal);
 
     [Fact]
     public async Task After_The_Party_An_Invitation_Still_Leads_Into_It()

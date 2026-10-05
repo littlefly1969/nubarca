@@ -504,8 +504,7 @@ public static class PartyInvitationEndpoints
             var enc = Uri.EscapeDataString(token);
             return Results.Text(
                 PartyHomeScreenApp.Manifest(
-                    PartyHomeScreenApp.AppId(access!.PartyId, invitation: true),
-                    PartyInvitationTokens.InvitationPath(enc), party.Title,
+                    access!.PartyId, PartyInvitationTokens.InvitationPath(enc), party.Title,
                     $"/api/party-invitations/{enc}/app-icon", party.Version),
                 PartyHomeScreenApp.ManifestContentType);
         }).WithName("GetPartyInvitationAppManifest").RequireRateLimiting(PartyPublicRateLimitPolicy);

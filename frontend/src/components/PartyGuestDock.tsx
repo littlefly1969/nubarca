@@ -1,3 +1,4 @@
+import { Link } from 'react-router';
 import { useI18n } from '../i18n';
 
 // The guest's persistent navigation, once they have left the cover behind.
@@ -143,14 +144,15 @@ export function PartyGuestDock({
             finding your face are deliberately never here: the dock is
             NAVIGATION, and the deck is where actions live. */}
         {contributionUrl && (
-          <a
+          <Link
+            reloadDocument
             className="party-guest-dock-share"
             data-testid="party-dock-share"
-            href={contributionUrl}
+            to={contributionUrl}
           >
             <CameraPlusIcon />
             <span>{t('partyDock.share')}</span>
-          </a>
+          </Link>
         )}
       </div>
     </nav>
