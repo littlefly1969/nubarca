@@ -105,10 +105,12 @@ describe('document head', () => {
     expect(INDEX_HTML).toContain('content="#0a0f1a"');
   });
 
-  it('links a favicon, an apple touch icon and the manifest', () => {
+  it('links a favicon, and has the bootstrap create the apple touch icon and the manifest', () => {
     expect(INDEX_HTML).toContain('href="/brand/favicon.ico"');
-    expect(INDEX_HTML).toContain('rel="apple-touch-icon"');
-    expect(INDEX_HTML).toContain('href="/manifest.webmanifest"');
+    // Created by the party app bootstrap — the product's on every page that is
+    // not a party's (src/party/partyAppBootstrap.test.tsx runs it).
+    expect(INDEX_HTML).toContain("'/brand/nubarca-apple-touch-icon-180.png'");
+    expect(INDEX_HTML).toContain("'/manifest.webmanifest'");
   });
 });
 

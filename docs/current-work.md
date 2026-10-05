@@ -56,10 +56,14 @@ is built is described by `ARCHITECTURE.md`.
 - HEIC photos: recognised by signature and decoded by FFmpeg through
   `OriginalImageReader` (upload, bulk import, thumbnails, print from the original, SigLIP,
   faces, guest book, aesthetics); stored upright with orientation 1;
-  `media images redetect` recognises the ones uploaded before. The frame is a
-  temporary PNG file behind a lease (deleted on dispose, output limit checked
-  on the file), at most `Media:HeifDecodeMaxConcurrency` (2) at once,
-  cancellable down to FFmpeg; detection reads only its header.
+  `media images redetect` recognises the ones uploaded before. The frame is
+  streamed from FFmpeg's stdout to a temporary PNG file with
+  `HeifDecodeMaxOutputBytes` enforced as it arrives (one byte past it kills
+  the process tree and deletes the file), behind a lease deleted on dispose.
+  At most `Media:HeifDecodeMaxConcurrency` (2) frames are decoded and held at
+  once — a byte-taking consumer (renderer, AI, print) keeps the slot until it
+  has finished with its one array; a print sheet takes its slots together.
+  Cancellable down to FFmpeg; detection reads only the frame's header.
 - Video capture metadata (extractor v2): Apple's local creation date with its
   offset (photographs' wall-clock convention), the ISO 6709 location (Apple
   and Android) into owner-private GPS and the owner's map, make/model.
@@ -69,8 +73,10 @@ is built is described by `ARCHITECTURE.md`.
   `/api/party-invitations/{token}/app-manifest`: party title, scope `/party/`,
   `id` = a digest of the party (never a token; the invitation app is
   `<id>/invitation`), `start_url` = the link, icon = the cover the page opens
-  on, product icon otherwise). Which app is chosen from the address alone, by
-  a bootstrap script in index.html and `<PartyAppHead />`. They offer
+  on, product icon otherwise). Which app is chosen from the address alone: the
+  bootstrap script in index.html CREATES the manifest and icon links with
+  their final addresses (index.html has no static manifest link), and
+  `<PartyAppHead />` keeps them in step on navigation. They offer
   "Installa" (Android's own dialog, or Share → Add to Home Screen steps).
   No service worker: every launch is the party as it is now. An invitation
   opened again goes straight into the party once everybody coming has
