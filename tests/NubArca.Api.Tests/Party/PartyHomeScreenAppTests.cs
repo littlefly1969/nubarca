@@ -42,7 +42,11 @@ public sealed class PartyHomeScreenAppTests : IDisposable
         Assert.Equal("50 anni di \"Cesare\"", manifest.GetProperty("name").GetString());
         Assert.Equal("50 anni di \"Cesare\"", manifest.GetProperty("short_name").GetString());
         Assert.Equal($"/party/{party.Token}", manifest.GetProperty("start_url").GetString());
-        Assert.Equal($"/party/{party.Token}", manifest.GetProperty("id").GetString());
+        // The app's identity is the party's, never the link's token.
+        var id = manifest.GetProperty("id").GetString()!;
+        Assert.Matches("^/party/app/[0-9a-f]{32}$", id);
+        Assert.DoesNotContain(party.Token, id);
+        Assert.Equal(NubArca.Api.Party.PartyHomeScreenApp.AppId(party.PartyId, invitation: false), id);
         // Every party page: an invitation's "Entra nel Party" stays in the app.
         Assert.Equal("/party/", manifest.GetProperty("scope").GetString());
         Assert.Equal("standalone", manifest.GetProperty("display").GetString());
@@ -116,8 +120,12 @@ public sealed class PartyHomeScreenAppTests : IDisposable
 
         var manifest = await client.GetFromJsonAsync<JsonElement>($"/api/party-invitations/{token}/app-manifest");
         Assert.Equal("Matrimonio di Marta", manifest.GetProperty("name").GetString());
+        // Relaunching needs the invitation's token — it keeps no session — so
+        // the start URL carries it; the app's identity never does.
         Assert.Equal($"/party/invite/{token}", manifest.GetProperty("start_url").GetString());
-        Assert.Equal($"/party/invite/{token}", manifest.GetProperty("id").GetString());
+        var id = manifest.GetProperty("id").GetString()!;
+        Assert.Matches("^/party/app/[0-9a-f]{32}/invitation$", id);
+        Assert.DoesNotContain(token, id);
         Assert.Equal("/party/", manifest.GetProperty("scope").GetString());
         // Never the guest's own name: the app is the party's.
         Assert.DoesNotContain("Sara", manifest.GetRawText());
@@ -129,6 +137,30 @@ public sealed class PartyHomeScreenAppTests : IDisposable
         using var icon = Image.Load(await response.Content.ReadAsByteArrayAsync());
         Assert.Equal(512, icon.Width);
         Assert.Equal(512, icon.Height);
+    }
+
+    [Fact]
+    public async Task Two_Invitations_To_One_Party_Are_One_App_And_Another_Party_Is_Another()
+    {
+        var party = await SeedPartyAsync();
+        var sara = await InviteTokenAsync(party, "Sara");
+        var luca = await InviteTokenAsync(party, "Luca");
+        var other = await SeedPartyAsync();
+        var client = _factory.CreateClient();
+
+        async Task<string> IdAsync(string url) =>
+            (await client.GetFromJsonAsync<JsonElement>(url)).GetProperty("id").GetString()!;
+
+        var saraApp = await IdAsync($"/api/party-invitations/{sara}/app-manifest");
+        Assert.Equal(saraApp, await IdAsync($"/api/party-invitations/{luca}/app-manifest"));
+        // Stable: asked again, the same.
+        Assert.Equal(saraApp, await IdAsync($"/api/party-invitations/{sara}/app-manifest"));
+        // The party's page and its invitations: two apps of the same party.
+        var partyApp = await IdAsync($"/api/party/{party.Token}/app-manifest");
+        Assert.NotEqual(saraApp, partyApp);
+        Assert.StartsWith(partyApp + "/", saraApp);
+        // Another party: another app.
+        Assert.NotEqual(partyApp, await IdAsync($"/api/party/{other.Token}/app-manifest"));
     }
 
     [Fact]

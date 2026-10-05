@@ -1,62 +1,73 @@
 import { useEffect, useSyncExternalStore } from 'react';
+import { useLocation } from 'react-router';
 
 // A PARTY ON THE HOME SCREEN.
 //
-// The page in front of the guest declares itself as the app of its own link:
-// the party's manifest (named after the party, its cover as the icon, opening
-// this very link) replaces the product's, and the iPhone's own tags follow.
-// Leaving the page puts the product's back. Nothing is cached: the app opens
-// the link, and the link asks the server for the party as it is now.
+// A party's page is the party's own app: its manifest (named after the party,
+// its cover as the icon, opening this very link) stands in for the product's,
+// and the iPhone's own tags follow. WHICH app is decided from the ADDRESS
+// ALONE — at bootstrap by the script in index.html, before any manifest is
+// read, and on in-app navigation by <PartyAppHead /> with the same rules —
+// never after a fetch: a browser may judge a page installable before React
+// has run. Only the title waits for the party to load. Nothing is cached: the
+// app opens the link, and the link asks the server for the party as it is now.
 //
 // Android's browsers offer to install a page whose manifest qualifies, through
 // an event that comes once and early; it is caught here, at module load, so the
 // button can use it whenever the guest asks. An iPhone has no such thing: the
 // button there explains Share → Add to Home Screen.
 
-/** The party's app, as the page in front of the guest declares it. */
-export interface PartyHomeScreenApp {
+export interface PartyAppHeadLinks {
   manifestUrl: string;
   iconUrl: string;
-  title: string;
 }
 
-export function partyAppFor(token: string, title: string): PartyHomeScreenApp {
+/** The product's own app: every page that is not a party's. */
+export const PRODUCT_APP: PartyAppHeadLinks = {
+  manifestUrl: '/manifest.webmanifest',
+  iconUrl: '/brand/nubarca-apple-touch-icon-180.png',
+};
+
+/**
+ * The party app a page's address belongs to, or null. Only a party's own page
+ * (/party/<token>) and a personal invitation (/party/invite/<token>): the
+ * party's other pages carry other capabilities' tokens. KEEP IN STEP with the
+ * party app bootstrap in index.html — partyAppBootstrap.test.ts holds the two
+ * to one table.
+ */
+export function partyAppForPath(pathname: string): PartyAppHeadLinks | null {
+  const match = /^\/party\/(?:(invite)\/)?([A-Za-z0-9_-]+)\/?$/.exec(pathname);
+  if (!match) return null;
+  const [, invite, token] = match;
+  if (!invite && (token === 'crew' || token === 'invite')) return null;
+  const base = invite ? '/api/party-invitations/' : '/api/party/';
   const enc = encodeURIComponent(token);
-  return {
-    manifestUrl: `/api/party/${enc}/app-manifest`,
-    iconUrl: `/api/party/${enc}/app-icon/192`,
-    title,
-  };
+  return { manifestUrl: `${base}${enc}/app-manifest`, iconUrl: `${base}${enc}/app-icon/192` };
 }
 
-export function invitationAppFor(token: string, title: string): PartyHomeScreenApp {
-  const enc = encodeURIComponent(token);
-  return {
-    manifestUrl: `/api/party-invitations/${enc}/app-manifest`,
-    iconUrl: `/api/party-invitations/${enc}/app-icon/192`,
-    title,
-  };
-}
-
-/** The head of the document while `app` is the page: restored as it was afterwards. */
-export function usePartyHomeScreen(app: PartyHomeScreenApp | null): void {
-  const manifestUrl = app?.manifestUrl;
-  const iconUrl = app?.iconUrl;
-  const title = app?.title;
+/** Keeps the document's app in step with in-app navigation — from the address alone. */
+export function PartyAppHead(): null {
+  const { pathname } = useLocation();
   useEffect(() => {
-    if (!manifestUrl || !iconUrl || !title) return undefined;
-    const restore = [
-      setHead('link[rel="manifest"]', 'href', manifestUrl),
-      setHead('link[rel="apple-touch-icon"]', 'href', iconUrl),
-      setHead('meta[name="apple-mobile-web-app-title"]', 'content', title),
-    ];
+    const app = partyAppForPath(pathname) ?? PRODUCT_APP;
+    setHead('link[rel="manifest"]', 'href', app.manifestUrl);
+    setHead('link[rel="apple-touch-icon"]', 'href', app.iconUrl);
+  }, [pathname]);
+  return null;
+}
+
+/** The party's name as the page's and the home-screen app's title, once the party has loaded. */
+export function usePartyHomeScreen(title: string | null): void {
+  useEffect(() => {
+    if (!title) return undefined;
+    const restore = setHead('meta[name="apple-mobile-web-app-title"]', 'content', title);
     const previousTitle = document.title;
     document.title = title;
     return () => {
       document.title = previousTitle;
-      restore.forEach((undo) => undo());
+      restore();
     };
-  }, [manifestUrl, iconUrl, title]);
+  }, [title]);
 }
 
 function setHead(selector: string, attribute: string, value: string): () => void {
