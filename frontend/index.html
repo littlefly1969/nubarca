@@ -113,17 +113,26 @@
       // judging the page installable never sees another app's manifest first.
       // Which app is decided from the address alone. It mirrors, verbatim,
       // partyAppForPath and PRODUCT_APP in src/party/partyHomeScreen.ts:
+      //   * a party's app lives under /party/app/<32 hex>/; that prefix is set
+      //     aside and the rest of the address read as below
       //   * /party/<token>         => /api/party/<token>/app-manifest
       //   * /party/invite/<token>  => /api/party-invitations/<token>/app-manifest
-      //   * a token is [A-Za-z0-9_-]+, 'crew' and 'invite' are not tokens, and
+      //   * a token is [A-Za-z0-9_-]+, 'crew', 'invite' and 'app' are not tokens, and
       //     nothing may follow it but one slash
+      //   * any other page of a party's app => no manifest at all
       //   * any other page         => /manifest.webmanifest (the product's)
       // <PartyAppHead /> keeps the same choice on in-app navigation.
       (function () {
         var manifest = '/manifest.webmanifest';
         var icon = '/brand/nubarca-apple-touch-icon-180.png';
-        var match = /^\/party\/(?:(invite)\/)?([A-Za-z0-9_-]+)\/?$/.exec(window.location.pathname);
-        if (match && (match[1] || (match[2] !== 'crew' && match[2] !== 'invite'))) {
+        var path = window.location.pathname;
+        var app = /^\/party\/app\/[0-9a-f]{32}(?=\/|$)/.exec(path);
+        if (app) {
+          manifest = null;
+          path = path.slice(app[0].length) || '/';
+        }
+        var match = /^\/party\/(?:(invite)\/)?([A-Za-z0-9_-]+)\/?$/.exec(path);
+        if (match && (match[1] || (match[2] !== 'crew' && match[2] !== 'invite' && match[2] !== 'app'))) {
           var base = (match[1] ? '/api/party-invitations/' : '/api/party/') + encodeURIComponent(match[2]);
           manifest = base + '/app-manifest';
           icon = base + '/app-icon/192';
@@ -135,7 +144,7 @@
           document.head.appendChild(element);
         };
         link('apple-touch-icon', icon);
-        link('manifest', manifest);
+        if (manifest) link('manifest', manifest);
       })();
     </script>
   </head>
