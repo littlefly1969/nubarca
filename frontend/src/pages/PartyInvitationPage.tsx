@@ -16,7 +16,7 @@ import { PartyBeforeHome } from '../party/PartyGuestSurfaces';
 import { PartyHubTopBar } from '../party/PartyHubTopBar';
 import { useHomeScreenTitle } from '../homeScreen/homeScreen';
 import { invitationEntersParty } from '../party/invitationEntry';
-import { PartyImageViewer } from '../party/PartyImageViewer';
+import { PublicMediaViewer } from '../publicMedia/PublicMediaViewer';
 import {
   PartyRsvpSheet, PartyRsvpSummary, partyRsvpAnswered, type PartyRsvpNotice,
 } from '../party/PartyRsvpCard';
@@ -262,7 +262,11 @@ export function PartyInvitationPage() {
       )}
 
       {posterSlot?.mediaUrl && (
-        <PartyImageViewer src={posterSlot.mediaUrl} label={t('party.photoViewer')} onClose={() => setPoster(null)} />
+        <PublicMediaViewer
+          item={{ id: `poster-${posterSlot.mediaUrl}`, kind: 'image', previewUrl: posterSlot.mediaUrl }}
+          label={t('party.photoViewer')}
+          onClose={() => setPoster(null)}
+        />
       )}
     </>
   );

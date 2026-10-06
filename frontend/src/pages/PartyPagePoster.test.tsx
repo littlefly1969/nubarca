@@ -127,7 +127,7 @@ describe('a Party content poster', () => {
 
     await user.click(await screen.findByTestId('party-poster-open-menu'));
 
-    const viewer = await screen.findByTestId('party-image-viewer');
+    const viewer = await screen.findByTestId('public-viewer');
     expect(viewer.querySelector('img')).toHaveAttribute('src', MENU_MEDIA);
     // The URL is what Back will consume.
     expect(screen.getByTestId('location')).toHaveTextContent('/party/tok-1?poster=menu');
@@ -139,7 +139,7 @@ describe('a Party content poster', () => {
     render(wrapper());
     await user.click(await screen.findByTestId('party-poster-open-menu'));
 
-    const viewer = await screen.findByTestId('party-image-viewer');
+    const viewer = await screen.findByTestId('public-viewer');
     // A Party reference authorizes LOOKING. Not bytes, not an original.
     expect(within(viewer).queryByRole('link', { name: /scarica|download/i }))
       .not.toBeInTheDocument();
@@ -150,12 +150,12 @@ describe('a Party content poster', () => {
     mock();
     render(wrapper());
     await user.click(await screen.findByTestId('party-poster-open-menu'));
-    await screen.findByTestId('party-image-viewer');
+    await screen.findByTestId('public-viewer');
 
     await user.click(screen.getByTestId('press-back'));
 
     await waitFor(() => {
-      expect(screen.queryByTestId('party-image-viewer')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('public-viewer')).not.toBeInTheDocument();
     });
     // Still on the party, not off it.
     expect(screen.getByTestId('location')).toHaveTextContent('/party/tok-1');
@@ -168,10 +168,10 @@ describe('a Party content poster', () => {
     render(wrapper());
     await user.click(await screen.findByTestId('party-poster-open-menu'));
 
-    await user.click(await screen.findByTestId('party-viewer-close'));
+    await user.click(await screen.findByTestId('public-viewer-close'));
 
     await waitFor(() => {
-      expect(screen.queryByTestId('party-image-viewer')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('public-viewer')).not.toBeInTheDocument();
     });
     expect(screen.getByTestId('location')).toHaveTextContent('/party/tok-1');
   });
@@ -183,11 +183,11 @@ describe('a Party content poster', () => {
     mock();
     render(wrapper(['/party/tok-1?poster=menu']));
 
-    await screen.findByTestId('party-image-viewer');
-    await user.click(screen.getByTestId('party-viewer-close'));
+    await screen.findByTestId('public-viewer');
+    await user.click(screen.getByTestId('public-viewer-close'));
 
     await waitFor(() => {
-      expect(screen.queryByTestId('party-image-viewer')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('public-viewer')).not.toBeInTheDocument();
     });
     expect(screen.getByTestId('location')).toHaveTextContent('/party/tok-1');
     expect(screen.getByTestId('party-poster-open-menu')).toBeInTheDocument();
@@ -200,7 +200,7 @@ describe('a Party content poster', () => {
     render(wrapper(['/party/tok-1?poster=definitely-not-a-kind']));
 
     await screen.findByTestId('party-poster-open-menu');
-    expect(screen.queryByTestId('party-image-viewer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('public-viewer')).not.toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByTestId('location')).toHaveTextContent('/party/tok-1');
     });
@@ -211,7 +211,7 @@ describe('a Party content poster', () => {
     render(wrapper(['/party/tok-1?poster=menu']));
 
     await screen.findByTestId('party-content');
-    expect(screen.queryByTestId('party-image-viewer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('public-viewer')).not.toBeInTheDocument();
   });
 
   it('a poster whose photograph is gone opens nothing', async () => {
@@ -219,7 +219,7 @@ describe('a Party content poster', () => {
     render(wrapper(['/party/tok-1?poster=menu']));
 
     await screen.findByTestId('party-content');
-    expect(screen.queryByTestId('party-image-viewer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('public-viewer')).not.toBeInTheDocument();
     // And no dead row is offered either.
     expect(screen.queryByTestId('party-poster-open-menu')).not.toBeInTheDocument();
   });
@@ -235,12 +235,12 @@ describe('a Party content poster', () => {
     });
     render(wrapper());
     await user.click(await screen.findByTestId('party-poster-open-menu'));
-    await screen.findByTestId('party-image-viewer');
+    await screen.findByTestId('public-viewer');
 
     current = context({ content: [slot({ mediaUrl: null })] });
 
     await waitFor(
-      () => { expect(screen.queryByTestId('party-image-viewer')).not.toBeInTheDocument(); },
+      () => { expect(screen.queryByTestId('public-viewer')).not.toBeInTheDocument(); },
       { timeout: 20_000 },
     );
     expect(screen.getByTestId('location')).toHaveTextContent('/party/tok-1');
@@ -271,7 +271,7 @@ describe('the poster opens on EVERY surface, not only Live', () => {
 
     await user.click(await screen.findByTestId('party-poster-open-invitation'));
 
-    const viewer = await screen.findByTestId('party-image-viewer');
+    const viewer = await screen.findByTestId('public-viewer');
     expect(viewer.querySelector('img'))
       .toHaveAttribute('src', '/api/party/tok-1/content/invitation/media?v=3');
     expect(screen.getByTestId('location')).toHaveTextContent('?poster=invitation');
@@ -291,7 +291,7 @@ describe('the poster opens on EVERY surface, not only Live', () => {
 
     await user.click(await screen.findByTestId('party-poster-open-menu'));
 
-    expect((await screen.findByTestId('party-image-viewer')).querySelector('img'))
+    expect((await screen.findByTestId('public-viewer')).querySelector('img'))
       .toHaveAttribute('src', MENU_MEDIA);
   });
 
@@ -313,7 +313,7 @@ describe('the poster opens on EVERY surface, not only Live', () => {
 
     await user.click(await screen.findByTestId('party-poster-open-thank-you'));
 
-    expect((await screen.findByTestId('party-image-viewer')).querySelector('img'))
+    expect((await screen.findByTestId('public-viewer')).querySelector('img'))
       .toHaveAttribute('src', '/api/party/tok-1/content/thank-you/media?v=3');
     expect(screen.getByTestId('location')).toHaveTextContent('?poster=thank-you');
   });
@@ -328,12 +328,12 @@ describe('the poster opens on EVERY surface, not only Live', () => {
     }));
     render(wrapper());
     await user.click(await screen.findByTestId('party-poster-open-menu'));
-    await screen.findByTestId('party-image-viewer');
+    await screen.findByTestId('public-viewer');
 
     await user.click(screen.getByTestId('press-back'));
 
     await waitFor(() => {
-      expect(screen.queryByTestId('party-image-viewer')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('public-viewer')).not.toBeInTheDocument();
     });
     expect(screen.getByTestId('location')).toHaveTextContent('/party/tok-1');
     // The invitation, not the party, and not a blank page.
@@ -396,7 +396,7 @@ describe('the gallery viewer keeps what it had', () => {
     await screen.findByTestId('party-grid');
     await user.click(screen.getByRole('button', { name: 'Apri foto' }));
 
-    const viewer = await screen.findByTestId('party-image-viewer');
+    const viewer = await screen.findByTestId('public-viewer');
     expect(viewer.querySelector('img'))
       .toHaveAttribute('src', '/api/party/tok-1/media/f1/preview');
     expect(within(viewer).getByRole('link')).toHaveAttribute(

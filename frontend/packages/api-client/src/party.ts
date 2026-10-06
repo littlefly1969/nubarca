@@ -975,8 +975,12 @@ export interface PartyItem {
   mediaType: 'image' | 'video';
   thumbnailUrl: string;
   previewUrl: string;
-  // Present for images (metadata-stripped medium download); null for videos.
+  // Present for images (metadata-stripped medium download); null for videos:
+  // a party hands out no originals.
   downloadUrl: string | null;
+  // A video's adaptive HLS ladder, played by the guest; null for images and on
+  // an installation without an HLS provider.
+  playbackUrl?: string | null;
 }
 
 export interface PartyItems {

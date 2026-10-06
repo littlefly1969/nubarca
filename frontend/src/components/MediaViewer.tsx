@@ -6,12 +6,19 @@ import { HlsVideoPlayer, type VideoPlayerHandle } from '../video/HlsVideoPlayer'
 import { CastVideoControl } from '../cast/CastVideoControl';
 import { useCast } from '../cast/useCast';
 import { resolveViewerSummary } from './mediaViewerSummary';
-import { isEditableKeyboardTarget, ownsKeyboardEvent } from './keyboardOwnership';
+import { ZoomableImage } from '../mediaView/ZoomableImage';
+import { useIdleChrome, useSwipe, useViewerKeys } from '../mediaView/viewerControls';
 
 // Slice 86: a reusable, clean full-screen media viewer for images and videos.
 // The media is centered on a dark backdrop with minimal chrome that auto-hides
 // when idle; metadata lives in an on-demand drawer so it never clutters the
 // full-screen surface. Keyboard + swipe navigation; dialog semantics.
+//
+// THE OWNER'S viewer. Its engine — the zoomable photograph, the chrome that
+// steps aside, the keys and the swipe — is src/mediaView, shared with the
+// PUBLIC viewer a party guest or a link's visitor opens (src/publicMedia). The
+// chrome is not shared: names, metadata, Cast and Play are the owner's and
+// live only here.
 //
 // Media URLs reuse the existing endpoints:
 //   image → GET /api/files/{id}/preview  (medium; never the original)
@@ -144,8 +151,6 @@ interface MediaViewerProps {
   playback?: MediaViewerPlaybackBinding;
 }
 
-const IDLE_HIDE_MS = 2600;
-
 export function MediaViewer({
   items, index, onClose, onIndexChange, onNearEnd, renderDetails,
   capabilities = OWNER_VIEWER_CAPABILITIES, renderActions, playback,
@@ -155,14 +160,12 @@ export function MediaViewer({
   const hasPrev = index > 0;
   const hasNext = index < items.length - 1;
 
-  const [chromeVisible, setChromeVisible] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(false);
   // Per-image "preview failed to load" flag; reset whenever we navigate.
   const [imageFailed, setImageFailed] = useState(false);
   // Metadata for the current item (summary line + drawer body).
   const [metadata, setMetadata] = useState<FileMetadata | null>(null);
   const [metadataError, setMetadataError] = useState(false);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // NUBARCA-GOOGLE-CAST-01: the player bridge. The viewer never reaches into
   // the player's DOM; it asks the handle for the position and to stop.
   const playerRef = useRef<VideoPlayerHandle | null>(null);
@@ -196,16 +199,10 @@ export function MediaViewer({
     setMetadataError(false);
   }, []);
 
-  const showChrome = useCallback(() => {
-    setChromeVisible(true);
-    if (hideTimer.current) clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => setChromeVisible(false), IDLE_HIDE_MS);
-  }, []);
-
-  useEffect(() => {
-    showChrome();
-    return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
-  }, [showChrome, index]);
+  const chrome = useIdleChrome(index);
+  const showChrome = chrome.show;
+  // A zoomed photograph is being panned, not swiped away.
+  const [zoomed, setZoomed] = useState(false);
 
   // Prefetch trigger when nearing the end of loaded items.
   useEffect(() => {
@@ -216,31 +213,11 @@ export function MediaViewer({
   const goNext = useCallback(() => { if (hasNext) onIndexChange(index + 1); }, [hasNext, index, onIndexChange]);
 
   // Keyboard: Escape closes, arrows navigate — but only when this viewer is the
-  // surface the key belongs to. A drawer here opens real modals on top (the album
-  // picker, the vault move dialog), and a `window` listener cannot tell whose
-  // keystroke it is without asking. See keyboardOwnership.ts.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (!ownsKeyboardEvent(rootRef.current, e.target)) return;
-      if (e.key === 'Escape') { onClose(); return; }
-      if (isEditableKeyboardTarget(e.target)) return;
-      if (e.key === 'ArrowLeft') { goPrev(); showChrome(); }
-      else if (e.key === 'ArrowRight') { goNext(); showChrome(); }
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, goPrev, goNext, showChrome]);
-
-  // Touch swipe left/right to navigate.
-  const touchStartX = useRef<number | null>(null);
-  function onTouchStart(e: React.TouchEvent) { touchStartX.current = e.touches[0]?.clientX ?? null; }
-  function onTouchEnd(e: React.TouchEvent) {
-    const start = touchStartX.current;
-    touchStartX.current = null;
-    if (start == null) return;
-    const dx = (e.changedTouches[0]?.clientX ?? start) - start;
-    if (Math.abs(dx) > 50) { if (dx > 0) goPrev(); else goNext(); showChrome(); }
-  }
+  // surface the key belongs to (keyboardOwnership). Swipe: one finger, at fit.
+  const keyPrev = useCallback(() => { goPrev(); showChrome(); }, [goPrev, showChrome]);
+  const keyNext = useCallback(() => { goNext(); showChrome(); }, [goNext, showChrome]);
+  useViewerKeys(rootRef, { onClose, onPrevious: keyPrev, onNext: keyNext });
+  const swipe = useSwipe({ onPrevious: keyPrev, onNext: keyNext, disabled: zoomed });
 
   // A cast that ended (stopped, or the receiver went away) hands its last known
   // position back. Applied once, to the file it belongs to, and always PAUSED —
@@ -295,8 +272,8 @@ export function MediaViewer({
       aria-label={t('mediaViewer.viewerAria', { name: item.displayName })}
       ref={rootRef}
       onMouseMove={showChrome}
-      onTouchStart={onTouchStart}
-      onTouchEnd={onTouchEnd}
+      onTouchStart={swipe.onTouchStart}
+      onTouchEnd={swipe.onTouchEnd}
     >
       {/* Backdrop: clicking it (not the media) toggles chrome. */}
       <button
@@ -304,25 +281,28 @@ export function MediaViewer({
         className="media-viewer-backdrop"
         aria-label={t('mediaViewer.toggleControls')}
         tabIndex={-1}
-        onClick={() => setChromeVisible((v) => !v)}
+        onClick={chrome.toggle}
       />
 
+      {item.kind === 'image' && !imageFailed && imageUrl !== null ? (
+        // The photograph fills the viewer and is examinable — pinch, double
+        // tap, drag — on the engine the public viewer shares. A tap on it is
+        // the backdrop's: it shows or hides the chrome.
+        <ZoomableImage
+          src={imageUrl}
+          alt={item.displayName}
+          imgClassName="media-viewer-media"
+          imgTestId="media-viewer-image"
+          onError={() => setImageFailed(true)}
+          onZoomChange={setZoomed}
+          onTap={chrome.toggle}
+        />
+      ) : (
       <div className="media-viewer-stage">
         {item.kind === 'image' ? (
-          imageFailed || imageUrl === null ? (
-            <div className="media-viewer-error" role="alert">
-              {t('mediaViewer.imageError')}
-            </div>
-          ) : (
-            <img
-              className="media-viewer-media"
-              data-testid="media-viewer-image"
-              src={imageUrl}
-              alt={item.displayName}
-              draggable={false}
-              onError={() => setImageFailed(true)}
-            />
-          )
+          <div className="media-viewer-error" role="alert">
+            {t('mediaViewer.imageError')}
+          </div>
         ) : videoUnavailable ? (
           <div className="media-viewer-error" role="alert">
             {t('mediaViewer.videoError')}
@@ -352,8 +332,9 @@ export function MediaViewer({
           />
         )}
       </div>
+      )}
 
-      <div className={`media-viewer-chrome${chromeVisible ? '' : ' is-hidden'}`}>
+      <div className={`media-viewer-chrome${chrome.visible ? '' : ' is-hidden'}`}>
         <div className="media-viewer-topbar">
           {/* Identity on the left, controls on the right — unchanged. The
               summary sits directly under the display name. */}

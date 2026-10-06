@@ -1,0 +1,214 @@
+/* THE PUBLIC MEDIA SURFACE — a party's gallery and an album shared by link
+   alike: the mosaic, and the viewer a guest opens from it. Both pages are the
+   same fixed dark surface, so the palette is pinned here rather than borrowed
+   from whichever page happens to host it. */
+
+/* ---- The mosaic ---------------------------------------------------------
+   An editorial composition, not a contact sheet: two columns, a wide tile every
+   so often, and rows that alternate between portrait and square. The shapes are
+   decided by index (galleryShapes), so DOM order and visual order are the same
+   and no measurement of the real images is involved. */
+.public-gallery {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.public-gallery-tile {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0.85rem;
+  /* Held before the photo arrives, so the grid never jumps as images load. */
+  background: rgb(15 30 58 / 62%);
+  cursor: pointer;
+}
+
+.public-gallery-tile[data-shape='featured'] {
+  grid-column: 1 / -1;
+  aspect-ratio: 16 / 10;
+}
+
+.public-gallery-tile[data-shape='portrait'] { aspect-ratio: 4 / 5; }
+.public-gallery-tile[data-shape='square'] { aspect-ratio: 1 / 1; }
+
+/* The photograph is the colour on this surface: no permanent tint over it.
+   SMALL, as every grid in this product is. */
+.public-gallery-tile-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 220ms ease, opacity 220ms ease;
+}
+
+.public-gallery-tile:hover .public-gallery-tile-img { transform: scale(1.03); }
+.public-gallery-tile:active .public-gallery-tile-img { opacity: 0.86; }
+
+.public-gallery-tile:focus-visible {
+  outline: 3px solid var(--brand-cyan-glow);
+  outline-offset: 3px;
+}
+
+/* A video is a poster plus a play mark. No duration is served, so none is shown. */
+.public-gallery-tile-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid rgb(245 247 251 / 30%);
+  border-radius: 999px;
+  background: rgb(10 15 26 / 52%);
+  color: var(--brand-cloud-white);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.public-gallery-tile-play svg {
+  width: 1.35rem;
+  height: 1.35rem;
+  fill: currentcolor;
+  stroke: none;
+}
+
+/* From tablet up the editorial pattern is retired rather than stretched: a wide
+   tile spanning two of three columns cannot stay gap-free at every album size,
+   and a 68rem-wide "featured" photo is not editorial, it is enormous. Uniform
+   portrait tiles, three then four across. */
+@media (min-width: 48rem) {
+  .public-gallery {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.6rem;
+  }
+
+  .public-gallery-tile[data-shape='featured'],
+  .public-gallery-tile[data-shape='portrait'],
+  .public-gallery-tile[data-shape='square'] {
+    grid-column: auto;
+    aspect-ratio: 4 / 5;
+  }
+}
+
+@media (min-width: 68rem) {
+  .public-gallery { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* ---- The viewer ---------------------------------------------------------
+   One picture, the whole screen, on almost nothing. The stage (src/mediaView)
+   fills this box, so the photograph is whole in portrait and in landscape. */
+.public-viewer {
+  --public-viewer-text: var(--brand-cloud-white);
+  --public-viewer-border: rgb(245 247 251 / 22%);
+
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: rgb(4 8 16 / 96%);
+  color: var(--public-viewer-text);
+}
+
+.public-viewer-video {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The controls FLOAT over the picture and step aside after a moment; while
+   hidden they take no taps, so a tap reaches the photograph and brings them
+   back. */
+.public-viewer-controls {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.public-viewer-controls > * { pointer-events: auto; }
+.public-viewer-controls.is-hidden { opacity: 0; }
+.public-viewer-controls.is-hidden > * { pointer-events: none; }
+
+.public-viewer-bar {
+  position: absolute;
+  left: 50%;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  width: max-content;
+  max-width: calc(100% - 2rem);
+  transform: translateX(-50%);
+}
+
+/* Above a video's own controls, which sit at the bottom of the picture. */
+.public-viewer-bar[data-kind='video'] {
+  bottom: calc(max(1rem, env(safe-area-inset-bottom)) + 4.5rem);
+}
+
+.public-viewer-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3rem;
+  padding: 0.7rem 1.3rem;
+  border: 1px solid var(--public-viewer-border);
+  border-radius: 999px;
+  background: rgb(10 15 26 / 62%);
+  color: var(--public-viewer-text);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 35%);
+}
+
+.public-viewer-action:disabled { opacity: 0.7; cursor: progress; }
+
+.public-viewer-action--primary {
+  border: 0;
+  background:
+    linear-gradient(135deg, rgb(0 212 255 / 20%), rgb(0 212 255 / 0%) 60%),
+    var(--brand-electric-blue);
+  color: var(--accent-contrast);
+}
+
+.public-viewer-note {
+  flex-basis: 100%;
+  margin: 0;
+  padding: 0.5rem 0.9rem;
+  border-radius: 0.75rem;
+  background: rgb(10 15 26 / 70%);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.public-viewer :focus-visible {
+  outline: 3px solid var(--brand-cyan-glow);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .public-gallery-tile-img { transition: none; }
+  .public-gallery-tile:hover .public-gallery-tile-img { transform: none; }
+  .public-viewer-controls { transition: none; }
+}
