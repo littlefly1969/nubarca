@@ -3,78 +3,17 @@ using NubArca.Api.Domain.Print;
 namespace NubArca.Api.Print;
 
 /// <summary>
-/// The geometry of a party print, in one place.
+/// What a PARTY prints in the bands and on the photograph — its name, the
+/// host's line, the guest's number, the NubArca mark — and the party's QR card.
 ///
-/// The browser draws a preview and the server draws the sheet that is actually
-/// printed. Those two must agree, or a guest composes one thing and collects
-/// another — and the sheet is the one they take home. So every number that
-/// decides framing lives here, as fractions of the sheet, and the frontend
-/// mirrors this file. Fractions rather than pixels: the preview is a few hundred
-/// pixels wide and the print is 1200, and a fraction means the same thing at
-/// both sizes.
-///
-/// The sheet is the loaded paper at 300dpi (see PrintPapers): 10x15, 13x18 or
-/// 20x15, standing or lying. Margins, footers and type are fractions of its
-/// SHORT edge, so a composition keeps its proportions on every paper. The twin
-/// strip is the one composition tied to one paper, the 10x15 the printer cuts.
+/// Where photographs and bands sit is not here: that is the catalogue every
+/// surface shares (<see cref="PrintLayouts"/>). This is the party's decoration
+/// on top of it, as fractions of the sheet's short edge, mirrored value for
+/// value by the browser's preview (partyPrintGeometry.ts), whose parity test
+/// reads these numbers from this file.
 /// </summary>
 public static class PartyPrintGeometry
 {
-    /// <summary>10x15cm at 300dpi, portrait. The twin strip's sheet.</summary>
-    public const int PortraitWidth = 1200;
-    public const int PortraitHeight = 1800;
-
-    /// <summary>The same sheet turned, for a single landscape photo.</summary>
-    public const int LandscapeWidth = 1800;
-    public const int LandscapeHeight = 1200;
-
-    /// <summary>A sheet of <paramref name="paper"/>, standing or lying, in pixels.</summary>
-    public static (int Width, int Height) Sheet(string paper, bool portrait) =>
-        PrintPapers.Pixels(PrintPapers.IsKnown(paper) ? paper : PrintPapers.Photo10x15, portrait);
-
-    // --- Single photo ------------------------------------------------------
-
-    /// <summary>Border around the photograph, as a fraction of the short edge.</summary>
-    public const double PhotoMarginFraction = 0.055;
-
-    /// <summary>
-    /// Room under the photograph for the party line, the wordmark and the number.
-    ///
-    /// A fraction of the SHORT EDGE, like the margin beside it — never of the
-    /// height. The height is what flips when the sheet follows a landscape
-    /// photograph, and a footer measured against it came out a third shorter on
-    /// exactly the sheets that are widest: 11.7mm instead of 17.5mm, with the
-    /// type shrinking with the band, which is why a landscape print read as
-    /// having no party name at all. The short edge is 10cm on both, so this is
-    /// the same strip of paper whichever way the picture faces.
-    /// </summary>
-    public const double PhotoFooterFraction = 0.17;
-
-    /// <summary>Where the photograph sits on a single-photo sheet, in sheet fractions.</summary>
-    public static (double X, double Y, double Width, double Height) PhotoSlot(string paper, bool portrait)
-    {
-        var (w, h) = Sheet(paper, portrait);
-        var margin = PhotoMarginFraction * Math.Min(w, h);
-        var footer = PhotoFooterFraction * Math.Min(w, h);
-        return (margin / w, margin / h, (w - (2 * margin)) / w, (h - (2 * margin) - footer) / h);
-    }
-
-    /// <summary>The band under it for the party line, the wordmark and the number.</summary>
-    public static (double X, double Y, double Width, double Height) PhotoFooter(string paper, bool portrait)
-    {
-        var (w, h) = Sheet(paper, portrait);
-        var (x, y, width, height) = PhotoSlot(paper, portrait);
-        return (x, y + height, width, PhotoFooterFraction * Math.Min(w, h) / h);
-    }
-
-    /// <summary>Aspect ratio the single-photo crop is locked to.</summary>
-    public static double PhotoSlotAspect(bool portrait, string paper = PrintPapers.Photo10x15)
-    {
-        var (w, h) = Sheet(paper, portrait);
-        var (_, _, width, height) = PhotoSlot(paper, portrait);
-        return width * w / (height * h);
-    }
-
     // --- Single photograph, title on the photograph ---------------------------
 
     /// <summary>
@@ -140,91 +79,7 @@ public static class PartyPrintGeometry
     /// </summary>
     public const int PartyNameMaxLength = 42;
 
-    /// <summary>Aspect ratio of a title-on-the-photograph crop: the whole sheet.</summary>
-    public static double OverlaySlotAspect(bool portrait, string paper = PrintPapers.Photo10x15)
-    {
-        var (w, h) = Sheet(paper, portrait);
-        return (double)w / h;
-    }
-
-    // --- Four photographs, two by two ----------------------------------------
-
-    /// <summary>Border around the four, short-edge fraction: little, the paper is for photographs.</summary>
-    public const double GridMarginFraction = 0.035;
-
-    /// <summary>Space between the four, short-edge fraction.</summary>
-    public const double GridGutterFraction = 0.02;
-
-    /// <summary>
-    /// The band at the foot for the party line, the wordmark and the number —
-    /// slimmer than a single photograph's, because four photographs want the
-    /// room. Short-edge fraction, like everything here.
-    /// </summary>
-    public const double GridFooterFraction = 0.12;
-
-    /// <summary>
-    /// The four sit as the paper is named, never turned: standing on 10x15 and
-    /// 13x18 (four 5x7.5 and 6.5x9 cm frames), lying on 20x15 (four 10x7.5).
-    /// </summary>
-    public static bool GridPortrait(string paper) => !PrintPapers.NamedLandscape(paper);
-
-    /// <summary>
-    /// One of the four, in sheet fractions: 0 top left, 1 top right, 2 bottom
-    /// left, 3 bottom right — the order the guest arranged them in.
-    /// </summary>
-    public static (double X, double Y, double Width, double Height) GridSlot(string paper, int index)
-    {
-        var (w, h) = Sheet(paper, GridPortrait(paper));
-        var shortEdge = Math.Min(w, h);
-        var margin = GridMarginFraction * shortEdge;
-        var gutter = GridGutterFraction * shortEdge;
-        var footer = GridFooterFraction * shortEdge;
-        var cellW = (w - (2 * margin) - gutter) / 2;
-        var cellH = (h - (2 * margin) - gutter - footer) / 2;
-        var (column, row) = (index % 2, index / 2);
-        return ((margin + (column * (cellW + gutter))) / w, (margin + (row * (cellH + gutter))) / h,
-            cellW / w, cellH / h);
-    }
-
-    /// <summary>The band at the foot of a four-photo sheet, in sheet fractions.</summary>
-    public static (double X, double Y, double Width, double Height) GridFooter(string paper)
-    {
-        var (w, h) = Sheet(paper, GridPortrait(paper));
-        var shortEdge = Math.Min(w, h);
-        var margin = GridMarginFraction * shortEdge;
-        var footer = GridFooterFraction * shortEdge;
-        return (margin / w, (h - margin - footer) / h, (w - (2 * margin)) / w, footer / h);
-    }
-
-    /// <summary>Aspect ratio each of the four crops is locked to.</summary>
-    public static double GridSlotAspect(string paper)
-    {
-        var (w, h) = Sheet(paper, GridPortrait(paper));
-        var (_, _, width, height) = GridSlot(paper, 0);
-        return width * w / (height * h);
-    }
-
-    // --- Four-photo strip --------------------------------------------------
-
-    /// <summary>
-    /// TWO STRIPS side by side on one portrait sheet, so a single 10x15 yields
-    /// two photo-booth keepsakes: one to keep, one to give away. Each strip has
-    /// its own four photographs — eight in all.
-    /// </summary>
-    public const int StripsPerSheet = 2;
-    public const int SlotsPerStrip = 4;
-
-    /// <summary>Gutter between the twin strips, where the sheet is cut.</summary>
-    public const double StripGutterFraction = 0.035;
-
-    /// <summary>Outer border of the sheet.</summary>
-    public const double StripMarginFraction = 0.035;
-
-    /// <summary>Gap between the four frames within a strip.</summary>
-    public const double StripSlotGapFraction = 0.012;
-
-    /// <summary>Room at the foot of each strip for the party line and wordmark.</summary>
-    public const double StripFooterFraction = 0.075;
+    // --- The wordmark in a band ------------------------------------------------
 
     /// <summary>
     /// Width of the wordmark on a strip, as a fraction of the strip's width —
@@ -241,45 +96,6 @@ public static class PartyPrintGeometry
     /// 0.20 it was, still the smallest thing on the sheet beside the number.
     /// </summary>
     public const double FooterWordmarkWidthFraction = 0.23;
-
-    /// <summary>Width of one strip, in sheet fractions.</summary>
-    public static double StripWidthFraction =>
-        (1.0 - (2 * StripMarginFraction) - StripGutterFraction) / StripsPerSheet;
-
-    /// <summary>
-    /// One slot's rectangle inside a strip, in fractions of the SHEET.
-    /// The single place that decides where a photograph lands, shared by the
-    /// renderer and mirrored by the preview.
-    /// </summary>
-    public static (double X, double Y, double Width, double Height) StripSlot(
-        int stripIndex, int slotIndex)
-    {
-        var stripW = StripWidthFraction;
-        var x = StripMarginFraction + (stripIndex * (stripW + StripGutterFraction));
-
-        var contentTop = StripMarginFraction;
-        var contentHeight = 1.0 - (2 * StripMarginFraction) - StripFooterFraction;
-        var totalGap = StripSlotGapFraction * (SlotsPerStrip - 1);
-        var slotH = (contentHeight - totalGap) / SlotsPerStrip;
-        var y = contentTop + (slotIndex * (slotH + StripSlotGapFraction));
-
-        return (x, y, stripW, slotH);
-    }
-
-    /// <summary>Aspect ratio every strip slot's crop is locked to.</summary>
-    public static double StripSlotAspect()
-    {
-        var (_, _, w, h) = StripSlot(0, 0);
-        return (w * PortraitWidth) / (h * PortraitHeight);
-    }
-
-    /// <summary>The footer band at the foot of one strip, in sheet fractions.</summary>
-    public static (double X, double Y, double Width, double Height) StripFooter(int stripIndex)
-    {
-        var stripW = StripWidthFraction;
-        return (StripMarginFraction + (stripIndex * (stripW + StripGutterFraction)),
-            1.0 - StripMarginFraction - StripFooterFraction, stripW, StripFooterFraction);
-    }
 
     // --- The party's QR card, on the twin strip's sheet ------------------------
 
@@ -305,11 +121,11 @@ public static class PartyPrintGeometry
     /// <summary>One cell of a QR card — 0 the photograph, 1 the code — in fractions of the sheet.</summary>
     public static (double X, double Y, double Width, double Height) QrCardCell(int stripIndex, int cellIndex)
     {
-        var stripW = StripWidthFraction;
-        var x = StripMarginFraction + (stripIndex * (stripW + StripGutterFraction));
-        var contentHeight = 1.0 - (2 * StripMarginFraction) - StripFooterFraction;
-        var cellH = (contentHeight - (StripSlotGapFraction * (QrCardCellsPerStrip - 1))) / QrCardCellsPerStrip;
-        var y = StripMarginFraction + (cellIndex * (cellH + StripSlotGapFraction));
+        var stripW = PrintLayouts.StripWidthFraction;
+        var x = PrintLayouts.StripMarginFraction + (stripIndex * (stripW + PrintLayouts.StripGutterFraction));
+        var contentHeight = 1.0 - (2 * PrintLayouts.StripMarginFraction) - PrintLayouts.StripFooterFraction;
+        var cellH = (contentHeight - (PrintLayouts.StripSlotGapFraction * (QrCardCellsPerStrip - 1))) / QrCardCellsPerStrip;
+        var y = PrintLayouts.StripMarginFraction + (cellIndex * (cellH + PrintLayouts.StripSlotGapFraction));
         return (x, y, stripW, cellH);
     }
 
@@ -317,6 +133,6 @@ public static class PartyPrintGeometry
     public static double QrCardPhotoAspect()
     {
         var (_, _, w, h) = QrCardCell(0, 0);
-        return (w * PortraitWidth) / (h * PortraitHeight);
+        return (w * PrintLayouts.PortraitWidth) / (h * PrintLayouts.PortraitHeight);
     }
 }

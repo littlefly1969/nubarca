@@ -152,7 +152,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
             return Refuse(OwnerPhotoPrintErrors.FormatUnsupported);
 
         // 6. The framing: no further out than the whole photograph on the sheet.
-        var (sheetW, sheetH) = PartyPrintGeometry.Sheet(paper, portrait);
+        var (sheetW, sheetH) = PrintLayouts.Sheet(paper, portrait);
         // The shape comes from the stored dimensions; a legacy file that has
         // none is checked against its own decoded pixels once they are read.
         var sheetAspect = (double)sheetW / sheetH;

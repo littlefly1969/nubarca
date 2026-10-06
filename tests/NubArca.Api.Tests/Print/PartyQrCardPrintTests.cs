@@ -167,7 +167,7 @@ public sealed class PartyQrCardPrintTests : IDisposable
     private static Rectangle Cell(int strip, int cell)
     {
         var (x, y, w, h) = PartyPrintGeometry.QrCardCell(strip, cell);
-        const int W = PartyPrintGeometry.PortraitWidth, H = PartyPrintGeometry.PortraitHeight;
+        const int W = PrintLayouts.PortraitWidth, H = PrintLayouts.PortraitHeight;
         return new Rectangle((int)Math.Round(x * W), (int)Math.Round(y * H),
             (int)Math.Round(w * W), (int)Math.Round(h * H));
     }
@@ -181,7 +181,7 @@ public sealed class PartyQrCardPrintTests : IDisposable
         using var generator = new QRCodeGenerator();
         using var data = generator.CreateQrCode(url, QRCodeGenerator.ECCLevel.M);
         var matrix = data.ModuleMatrix;
-        var area = PartyPrintComposer.QrCodeArea(Cell(strip, 1), matrix.Count, PartyPrintGeometry.PortraitWidth);
+        var area = PartyPrintComposer.QrCodeArea(Cell(strip, 1), matrix.Count, PrintLayouts.PortraitWidth);
         var wrong = 0;
         for (var my = 0; my < matrix.Count; my++)
             for (var mx = 0; mx < matrix.Count; mx++)
@@ -211,7 +211,7 @@ public sealed class PartyQrCardPrintTests : IDisposable
         using var sheet = Image.Load<Rgb24>(bytes);
 
         // The twin strip's sheet: a portrait 10x15.
-        Assert.Equal((PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight), (sheet.Width, sheet.Height));
+        Assert.Equal((PrintLayouts.PortraitWidth, PrintLayouts.PortraitHeight), (sheet.Width, sheet.Height));
         // The printer cuts down the middle: nothing is printed across it.
         for (var y = 0; y < sheet.Height; y += 3)
             for (var x = sheet.Width / 2 - 6; x <= sheet.Width / 2 + 6; x++)

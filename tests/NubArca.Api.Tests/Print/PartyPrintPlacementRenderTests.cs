@@ -46,11 +46,11 @@ public sealed class PartyPrintPlacementRenderTests
     public async Task Zoomed_Out_The_Bands_Are_The_Themes_Own_Paper(PartyPrintTheme theme, byte r, byte g, byte b)
     {
         // A wide photograph whole on a standing sheet: paper above and below it.
-        var contain = PhotoPlacementGeometry.ContainZoom(1.5, PartyPrintGeometry.PhotoSlotAspect(portrait: true));
+        var contain = PhotoPlacementGeometry.ContainZoom(1.5, PrintLayouts.SlotAspect(PrintLayouts.Photo, PrintLayouts.Framed, "10x15", portrait: true));
         using var sheet = await RenderAsync(new PartyPrintComposition(
             PartyPrintProducts.Photo, theme, [PartyPrintPhoto.Placed(Flat(1500, 1000), new PhotoPlacement(0.5, 0.5, contain))],
             "Festa", null, Orientation: PartyPrintOrientation.Portrait));
-        var slot = PartyPrintGeometry.PhotoSlot(PrintPapers.Photo10x15, portrait: true);
+        var slot = PrintLayouts.PhotoSlot(PrintPapers.Photo10x15, portrait: true);
         var band = In(sheet.Width, sheet.Height, slot, 0.5, 0.04);
         var middle = In(sheet.Width, sheet.Height, slot, 0.5, 0.5);
         Assert.True(Near(sheet[band.X, band.Y], new Rgba32(r, g, b)), $"band {sheet[band.X, band.Y]}");
@@ -62,7 +62,7 @@ public sealed class PartyPrintPlacementRenderTests
     [Fact]
     public async Task On_The_Photo_With_No_Paper_Of_Its_Own_The_Bands_Are_White()
     {
-        var contain = PhotoPlacementGeometry.ContainZoom(1.5, PartyPrintGeometry.OverlaySlotAspect(portrait: true));
+        var contain = PhotoPlacementGeometry.ContainZoom(1.5, PrintLayouts.SlotAspect(PrintLayouts.Photo, PrintLayouts.FullBleed, "10x15", portrait: true));
         using var sheet = await RenderAsync(new PartyPrintComposition(
             PartyPrintProducts.Photo, PartyPrintTheme.Overlay,
             [PartyPrintPhoto.Placed(Flat(1500, 1000), new PhotoPlacement(0.5, 0.5, contain))],
@@ -80,7 +80,7 @@ public sealed class PartyPrintPlacementRenderTests
         using var ms = new MemoryStream();
         source.SaveAsPng(ms);
         var bytes = ms.ToArray();
-        var frame = PartyPrintGeometry.PhotoSlotAspect(portrait: false);
+        var frame = PrintLayouts.SlotAspect(PrintLayouts.Photo, PrintLayouts.Framed, "10x15", portrait: false);
         foreach (var placement in new[] { new PhotoPlacement(0.5, 0.5, 1), new PhotoPlacement(0.2, 0.7, 2.5) })
         {
             var (cx, cy, cw, ch) = PhotoPlacementGeometry.LegacyCrop(PhotoPlacementGeometry.Place(1.5, frame, placement));
@@ -90,7 +90,7 @@ public sealed class PartyPrintPlacementRenderTests
             using var cropped = await RenderAsync(new PartyPrintComposition(
                 PartyPrintProducts.Photo, PartyPrintTheme.Pure, [new PartyPrintPhoto(bytes, cx, cy, cw, ch)],
                 "Festa", null, Orientation: PartyPrintOrientation.Landscape));
-            var slot = PartyPrintGeometry.PhotoSlot(PrintPapers.Photo10x15, portrait: false);
+            var slot = PrintLayouts.PhotoSlot(PrintPapers.Photo10x15, portrait: false);
             for (var fx = 0.05; fx < 1; fx += 0.15)
             {
                 for (var fy = 0.05; fy < 1; fy += 0.15)
@@ -107,15 +107,15 @@ public sealed class PartyPrintPlacementRenderTests
     public async Task Each_Of_Four_Keeps_Its_Own_Framing()
     {
         var paper = PrintPapers.Photo10x15;
-        var frame = PartyPrintGeometry.GridSlotAspect(paper);
+        var frame = PrintLayouts.SlotAspect(PrintLayouts.Grid4, PrintLayouts.Framed, paper, portrait: true);
         // Slot 0 zoomed out on a wide photograph; slots 1–3 filled.
         var photos = Enumerable.Range(0, 4).Select(i => PartyPrintPhoto.Placed(Flat(1500, 1000),
             new PhotoPlacement(0.5, 0.5, i == 0 ? PhotoPlacementGeometry.ContainZoom(1.5, frame) : 1))).ToList();
         using var sheet = await RenderAsync(new PartyPrintComposition(
             PartyPrintProducts.Grid4, PartyPrintTheme.Midnight, photos, "Festa", null, Paper: paper));
         var paperColour = new Rgba32(0x0A, 0x0F, 0x1A);
-        var zero = In(sheet.Width, sheet.Height, PartyPrintGeometry.GridSlot(paper, 0), 0.5, 0.03);
-        var one = In(sheet.Width, sheet.Height, PartyPrintGeometry.GridSlot(paper, 1), 0.5, 0.03);
+        var zero = In(sheet.Width, sheet.Height, PrintLayouts.GridSlot(paper, 0), 0.5, 0.03);
+        var one = In(sheet.Width, sheet.Height, PrintLayouts.GridSlot(paper, 1), 0.5, 0.03);
         Assert.True(Near(sheet[zero.X, zero.Y], paperColour), $"slot 0 band {sheet[zero.X, zero.Y]}");
         Assert.True(Near(sheet[one.X, one.Y], Photo), $"slot 1 filled {sheet[one.X, one.Y]}");
     }
@@ -123,7 +123,7 @@ public sealed class PartyPrintPlacementRenderTests
     [Fact]
     public async Task Each_Of_Eight_On_The_Twin_Strip_Keeps_Its_Own_Framing()
     {
-        var frame = PartyPrintGeometry.StripSlotAspect();
+        var frame = PrintLayouts.SlotAspect(PrintLayouts.TwinStrip4, PrintLayouts.Framed, Domain.Print.PrintPapers.Photo10x15, portrait: true);
         // A tall photograph in the wide strip frames: zoomed out on odd slots,
         // so paper shows beside them; filled on even ones.
         var photos = Enumerable.Range(0, 8).Select(i => PartyPrintPhoto.Placed(Flat(800, 1200),
@@ -133,7 +133,7 @@ public sealed class PartyPrintPlacementRenderTests
         var paperColour = new Rgba32(0x0F, 0x1E, 0x3A);
         for (var i = 0; i < 8; i++)
         {
-            var p = In(sheet.Width, sheet.Height, PartyPrintGeometry.StripSlot(i / 4, i % 4), 0.04, 0.5);
+            var p = In(sheet.Width, sheet.Height, PrintLayouts.StripSlot(i / 4, i % 4), 0.04, 0.5);
             Assert.True(Near(sheet[p.X, p.Y], i % 2 == 1 ? paperColour : Photo), $"slot {i}: {sheet[p.X, p.Y]}");
         }
     }

@@ -857,7 +857,13 @@ export interface PartyPrintFormat {
   enabled: boolean;
   /** This product's OWN remaining count for the party. The two are never summed. */
   remaining: number;
+  /** The most photographs this format takes. */
   requiredPhotos: number;
+  /**
+   * Every number of photographs it takes — a twin strip four (the same strip
+   * twice) or eight (two strips). Absent from a server from before the choice.
+   */
+  photoCounts?: number[];
   /**
    * What is left of THIS guest's allowance, or null when the host set no
    * per-guest limit. Null is not zero — it means the ceiling does not exist.

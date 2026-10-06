@@ -187,7 +187,7 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         var (access, _) = await SeedAsync();
         await ShapeAsync(_photos[0], 1500, 1000);
         // A wide photograph whole on a standing sheet.
-        var contain = PhotoPlacementGeometry.ContainZoom(1.5, PartyPrintGeometry.PhotoSlotAspect(portrait: true));
+        var contain = PhotoPlacementGeometry.ContainZoom(1.5, PrintLayouts.SlotAspect(PrintLayouts.Photo, PrintLayouts.Framed, "10x15", portrait: true));
         var result = await SubmitAsync(access, Placed(PartyPrintProducts.Photo, contain, "portrait", _photos[0]), "pz1");
         Assert.True(result.Ok, result.Refusal.ToString());
 
@@ -205,7 +205,7 @@ public sealed class PartyPrintSubmissionTests : IDisposable
     {
         var (access, albumId) = await SeedAsync();
         await ShapeAsync(_photos[0], 1500, 1000);
-        var contain = PhotoPlacementGeometry.ContainZoom(1.5, PartyPrintGeometry.PhotoSlotAspect(portrait: true));
+        var contain = PhotoPlacementGeometry.ContainZoom(1.5, PrintLayouts.SlotAspect(PrintLayouts.Photo, PrintLayouts.Framed, "10x15", portrait: true));
         var result = await SubmitAsync(access, Placed(PartyPrintProducts.Photo, contain * 0.8, "portrait", _photos[0]), "pz2");
         Assert.Equal(PartyPrintRefusal.Invalid, result.Refusal);
         Assert.Equal(0, (await ProfileAsync(albumId)).PhotoAcceptedCount);
@@ -241,7 +241,7 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         foreach (var id in _photos) await ShapeAsync(id, 1000, 1000);
         var grid = new PartyPrintSubmitRequest(PartyPrintProducts.Grid4, "pure",
             _photos.Take(4).Select((id, i) => new PartyPrintSlotRequest(id,
-                Placement: new PartyPrintPlacementRequest(0.5, 0.5, i == 0 ? PhotoPlacementGeometry.ContainZoom(1, PartyPrintGeometry.GridSlotAspect("10x15")) : 1 + i))).ToList());
+                Placement: new PartyPrintPlacementRequest(0.5, 0.5, i == 0 ? PhotoPlacementGeometry.ContainZoom(1, PrintLayouts.SlotAspect(PrintLayouts.Grid4, PrintLayouts.Framed, "10x15", portrait: true)) : 1 + i))).ToList());
         var gridResult = await SubmitAsync(access, grid, "pz8");
         Assert.True(gridResult.Ok, gridResult.Refusal.ToString());
         var strip = new PartyPrintSubmitRequest(PartyPrintProducts.TwinStrip4, "midnight",
@@ -630,25 +630,32 @@ public sealed class PartyPrintSubmissionTests : IDisposable
     }
 
     [Fact]
-    public async Task A_Strip_Needs_Eight_DIFFERENT_Photographs()
+    public async Task A_Strip_Takes_Four_The_Same_Strip_Twice_Or_Eight_And_Never_A_Picture_Twice()
     {
         var (access, albumId) = await SeedAsync();
 
-        // Too few — the old four included, which would print two copies — too
-        // many, and a repeated picture are all refused.
+        // Too few, too many, and a repeated picture — among eight or among four
+        // — are all refused, and none of them cost anything.
         Assert.Equal(PartyPrintRefusal.Invalid,
             (await SubmitAsync(access, Request(PartyPrintProducts.TwinStrip4, _photos[0]), "a")).Refusal);
-        Assert.Equal(PartyPrintRefusal.Invalid,
-            (await SubmitAsync(access, Request(PartyPrintProducts.TwinStrip4,
-                _photos[0], _photos[1], _photos[2], _photos[3]), "four")).Refusal);
         Assert.Equal(PartyPrintRefusal.Invalid,
             (await SubmitAsync(access, Request(PartyPrintProducts.TwinStrip4, _photos.Take(9).ToArray()), "b")).Refusal);
         Assert.Equal(PartyPrintRefusal.Invalid,
             (await SubmitAsync(access, Request(PartyPrintProducts.TwinStrip4,
                 [.. _photos.Take(7), _photos[0]]), "c")).Refusal);
-
-        // None of them cost anything.
+        Assert.Equal(PartyPrintRefusal.Invalid,
+            (await SubmitAsync(access, Request(PartyPrintProducts.TwinStrip4,
+                _photos[0], _photos[1], _photos[2], _photos[0]), "d")).Refusal);
         Assert.Equal(0, (await ProfileAsync(albumId)).StripAcceptedCount);
+
+        // Four is the same strip twice — one to keep, one to give — and eight is
+        // two strips. Each is one sheet.
+        var four = await SubmitAsync(access, Request(PartyPrintProducts.TwinStrip4,
+            _photos[0], _photos[1], _photos[2], _photos[3]), "four");
+        Assert.NotNull(four.Accepted);
+        var eight = await SubmitAsync(access, Request(PartyPrintProducts.TwinStrip4, _photos.Take(8).ToArray()), "eight");
+        Assert.NotNull(eight.Accepted);
+        Assert.Equal(2, (await ProfileAsync(albumId)).StripAcceptedCount);
     }
 
     [Fact]

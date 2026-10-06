@@ -438,6 +438,50 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(screen.getByTestId('party-print-strip-1')).not.toHaveAttribute('aria-hidden');
   });
 
+  it('prints the SAME strip twice from four photographs, when the guest chooses it', async () => {
+    const user = setup();
+    const mock = mount(manifest({
+      formats: [
+        { type: 'photo', enabled: true, remaining: 12, requiredPhotos: 1, remainingForYou: null },
+        {
+          type: 'twinStrip4', enabled: true, remaining: 5, requiredPhotos: 8, remainingForYou: null,
+          cutByPrinter: true, photoCounts: [4, 8],
+        },
+      ],
+    }), {
+      [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
+    });
+    const { container } = render(wrapper());
+
+    // Both strips are on offer, each saying what it is.
+    expect(await screen.findByTestId('party-print-format-twinStrip4')).toHaveTextContent('Due strisce diverse');
+    const same = screen.getByTestId('party-print-format-twinStrip4-4');
+    expect(same).toHaveTextContent('Due strisce uguali');
+    await user.click(same);
+
+    // Four photographs, not eight: a fifth is not taken.
+    expect(screen.getByText(/la striscia si stampa due volte/)).toBeInTheDocument();
+    await pick(user, 5);
+    expect(screen.getAllByRole('button', { name: /Togli dalla selezione/ })).toHaveLength(4);
+    await user.click(next());
+
+    // One strip to put in order, not two.
+    expect(screen.getByTestId('party-print-order-strip-same')).toBeInTheDocument();
+    expect(screen.queryByTestId('party-print-order-strip-1')).toBeNull();
+    await user.click(next());
+    for (let i = 0; i < 4; i += 1) await user.click(next());
+
+    // The second strip is the first again, and is not announced twice.
+    expect(container.querySelectorAll('.party-print-slot')).toHaveLength(8);
+    expect(screen.getByTestId('party-print-strip-1').querySelector('img')?.getAttribute('src')).toContain('/f1/');
+    expect(screen.getByTestId('party-print-strip-1')).toHaveAttribute('aria-hidden', 'true');
+
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    expect(lastPost(mock.calls).product).toBe('twinStrip4');
+    expect(lastPost(mock.calls).slots.map((s: { itemId: string }) => s.itemId)).toEqual(['f1', 'f2', 'f3', 'f4']);
+  });
+
   it('puts the title on the untouched photo, with text and logo chosen apart', async () => {
     const user = setup();
     const mock = mount(manifest(), {
@@ -757,7 +801,7 @@ describe('PartyPrintPage (public print studio)', () => {
     const { unmount } = render(wrapper());
     expect(await screen.findByTestId('party-print-format-photo')).toHaveTextContent('Foto 10×15');
     expect(screen.getByTestId('party-print-format-grid4')).toHaveTextContent('4 foto su 10×15');
-    expect(screen.getByTestId('party-print-format-twinStrip4')).toHaveTextContent('Due strisce da 4 foto');
+    expect(screen.getByTestId('party-print-format-twinStrip4')).toHaveTextContent('Due strisce diverse');
     unmount();
     cleanup();
 

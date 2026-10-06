@@ -12,129 +12,63 @@
  */
 
 import {
-  DEFAULT_PHOTO_PLACEMENT, MAX_PLACEMENT_ZOOM, type PhotoPlacement,
+  DEFAULT_PHOTO_PLACEMENT, MAX_PLACEMENT_ZOOM, PORTRAIT_HEIGHT, PORTRAIT_WIDTH,
+  STRIP_FOOTER_FRACTION, STRIP_GUTTER_FRACTION, STRIP_MARGIN_FRACTION, STRIP_SLOT_GAP_FRACTION,
+  arrangeSheet, slotAspect, stripWidthFraction,
+  type PhotoPlacement, type PrintPaper, type PrintRect,
 } from '@nubarca/contracts';
 
-/** 10x15cm at 300dpi, portrait. The twin strip's sheet. */
-export const PORTRAIT_WIDTH = 1200;
-export const PORTRAIT_HEIGHT = 1800;
+// WHERE photographs and bands sit is the shared print catalogue's
+// (@nubarca/contracts printLayouts, held to the server's PrintLayouts by one
+// table of cases). It is re-exported here under the names the studio has always
+// used; what this file adds is the PARTY's decoration — the words, the mark and
+// the QR card — mirrored from PartyPrintGeometry.cs.
+export {
+  PAPER_DPI, PAPER_INCHES, PORTRAIT_WIDTH, PORTRAIT_HEIGHT, LANDSCAPE_WIDTH, LANDSCAPE_HEIGHT,
+  PHOTO_MARGIN_FRACTION, PHOTO_FOOTER_FRACTION,
+  GRID_MARGIN_FRACTION, GRID_GUTTER_FRACTION, GRID_FOOTER_FRACTION, gridPortrait,
+  STRIPS_PER_SHEET, SLOTS_PER_STRIP, STRIP_GUTTER_FRACTION, STRIP_MARGIN_FRACTION,
+  STRIP_SLOT_GAP_FRACTION, STRIP_FOOTER_FRACTION, stripWidthFraction, stripSlot, stripFooter,
+  printSheet as sheet,
+} from '@nubarca/contracts';
 
-/** The same sheet turned, for a single landscape photograph. */
-export const LANDSCAPE_WIDTH = 1800;
-export const LANDSCAPE_HEIGHT = 1200;
-
-// --- Papers -----------------------------------------------------------------
-
-/**
- * The papers a printer can have loaded, as PrintPapers names them: DNP's 4x6,
- * 5x7 and 6x8 inch media under their photo trade names. The name's order is
- * the paper's own orientation — 20x15 lies.
- */
-export type PaperSize = '10x15' | '13x18' | '20x15';
-export const PAPER_DPI = 300;
-export const PAPER_INCHES: Readonly<Record<PaperSize, readonly [number, number]>> = {
-  '10x15': [4, 6],
-  '13x18': [5, 7],
-  '20x15': [6, 8],
-};
-
-/** A sheet of `paper`, standing or lying, in pixels. */
-export function sheet(paper: PaperSize, portrait: boolean): [number, number] {
-  const [shortEdge, longEdge] = PAPER_INCHES[paper] ?? PAPER_INCHES['10x15'];
-  return portrait
-    ? [shortEdge * PAPER_DPI, longEdge * PAPER_DPI]
-    : [longEdge * PAPER_DPI, shortEdge * PAPER_DPI];
-}
+/** The papers a printer can have loaded, as the catalogue names them. */
+export type PaperSize = PrintPaper;
 
 // --- Single photograph ------------------------------------------------------
 
-export const PHOTO_MARGIN_FRACTION = 0.055;
-/**
- * A fraction of the SHORT EDGE, like the margin — never of the height, which is
- * what flips when the sheet follows a landscape photograph.
- */
-export const PHOTO_FOOTER_FRACTION = 0.17;
-
-export interface Rect { x: number; y: number; width: number; height: number }
+export type Rect = PrintRect;
 
 /**
- * Where the photograph and the footer sit on a single-photo sheet, in sheet
- * fractions — and how big that sheet is.
- *
- * THE SHEET FOLLOWS THE PHOTOGRAPH: a landscape picture is printed on a
- * landscape sheet rather than a portrait one with white bars beside it, exactly
- * as the renderer decides it.
+ * Where the photograph and the footer sit on a single framed sheet, in sheet
+ * fractions — and how big that sheet is. THE SHEET FOLLOWS THE PHOTOGRAPH,
+ * exactly as the renderer decides it.
  */
 export function photoLayout(portrait: boolean, paper: PaperSize = '10x15'): {
   sheetWidth: number; sheetHeight: number; slot: Rect; footer: Rect;
 } {
-  const [w, h] = sheet(paper, portrait);
-  const margin = PHOTO_MARGIN_FRACTION * Math.min(w, h);
-  const footerHeight = PHOTO_FOOTER_FRACTION * Math.min(w, h);
-  const slot: Rect = {
-    x: margin / w,
-    y: margin / h,
-    width: (w - 2 * margin) / w,
-    height: (h - 2 * margin - footerHeight) / h,
-  };
-  return {
-    sheetWidth: w,
-    sheetHeight: h,
-    slot,
-    footer: { x: slot.x, y: slot.y + slot.height, width: slot.width, height: footerHeight / h },
-  };
+  const sheet = arrangeSheet('photo', 'framed', paper, portrait);
+  return { sheetWidth: sheet.width, sheetHeight: sheet.height, slot: sheet.slots[0], footer: sheet.bands[0] };
 }
 
 /** Aspect ratio the single-photo crop is locked to. */
 export function photoSlotAspect(portrait: boolean, paper: PaperSize = '10x15'): number {
-  const { sheetWidth, sheetHeight, slot } = photoLayout(portrait, paper);
-  return (slot.width * sheetWidth) / (slot.height * sheetHeight);
+  return slotAspect('photo', 'framed', paper, portrait);
 }
 
 // --- Four photographs, two by two -------------------------------------------
 
-/** Short-edge fractions: little border and gutter, a slim band for the signature. */
-export const GRID_MARGIN_FRACTION = 0.035;
-export const GRID_GUTTER_FRACTION = 0.02;
-export const GRID_FOOTER_FRACTION = 0.12;
-
-/** The four sit as the paper is named: standing on 10x15 and 13x18, lying on 20x15. */
-export function gridPortrait(paper: PaperSize): boolean {
-  return paper !== '20x15';
-}
-
-/**
- * The four frames and the footer band of a four-photo sheet, in sheet
- * fractions: 0 top left, 1 top right, 2 bottom left, 3 bottom right.
- */
+/** The four frames and the footer band of a four-photo sheet, in sheet fractions. */
 export function gridLayout(paper: PaperSize): {
   sheetWidth: number; sheetHeight: number; slots: Rect[]; footer: Rect;
 } {
-  const [w, h] = sheet(paper, gridPortrait(paper));
-  const shortEdge = Math.min(w, h);
-  const margin = GRID_MARGIN_FRACTION * shortEdge;
-  const gutter = GRID_GUTTER_FRACTION * shortEdge;
-  const footer = GRID_FOOTER_FRACTION * shortEdge;
-  const cellW = (w - 2 * margin - gutter) / 2;
-  const cellH = (h - 2 * margin - gutter - footer) / 2;
-  const slots = [0, 1, 2, 3].map((index): Rect => ({
-    x: (margin + (index % 2) * (cellW + gutter)) / w,
-    y: (margin + Math.floor(index / 2) * (cellH + gutter)) / h,
-    width: cellW / w,
-    height: cellH / h,
-  }));
-  return {
-    sheetWidth: w,
-    sheetHeight: h,
-    slots,
-    footer: { x: margin / w, y: (h - margin - footer) / h, width: (w - 2 * margin) / w, height: footer / h },
-  };
+  const sheet = arrangeSheet('grid4', 'framed', paper, true);
+  return { sheetWidth: sheet.width, sheetHeight: sheet.height, slots: sheet.slots, footer: sheet.bands[0] };
 }
 
 /** Aspect ratio each of the four crops is locked to. */
 export function gridSlotAspect(paper: PaperSize): number {
-  const { sheetWidth, sheetHeight, slots } = gridLayout(paper);
-  return (slots[0].width * sheetWidth) / (slots[0].height * sheetHeight);
+  return slotAspect('grid4', 'framed', paper, true);
 }
 
 // --- Single photograph, title on the photograph -----------------------------
@@ -197,8 +131,7 @@ export function printedLine(value: string, max: number): string {
 
 /** A title-on-the-photograph crop fills the whole sheet. */
 export function overlaySlotAspect(portrait: boolean, paper: PaperSize = '10x15'): number {
-  const [w, h] = sheet(paper, portrait);
-  return w / h;
+  return slotAspect('photo', 'fullBleed', paper, portrait);
 }
 
 /**
@@ -213,60 +146,14 @@ export function overlayTextSupport(rgb: string): string {
 
 // --- Four-photo strip -------------------------------------------------------
 
-/**
- * TWO STRIPS side by side on one portrait sheet, so a single 10x15 yields two
- * photo-booth keepsakes: one to keep, one to give away. Each strip has its own
- * four photographs — eight in all.
- */
-export const STRIPS_PER_SHEET = 2;
-export const SLOTS_PER_STRIP = 4;
-
-export const STRIP_GUTTER_FRACTION = 0.035;
-export const STRIP_MARGIN_FRACTION = 0.035;
-export const STRIP_SLOT_GAP_FRACTION = 0.012;
-export const STRIP_FOOTER_FRACTION = 0.075;
 /** The wordmark on a strip, as a fraction of the strip's width: as large as its row allows. */
 export const STRIP_WORDMARK_WIDTH_FRACTION = 0.31;
 /** The wordmark under a photograph or four, as a fraction of the footer's width. */
 export const FOOTER_WORDMARK_WIDTH_FRACTION = 0.23;
 
-/** Width of one strip, in sheet fractions. */
-export function stripWidthFraction(): number {
-  return (1 - 2 * STRIP_MARGIN_FRACTION - STRIP_GUTTER_FRACTION) / STRIPS_PER_SHEET;
-}
-
-/**
- * One slot's rectangle inside a strip, in fractions of the SHEET. The single
- * place that decides where a photograph lands — shared with the renderer.
- */
-export function stripSlot(stripIndex: number, slotIndex: number): Rect {
-  const stripW = stripWidthFraction();
-  const x = STRIP_MARGIN_FRACTION + stripIndex * (stripW + STRIP_GUTTER_FRACTION);
-
-  const contentTop = STRIP_MARGIN_FRACTION;
-  const contentHeight = 1 - 2 * STRIP_MARGIN_FRACTION - STRIP_FOOTER_FRACTION;
-  const totalGap = STRIP_SLOT_GAP_FRACTION * (SLOTS_PER_STRIP - 1);
-  const slotH = (contentHeight - totalGap) / SLOTS_PER_STRIP;
-  const y = contentTop + slotIndex * (slotH + STRIP_SLOT_GAP_FRACTION);
-
-  return { x, y, width: stripW, height: slotH };
-}
-
-/** The footer band at the foot of one strip, in sheet fractions. */
-export function stripFooter(stripIndex: number): Rect {
-  const stripW = stripWidthFraction();
-  return {
-    x: STRIP_MARGIN_FRACTION + stripIndex * (stripW + STRIP_GUTTER_FRACTION),
-    y: 1 - STRIP_MARGIN_FRACTION - STRIP_FOOTER_FRACTION,
-    width: stripW,
-    height: STRIP_FOOTER_FRACTION,
-  };
-}
-
 /** Aspect ratio every strip slot's crop is locked to. */
 export function stripSlotAspect(): number {
-  const { width, height } = stripSlot(0, 0);
-  return (width * PORTRAIT_WIDTH) / (height * PORTRAIT_HEIGHT);
+  return slotAspect('twinStrip4', 'framed', '10x15', true);
 }
 
 // --- The party's QR card, on the twin strip's sheet ---------------------------
