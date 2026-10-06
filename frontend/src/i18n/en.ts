@@ -1305,6 +1305,10 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.openVideo': 'Open video',
   'party.photoViewer': 'Photo viewer',
   'party.videoViewer': 'Video viewer',
+  'publicViewer.share': 'Share',
+  'publicViewer.sharePreparing': 'Preparing…',
+  'publicViewer.shareReady': 'Share now',
+  'publicViewer.shareFailed': 'The photo could not be prepared for sharing.',
 
   // --- Public party FACE SEARCH ("find your face", guest) ---
   'partyFace.title': 'Find your photos',

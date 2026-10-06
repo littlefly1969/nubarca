@@ -41,91 +41,10 @@
   font-size: 1.125rem;
 }
 
-/* ---- The grid -----------------------------------------------------------
-   `auto-fill` with a floor rather than a fixed column count: three across on a
-   phone, more on a tablet, and never one enormous tile on a narrow screen. */
-.album-share-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
-  gap: 0.4rem;
-  margin: 1.5rem 0 0;
-  padding: 0;
-  list-style: none;
-}
-.album-share-tile {
-  position: relative;
-  display: block;
-  width: 100%;
-  aspect-ratio: 1;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-button);
-  overflow: hidden;
-  background: var(--surface-subtle);
-  cursor: pointer;
-}
-.album-share-tile img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.album-share-tile:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-/* A triangle, drawn rather than shipped: one more image request per video tile
-   would cost more than the mark is worth. */
-.album-share-video {
-  position: absolute;
-  right: 0.35rem;
-  bottom: 0.35rem;
-  width: 0;
-  height: 0;
-  border-top: 0.35rem solid transparent;
-  border-bottom: 0.35rem solid transparent;
-  border-left: 0.6rem solid rgb(255 255 255 / 0.9);
-  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.6));
-}
-
-/* ---- The viewer ---------------------------------------------------------- */
-.album-share-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  padding: 1rem;
-  padding-bottom: max(1rem, env(safe-area-inset-bottom));
-  background: rgb(0 0 0 / 0.92);
-}
-.album-share-lightbox video,
-.album-share-lightbox img {
-  max-width: 100%;
-  /* Room for the close button above and the download below, so neither ever
-     sits on top of the photograph. */
-  max-height: calc(100% - 8rem);
-  object-fit: contain;
-  border-radius: var(--radius-card);
-}
-.album-share-close {
-  position: absolute;
-  top: max(0.5rem, env(safe-area-inset-top));
-  right: 0.5rem;
-  min-width: 2.75rem;
-  min-height: 2.75rem;
-  border: 0;
-  border-radius: 50%;
-  background: rgb(255 255 255 / 0.12);
-  color: #fff;
-  font-size: 1.5rem;
-  line-height: 1;
-  cursor: pointer;
-}
-.album-share-download { text-decoration: none; }
+/* ---- The gallery -------------------------------------------------------
+   The party's own mosaic and viewer (src/publicMedia), so an album shared by
+   link looks and behaves exactly as a party's photographs do. */
+.album-share-gallery { margin: 1.5rem 0 0; }
 
 /* ---- Adding ------------------------------------------------------------- */
 .album-share-upload {

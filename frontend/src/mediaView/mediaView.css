@@ -1,0 +1,31 @@
+/* The shared engine of every full-screen viewer (src/mediaView): the stage a
+   photograph fits and zooms in. Each viewer's own chrome is its own. */
+
+/* The stage FILLS its viewer, which is positioned, so the picture fits a box
+   of definite size in portrait and landscape alike. `touch-action: none` hands
+   pinch and drag to the handlers INSIDE the viewer only — the page's own
+   browser zoom is untouched, which NubArca's viewport deliberately allows. */
+.zoomable-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.zoomable-stage[data-zoomed='true'] { cursor: grab; }
+
+/* Contain, never crop: the viewer shows the whole photo. A zoom is a direct
+   manipulation, so it follows the fingers with no easing. */
+.zoomable-img {
+  max-width: 100%;
+  max-height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  transform-origin: center center;
+  will-change: transform;
+  -webkit-user-select: none;
+  user-select: none;
+}

@@ -110,34 +110,60 @@ it('opens a photograph at preview size and hands it over on request', async () =
   mount();
 
   await user.click(await screen.findByTestId('album-share-item-i1'));
-  const lightbox = await screen.findByTestId('album-share-lightbox');
+  const viewer = await screen.findByTestId('public-viewer');
   // The grid asked for the SMALL rendition; the viewer asks for the preview.
-  expect(lightbox.querySelector('img')).toHaveAttribute(
+  expect(viewer.querySelector('img')).toHaveAttribute(
     'src', `/api/album-share/${TOKEN}/media/i1/preview`);
 
-  const download = screen.getByTestId('album-share-download');
+  const download = screen.getByTestId('public-viewer-download');
   expect(download).toHaveAttribute('href', `/api/album-share/${TOKEN}/media/i1/download`);
   // The owner left originals off, so the button does not promise one.
   expect(download).toHaveTextContent(/^Scarica$/);
 });
 
-it('plays a video instead of showing its poster, and says why it cannot be taken', async () => {
+it("lays the album out as the party's mosaic, and walks it in the viewer", async () => {
   const user = userEvent.setup();
   serve();
   mount();
 
+  const grid = await screen.findByTestId('album-share-grid');
+  expect(grid).toHaveClass('public-gallery');
+  expect(grid.querySelectorAll('button.public-gallery-tile')).toHaveLength(2);
+  expect(grid.querySelector('.public-gallery-tile-play')).toBeInTheDocument();
+
+  await user.click(screen.getByTestId('album-share-item-i1'));
+  await user.click(screen.getByRole('button', { name: 'Successivo' }));
+  expect(screen.getByRole('dialog', { name: 'Visualizzatore video' })).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Precedente' }));
+  expect(screen.getByRole('dialog', { name: 'Visualizzatore foto' })).toBeInTheDocument();
+
+  // Closing hands focus back to the tile it was opened from.
+  await user.click(screen.getByTestId('public-viewer-close'));
+  expect(document.activeElement).toBe(screen.getByTestId('album-share-item-i1'));
+});
+
+it('plays a video through the adaptive player, and says why it cannot be taken', async () => {
+  const user = userEvent.setup();
+  const { calls } = installFetchMock({
+    [`GET /api/album-share/${TOKEN}`]: () => jsonResponse(album()),
+    [`GET /api/album-share/${TOKEN}/items`]: () => jsonResponse(items()),
+    // The ladder is still being prepared: the poster, and a status.
+    [`GET /api/album-share/${TOKEN}/media/i2/video`]: () =>
+      new Response(null, { status: 202, headers: { 'Retry-After': '30' } }),
+  });
+  mount();
+
   await user.click(await screen.findByTestId('album-share-item-i2'));
-  // It used to be drawn as an <img> of the poster: a still frame and no way to
-  // watch it.
-  const video = await screen.findByTestId('album-share-video');
-  expect(video.tagName).toBe('VIDEO');
-  expect(video).toHaveAttribute('poster', `/api/album-share/${TOKEN}/media/i2/preview`);
-  // The ladder, not the original — which is why it is offered at all.
-  expect(video).toHaveAttribute('src', `/api/album-share/${TOKEN}/media/i2/video`);
+  // The ladder, not the original — which is why it is offered at all — asked
+  // for by the same player the owner's library uses.
+  await waitFor(() => expect(calls.some((c) => c.url === `/api/album-share/${TOKEN}/media/i2/video`)).toBe(true));
+  expect(screen.queryByTestId('public-viewer-stage')).toBeNull();
+  await waitFor(() => expect(screen.getByTestId('public-viewer').querySelector('img'))
+    .toHaveAttribute('src', `/api/album-share/${TOKEN}/media/i2/preview`));
 
   // And no download button, because the route would have answered 404.
-  expect(screen.queryByTestId('album-share-download')).toBeNull();
-  expect(screen.getByTestId('album-share-no-download')).toBeInTheDocument();
+  expect(screen.queryByTestId('public-viewer-download')).toBeNull();
+  expect(screen.getByText(/si può solo guardare qui/i)).toBeInTheDocument();
 });
 
 it('says when the owner allowed the real file', async () => {
@@ -146,7 +172,7 @@ it('says when the owner allowed the real file', async () => {
   mount();
 
   await user.click(await screen.findByTestId('album-share-item-i1'));
-  expect(screen.getByTestId('album-share-download')).toHaveTextContent(/originale/i);
+  expect(screen.getByTestId('public-viewer-download')).toHaveTextContent(/originale/i);
 });
 
 it('still opens when the owner closed contribution', async () => {

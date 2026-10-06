@@ -15,6 +15,8 @@ import { useI18n } from '../i18n';
 import { PRODUCT_NAME } from '../brand/brand';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { HomeScreenButton } from '../homeScreen/HomeScreenButton';
+import { PublicGallery } from '../publicMedia/PublicGallery';
+import { PublicMediaViewer } from '../publicMedia/PublicMediaViewer';
 import {
   restartAlbumShareApp, useHomeScreenAppMismatch, useHomeScreenTitle,
 } from '../homeScreen/homeScreen';
@@ -141,7 +143,19 @@ function AlbumShareBody({
   onChanged(): void;
 }) {
   const { t, tn } = useI18n();
-  const [open, setOpen] = useState<AlbumShareItem | null>(null);
+  // The open picture, by position, so ‹ › and a swipe walk the album; and the
+  // tile it was opened from, so focus goes back there.
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const close = useCallback(() => {
+    setOpenIndex(null);
+    openerRef.current?.focus?.();
+    openerRef.current = null;
+  }, []);
+  // Clamped in the update itself: several key presses can land before a render.
+  const move = useCallback((delta: number) => setOpenIndex((i) => (
+    i === null ? i : Math.max(0, Math.min(items.length - 1, i + delta)))), [items.length]);
+  const shown = openIndex === null ? null : items[openIndex] ?? null;
 
   return (
     <>
@@ -161,96 +175,40 @@ function AlbumShareBody({
           {t('albumLink.empty')}
         </p>
       ) : (
-        <ul className="album-share-grid" data-testid="album-share-grid">
-          {items.map((item) => (
-            <li key={item.id}>
-              <button
-                type="button"
-                className="album-share-tile"
-                data-testid={`album-share-item-${item.id}`}
-                onClick={() => setOpen(item)}
-              >
-                {/* SMALL in the grid, as every grid in this product uses —
-                    a medium in forty tiles is forty times the bytes for a
-                    picture nobody is looking at yet. */}
-                <img src={item.thumbnailUrl} alt="" loading="lazy" />
-                {item.isVideo && <span className="album-share-video" aria-hidden="true" />}
-              </button>
-            </li>
-          ))}
-        </ul>
+        // The party's own mosaic: an album shared by link and a party's
+        // photographs are the same thing to look at.
+        <div className="album-share-gallery">
+          <PublicGallery
+            testId="album-share-grid"
+            itemTestId={(item) => `album-share-item-${item.id}`}
+            items={items}
+            onOpen={(index, tile) => { openerRef.current = tile; setOpenIndex(index); }}
+          />
+        </div>
       )}
 
-      {open && (
-        <Lightbox
-          item={open}
-          canDownloadOriginal={album.canDownloadOriginal}
-          onClose={() => setOpen(null)}
+      {shown && openIndex !== null && (
+        <PublicMediaViewer
+          item={{
+            id: shown.id,
+            kind: shown.isVideo ? 'video' : 'image',
+            // MEDIUM in the viewer, again as the rest of the product does; a
+            // video is PLAYED from its ladder, its poster until it starts.
+            previewUrl: shown.previewUrl,
+            playbackUrl: shown.playbackUrl,
+            // The original leaves only through this, and only when the owner allowed it.
+            downloadUrl: shown.downloadUrl,
+          }}
+          label={shown.isVideo ? t('party.videoViewer') : t('party.photoViewer')}
+          downloadLabel={t(album.canDownloadOriginal ? 'albumLink.downloadOriginal' : 'albumLink.download')}
+          // Said, rather than left as a button that would answer 404.
+          note={shown.isVideo && !shown.downloadUrl ? t('albumLink.videoNeedsOriginals') : null}
+          onClose={close}
+          onPrevious={openIndex > 0 ? () => move(-1) : undefined}
+          onNext={openIndex < items.length - 1 ? () => move(1) : undefined}
         />
       )}
     </>
-  );
-}
-
-function Lightbox({
-  item, canDownloadOriginal, onClose,
-}: {
-  item: AlbumShareItem;
-  canDownloadOriginal: boolean;
-  onClose(): void;
-}) {
-  const { t } = useI18n();
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  return (
-    <div className="album-share-lightbox" role="dialog" aria-modal="true" data-testid="album-share-lightbox">
-      <button
-        type="button"
-        className="album-share-close"
-        aria-label={t('common.close')}
-        onClick={onClose}
-      >×</button>
-      {/* MEDIUM in the viewer, again as the rest of the product does. The
-          original leaves only through the download below, and only when the
-          owner allowed it. */}
-      {/* A VIDEO IS PLAYED, NOT LOOKED AT. It used to be drawn as an <img> of
-          its poster, so a visitor opening one got a still frame and no way to
-          watch it. The preview route serves the poster, which is what a video
-          element should show before it starts. */}
-      {item.isVideo && item.playbackUrl ? (
-        <video
-          src={item.playbackUrl}
-          poster={item.previewUrl}
-          controls
-          playsInline
-          data-testid="album-share-video"
-        />
-      ) : (
-        // An image, or a video this installation cannot transcode: the poster
-        // is what there is, and showing it is better than an empty frame.
-        <img src={item.previewUrl} alt="" />
-      )}
-      {item.downloadUrl ? (
-        <a
-          className="party-contribution-primary album-share-download"
-          href={item.downloadUrl}
-          download
-          data-testid="album-share-download"
-        >
-          {t(canDownloadOriginal ? 'albumLink.downloadOriginal' : 'albumLink.download')}
-        </a>
-      ) : (
-        // Said, rather than left as a button that would answer 404.
-        <p className="party-contribution-hint" data-testid="album-share-no-download">
-          {t('albumLink.videoNeedsOriginals')}
-        </p>
-      )}
-    </div>
   );
 }
 

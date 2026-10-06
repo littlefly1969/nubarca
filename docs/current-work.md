@@ -93,6 +93,20 @@ is built is described by `ARCHITECTURE.md`.
   Screen steps). No service worker: every launch is the page as it is now. An invitation
   opened again goes straight into the party once everybody coming has
   arrived, and after the party always (`partyUrl` now also after).
+- Viewers: ONE engine (`src/mediaView`: zoomable photograph — pinch, double
+  tap, pan — the stage filling the viewer so a picture stays whole in
+  landscape, chrome that steps aside after 2.6 s, keys with keyboard ownership,
+  swipe) under TWO shells. The owner's `MediaViewer` (names, metadata drawer,
+  Cast, Play) and ONE public viewer (`src/publicMedia/PublicMediaViewer`) for a
+  party's gallery, its content posters and an album shared by link: floating
+  "Chiudi", "Scarica" (only the server-offered address) and "Condividi" (the
+  system share sheet with the downloaded FILE via Web Share level 2 — never the
+  page address, which is a capability; absent where files cannot be shared), no
+  names or metadata. Videos play through `HlsVideoPlayer` in both: a party
+  now serves its videos' ladder (`/api/party/{token}/media/{id}/video[/…]`,
+  `PlaybackUrl` on its items, same lifecycle as the gallery) through
+  `PublicAlbumVideo`, the HLS path shared with the album share. The party's
+  mosaic (`PublicGallery`, `galleryShapes`) is also the shared album's grid.
 - Bulk import faces: a finished import (staging upload or admin import)
   enqueues face detection for exactly the photos it created — chunks of
   `AdminImport:FaceDetectionBatchSize` (100) blob ids, each chaining

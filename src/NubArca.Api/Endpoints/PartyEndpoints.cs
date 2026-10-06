@@ -482,6 +482,7 @@ public static class PartyEndpoints
             HttpContext httpContext,
             [FromServices] NubArca.Api.Party.IPartyLinkService party,
             [FromServices] NubArca.Api.Party.IPartyMediaService partyMedia,
+            [FromServices] VideoHlsServingService hlsServing,
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
@@ -510,9 +511,13 @@ public static class PartyEndpoints
                     isVideo ? "video" : "image",
                     $"/api/party/{enc}/media/{i.FileItemId}/thumbnail",
                     $"/api/party/{enc}/media/{i.FileItemId}/preview",
-                    // View-only for videos in this slice (no playback/download); images
-                    // get a metadata-stripped medium download.
-                    isVideo ? null : $"/api/party/{enc}/media/{i.FileItemId}/download");
+                    // Images get a metadata-stripped medium download. A video
+                    // has none: a party hands out no originals, and a camera's
+                    // video is nothing but its original.
+                    isVideo ? null : $"/api/party/{enc}/media/{i.FileItemId}/download",
+                    // A video is WATCHED, through the same adaptive ladder the
+                    // owner's player uses (PublicAlbumVideo) — never the file.
+                    isVideo && hlsServing.Enabled ? $"/api/party/{enc}/media/{i.FileItemId}/video" : null);
             }).ToList();
 
             return Results.Ok(new NubArca.Api.Party.PartyItemsDto(header.Name, dtos));
@@ -556,6 +561,43 @@ public static class PartyEndpoints
             ServePartyMediaAsync(token, fileId, "download", httpContext, party, partyMedia, thumbnails, stripper, cancellationToken))
             .WithName("GetPartyMediaDownload")
             .RequireRateLimiting(PartyPublicRateLimitPolicy);
+
+        // A party's VIDEO, played: the album's HLS ladder under the party's own
+        // token (PublicAlbumVideo), on the lifecycle the gallery obeys — album
+        // media, present during the party and for as long as the memories last.
+        app.MapGet("/api/party/{token}/media/{fileId:guid}/video", async (
+            string token,
+            Guid fileId,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromServices] NubArca.Api.Party.IPartyMediaService partyMedia,
+            [FromServices] VideoHlsServingService hlsServing,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var access = await party.ResolvePublicAsync(token, cancellationToken);
+            if (access is null || !access.Experience.AllowsAlbumMedia) return Results.NotFound();
+            return await PublicAlbumVideo.MasterAsync(
+                access.OwnerUserId, access.MainAlbumId, fileId, httpContext, partyMedia, hlsServing, cancellationToken);
+        }).WithName("GetPartyMediaVideo").RequireRateLimiting(PartyPublicMediaRateLimitPolicy);
+
+        app.MapGet("/api/party/{token}/media/{fileId:guid}/video/{rendition}/{file}", async (
+            string token,
+            Guid fileId,
+            string rendition,
+            string file,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromServices] NubArca.Api.Party.IPartyMediaService partyMedia,
+            [FromServices] VideoHlsServingService hlsServing,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var access = await party.ResolvePublicAsync(token, cancellationToken);
+            if (access is null || !access.Experience.AllowsAlbumMedia) return Results.NotFound();
+            return await PublicAlbumVideo.LadderFileAsync(
+                access.OwnerUserId, access.MainAlbumId, fileId, rendition, file, partyMedia, hlsServing, cancellationToken);
+        }).WithName("GetPartyMediaVideoHlsFile").RequireRateLimiting(PartyPublicMediaRateLimitPolicy);
 
         // PUBLIC party UPLOAD (anonymous, upload-token scoped). Guests add photos to a
         // party album on the owner's behalf. The upload token is SEPARATE from the

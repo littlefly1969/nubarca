@@ -1329,6 +1329,10 @@ const it = {
   'party.openVideo': 'Apri video',
   'party.photoViewer': 'Visualizzatore foto',
   'party.videoViewer': 'Visualizzatore video',
+  'publicViewer.share': 'Condividi',
+  'publicViewer.sharePreparing': 'Preparo…',
+  'publicViewer.shareReady': 'Condividi ora',
+  'publicViewer.shareFailed': 'Non è stato possibile preparare la foto da condividere.',
 
   // --- Public party FACE SEARCH ("find your face", guest) ---
   'partyFace.title': 'Trova le tue foto',

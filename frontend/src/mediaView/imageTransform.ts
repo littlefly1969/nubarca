@@ -1,4 +1,5 @@
-// Zoom and pan for the Party image viewer, as PURE state.
+// Zoom and pan for every full-screen viewer — the public one and the owner's —
+// as PURE state.
 //
 // A photograph opened full-screen on a phone has to be examinable — a menu
 // graphic is unreadable at fit-to-screen on a 5" display, which is most of why

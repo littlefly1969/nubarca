@@ -21,7 +21,8 @@ import {
 import { PartyGameAffordance } from '../party/PartyGameAffordance';
 import { PartyHubTopBar } from '../party/PartyHubTopBar';
 import { useHomeScreenTitle } from '../homeScreen/homeScreen';
-import { PartyImageViewer } from '../party/PartyImageViewer';
+import { PublicMediaViewer, type PublicMediaItem } from '../publicMedia/PublicMediaViewer';
+import { PublicGallery } from '../publicMedia/PublicGallery';
 import {
   PartyAfterHome,
   PartyBeforeHome,
@@ -134,65 +135,6 @@ function PhotoStackIcon() {
       <path d="m9.5 13.2 3.1-3.1a1.4 1.4 0 0 1 2 0l3.4 3.4" />
       <circle cx="16.3" cy="7.6" r="1.3" />
       <path d="M16.5 20.5H6a2.5 2.5 0 0 1-2.5-2.5V7.5" />
-    </svg>
-  );
-}
-
-/* Gallery composition.
-
-   An editorial 2-column grid rather than a uniform contact sheet, but a
-   DETERMINISTIC one: a tile's shape comes from its index, never from the
-   image's real dimensions, so nothing reflows once the photos load and the
-   visual order is exactly the DOM order (no masonry, no `columns`, no dense
-   packing).
-
-   Two rules keep the composition whole at any album size:
-
-     * a wide tile every FEATURE_EVERY items, which always starts a fresh row
-       because the six tiles between two of them fill exactly three rows —
-       so a wide tile can never leave a gap beside it;
-     * the two tiles sharing a row always share a shape, so a row never has one
-       short tile and one tall one with dead space under the short one.
-
-   The one thing that does depend on the total is the LAST tile: if it would sit
-   alone it widens to fill its row. That is a single tile at the very end, so a
-   photo arriving from the poll changes that row and nothing above it. */
-export type GalleryShape = 'featured' | 'portrait' | 'square';
-
-const FEATURE_EVERY = 7;
-
-export function galleryShapes(count: number): GalleryShape[] {
-  const shapes: GalleryShape[] = [];
-  let row = 0;
-  let col = 0;
-  let cells = 0;
-  for (let i = 0; i < count; i += 1) {
-    if (i % FEATURE_EVERY === 0) {
-      shapes.push('featured');
-      cells += 2;
-      row += 1;
-      col = 0;
-      continue;
-    }
-    shapes.push(row % 2 === 0 ? 'portrait' : 'square');
-    cells += 1;
-    col += 1;
-    if (col === 2) {
-      col = 0;
-      row += 1;
-    }
-  }
-  // An odd number of cells means the last row holds one tile: widen it.
-  if (cells % 2 === 1 && shapes.length > 0) shapes[shapes.length - 1] = 'featured';
-  return shapes;
-}
-
-
-
-function PlayIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M9.5 7.8 16.8 12l-7.3 4.2Z" />
     </svg>
   );
 }
@@ -588,8 +530,8 @@ export function PartyPage() {
     setNewMoments(0);
   }, [readyItems]);
 
-  // Escape, the scroll lock and the focus trap belong to PartyImageViewer, which
-  // the gallery and a content poster share. What stays here is the one thing
+  // Escape, the scroll lock and the focus trap belong to PublicMediaViewer,
+  // which the gallery and a content poster share. What stays here is the one thing
   // only this page knows: which tile the viewer was opened from, so focus goes
   // back to it.
   useEffect(() => {
@@ -744,8 +686,6 @@ export function PartyPage() {
       .map((id) => items.find((it) => it.id === id))
       .filter((it): it is PartyItem => it !== undefined)
     : items;
-
-  const shapes = galleryShapes(visibleItems.length);
 
   // What this party actually offers right now. "Share a moment" is deliberately
   // absent: it is the hero's primary CTA and must not be duplicated here.
@@ -952,30 +892,13 @@ export function PartyPage() {
           )}
         </div>
       ) : (
-        <div className="party-guest-hub-tiles" data-testid="party-grid">
-          {visibleItems.map((item, index) => (
-            <button
-              key={item.id}
-              type="button"
-              className="party-guest-hub-tile"
-              data-shape={shapes[index]}
-              onClick={(e) => openViewer(visibleItems, index, e.currentTarget)}
-              aria-label={item.mediaType === 'video' ? t('party.openVideo') : t('party.openPhoto')}
-            >
-              <img
-                className="party-guest-hub-tile-img"
-                src={item.thumbnailUrl}
-                alt=""
-                loading="lazy"
-              />
-              {/* The party surface serves a POSTER for a video and no duration,
-                  so the tile says "video" and invents nothing else. */}
-              {item.mediaType === 'video' && (
-                <span className="party-guest-hub-tile-play" aria-hidden="true"><PlayIcon /></span>
-              )}
-            </button>
-          ))}
-        </div>
+        <PublicGallery
+          testId="party-grid"
+          items={visibleItems.map((item) => ({
+            id: item.id, thumbnailUrl: item.thumbnailUrl, isVideo: item.mediaType === 'video',
+          }))}
+          onOpen={(index, tile) => openViewer(visibleItems, index, tile)}
+        />
       )}
       </section>
       </div>
@@ -1022,10 +945,10 @@ export function PartyPage() {
     <>
       {surface}
 
-      {/* The gallery photograph. The medium PREVIEW, whole and uncropped — for a
-          video this is the poster the party surface serves; there is no playback
-          here. It keeps the download the server offered, which is the one thing
-          a content poster never has. Only the Live/memories surface has a
+      {/* The gallery photograph or video. The medium PREVIEW, whole and
+          uncropped — a video is PLAYED from its ladder, with its poster until
+          it starts. It keeps the download the server offered, which is the one
+          thing a content poster never has. Only the Live/memories surface has a
           gallery, so `lightbox` is simply null on the other two. */}
       {lightbox && (() => {
         const item = lightbox.items[lightbox.index];
@@ -1035,11 +958,17 @@ export function PartyPage() {
         const move = (delta: number) => setLightbox((lb) => (lb
           ? { ...lb, index: Math.max(0, Math.min(lb.items.length - 1, lb.index + delta)) }
           : lb));
+        const shown: PublicMediaItem = {
+          id: item.id,
+          kind: item.mediaType,
+          previewUrl: item.previewUrl,
+          playbackUrl: item.playbackUrl ?? null,
+          downloadUrl: item.downloadUrl,
+        };
         return (
-          <PartyImageViewer
-            src={item.previewUrl}
+          <PublicMediaViewer
+            item={shown}
             label={item.mediaType === 'video' ? t('party.videoViewer') : t('party.photoViewer')}
-            downloadUrl={item.downloadUrl}
             onClose={() => setLightbox(null)}
             onPrevious={lightbox.index > 0 ? () => move(-1) : undefined}
             onNext={lightbox.index < lightbox.items.length - 1 ? () => move(1) : undefined}
@@ -1053,8 +982,8 @@ export function PartyPage() {
           invitation's `Invito ›` and the memories' `Ringraziamento ›` are the
           same act as the party's `Menu ›`. */}
       {posterSlot?.mediaUrl && (
-        <PartyImageViewer
-          src={posterSlot.mediaUrl}
+        <PublicMediaViewer
+          item={{ id: `poster-${posterSlot.mediaUrl}`, kind: 'image', previewUrl: posterSlot.mediaUrl }}
           label={t('party.photoViewer')}
           onClose={closePoster}
         />

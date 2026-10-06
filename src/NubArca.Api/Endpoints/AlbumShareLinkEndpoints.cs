@@ -444,20 +444,8 @@ public static class AlbumShareLinkEndpoints
             if (!hlsServing.Enabled) return Results.NotFound();
             var access = await GrantAsync(shares, token, httpContext, cancellationToken);
             if (access is null) return Results.NotFound();
-            var kind = await media.GetVisibleMediaKindAsync(
-                access.OwnerUserId, access.AlbumId, fileId, cancellationToken);
-            if (kind != NubArca.Api.Party.PartyMediaKind.Video) return Results.NotFound();
-
-            var master = await hlsServing.GetMasterAsync(
-                fileId, access.OwnerUserId, cancellationToken);
-            return master.Status switch
-            {
-                VideoHlsMasterStatus.Ready => Results.Text(
-                    master.MasterPlaylist!, VideoHlsServingService.MasterContentType),
-                VideoHlsMasterStatus.Preparing =>
-                    VideoHlsServingService.Preparing(httpContext.Response),
-                _ => Results.NotFound(),
-            };
+            return await PublicAlbumVideo.MasterAsync(
+                access.OwnerUserId, access.AlbumId, fileId, httpContext, media, hlsServing, cancellationToken);
         }).WithName("GetAlbumShareVideo").RequireRateLimiting(MediaRateLimitPolicy);
 
         // Ladder child files. The FULL grant is re-resolved on every segment,
@@ -475,15 +463,8 @@ public static class AlbumShareLinkEndpoints
             if (!hlsServing.Enabled) return Results.NotFound();
             var access = await GrantAsync(shares, token, httpContext, cancellationToken);
             if (access is null) return Results.NotFound();
-            var kind = await media.GetVisibleMediaKindAsync(
-                access.OwnerUserId, access.AlbumId, fileId, cancellationToken);
-            if (kind != NubArca.Api.Party.PartyMediaKind.Video) return Results.NotFound();
-
-            var content = await hlsServing.OpenLadderFileAsync(
-                fileId, access.OwnerUserId, $"{rendition}/{file}", cancellationToken);
-            return content is null
-                ? Results.NotFound()
-                : Results.File(content.Content, content.ContentType);
+            return await PublicAlbumVideo.LadderFileAsync(
+                access.OwnerUserId, access.AlbumId, fileId, rendition, file, media, hlsServing, cancellationToken);
         }).WithName("GetAlbumShareVideoHlsFile").RequireRateLimiting(MediaRateLimitPolicy);
 
         app.MapPost("/api/album-share/{token}/upload", async (

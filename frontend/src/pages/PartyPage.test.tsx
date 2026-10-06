@@ -545,7 +545,7 @@ describe('PartyPage (public party landing)', () => {
     render(wrapper());
     const user = userEvent.setup();
     await screen.findByTestId('party-grid');
-    expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile')).toHaveLength(2);
+    expect(screen.getByTestId('party-grid').querySelectorAll('button.public-gallery-tile')).toHaveLength(2);
 
     // Run a face search: only the matching photo stays visible; the full album
     // remains in state (the item count subtitle is unchanged).
@@ -559,7 +559,7 @@ describe('PartyPage (public party landing)', () => {
     // The sheet sweeps the face three times before it answers, so this waits
     // as long as a guest does.
     await screen.findByTestId('party-face-count', {}, { timeout: SCAN_WAIT_MS });
-    const tiles = screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile img');
+    const tiles = screen.getByTestId('party-grid').querySelectorAll('button.public-gallery-tile img');
     expect(tiles).toHaveLength(1);
     expect(tiles[0]).toHaveAttribute('src', '/api/party/tok-1/media/f2/thumbnail');
 
@@ -568,10 +568,10 @@ describe('PartyPage (public party landing)', () => {
     await user.click(screen.getByTestId('party-face-show-results'));
     await waitFor(() => expect(screen.queryByTestId('party-face')).not.toBeInTheDocument());
     expect(screen.getByTestId('party-face-filter')).toBeInTheDocument();
-    expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile')).toHaveLength(1);
+    expect(screen.getByTestId('party-grid').querySelectorAll('button.public-gallery-tile')).toHaveLength(1);
 
     // A matching photo can still be opened + downloaded.
-    await user.click(screen.getByTestId('party-grid').querySelector('button.party-guest-hub-tile')!);
+    await user.click(screen.getByTestId('party-grid').querySelector('button.public-gallery-tile')!);
     const dialog = await screen.findByRole('dialog', { name: /Visualizzatore foto/i });
     expect(screen.getByRole('link', { name: /Scarica/i }))
       .toHaveAttribute('href', '/api/party/tok-1/media/f2/download');
@@ -583,7 +583,7 @@ describe('PartyPage (public party landing)', () => {
     // Clearing it from the banner → server-side delete + full album restored.
     await user.click(screen.getByTestId('party-face-filter-clear'));
     await screen.findByTestId('party-grid');
-    expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile')).toHaveLength(2);
+    expect(screen.getByTestId('party-grid').querySelectorAll('button.public-gallery-tile')).toHaveLength(2);
     expect(screen.queryByTestId('party-face-filter')).not.toBeInTheDocument();
     expect(mock.calls.some((c) => c.method === 'DELETE' && c.url.includes('/face-search/s1'))).toBe(true);
   });
@@ -595,7 +595,7 @@ describe('PartyPage (public party landing)', () => {
       id, mediaType,
       thumbnailUrl: `/api/party/tok-1/media/${id}/thumbnail`,
       previewUrl: `/api/party/tok-1/media/${id}/preview`,
-      // The party surface serves videos as a poster, with no download.
+      // A party hands out no video file; whether it plays is `playbackUrl`.
       downloadUrl: mediaType === 'video' ? null : `/api/party/tok-1/media/${id}/download`,
     };
   }
@@ -622,7 +622,7 @@ describe('PartyPage (public party landing)', () => {
     render(wrapper());
     await screen.findByTestId('party-grid');
     const tiles = Array.from(
-      screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile img'),
+      screen.getByTestId('party-grid').querySelectorAll('button.public-gallery-tile img'),
     );
     // DOM order IS the server's order — nothing reorders for looks.
     expect(tiles.map((t) => t.getAttribute('src'))).toEqual([
@@ -634,7 +634,7 @@ describe('PartyPage (public party landing)', () => {
     ]);
     // The shapes come from the index, never from the images.
     const shapes = Array.from(
-      screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile'),
+      screen.getByTestId('party-grid').querySelectorAll('button.public-gallery-tile'),
     ).map((el) => el.getAttribute('data-shape'));
     expect(shapes).toEqual(['featured', 'square', 'square', 'portrait', 'portrait']);
   });
@@ -643,7 +643,7 @@ describe('PartyPage (public party landing)', () => {
     mockAlbum([media('f1')]);
     const one = render(wrapper());
     await screen.findByTestId('party-grid');
-    expect(Array.from(document.querySelectorAll('button.party-guest-hub-tile'))
+    expect(Array.from(document.querySelectorAll('button.public-gallery-tile'))
       .map((el) => el.getAttribute('data-shape'))).toEqual(['featured']);
     one.unmount();
 
@@ -652,7 +652,7 @@ describe('PartyPage (public party landing)', () => {
     mockAlbum([media('f1'), media('f2')]);
     render(wrapper());
     await screen.findByTestId('party-grid');
-    expect(Array.from(document.querySelectorAll('button.party-guest-hub-tile'))
+    expect(Array.from(document.querySelectorAll('button.public-gallery-tile'))
       .map((el) => el.getAttribute('data-shape'))).toEqual(['featured', 'featured']);
   });
 
@@ -661,7 +661,7 @@ describe('PartyPage (public party landing)', () => {
     render(wrapper());
     await screen.findByTestId('party-grid');
     const video = screen.getByRole('button', { name: 'Apri video' });
-    expect(video.querySelector('.party-guest-hub-tile-play')).toBeInTheDocument();
+    expect(video.querySelector('.public-gallery-tile-play')).toBeInTheDocument();
     expect(video.querySelector('img')).toHaveAttribute('src', '/api/party/tok-1/media/f2/thumbnail');
     // No made-up runtime: the party API returns none.
     expect(video.textContent).not.toMatch(/\d+:\d\d/);
@@ -669,15 +669,35 @@ describe('PartyPage (public party landing)', () => {
     expect(document.querySelector('video')).toBeNull();
   });
 
-  it('opens a video as the party-safe poster, with no download offered', async () => {
+  it('opens a video with nothing to play as its poster, with no download offered', async () => {
     mockAlbum([media('f1', 'video')]);
     render(wrapper());
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Apri video' }));
     const viewer = await screen.findByRole('dialog', { name: 'Visualizzatore video' });
-    // previewUrl for a video IS the poster; the party surface has no playback
-    // and no video download.
+    // No playback address (an installation without HLS): previewUrl IS the
+    // poster, and a party hands out no video file.
     expect(viewer.querySelector('img')).toHaveAttribute('src', '/api/party/tok-1/media/f1/preview');
     expect(viewer.querySelector('video')).toBeNull();
+    expect(screen.queryByRole('link', { name: /Scarica/i })).not.toBeInTheDocument();
+  });
+
+  it('plays a party video from its ladder, through the same player as the owner\'s library', async () => {
+    const video = { ...media('f1', 'video'), playbackUrl: '/api/party/tok-1/media/f1/video' };
+    const { calls } = installFetchMock({
+      'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 1 })),
+      'GET /api/party/tok-1/items': () => jsonResponse({ albumName: 'Beach Party', items: [video] }),
+      'GET /api/party/tok-1/media/f1/video': () =>
+        new Response(null, { status: 202, headers: { 'Retry-After': '30' } }),
+    });
+    render(wrapper());
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Apri video' }));
+    await screen.findByRole('dialog', { name: 'Visualizzatore video' });
+
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/party/tok-1/media/f1/video')).toBe(true));
+    // Not the zoomable poster: the player, its poster shown while the ladder is prepared.
+    expect(screen.queryByTestId('public-viewer-stage')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('public-viewer').querySelector('img'))
+      .toHaveAttribute('src', '/api/party/tok-1/media/f1/preview'));
     expect(screen.queryByRole('link', { name: /Scarica/i })).not.toBeInTheDocument();
   });
 
@@ -687,7 +707,7 @@ describe('PartyPage (public party landing)', () => {
     const user = userEvent.setup();
     await screen.findByTestId('party-grid');
     await user.click(screen.getAllByRole('button', { name: 'Apri foto' })[0]);
-    const shown = () => screen.getByTestId('party-image-viewer').querySelector('img')?.getAttribute('src');
+    const shown = () => screen.getByTestId('public-viewer').querySelector('img')?.getAttribute('src');
 
     // First of three: nothing before it.
     expect(shown()).toBe('/api/party/tok-1/media/f1/preview');
@@ -704,7 +724,7 @@ describe('PartyPage (public party landing)', () => {
     expect(screen.getByRole('button', { name: 'Successivo' })).toBeDisabled();
 
     // A swipe to the right goes back.
-    const stage = screen.getByTestId('party-viewer-stage');
+    const stage = screen.getByTestId('public-viewer-stage');
     fireEvent.touchStart(stage, { touches: [{ clientX: 100, clientY: 200 }] });
     fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 220, clientY: 205 }] });
     expect(shown()).toBe('/api/party/tok-1/media/f2/preview');
@@ -724,7 +744,7 @@ describe('PartyPage (public party landing)', () => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
       }
     });
-    const viewer = screen.getByTestId('party-image-viewer');
+    const viewer = screen.getByTestId('public-viewer');
     expect(viewer.querySelector('img')).toHaveAttribute('src', '/api/party/tok-1/media/f3/preview');
     expect(screen.getByRole('button', { name: 'Successivo' })).toBeDisabled();
 
@@ -734,7 +754,7 @@ describe('PartyPage (public party landing)', () => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }));
       }
     });
-    expect(screen.getByTestId('party-image-viewer').querySelector('img'))
+    expect(screen.getByTestId('public-viewer').querySelector('img'))
       .toHaveAttribute('src', '/api/party/tok-1/media/f1/preview');
   });
 
@@ -747,7 +767,7 @@ describe('PartyPage (public party landing)', () => {
 
     await user.click(tiles[1]);
     await screen.findByRole('dialog', { name: /Visualizzatore foto/i });
-    await user.click(screen.getByTestId('party-viewer-close'));
+    await user.click(screen.getByTestId('public-viewer-close'));
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: /Visualizzatore foto/i })).not.toBeInTheDocument());
     expect(document.activeElement).toBe(tiles[1]);
@@ -796,7 +816,7 @@ describe('PartyPage (public party landing)', () => {
     // A video announced as a "photo viewer" is simply wrong.
     expect(await screen.findByRole('dialog', { name: 'Visualizzatore video' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Visualizzatore foto' })).not.toBeInTheDocument();
-    await user.click(screen.getByTestId('party-viewer-close'));
+    await user.click(screen.getByTestId('public-viewer-close'));
 
     await user.click(screen.getByRole('button', { name: 'Apri foto' }));
     expect(await screen.findByRole('dialog', { name: 'Visualizzatore foto' })).toBeInTheDocument();
@@ -810,7 +830,7 @@ describe('PartyPage (public party landing)', () => {
     await user.click(screen.getByRole('button', { name: 'Apri foto' }));
     const viewer = await screen.findByRole('dialog', { name: 'Visualizzatore foto' });
 
-    const close = screen.getByTestId('party-viewer-close');
+    const close = screen.getByTestId('public-viewer-close');
     const download = screen.getByRole('link', { name: /Scarica/i });
     expect(document.activeElement).toBe(close);
 
@@ -834,7 +854,7 @@ describe('PartyPage (public party landing)', () => {
     await user.click(screen.getByRole('button', { name: 'Apri video' }));
     await screen.findByRole('dialog', { name: 'Visualizzatore video' });
 
-    const close = screen.getByTestId('party-viewer-close');
+    const close = screen.getByTestId('public-viewer-close');
     expect(document.activeElement).toBe(close);
     await user.tab();
     expect(document.activeElement).toBe(close);
@@ -876,14 +896,14 @@ describe('PartyPage (public party landing)', () => {
     expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('1 foto trovata');
     expect(screen.getByTestId('party-gallery-count')).not.toHaveTextContent('3');
     expect(screen.getByTestId('party-face-filter')).toBeInTheDocument();
-    expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile'))
+    expect(screen.getByTestId('party-grid').querySelectorAll('button.public-gallery-tile'))
       .toHaveLength(1);
 
     // And back to the whole album.
     await user.click(screen.getByTestId('party-face-filter-clear'));
     await waitFor(() =>
       expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('3 momenti'));
-    expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile'))
+    expect(screen.getByTestId('party-grid').querySelectorAll('button.public-gallery-tile'))
       .toHaveLength(3);
   });
 
@@ -928,7 +948,7 @@ describe('PartyPage (public party landing)', () => {
       expect(screen.getAllByText('2 nuovi momenti')).toHaveLength(1);
       expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('4 momenti');
       // The existing photos are still there, in order, and nothing scrolled.
-      expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile'))
+      expect(screen.getByTestId('party-grid').querySelectorAll('button.public-gallery-tile'))
         .toHaveLength(4);
 
       // Acknowledging it clears the pill without touching the album; the live
@@ -936,7 +956,7 @@ describe('PartyPage (public party landing)', () => {
       await act(async () => { screen.getByTestId('party-new-moments').click(); });
       expect(document.querySelector('.party-guest-hub-gallery-live')).toBeInTheDocument();
       expect(screen.queryByTestId('party-new-moments')).not.toBeInTheDocument();
-      expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile'))
+      expect(screen.getByTestId('party-grid').querySelectorAll('button.public-gallery-tile'))
         .toHaveLength(4);
     } finally {
       vi.useRealTimers();
@@ -1301,8 +1321,8 @@ describe('PartyPage (public party landing)', () => {
     // outright, so the count can never be derived from the wrong box.
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    const css = readFileSync(resolve(process.cwd(), 'src/pages/PartyGuestHub.css'), 'utf8');
-    const rule = css.match(/\.party-guest-hub-tiles\s*\{([^}]*)\}/)?.[1] ?? '';
+    const css = readFileSync(resolve(process.cwd(), 'src/publicMedia/publicMedia.css'), 'utf8');
+    const rule = css.match(/\.public-gallery\s*\{([^}]*)\}/)?.[1] ?? '';
     expect(rule).toContain('width: 100%');
     expect(rule).toContain('min-width: 0');
     expect(rule).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');

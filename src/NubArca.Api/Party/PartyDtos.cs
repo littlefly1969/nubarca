@@ -290,8 +290,9 @@ public sealed record PartyItemDto(
     Guid Id,
     string MediaType, // "image" | "video"
     string ThumbnailUrl,
-    string PreviewUrl,
-    string? DownloadUrl); // null for videos (no playback/download in this slice)
+    string PreviewUrl, // a video's poster
+    string? DownloadUrl, // null for videos: a party hands out no originals
+    string? PlaybackUrl = null); // a video's HLS ladder; null for images and without HLS
 
 public sealed record PartyItemsDto(string AlbumName, IReadOnlyList<PartyItemDto> Items);
 
