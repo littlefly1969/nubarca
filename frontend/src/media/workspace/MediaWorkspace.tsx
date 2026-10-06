@@ -118,13 +118,14 @@ export function MediaWorkspace({
   const { selection, viewer } = ws;
   const [visibleKey, setVisibleKey] = useState<string | null>(null);
   const [previousFailed, setPreviousFailed] = useState(false);
+  const previousWindowEpoch = useRef(0);
+  const navigationQueryKey = queryFingerprint(identity);
   const navigationLayoutRef = useRef<HTMLDivElement>(null);
   const fastNavigation = canFastNavigate(identity);
   const visibleItem = useCallback((item: import('@nubarca/api-client').MediaItem) => {
     setVisibleKey(mediaNavigationKey(item, identity.sort));
   }, [identity.sort]);
   useEffect(() => {
-    setPreviousFailed(false);
     const node = navigationLayoutRef.current;
     const chrome = node?.closest('.ws-page')?.querySelector<HTMLElement>('.ws-sticky-chrome');
     if (!node || !chrome || typeof ResizeObserver === 'undefined') return;
@@ -133,6 +134,20 @@ export function MediaWorkspace({
     observer.observe(chrome); measure();
     return () => observer.disconnect();
   }, [fastNavigation, ws.items.length > 0]);
+
+  useEffect(() => {
+    previousWindowEpoch.current += 1;
+    setPreviousFailed(false);
+    return () => { previousWindowEpoch.current += 1; };
+  }, [navigationQueryKey, ws.scrollTarget?.revision]);
+
+  const jumpTo = (key: string) => {
+    // Invalidate earlier-page feedback as soon as a jump starts, before its
+    // aborted promise can settle and before the destination has been rendered.
+    previousWindowEpoch.current += 1;
+    setPreviousFailed(false);
+    return ws.jumpTo(key);
+  };
 
 
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -289,13 +304,19 @@ export function MediaWorkspace({
   // shared album wall uses too so both walls page identically.
   const previousLoader = useRef(ws.loadPrevious);
   previousLoader.current = ws.loadPrevious;
+  const loadPrevious = () => {
+    const epoch = previousWindowEpoch.current;
+    void previousLoader.current().then((ok) => {
+      if (epoch === previousWindowEpoch.current) setPreviousFailed(!ok);
+    });
+  };
   const previousSentinel = useWallSentinel({
     ready: !ws.navigationBusy && (ws.phase.kind === 'ready' || ws.phase.kind === 'end'),
     hasMore: ws.previousCursor !== null,
     preloadMargin: '240px 0px',
     loadMore: () => {
       if (!previousFailed && !ws.navigationBusy && !ws.loadingMore)
-        void previousLoader.current().then((ok) => { if (!ok) setPreviousFailed(true); });
+        loadPrevious();
     },
   });
   const loadMoreRef = useRef(ws.loadMore);
@@ -568,7 +589,7 @@ export function MediaWorkspace({
               {ws.previousCursor && <button type="button" className="row-action media-navigation-previous"
                 disabled={ws.navigationBusy} onClick={() => {
                   setPreviousFailed(false);
-                  void ws.loadPrevious().then((ok) => setPreviousFailed(!ok));
+                  loadPrevious();
                 }}>{ws.navigationBusy ? t('mediaNav.loading') : t(previousFailed ? 'mediaNav.previousRetry' : 'mediaNav.previous')}</button>}
               <MediaGrid
                 items={ws.items}
@@ -582,7 +603,7 @@ export function MediaWorkspace({
               />
             </div>
             {fastNavigation && <MediaFastNavigation identity={identity} revision={ws.navigationRevision}
-              currentKey={visibleKey} busy={ws.navigationBusy} onJump={ws.jumpTo} onAuthError={invalidateAuth} />}
+              currentKey={visibleKey} busy={ws.navigationBusy} onJump={jumpTo} onAuthError={invalidateAuth} />}
           </div>
         )}
 

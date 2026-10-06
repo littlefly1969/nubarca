@@ -118,8 +118,13 @@ is built is described by `ARCHITECTURE.md`.
   The rail supports captured touch/mouse dragging, keyboard navigation and a
   precise year/month/initial picker, with bounded reads and explicit retry.
   Earlier pages preserve the visible row through subpixel scroll rounding and
-  resizing; file selections persist across jumps by identity. Public/member album
-  projections keep their curated order and expose no new names or capture dates.
+  resizing; earlier-page failures and late responses are bound to their own
+  destination, so another jump resumes automatic backfill. File selections
+  persist across jumps by identity. Physical cursor type/sort validation lives
+  in `ImageCursor.MatchesSort`, shared by ordinary pages and navigation windows.
+  Public/member album projections keep their curated order and expose no new
+  names or capture dates. PostgreSQL CI measures 50k/100k synthetic collections
+  and retains full query plans; see [performance acceptance](media-navigation-performance.md).
 - Viewers: ONE engine (`src/mediaView`: zoomable photograph — pinch, double
   tap, pan — the stage filling the viewer so a picture stays whole in
   landscape, chrome that steps aside after 2.6 s, keys with keyboard ownership,

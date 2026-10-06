@@ -178,6 +178,7 @@ public sealed class MediaNavigationEndpointTests : IDisposable
     [InlineData(ImageSortField.Name)]
     [InlineData(ImageSortField.Created)]
     [InlineData(ImageSortField.DateTaken)]
+    [InlineData(ImageSortField.Size)]
     public async Task RejectsCursorWhosePrimaryTypeDoesNotMatchTheDeclaredSort(ImageSortField sort)
     {
         var (_, client) = await _factory.CreateAuthenticatedClientAsync();
@@ -187,5 +188,29 @@ public sealed class MediaNavigationEndpointTests : IDisposable
             : ImageCursor.FromString(sort, ImageSortDirection.Desc, "altered", Guid.NewGuid(), fingerprint);
         var response = await client.GetAsync($"/api/media/window?sort={sort.ToString().ToLowerInvariant()}&direction=desc&cursor={Uri.EscapeDataString(cursor.Encode())}");
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var collection = await client.GetAsync($"/api/media?sort={sort.ToString().ToLowerInvariant()}&direction=desc&cursor={Uri.EscapeDataString(cursor.Encode())}");
+        Assert.Equal(HttpStatusCode.BadRequest, collection.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("created", "asc")]
+    [InlineData("created", "desc")]
+    [InlineData("datetaken", "asc")]
+    [InlineData("datetaken", "desc")]
+    public async Task LastRepresentableInstantBelongsToTheDecemberBucket(string sort, string direction)
+    {
+        var (owner, client) = await _factory.CreateAuthenticatedClientAsync();
+        var id = await SeedAsync(owner, "last.jpg", "9999-12");
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var file = await db.FileItems.SingleAsync(f => f.Id == id);
+            file.CreatedAt = file.EffectiveDateTaken = DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc);
+            await db.SaveChangesAsync();
+        }
+        var index = await client.GetFromJsonAsync<MediaNavigationIndex>($"/api/media/navigation?sort={sort}&direction={direction}");
+        Assert.Equal(new MediaNavigationBucket("9999-12", 1), Assert.Single(index!.Buckets));
+        var window = await client.GetFromJsonAsync<MediaNavigationWindow>($"/api/media/window?sort={sort}&direction={direction}&target=9999-12");
+        Assert.Equal(id, Assert.Single(window!.Items).Id);
     }
 }

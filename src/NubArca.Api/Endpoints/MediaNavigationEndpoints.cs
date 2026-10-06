@@ -11,14 +11,14 @@ public static class MediaNavigationEndpoints
         foreach (var prefix in new[] { "/api/media", "/api/albums/{albumId:guid}/media" })
         {
             app.MapGet(prefix + "/navigation", async ([AsParameters] NavigationRequest request,
-                HttpContext context, IMediaCollectionQueryService media, CancellationToken cancellationToken) =>
+                HttpContext context, [FromServices] IMediaCollectionQueryService media, CancellationToken cancellationToken) =>
             {
                 SetNoStore(context);
                 if (!request.TryBind(context, out var query, out var error)) return Results.BadRequest(new { error });
                 return Map(await media.NavigationAsync(context.GetCurrentUserId()!.Value, query, cancellationToken));
             }).RequireAuthorization();
             app.MapGet(prefix + "/window", async ([AsParameters] NavigationRequest request,
-                HttpContext context, IMediaCollectionQueryService media, CancellationToken cancellationToken) =>
+                HttpContext context, [FromServices] IMediaCollectionQueryService media, CancellationToken cancellationToken) =>
             {
                 SetNoStore(context);
                 if (!request.TryBind(context, out var query, out var error)) return Results.BadRequest(new { error });

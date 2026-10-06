@@ -125,7 +125,13 @@ public sealed record ImageCursor(
     }
 
     public bool MatchesSort(ImageSortField sort, ImageSortDirection direction)
-        => Sort == sort && Direction == direction;
+        => Sort == sort && Direction == direction && PrimaryKind == (sort switch
+        {
+            ImageSortField.Name => KindString,
+            ImageSortField.Size => KindNumber,
+            ImageSortField.Created or ImageSortField.DateTaken => KindDate,
+            _ => null,
+        });
 
     // Slice 61: cursor + filter binding. A null Filter on either side
     // (old cursor pre-slice-61, or unfiltered current request) is treated
