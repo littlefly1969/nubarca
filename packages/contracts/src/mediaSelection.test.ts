@@ -77,7 +77,10 @@ test('print is one photograph, from the library or an own album, never excluded'
   assert.equal(caps([]).canPrintPhoto, false);
   assert.equal(caps([image]).canPrintPhoto, true);
   assert.equal(caps([image], 'album').canPrintPhoto, true);
-  assert.equal(caps([image, image]).canPrintPhoto, false);
+  assert.equal(caps([image, image]).canPrintPhoto, true);
+  assert.equal(caps(Array(8).fill(image)).canPrintPhoto, true);
+  assert.equal(caps(Array(9).fill(image)).canPrintPhoto, false);
+  assert.equal(caps([image, video]).canPrintPhoto, false);
   assert.equal(caps([video]).canPrintPhoto, false);
   assert.equal(caps([image, video]).canPrintPhoto, false);
   assert.equal(caps([image], 'library', 'excluded').canPrintPhoto, false);

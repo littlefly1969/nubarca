@@ -93,16 +93,22 @@ is built is described by `ARCHITECTURE.md`.
   Screen steps). No service worker: every launch is the page as it is now. An invitation
   opened again goes straight into the party once everybody coming has
   arrived, and after the party always (`partyUrl` now also after).
-- Print catalogue: ONE catalogue of formats for every surface that prints
+- Print: ONE catalogue of formats for every surface that prints
   (`PrintLayouts.cs`, mirrored by `@nubarca/contracts` `printLayouts.ts`, both
   held to `printLayouts.cases.json` from an independent implementation):
   formats `photo` / `grid4` / `twinStrip4`, styles `framed` (border + band) /
   `fullBleed` (single photo only), sheets, slots, bands, papers, photo counts —
-  the twin strip takes 4 (the same strip twice) or 8. `PartyPrintGeometry` keeps
-  only the party's decoration (words, mark, QR card). Party products are the
-  catalogue's formats with their own budgets. Next: the owner's album print
-  through the same studio (Piena / Cornice, one free line, date in the band,
-  NubArca mark off by default).
+  the twin strip takes 4 (the same strip twice) or 8, and only a printer that
+  cuts (`2x6x2`) makes it. ONE studio (`src/print/studio/PrintStudio`): format →
+  photos → order → framing → preview, for a party's guest (`PartyPrintPage`:
+  budgets, looks, the party's words, the number) and an owner
+  (`/print?album=…&files=…`, `OwnerPrintPage`: printer, Piena / Cornice, one free
+  line ≤ 40 chars, date in the band — the first photo's — NubArca mark off by
+  default; from the album's "Stampa" or a 1–8 photo selection). ONE composer for
+  framed sheets: band words are data (`PrintSheetWords`), null = the party's own;
+  Piena stays the owner renderer's. Owner job kinds `owner-photo` /
+  `owner-grid4` / `owner-strip4`. `PartyPrintGeometry` keeps only the party's
+  decoration (words, mark, QR card).
 - Viewers: ONE engine (`src/mediaView`: zoomable photograph — pinch, double
   tap, pan — the stage filling the viewer so a picture stays whole in
   landscape, chrome that steps aside after 2.6 s, keys with keyboard ownership,

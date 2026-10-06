@@ -4181,6 +4181,8 @@ const it = {
   'print.queueTitle': 'Coda',
   'print.kind.diagnostic': 'Pagina test',
   'print.kind.ownerPhoto': 'Foto dall’album',
+  'print.kind.ownerStrip4': 'Strisce dall\u2019album',
+  'print.kind.ownerGrid4': '4 foto dall\u2019album',
   'print.kind.partyPhoto': 'Foto della festa',
   'print.kind.partyGrid4': '4 foto',
   'print.kind.partyStrip4': 'Strisce',
@@ -4410,6 +4412,18 @@ const it = {
   'ownerPrint.error.photo': 'Questa foto non si può stampare.',
   'ownerPrint.error.render': 'Non è stato possibile preparare la stampa. Riprova.',
   'ownerPrint.error.generic': 'Invio non riuscito. Riprova.',
+  'ownerPrint.brand': 'Firma NubArca',
+  'ownerPrint.captionInvalid': 'Al massimo {max} caratteri, senza emoji',
+  'ownerPrint.captionHelp': 'Una riga sotto le foto, fino a {max} caratteri',
+  'ownerPrint.caption': 'Scritta',
+  'ownerPrint.style.framed': 'Cornice',
+  'ownerPrint.style.fullBleed': 'Piena',
+  'ownerPrint.style': 'Stile',
+  'ownerPrint.printAnother': 'Stampa un\u2019altra',
+  'ownerPrint.backToLibrary': 'Torna alla libreria',
+  'ownerPrint.backToAlbum': 'Torna all\u2019album',
+  'ownerPrint.error.caption': 'La scritta non si può stampare: una riga, al massimo 40 caratteri, senza emoji.',
+  'ownerPrint.format.photoHelp': 'Una foto, piena o con la cornice',
 } as const;
 
 export type MessageKey = keyof typeof it;

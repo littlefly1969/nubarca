@@ -1,6 +1,6 @@
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MediaItem, MediaListResponse } from '@nubarca/api-client';
 import {
@@ -22,6 +22,8 @@ const imageItem: MediaItem = {
   favorite: false, rating: null, thumbnailUrl: '/api/files/i1/thumbnail?size=small',
   occurrenceCount: 1, hasDuplicates: false, hasGps: null,
 };
+const secondImage: MediaItem = { ...imageItem, id: 'i2', name: 'second.jpg', displayName: 'second.jpg',
+  thumbnailUrl: '/api/files/i2/thumbnail?size=small' };
 const videoItem: MediaItem = {
   id: 'v1', kind: 'video', name: 'clip.mp4', title: null, displayName: 'clip.mp4',
   mimeType: 'video/mp4', sizeBytes: 2000, width: 1920, height: 1080,
@@ -316,21 +318,28 @@ describe('MediaWorkspace', () => {
     expect(screen.getByTestId('media-sel-trash')).toBeInTheDocument();
   });
 
-  it('offers Print for one photograph, and opens the print dialog on it', async () => {
+  it('offers Print for photographs, and takes them to the print studio in the order they were chosen', async () => {
     installFetchMock({
-      'GET /api/media': () => jsonResponse(page([imageItem, videoItem])),
-      'GET /api/print/stations': () => jsonResponse([]),
-      'GET /api/print/shared-printers': () => jsonResponse([]),
+      'GET /api/media': () => jsonResponse(page([imageItem, videoItem, secondImage])),
     });
+    function Studio() {
+      const location = useLocation();
+      return <p data-testid="studio-at">{`${location.pathname}${location.search}`}</p>;
+    }
     render(
       <MemoryRouter>
         <AuthedWrapper>
-          <MediaWorkspace
-            source={LIBRARY}
-            identity={emptyIdentity(LIBRARY)}
-            onIdentityChange={vi.fn()}
-            searchPlaceholder="Cerca"
-          />
+          <Routes>
+            <Route path="/" element={(
+              <MediaWorkspace
+                source={LIBRARY}
+                identity={emptyIdentity(LIBRARY)}
+                onIdentityChange={vi.fn()}
+                searchPlaceholder="Cerca"
+              />
+            )} />
+            <Route path="/print" element={<Studio />} />
+          </Routes>
         </AuthedWrapper>
       </MemoryRouter>,
     );
@@ -340,15 +349,18 @@ describe('MediaWorkspace', () => {
     // The photograph: Print is right on the dock, not in a menu.
     await userEvent.click(controls[0]);
     expect(await screen.findByTestId('media-sel-print')).toHaveTextContent('Stampa');
-    // With the video too, it is two items and a mixed selection: no Print.
+    // With the video too, it is a mixed selection: no Print.
     await userEvent.click(controls[1]);
     expect(screen.queryByTestId('media-sel-print')).not.toBeInTheDocument();
     await userEvent.click(controls[1]);
 
+    // Two photographs, the second chosen first: the studio receives them in that order.
+    await userEvent.click(controls[0]);
+    await userEvent.click(controls[2]);
+    await userEvent.click(controls[0]);
     await userEvent.click(screen.getByTestId('media-sel-print'));
-    const dialog = await screen.findByTestId('owner-print');
-    expect(within(dialog).getByText('Stampa foto')).toBeInTheDocument();
-    expect(await within(dialog).findByTestId('owner-print-empty')).toHaveTextContent('Nessuna stampante disponibile');
+    expect(await screen.findByTestId('studio-at'))
+      .toHaveTextContent(`/print?files=${secondImage.id}%2C${imageItem.id}`);
   });
 
   it('offers the photo-only destinations only for an all-photo selection', async () => {

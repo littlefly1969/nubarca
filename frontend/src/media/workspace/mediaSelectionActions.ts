@@ -122,7 +122,7 @@ const ADD_TO: readonly Candidate[] = [
 // Restore is the inverse of Excluded, not a peer of it — offering it inside
 // "Move to" would read as a fourth place to put the media. Remove-from-album
 // takes away a MEMBERSHIP and never touches the file, so filing it beside Trash
-// would be a lie about what it does. Print sends one photograph to a printer
+// would be a lie about what it does. Print takes photographs to the print studio
 // and leaves it exactly where it is. All three stay on the dock itself.
 const CONTEXTUAL: readonly Candidate[] = [
   {

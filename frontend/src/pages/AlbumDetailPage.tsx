@@ -168,6 +168,15 @@ export function AlbumDetailPage() {
             >
               {t('albumCopy.openButton')}
             </button>
+            {/* Always offered: the print studio opens on this album's
+                photographs — choosing first, as at a party. */}
+            <Link
+              to={`/print?album=${encodeURIComponent(album.id)}`}
+              className="row-action"
+              data-testid="album-open-print"
+            >
+              {t('ownerPrint.action')}
+            </Link>
             <button
               type="button"
               ref={settingsButtonRef}

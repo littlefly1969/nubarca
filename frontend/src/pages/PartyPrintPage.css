@@ -618,6 +618,22 @@
   min-width: 0;
 }
 
+/* An owner's date at the right of the signature row, where a guest's number
+   sits on paper: the same muted bold, sharing the wordmark's baseline. */
+.party-print-sheet-date {
+  margin-inline-start: auto;
+  color: var(--sheet-muted);
+  font-family: var(--font-heading);
+  font-size: clamp(0.45rem, 2.6cqw, 0.75rem);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.party-print-sheet-footer.is-strip .party-print-sheet-date {
+  font-size: clamp(0.4rem, 2.3cqw, 0.66rem);
+}
+
 /* "On the photo" options ---------------------------------------------------
    Two independent groups under the preview, in the Print Studio's own pill
    language: bordered, rounded, cyan when chosen — but as cards with a swatch,
