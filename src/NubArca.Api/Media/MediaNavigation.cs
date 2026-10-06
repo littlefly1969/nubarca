@@ -44,6 +44,7 @@ public sealed partial class MediaCollectionQueryService
         {
             if (target is not null || !ImageCursor.TryParse(query.Cursor, out cursor)
                 || !cursor.MatchesSort(query.Sort, query.Direction)
+                || cursor.PrimaryKind != (query.Sort == ImageSortField.Name ? ImageCursor.KindString : ImageCursor.KindDate)
                 || !cursor.MatchesFilter(query.MediaKind.MediaCursorFingerprint(filters)))
                 return new(MediaCollectionStatus.BadCursor, null, "Invalid or mismatched navigation cursor.");
         }

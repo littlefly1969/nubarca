@@ -173,4 +173,19 @@ public sealed class MediaNavigationEndpointTests : IDisposable
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/media/window?sort=datetaken&direction=asc&kind=video&cursor=" + cursor)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/media/window?sort=datetaken&target=1999-01")).StatusCode);
     }
+
+    [Theory]
+    [InlineData(ImageSortField.Name)]
+    [InlineData(ImageSortField.Created)]
+    [InlineData(ImageSortField.DateTaken)]
+    public async Task RejectsCursorWhosePrimaryTypeDoesNotMatchTheDeclaredSort(ImageSortField sort)
+    {
+        var (_, client) = await _factory.CreateAuthenticatedClientAsync();
+        var fingerprint = MediaKindScope.All.MediaCursorFingerprint(new ImageFilters());
+        var cursor = sort == ImageSortField.Name
+            ? ImageCursor.FromDate(sort, ImageSortDirection.Desc, DateTime.UtcNow, Guid.NewGuid(), fingerprint)
+            : ImageCursor.FromString(sort, ImageSortDirection.Desc, "altered", Guid.NewGuid(), fingerprint);
+        var response = await client.GetAsync($"/api/media/window?sort={sort.ToString().ToLowerInvariant()}&direction=desc&cursor={Uri.EscapeDataString(cursor.Encode())}");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }
