@@ -105,8 +105,9 @@ public static class PrintEndpoints
             return job is null ? Results.NotFound() : Results.Accepted(value: job);
         }).WithName("CreatePrintTestJob");
 
-        // An owner's own photograph, printed directly from their library or an
-        // album, on their printer or one lent to them.
+        // An owner's own photographs, printed directly from their library or an
+        // album — one, four, or the twin strip, Piena or Cornice — on their
+        // printer or one lent to them.
         owner.MapPost("/photo-jobs", async ([FromBody] OwnerPhotoPrintSubmitRequest? request,
             [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey, HttpContext context,
             [FromServices] IOwnerPhotoPrintService service, CancellationToken ct) =>
@@ -118,7 +119,8 @@ public static class PrintEndpoints
             return error switch
             {
                 OwnerPhotoPrintErrors.InvalidRequest or OwnerPhotoPrintErrors.InvalidOrientation
-                    or OwnerPhotoPrintErrors.InvalidPlacement or OwnerPhotoPrintErrors.InvalidTimezone =>
+                    or OwnerPhotoPrintErrors.InvalidPlacement or OwnerPhotoPrintErrors.InvalidTimezone
+                    or OwnerPhotoPrintErrors.InvalidLayout or OwnerPhotoPrintErrors.InvalidCaption =>
                     Results.BadRequest(new { error }),
                 OwnerPhotoPrintErrors.NotFound or OwnerPhotoPrintErrors.PrinterNotFound =>
                     Results.NotFound(new { error }),
