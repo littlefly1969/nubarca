@@ -1,6 +1,4 @@
-import {
-  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode,
-} from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import {
   ApiError,
@@ -10,36 +8,28 @@ import {
   type PartyPrintAccepted,
   type PartyPrintFormat,
   type PartyPrintManifest,
-  type PartyPrintOrientation,
-  type PartyPrintPhoto,
-  type PartyPrintProduct,
-  type PartyPrintSlot,
   type PartyPrintState,
   type PartyPrintTheme,
   type PartyPrintOverlayText,
   type PartyPrintOverlayLogo,
 } from '@nubarca/api-client';
+import type { PrintLayout } from '@nubarca/contracts';
 import { useI18n, type MessageKey } from '../i18n';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PRODUCT_NAME } from '../brand/brand';
 import { recallFaceFilter, recallPartyHome } from './partyGuestMemo';
-import { effectiveZoom, placePhoto } from '@nubarca/contracts';
-import { PhotoCropFrame, photoPlacementStyle } from '../party/PhotoCropFrame';
-import { PhotoFramingControls } from '../party/PhotoFramingControls';
 import {
-  DEFAULT_CROP_VIEW, SLOTS_PER_STRIP, STRIPS_PER_SHEET,
-  PORTRAIT_HEIGHT, PORTRAIT_WIDTH,
-  type CropView, photoLayout, photoSlotAspect, stripFooter, stripSlot,
-  STRIP_WORDMARK_WIDTH_FRACTION, gridLayout, gridPortrait, gridSlotAspect, sheet, type PaperSize,
+  PAPER_LABEL, PrintStudio, useFitLine,
+  type FullBleedSheet, type StudioFormat, type StudioSubmission,
+} from '../print/studio/PrintStudio';
+import {
+  SLOTS_PER_STRIP, type PaperSize,
   OVERLAY_LINE_FRACTION, OVERLAY_MARGIN_FRACTION, OVERLAY_SYMBOL_FRACTION, OVERLAY_TITLE_FRACTION,
-  OVERLAY_SYMBOL_GAP_FRACTION, FOOTER_WORDMARK_WIDTH_FRACTION,
+  OVERLAY_SYMBOL_GAP_FRACTION,
   OVERLAY_NUMBER_FRACTION, OVERLAY_TEXT_SUPPORT_PADDING_FRACTION, OVERLAY_HALO_BLUR_FRACTION,
   OVERLAY_HALO_OPACITY, OVERLAY_NUMBER_ROOM, PARTY_NAME_MAX_LENGTH, FOOTER_MAX_LENGTH,
-  overlaySlotAspect, overlayTextSupport, printedLine,
-  stripSlotAspect,
+  overlayTextSupport, printedLine,
 } from './partyPrintGeometry';
-import './PartyGuestHub.css';
-import './PartyPrintPage.css';
 
 /* PUBLIC, unauthenticated party PRINT STUDIO. Reached from the party hub's
    print card, on its own capability token — a print token, never the view one.
@@ -57,11 +47,6 @@ import './PartyPrintPage.css';
    sent to the browser — the server composes at 300dpi from its own copy. */
 
 const PARTY_WORDMARK_DARK = '/brand/nubarca-wordmark-on-dark-480w.png';
-// The COMPACT light rendition, not the master. The brand manifest builds this
-// one so that "both themes share one visible geometry" — which is precisely
-// what a footer band needs, and what the renderer draws. The padded master
-// fitted into a tight band comes out visibly smaller than the on-dark artwork.
-const PARTY_WORDMARK_LIGHT = '/brand/nubarca-wordmark-on-light-480w.png';
 const PARTY_EYEBROW = `${PRODUCT_NAME} Party`;
 
 /**
@@ -107,9 +92,6 @@ const OVERLAY_LOGO: Record<PartyPrintOverlayLogo, { mark: string; swatch: string
   },
 };
 
-function isOverlay(theme: PartyPrintTheme): theme is 'overlay' {
-  return theme === 'overlay';
-}
 /** Which wordmark an artwork this dark takes. Mirrors the renderer's palette. */
 const DARK_THEMES: readonly PartyPrintTheme[] = ['midnight', 'event'] as const;
 
@@ -126,8 +108,6 @@ const STATE_LABEL: Record<PartyPrintState, MessageKey> = {
 /** Once a print is out of the pipeline there is nothing left to ask about. */
 const SETTLED: readonly PartyPrintState[] = ['completed', 'failed', 'unknown'] as const;
 const STATUS_POLL_MS = 4_000;
-
-type Step = 'format' | 'select' | 'arrange' | 'crop' | 'preview';
 
 type Phase =
   | { kind: 'loading' }
@@ -166,41 +146,6 @@ function refusalKey(err: unknown): MessageKey {
   }
 }
 
-function newIdempotencyKey(): string {
-  const uuid = globalThis.crypto?.randomUUID;
-  if (typeof uuid === 'function') return globalThis.crypto.randomUUID();
-  // Older WebViews: still unique enough to distinguish one guest's compositions.
-  return `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
-}
-
-function PrinterIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M7 8.5V4.5h10v4" />
-      <path d="M7 17.5H5.5A1.5 1.5 0 0 1 4 16v-4.5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2V16a1.5 1.5 0 0 1-1.5 1.5H17" />
-      <rect x="7" y="14" width="10" height="6" rx="1.2" />
-    </svg>
-  );
-}
-
-function GridIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <rect x="4" y="3.5" width="7" height="8" rx="1.2" />
-      <rect x="13" y="3.5" width="7" height="8" rx="1.2" />
-      <rect x="4" y="12.5" width="7" height="8" rx="1.2" />
-      <rect x="13" y="12.5" width="7" height="8" rx="1.2" />
-    </svg>
-  );
-}
-
-/** A paper as the photo trade writes it. */
-const PAPER_LABEL: Record<PaperSize, string> = {
-  '10x15': '10\u00d715',
-  '13x18': '13\u00d718',
-  '20x15': '20\u00d715',
-};
-
 /**
  * What a slot shows beside a photograph zoomed out — the renderer's band:
  * each palette's own paper, and white on the photograph that has none.
@@ -211,137 +156,6 @@ const PRINT_BAND: Readonly<Record<PartyPrintTheme, string>> = {
   event: '#0f1e3a',
   overlay: '#ffffff',
 };
-
-/** Where each of the four sits on its sheet, in reading order. */
-const GRID_POSITION: readonly MessageKey[] = [
-  'partyPrint.gridPosition.topLeft', 'partyPrint.gridPosition.topRight',
-  'partyPrint.gridPosition.bottomLeft', 'partyPrint.gridPosition.bottomRight',
-] as const;
-
-function StripIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <rect x="8.5" y="2.5" width="7" height="19" rx="1.4" />
-      <path d="M8.5 7.25h7M8.5 12h7M8.5 16.75h7" />
-    </svg>
-  );
-}
-
-// --- The sheet, as it will come out ----------------------------------------
-
-/**
- * A photograph inside a rectangle, framed exactly as the server will frame it.
- * The same placement maths drives this and the print, so what a guest arranges
- * here is what the paper gets — zoomed out, the slot's own paper beside it.
- */
-function FramedPhoto({
-  photo, aspect, slotAspect, view, onAspect,
-}: {
-  photo: PartyPrintPhoto | undefined;
-  aspect: number;
-  slotAspect: number;
-  view: CropView;
-  onAspect?: (width: number, height: number) => void;
-}) {
-  if (!photo) return null;
-  return (
-    <img
-      className="party-print-framed"
-      src={photo.previewUrl}
-      alt=""
-      // A single photograph's sheet is turned to match it, so the preview keeps
-      // learning shapes here too rather than only from the chooser's thumbnails.
-      onLoad={(event) => onAspect?.(
-        event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
-      style={photoPlacementStyle(placePhoto(aspect, slotAspect, view))}
-    />
-  );
-}
-
-/** The party line and the wordmark, in the band the renderer reserves. */
-function SheetFooter({
-  partyName, footerText, theme, strip = false,
-}: {
-  partyName: string;
-  footerText: string | null;
-  theme: PartyPrintTheme;
-  /** A strip's wordmark stands as wide as its narrow row allows, as on paper. */
-  strip?: boolean;
-}) {
-  const dark = DARK_THEMES.includes(theme);
-  return (
-    // A strip's narrow foot keeps its words' size; under a photograph or four
-    // they are a touch larger, as on paper.
-    <div className={strip ? 'party-print-sheet-footer is-strip' : 'party-print-sheet-footer'}>
-      <span className="party-print-sheet-text">
-        <span className="party-print-sheet-name">{partyName}</span>
-        {footerText && <span className="party-print-sheet-line">{footerText}</span>}
-      </span>
-      {/* Bottom-left, where the renderer puts it. The queue number that shares
-          this row on paper is deliberately absent: it does not exist until the
-          print is accepted, and a preview does not invent one. */}
-      <span className="party-print-sheet-sign">
-        <img
-          className={strip ? 'party-print-sheet-mark party-print-sheet-mark-strip' : 'party-print-sheet-mark'}
-          src={dark ? PARTY_WORDMARK_DARK : PARTY_WORDMARK_LIGHT}
-          alt={PRODUCT_NAME}
-          style={{ width: pct(strip ? STRIP_WORDMARK_WIDTH_FRACTION : FOOTER_WORDMARK_WIDTH_FRACTION) }}
-        />
-      </span>
-    </div>
-  );
-}
-
-interface SheetProps {
-  product: PartyPrintProduct;
-  theme: PartyPrintTheme;
-  partyName: string;
-  footerText: string | null;
-  chosen: string[];
-  photoById: Map<string, PartyPrintPhoto>;
-  aspectOf: (id: string) => number;
-  views: Record<string, CropView>;
-  onAspect: (id: string, width: number, height: number) => void;
-  /** Null follows the photograph, which is the default. */
-  orientation: PartyPrintOrientation | null;
-  /** The paper in the printer: every sheet is one of it. */
-  paper: PaperSize;
-  /** Only read for the 'overlay' look. */
-  overlayText: PartyPrintOverlayText;
-  overlayLogo: PartyPrintOverlayLogo;
-}
-
-function pct(value: number): string {
-  return `${value * 100}%`;
-}
-
-/**
- * The renderer's FitLine for the preview: a line wider than its box shrinks —
- * never below `floor` of its size — before the ellipsis takes the rest. The
- * box is what the layout left it, the number's room already taken out. The
- * sizes are container units, so the ratio found once holds at any width.
- */
-function useFitLine(size: string, floor: number, deps: readonly unknown[]) {
-  const ref = useRef<HTMLSpanElement>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return undefined;
-    const fit = () => {
-      el.style.fontSize = size;
-      const room = el.clientWidth;
-      const needed = el.scrollWidth;
-      if (needed > room && room > 0) {
-        el.style.fontSize = `calc(${size} * ${Math.max(floor, room / needed)})`;
-      }
-    };
-    fit();
-    let live = true;
-    // Measured again once the web fonts arrive: they set the real width.
-    void document.fonts?.ready.then(() => { if (live) fit(); });
-    return () => { live = false; };
-  }, [size, floor, ...deps]);
-  return ref;
-}
 
 /**
  * The words of the title-on-the-photo preview, laid out as the renderer lays
@@ -387,287 +201,96 @@ function OverlayWords({ partyName, footerText, orientation, symbol }: {
   ) : bottom(nameLine);
 }
 
-function SheetPreview(props: SheetProps) {
-  const {
-    product, theme, chosen, photoById, aspectOf, views, onAspect, orientation, paper,
-  } = props;
-  const viewOf = (id: string) => views[id] ?? DEFAULT_CROP_VIEW;
-
-  if (product === 'photo' && isOverlay(theme)) {
-    const id = chosen[0];
-    const aspect = aspectOf(id);
-    const portrait = orientation === null ? aspect <= 1 : orientation === 'portrait';
-    const [w, h] = sheet(paper, portrait);
-    const short = Math.min(w, h);
-    // Everything is a fraction of the short edge, turned into a fraction of the
-    // sheet's width, exactly as the renderer measures it.
-    const ofWidth = (fraction: number) => pct((fraction * short) / w);
-    const text = OVERLAY_TEXT[props.overlayText];
-    return (
-      <div
-        className="party-print-sheet party-print-sheet-overlay"
-        data-theme={theme}
-        data-testid="party-print-sheet"
-        data-orientation={portrait ? 'portrait' : 'landscape'}
-        data-overlay-text={props.overlayText}
-        data-overlay-logo={props.overlayLogo}
-        style={{ aspectRatio: `${w} / ${h}` }}
-      >
-        <div className="party-print-slot" style={{ left: 0, top: 0, width: '100%', height: '100%' }}>
-          <FramedPhoto
-            photo={photoById.get(id)} aspect={aspect}
-            slotAspect={overlaySlotAspect(portrait, paper)} view={viewOf(id)}
-            onAspect={(width, height) => onAspect(id, width, height)}
-          />
-        </div>
-        {/* The support is the words' own box: anchored to the foot, it begins
-            one padding above the real block of text, whatever the words turn
-            out to be, and the photograph above it keeps every pixel. Padding
-            percentages are of the sheet's width, as `ofWidth` gives them. */}
-        <div
-          className="party-print-overlay-support"
-          data-testid="party-print-overlay-support"
-          style={{
-            background: overlayTextSupport(text.support),
-            paddingTop: ofWidth(OVERLAY_TEXT_SUPPORT_PADDING_FRACTION),
-            paddingInline: ofWidth(OVERLAY_MARGIN_FRACTION),
-            paddingBottom: ofWidth(OVERLAY_MARGIN_FRACTION),
-          }}
-        >
-          <div
-            className="party-print-overlay-text"
-            style={{
-              color: text.ink,
-              ['--halo' as string]: `rgb(${text.support} / ${OVERLAY_HALO_OPACITY * 100}%)`,
-              // cqw of the sheet: the same fraction of the short edge as on paper.
-              ['--halo-blur' as string]: `${((2 * OVERLAY_HALO_BLUR_FRACTION * short) / w) * 100}cqw`,
-              ['--title-size' as string]: `${((OVERLAY_TITLE_FRACTION * short) / w) * 100}cqw`,
-              ['--line-size' as string]: `${((OVERLAY_LINE_FRACTION * short) / w) * 100}cqw`,
-              ['--number-size' as string]: `${((OVERLAY_NUMBER_FRACTION * short) / w) * 100}cqw`,
-              ['--symbol-size' as string]: `${((OVERLAY_SYMBOL_FRACTION * short) / w) * 100}cqw`,
-              ['--symbol-gap' as string]: `${((OVERLAY_SYMBOL_GAP_FRACTION * short) / w) * 100}cqw`,
-            }}
-          >
-            <OverlayWords
-              partyName={props.partyName}
-              footerText={props.footerText}
-              orientation={portrait ? 'portrait' : 'landscape'}
-              symbol={(
-                <img
-                  className="party-print-overlay-symbol"
-                  data-testid="party-print-overlay-symbol"
-                  src={OVERLAY_LOGO[props.overlayLogo].mark}
-                  alt=""
-                  aria-hidden="true"
-                />
-              )}
-            />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (product === 'photo') {
-    const id = chosen[0];
-    const aspect = aspectOf(id);
-    // The sheet follows the photograph unless the guest turned it — exactly the
-    // decision the renderer makes, made here from the same inputs.
-    const portrait = orientation === null ? aspect <= 1 : orientation === 'portrait';
-    const { sheetWidth, sheetHeight, slot, footer } = photoLayout(portrait, paper);
-    const slotAspect = photoSlotAspect(portrait, paper);
-    return (
-      <div
-        className="party-print-sheet"
-        data-theme={theme}
-        data-testid="party-print-sheet"
-        data-orientation={portrait ? 'portrait' : 'landscape'}
-        style={{ aspectRatio: `${sheetWidth} / ${sheetHeight}` }}
-      >
-        <div
-          className="party-print-slot"
-          style={{
-            left: pct(slot.x), top: pct(slot.y),
-            width: pct(slot.width), height: pct(slot.height),
-          }}
-        >
-          <FramedPhoto
-            photo={photoById.get(id)} aspect={aspect}
-            slotAspect={slotAspect} view={viewOf(id)}
-            onAspect={(w, h) => onAspect(id, w, h)}
-          />
-        </div>
-        <div
-          className="party-print-footer-band"
-          style={{
-            left: pct(footer.x), top: pct(footer.y),
-            width: pct(footer.width), height: pct(footer.height),
-          }}
-        >
-          <SheetFooter {...props} />
-        </div>
-      </div>
-    );
-  }
-
-  if (product === 'grid4') {
-    // Four frames, two by two, on the paper as it is named — the renderer's
-    // own layout (gridLayout), in the order the guest arranged them.
-    const { sheetWidth, sheetHeight, slots, footer } = gridLayout(paper);
-    const slotAspect = gridSlotAspect(paper);
-    return (
-      <div
-        className="party-print-sheet"
-        data-theme={theme}
-        data-testid="party-print-sheet"
-        data-layout="grid4"
-        data-orientation={gridPortrait(paper) ? 'portrait' : 'landscape'}
-        style={{ aspectRatio: `${sheetWidth} / ${sheetHeight}` }}
-      >
-        {slots.map((rect, index) => {
-          const id = chosen[index];
-          return (
-            <div
-              key={index}
-              className="party-print-slot"
-              data-testid={`party-print-grid-${index}`}
-              style={{
-                left: pct(rect.x), top: pct(rect.y),
-                width: pct(rect.width), height: pct(rect.height),
-              }}
-            >
-              <FramedPhoto
-                photo={photoById.get(id)} aspect={aspectOf(id)}
-                slotAspect={slotAspect} view={viewOf(id)}
-                onAspect={(w, h) => onAspect(id, w, h)}
-              />
-            </div>
-          );
-        })}
-        <div
-          className="party-print-footer-band"
-          style={{
-            left: pct(footer.x), top: pct(footer.y),
-            width: pct(footer.width), height: pct(footer.height),
-          }}
-        >
-          <SheetFooter {...props} />
-        </div>
-      </div>
-    );
-  }
-
-  const slotAspect = stripSlotAspect();
+/** The party's title on a full-bleed photograph: its support, its words, its symbol. */
+function OverlayBlock({ sheet, partyName, footerText, overlayText, overlayLogo }: {
+  sheet: FullBleedSheet;
+  partyName: string;
+  footerText: string | null;
+  overlayText: PartyPrintOverlayText;
+  overlayLogo: PartyPrintOverlayLogo;
+}) {
+  const { width: w, height: h } = sheet;
+  const short = Math.min(w, h);
+  // Everything is a fraction of the short edge, turned into a fraction of the
+  // sheet's width, exactly as the renderer measures it.
+  const ofWidth = (fraction: number) => `${((fraction * short) / w) * 100}%`;
+  const text = OVERLAY_TEXT[overlayText];
   return (
+    // The support is the words' own box: anchored to the foot, it begins one
+    // padding above the real block of text, whatever the words turn out to be,
+    // and the photograph above it keeps every pixel.
     <div
-      className="party-print-sheet"
-      data-theme={theme}
-      data-testid="party-print-sheet"
-      data-layout="twinStrip4"
-      data-orientation="portrait"
-      style={{ aspectRatio: `${PORTRAIT_WIDTH} / ${PORTRAIT_HEIGHT}` }}
+      className="party-print-overlay-support"
+      data-testid="party-print-overlay-support"
+      style={{
+        background: overlayTextSupport(text.support),
+        paddingTop: ofWidth(OVERLAY_TEXT_SUPPORT_PADDING_FRACTION),
+        paddingInline: ofWidth(OVERLAY_MARGIN_FRACTION),
+        paddingBottom: ofWidth(OVERLAY_MARGIN_FRACTION),
+      }}
     >
-      {/* TWO STRIPS of four on one sheet, which the printer cuts apart. */}
-      {Array.from({ length: STRIPS_PER_SHEET }, (_, strip) => (
-        <div
-          key={strip}
-          data-testid={`party-print-strip-${strip}`}
-          // Four photographs: the second strip is the first again, and says
-          // nothing the first did not.
-          aria-hidden={strip > 0 && chosen.length <= SLOTS_PER_STRIP ? 'true' : undefined}
-        >
-          {Array.from({ length: SLOTS_PER_STRIP }, (_, index) => {
-            const rect = stripSlot(strip, index);
-            // Photographs 1–4 on the first strip, 5–8 on the second.
-            const id = chosen[strip * SLOTS_PER_STRIP + index] ?? chosen[index];
-            return (
-              <div
-                key={index}
-                className="party-print-slot"
-                style={{
-                  left: pct(rect.x), top: pct(rect.y),
-                  width: pct(rect.width), height: pct(rect.height),
-                }}
-              >
-                <FramedPhoto
-                  photo={photoById.get(id)} aspect={aspectOf(id)}
-                  slotAspect={slotAspect} view={viewOf(id)}
-                  onAspect={(w, h) => onAspect(id, w, h)}
-                />
-              </div>
-            );
-          })}
-          <div
-            className="party-print-footer-band"
-            style={{
-              left: pct(stripFooter(strip).x), top: pct(stripFooter(strip).y),
-              width: pct(stripFooter(strip).width), height: pct(stripFooter(strip).height),
-            }}
-          >
-            <SheetFooter {...props} strip />
-          </div>
-        </div>
-      ))}
-      {/* No cut marks: the printer cuts the sheet, and the print has none. */}
+      <div
+        className="party-print-overlay-text"
+        style={{
+          color: text.ink,
+          ['--halo' as string]: `rgb(${text.support} / ${OVERLAY_HALO_OPACITY * 100}%)`,
+          // cqw of the sheet: the same fraction of the short edge as on paper.
+          ['--halo-blur' as string]: `${((2 * OVERLAY_HALO_BLUR_FRACTION * short) / w) * 100}cqw`,
+          ['--title-size' as string]: `${((OVERLAY_TITLE_FRACTION * short) / w) * 100}cqw`,
+          ['--line-size' as string]: `${((OVERLAY_LINE_FRACTION * short) / w) * 100}cqw`,
+          ['--number-size' as string]: `${((OVERLAY_NUMBER_FRACTION * short) / w) * 100}cqw`,
+          ['--symbol-size' as string]: `${((OVERLAY_SYMBOL_FRACTION * short) / w) * 100}cqw`,
+          ['--symbol-gap' as string]: `${((OVERLAY_SYMBOL_GAP_FRACTION * short) / w) * 100}cqw`,
+        }}
+      >
+        <OverlayWords
+          partyName={partyName}
+          footerText={footerText}
+          orientation={sheet.portrait ? 'portrait' : 'landscape'}
+          symbol={(
+            <img
+              className="party-print-overlay-symbol"
+              data-testid="party-print-overlay-symbol"
+              src={OVERLAY_LOGO[overlayLogo].mark}
+              alt=""
+              aria-hidden="true"
+            />
+          )}
+        />
+      </div>
     </div>
   );
 }
-
-// --- Framing one photograph -------------------------------------------------
 
 export function PartyPrintPage() {
   const { token } = useParams<{ token: string }>();
   const { t, tn } = useI18n();
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
 
-  const [step, setStep] = useState<Step>('format');
-  const [product, setProduct] = useState<PartyPrintProduct | null>(null);
-  // How many photographs THIS composition takes, where a format offers a
-  // choice: a twin strip of four (the same strip twice) or of eight.
-  const [photoCount, setPhotoCount] = useState<number | null>(null);
-  const [chosen, setChosen] = useState<string[]>([]);
-  const [views, setViews] = useState<Record<string, CropView>>({});
-  const [aspects, setAspects] = useState<Record<string, number>>({});
   const [look, setLook] = useState<Look>('pure');
   const [overlayText, setOverlayText] = useState<PartyPrintOverlayText>('white');
   const [overlayLogo, setOverlayLogo] = useState<PartyPrintOverlayLogo>('light');
   // The theme the server is sent: the overlay exists only for a single photograph.
-  const theme: PartyPrintTheme = look === 'overlay'
-    ? (product === 'photo' ? 'overlay' : 'pure')
-    : look;
-  const [cropIndex, setCropIndex] = useState(0);
+  const themeFor = useCallback((layout: PrintLayout): PartyPrintTheme => (look === 'overlay'
+    ? (layout === 'photo' ? 'overlay' : 'pure')
+    : look), [look]);
   const [onlyMine, setOnlyMine] = useState(false);
-  // Null is not "unset waiting for a value" — it IS the default: follow the
-  // photograph. Only a guest who deliberately turns the sheet leaves it.
-  const [orientation, setOrientation] = useState<PartyPrintOrientation | null>(null);
-  // On a phone a whole 10x15 frame can reach below the fold, and a finger on
-  // it moves the photograph rather than the page. When a photograph opens for
-  // framing and its frame does not end on screen, bring the frame into view.
-  const cropStageRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (step !== 'crop') return;
-    const stage = cropStageRef.current;
-    if (stage && stage.getBoundingClientRect().bottom > window.innerHeight) {
-      stage.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
-    }
-  }, [step, cropIndex]);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<MessageKey | null>(null);
+  // Why the guest is back at the formats (another paper went in).
+  const [formatNotice, setFormatNotice] = useState<MessageKey | null>(null);
+  const [resetSignal, setResetSignal] = useState(0);
   const [sent, setSent] = useState<Sent | null>(null);
 
-  // The sheet as it was first sent: its idempotency key AND the exact slots
-  // that key stands for, frozen together at the first attempt.
-  //
-  // Minting the key alone would leave "the same key" and "the same sheet" as
-  // two separate facts that merely tend to agree — a photograph whose real
-  // shape arrived between two attempts would change the crop under a key the
-  // server has already decided about. Freezing both makes it one fact. Changing
-  // the composition discards the pair and earns a new key.
-  const pendingRef = useRef<{ key: string; slots: PartyPrintSlot[] } | null>(null);
-  useEffect(() => {
-    pendingRef.current = null;
-  }, [product, chosen, views, theme, orientation, overlayText, overlayLogo]);
+  const refreshManifest = useCallback(() => {
+    // The budgets moved while this guest was composing, so re-read them rather
+    // than offering a count that is already out of date.
+    if (!token) return;
+    getPartyPrintManifest(token)
+      .then((fresh) => setPhase({ kind: 'ready', manifest: fresh }))
+      .catch(() => { /* Keep what we have; the next submit is authoritative. */ });
+  }, [token]);
 
   useEffect(() => {
     if (!token) {
@@ -739,120 +362,77 @@ export function PartyPrintPage() {
     f.remainingForYou !== null && f.remainingForYou <= f.remaining
   ), []);
 
-  const format = manifest?.formats.find((f) => f.type === product) ?? null;
   // The paper is a fact about the printer: every product on offer is a sheet of it.
   const paper: PaperSize = manifest?.paperSize ?? '10x15';
-  const required = photoCount ?? format?.requiredPhotos ?? 1;
-  // Four photographs on a twin strip: one strip, printed twice.
-  const sameStrip = product === 'twinStrip4' && required === SLOTS_PER_STRIP;
-  const printable = manifest?.formats.filter((f) => f.enabled) ?? [];
+  const printable = useMemo(() => manifest?.formats.filter((f) => f.enabled) ?? [], [manifest]);
   const anyLeft = printable.some((f) => leftFor(f) > 0);
-
   const gallery = onlyMine && mine.length > 0 ? mine : (manifest?.photos ?? []);
 
-  // The natural shape of a photograph, learned when its preview loads. Until
-  // then it is treated as filling its slot exactly, which crops nothing.
-  const aspectOf = useCallback((id: string) => aspects[id] ?? 0, [aspects]);
-  const noteAspect = useCallback((id: string, width: number, height: number) => {
-    if (width <= 0 || height <= 0) return;
-    setAspects((prev) => (prev[id] ? prev : { ...prev, [id]: width / height }));
-  }, []);
-
-  /** Portrait unless the guest turned the sheet, or the photograph is wide. */
-  const portraitFor = useCallback((id: string) => (
-    orientation === null ? aspectOf(id) <= 1 : orientation === 'portrait'
-  ), [orientation, aspectOf]);
-
-  const slotAspectFor = useCallback((id: string) => (
-    product === 'twinStrip4'
-      ? stripSlotAspect()
-      : product === 'grid4'
-        ? gridSlotAspect(paper)
-        : isOverlay(theme)
-          ? overlaySlotAspect(portraitFor(id), paper)
-          : photoSlotAspect(portraitFor(id), paper)
-  ), [product, portraitFor, theme]);
-
-  const toggle = (id: string) => {
-    setChosen((prev) => {
-      if (prev.includes(id)) return prev.filter((other) => other !== id);
-      if (prev.length >= required) return prev;
-      return [...prev, id];
-    });
-  };
-
-  const move = (index: number, delta: number) => {
-    setChosen((prev) => {
-      const next = [...prev];
-      const target = index + delta;
-      if (target < 0 || target >= next.length) return prev;
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
-  };
-
-  const setView = (id: string, view: CropView) => {
-    setViews((prev) => ({ ...prev, [id]: view }));
-  };
+  // Each product as offered — a format with a choice of how many photographs,
+  // the twin strip (the same four twice, or eight), as each of them.
+  const formats = useMemo<StudioFormat[]>(() => printable.flatMap((option) => (
+    [...(option.photoCounts && option.photoCounts.length > 1 ? option.photoCounts : [option.requiredPhotos])]
+      .sort((a, b) => a - b)
+      .map((count): StudioFormat => {
+        const left = leftFor(option);
+        const out = left <= 0;
+        const same = option.type === 'twinStrip4' && count === SLOTS_PER_STRIP;
+        return {
+          layout: option.type,
+          count,
+          testId: count === option.requiredPhotos
+            ? `party-print-format-${option.type}`
+            : `party-print-format-${option.type}-${count}`,
+          label: same
+            ? t('partyPrint.format.twinStrip4Same')
+            : t(`partyPrint.format.${option.type}`, { paper: PAPER_LABEL[paper] }),
+          help: same
+            ? t('partyPrint.format.twinStrip4SameHelp')
+            : t(`partyPrint.format.${option.type}Help`),
+          left: out
+            ? t(yoursIsBinding(option) ? 'partyPrint.yoursDone' : 'partyPrint.exhausted')
+            : yoursIsBinding(option) ? tn(left, 'partyPrint.yoursLeft') : tn(left, 'partyPrint.remaining'),
+          exhausted: out,
+        };
+      })
+  )), [printable, leftFor, yoursIsBinding, paper, t, tn]);
 
   const startOver = () => {
     setSent(null);
     setSubmitError(null);
-    setProduct(null);
-    setPhotoCount(null);
-    setChosen([]);
-    setViews({});
-    setCropIndex(0);
-    setOrientation(null);
-    setStep('format');
-    // The budgets moved while this guest was composing, so re-read them rather
-    // than offering a count that is already out of date.
-    if (token) {
-      getPartyPrintManifest(token)
-        .then((fresh) => setPhase({ kind: 'ready', manifest: fresh }))
-        .catch(() => { /* Keep what we have; the next submit is authoritative. */ });
-    }
+    refreshManifest();
   };
 
-  const submit = async () => {
-    if (!token || !product) return;
-    pendingRef.current ??= {
-      key: newIdempotencyKey(),
-      slots: chosen.map((id) => {
-        const view = views[id] ?? DEFAULT_CROP_VIEW;
-        // The zoom as drawn: a framing held below a shape learned later is
-        // sent as the contain it now shows.
-        const zoom = effectiveZoom(aspectOf(id), slotAspectFor(id), view.zoom);
-        return { itemId: id, placement: { centerX: view.centerX, centerY: view.centerY, zoom } };
-      }),
-    };
-    const pending = pendingRef.current;
+  const submit = async (composition: StudioSubmission) => {
+    if (!token) return;
+    const theme = themeFor(composition.layout);
     setSubmitting(true);
     setSubmitError(null);
     try {
       const accepted = await submitPartyPrint(
         token,
         {
-          product,
+          product: composition.layout,
           theme,
-          slots: pending.slots,
+          slots: composition.slots,
           // Omitted when the guest left the default: the server follows the
           // photograph, which is what it did before this choice existed.
-          ...(product === 'photo' && orientation ? { orientation } : {}),
+          ...(composition.orientation ? { orientation: composition.orientation } : {}),
           ...(theme === 'overlay' ? { overlayText, overlayLogo } : {}),
           // The paper this sheet was composed for: if the printer's is no
           // longer it, nothing is printed and the studio starts again.
           paperSize: paper,
         },
-        pending.key);
+        composition.key);
       setSent({ accepted, state: 'preparing' });
     } catch (err: unknown) {
       const refusal = refusalKey(err);
       if (refusal === 'partyPrint.error.paperChanged') {
         // Another paper is in: what can be made has changed, so begin again
         // from the products the new paper offers, saying why.
-        startOver();
-        setSubmitError(refusal);
+        setResetSignal((n) => n + 1);
+        setFormatNotice(refusal);
+        refreshManifest();
         return;
       }
       setSubmitError(refusal);
@@ -917,14 +497,14 @@ export function PartyPrintPage() {
     // it still has forty sheets is a lie they see through the moment somebody
     // else collects a print — and it sends them to complain to the host about
     // a limit the host set on purpose.
-    const mine = printable.length > 0 && printable.every(yoursIsBinding);
+    const yours = printable.length > 0 && printable.every(yoursIsBinding);
     return (
       <PrintShell title={phase.manifest.partyName}>
         <p className="party-print-note">
-          {t(mine ? 'partyPrint.yoursAllDone' : 'partyPrint.allExhausted')}
+          {t(yours ? 'partyPrint.yoursAllDone' : 'partyPrint.allExhausted')}
         </p>
         <p className="party-print-hint">
-          {t(mine ? 'partyPrint.yoursAllDoneHelp' : 'partyPrint.allExhaustedHelp')}
+          {t(yours ? 'partyPrint.yoursAllDoneHelp' : 'partyPrint.allExhaustedHelp')}
         </p>
         <BackLink />
       </PrintShell>
@@ -933,466 +513,115 @@ export function PartyPrintPage() {
 
   return (
     <PrintShell title={phase.manifest.partyName}>
-      {step === 'format' && (
-        <section className="party-print-step" aria-labelledby="party-print-heading">
-          <h2 className="party-print-heading" id="party-print-heading">
-            {t('partyPrint.step.format')}
-          </h2>
-          {/* Why the guest is back here: another paper was put in while they
-              composed, and this is what it can make. */}
-          {submitError && (
-            <p className="party-print-error" role="alert">{t(submitError)}</p>
-          )}
-          <ul className="party-print-formats">
-            {printable.flatMap((option) => (
-              // A format with a choice of how many photographs — the twin strip:
-              // the same four twice, or eight — is offered as each of them.
-              [...(option.photoCounts && option.photoCounts.length > 1
-                ? option.photoCounts
-                : [option.requiredPhotos])].sort((a, b) => a - b).map((count) => ({ option, count }))
-            )).map(({ option, count }) => {
-              const left = leftFor(option);
-              const out = left <= 0;
-              const same = option.type === 'twinStrip4' && count === SLOTS_PER_STRIP;
-              return (
-                <li key={`${option.type}-${count}`}>
-                  <button
-                    type="button"
-                    className="party-print-format"
-                    data-testid={count === option.requiredPhotos
-                      ? `party-print-format-${option.type}`
-                      : `party-print-format-${option.type}-${count}`}
-                    data-exhausted={out ? 'true' : undefined}
-                    disabled={out}
-                    onClick={() => {
-                      setSubmitError(null);
-                      setProduct(option.type);
-                      setPhotoCount(count);
-                      setChosen([]);
-                      setStep('select');
-                    }}
-                  >
-                    <span className="party-print-format-icon" aria-hidden="true">
-                      {option.type === 'twinStrip4'
-                        ? <StripIcon />
-                        : option.type === 'grid4' ? <GridIcon /> : <PrinterIcon />}
-                    </span>
-                    <span className="party-print-format-text">
-                      <strong>
-                        {same
-                          ? t('partyPrint.format.twinStrip4Same')
-                          : t(`partyPrint.format.${option.type}`, { paper: PAPER_LABEL[paper] })}
-                      </strong>
-                      <span className="party-print-format-help">
-                        {same
-                          ? t('partyPrint.format.twinStrip4SameHelp')
-                          : t(`partyPrint.format.${option.type}Help`)}
-                      </span>
-                    </span>
-                    <span className="party-print-format-left">
-                      {out
-                        ? t(yoursIsBinding(option)
-                          ? 'partyPrint.yoursDone'
-                          : 'partyPrint.exhausted')
-                        : yoursIsBinding(option)
-                          ? tn(left, 'partyPrint.yoursLeft')
-                          : tn(left, 'partyPrint.remaining')}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-          <BackLink />
-        </section>
-      )}
-
-      {step === 'select' && product && (
-        <section className="party-print-step" aria-labelledby="party-print-heading">
-          <h2 className="party-print-heading" id="party-print-heading">
-            {t(product === 'twinStrip4'
-              ? (sameStrip ? 'partyPrint.selectStripSame' : 'partyPrint.selectStrip')
-              : product === 'grid4' ? 'partyPrint.selectGrid' : 'partyPrint.selectPhoto')}
-          </h2>
-          <p className="party-print-count" role="status">
-            {t('partyPrint.chosen', { count: chosen.length, total: required })}
-          </p>
-          {/* Offered only when the guest's own search actually matched
-              photographs this token serves. */}
-          {mine.length > 0 && (
-            <button
-              type="button"
-              className="party-print-filter"
-              aria-pressed={onlyMine}
-              onClick={() => setOnlyMine((on) => !on)}
-            >
-              {t(onlyMine ? 'partyPrint.allPhotos' : 'partyPrint.onlyMine')}
-            </button>
-          )}
-          {gallery.length === 0 ? (
-            <p className="party-print-note">{t('partyPrint.noPhotos')}</p>
-          ) : (
-            <ul className="party-print-gallery">
-              {gallery.map((photo) => {
-                const at = chosen.indexOf(photo.id);
-                return (
-                  <li key={photo.id}>
-                    <button
-                      type="button"
-                      className="party-print-pick"
-                      aria-pressed={at >= 0}
-                      aria-label={at >= 0
-                        ? t('partyPrint.unchoose')
-                        : t('partyPrint.choose')}
-                      onClick={() => toggle(photo.id)}
-                    >
-                      <img
-                        src={photo.thumbnailUrl}
-                        alt=""
-                        loading="lazy"
-                        onLoad={(event) => noteAspect(
-                          photo.id,
-                          event.currentTarget.naturalWidth,
-                          event.currentTarget.naturalHeight,
-                        )}
-                      />
-                      {at >= 0 && (
-                        <span className="party-print-pick-badge" aria-hidden="true">
-                          {at + 1}
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {/* Pinned where a thumb is — the invitation's own bar — so a guest
-              choosing from a long album never has to scroll to its end to go on. */}
-          <div className="party-invitation-cta" data-testid="party-print-select-bar">
-            <div className="party-print-actions">
-              <button
-                type="button"
-                className="party-print-secondary"
-                onClick={() => setStep('format')}
-              >
-                {t('partyPrint.previous')}
-              </button>
-              <button
-                type="button"
-                className="party-print-primary"
-                disabled={chosen.length !== required}
-                onClick={() => setStep(product === 'photo' ? 'crop' : 'arrange')}
-              >
-                {t('partyPrint.continue')}
-              </button>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {step === 'arrange' && (
-        <section className="party-print-step" aria-labelledby="party-print-heading">
-          <h2 className="party-print-heading" id="party-print-heading">
-            {t('partyPrint.step.arrange')}
-          </h2>
-          <p className="party-print-hint">
-            {t(product === 'grid4'
-              ? 'partyPrint.arrangeHelpGrid'
-              : sameStrip ? 'partyPrint.arrangeHelpStripSame' : 'partyPrint.arrangeHelp')}
-          </p>
-          {/* Reordering is BUTTONS, not only dragging: the order is part of the
-              composition, and it must be reachable by keyboard, by screen
-              reader and by anyone who cannot hold a drag. */}
-          {(() => {
-            const label = (index: number) => (product === 'grid4'
-              ? `${t('partyPrint.position', { n: index + 1 })} \u00b7 ${t(GRID_POSITION[index])}`
-              : t('partyPrint.position', { n: index + 1 }));
-            const row = (id: string, index: number) => (
-              <li key={id} className="party-print-order-row">
-                <span className="party-print-order-index" aria-hidden="true">{index + 1}</span>
-                <img src={photoById.get(id)?.thumbnailUrl} alt="" />
-                <span className="party-print-order-label">{label(index)}</span>
-                <span className="party-print-order-buttons">
-                  <button
-                    type="button"
-                    disabled={index === 0}
-                    aria-label={`${t('partyPrint.moveUp')} \u2014 ${label(index)}`}
-                    onClick={() => move(index, -1)}
-                  >
-                    {t('partyPrint.moveUp')}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={index === chosen.length - 1}
-                    aria-label={`${t('partyPrint.moveDown')} \u2014 ${label(index)}`}
-                    onClick={() => move(index, 1)}
-                  >
-                    {t('partyPrint.moveDown')}
-                  </button>
-                </span>
-              </li>
-            );
-            // The twin strip is two strips: the first four on one, the next
-            // four on the other — shown as the two groups they will be.
-            if (sameStrip) {
-              return (
-                <section
-                  className="party-print-order-group"
-                  aria-labelledby="party-print-strip-heading-same"
-                  data-testid="party-print-order-strip-same"
-                >
-                  <h3 className="party-print-order-heading" id="party-print-strip-heading-same">
-                    {t('partyPrint.sameStrip')}
-                  </h3>
-                  <ol className="party-print-order">{chosen.map(row)}</ol>
-                </section>
-              );
-            }
-            return product === 'twinStrip4'
-              ? [0, 1].map((strip) => (
-                <section
-                  key={strip}
-                  className="party-print-order-group"
-                  aria-labelledby={`party-print-strip-heading-${strip}`}
-                  data-testid={`party-print-order-strip-${strip}`}
-                >
-                  <h3 className="party-print-order-heading" id={`party-print-strip-heading-${strip}`}>
-                    {t(strip === 0 ? 'partyPrint.firstStrip' : 'partyPrint.secondStrip')}
-                  </h3>
-                  <ol className="party-print-order" start={strip * SLOTS_PER_STRIP + 1}>
-                    {chosen.slice(strip * SLOTS_PER_STRIP, (strip + 1) * SLOTS_PER_STRIP)
-                      .map((id, i) => row(id, strip * SLOTS_PER_STRIP + i))}
-                  </ol>
-                </section>
-              ))
-              : <ol className="party-print-order">{chosen.map(row)}</ol>;
-          })()}
-          <div className="party-print-actions">
-            <button
-              type="button"
-              className="party-print-secondary"
-              onClick={() => setStep('select')}
-            >
-              {t('partyPrint.previous')}
-            </button>
-            <button
-              type="button"
-              className="party-print-primary"
-              onClick={() => { setCropIndex(0); setStep('crop'); }}
-            >
-              {t('partyPrint.continue')}
-            </button>
-          </div>
-        </section>
-      )}
-
-      {step === 'crop' && product && (() => {
-        const id = chosen[cropIndex];
-        const photo = photoById.get(id);
-        const view = views[id] ?? DEFAULT_CROP_VIEW;
-        const last = cropIndex === chosen.length - 1;
-        return (
-          <section className="party-print-step" aria-labelledby="party-print-heading">
-            <h2 className="party-print-heading" id="party-print-heading">
-              {t('partyPrint.step.crop')}
-            </h2>
-            {chosen.length > 1 && (
-              <p className="party-print-count" role="status">
-                {t('partyPrint.cropOf', { n: cropIndex + 1, total: chosen.length })}
-              </p>
-            )}
-            {photo && (
-              /* Sized to the screen as well as the column: see the CSS. */
-              <div
-                ref={cropStageRef}
-                className="party-print-crop-stage"
-                style={{ ['--crop-aspect' as string]: slotAspectFor(id) }}
-              >
-                <PhotoCropFrame
-                  src={photo.previewUrl}
-                  aspect={aspectOf(id)}
-                  slotAspect={slotAspectFor(id)}
-                  view={view}
-                  label={t('partyPrint.cropHelp')}
-                  onChange={(next) => setView(id, next)}
-                  // "Adatta" needs the photograph's shape: learn it here too.
-                  onAspect={(width, height) => noteAspect(id, width, height)}
-                  testId="party-print-crop"
-                  // What this slot shows beside a photograph zoomed out: the
-                  // sheet's own paper, white on the photograph with no paper.
-                  background={PRINT_BAND[theme]}
-                />
-              </div>
-            )}
-            <p className="party-print-hint">{t('partyPrint.cropHelp')}</p>
-            <PhotoFramingControls
-              aspect={aspectOf(id)}
-              slotAspect={slotAspectFor(id)}
-              view={view}
-              onChange={(next) => setView(id, next)}
-              zoomLabel={t('partyPrint.zoom')}
-              testId="party-print-framing"
-            />
-            <div className="party-print-actions">
-              <button
-                type="button"
-                className="party-print-secondary"
-                onClick={() => {
-                  if (cropIndex > 0) setCropIndex(cropIndex - 1);
-                  else setStep(product === 'photo' ? 'select' : 'arrange');
-                }}
-              >
-                {t('partyPrint.previous')}
-              </button>
-              <button
-                type="button"
-                className="party-print-primary"
-                onClick={() => {
-                  if (last) setStep('preview');
-                  else setCropIndex(cropIndex + 1);
-                }}
-              >
-                {t('partyPrint.continue')}
-              </button>
-            </div>
-          </section>
-        );
-      })()}
-
-      {step === 'preview' && product && (
-        <section className="party-print-step" aria-labelledby="party-print-heading">
-          <h2 className="party-print-heading" id="party-print-heading">
-            {t('partyPrint.step.preview')}
-          </h2>
-          <SheetPreview
-            product={product}
-            theme={theme}
+      <PrintStudio
+        paper={paper}
+        formats={formats}
+        gallery={gallery}
+        photoById={photoById}
+        // Offered only when the guest's own search actually matched
+        // photographs this token serves.
+        galleryTools={mine.length > 0 ? (
+          <button
+            type="button"
+            className="party-print-filter"
+            aria-pressed={onlyMine}
+            onClick={() => setOnlyMine((on) => !on)}
+          >
+            {t(onlyMine ? 'partyPrint.allPhotos' : 'partyPrint.onlyMine')}
+          </button>
+        ) : undefined}
+        formatFooter={<BackLink />}
+        formatNotice={formatNotice}
+        photoStyle={look === 'overlay' ? 'fullBleed' : 'framed'}
+        sheetTheme={themeFor}
+        bandDark={(layout) => DARK_THEMES.includes(themeFor(layout))}
+        paperColor={(layout) => PRINT_BAND[themeFor(layout)]}
+        band={{ title: phase.manifest.partyName, line: phase.manifest.footerText, mark: null, brand: true }}
+        fullBleedWords={(sheet) => (
+          <OverlayBlock
+            sheet={sheet}
             partyName={phase.manifest.partyName}
             footerText={phase.manifest.footerText}
-            chosen={chosen}
-            photoById={photoById}
-            aspectOf={aspectOf}
-            views={views}
-            onAspect={noteAspect}
-            orientation={orientation}
-            paper={paper}
             overlayText={overlayText}
             overlayLogo={overlayLogo}
           />
-          <p className="party-print-hint">{t('partyPrint.previewHelp', { paper: PAPER_LABEL[paper] })}</p>
-          {product === 'twinStrip4' && (
-            <p className="party-print-hint">{t('partyPrint.twinStrips')}</p>
-          )}
-          {/* Only for a single photograph: the four-photo strip is two strips
-              side by side on a portrait sheet, and turning that sheet would not
-              turn a picture, it would destroy the product. */}
-          {product === 'photo' && (
+        )}
+        sheetData={{ 'data-overlay-text': overlayText, 'data-overlay-logo': overlayLogo }}
+        compositionKey={JSON.stringify([look, overlayText, overlayLogo])}
+        submitError={submitError ? t(submitError) : null}
+        submitting={submitting}
+        resetSignal={resetSignal}
+        onSubmit={(composition) => { setFormatNotice(null); void submit(composition); }}
+        options={(layout) => (
+          <>
             <fieldset className="party-print-themes">
-              <legend>{t('partyPrint.orientation')}</legend>
-              {(['portrait', 'landscape'] as const).map((option) => (
+              <legend>{t('partyPrint.theme')}</legend>
+              {(layout === 'photo' ? PHOTO_LOOKS : FRAMED_LOOKS).map((option) => (
                 <label key={option} className="party-print-theme">
                   <input
                     type="radio"
-                    name="party-print-orientation"
+                    name="party-print-theme"
                     value={option}
-                    checked={(orientation ?? (aspectOf(chosen[0]) <= 1 ? 'portrait' : 'landscape'))
-                      === option}
-                    onChange={() => setOrientation(option)}
+                    checked={look === option || (option === 'pure' && look === 'overlay' && layout !== 'photo')}
+                    onChange={() => setLook(option)}
                   />
-                  <span>{t(`partyPrint.orientation.${option}`)}</span>
+                  <span>{t(LOOK_LABEL[option])}</span>
                 </label>
               ))}
             </fieldset>
-          )}
-          <fieldset className="party-print-themes">
-            <legend>{t('partyPrint.theme')}</legend>
-            {(product === 'photo' ? PHOTO_LOOKS : FRAMED_LOOKS).map((option) => (
-              <label key={option} className="party-print-theme">
-                <input
-                  type="radio"
-                  name="party-print-theme"
-                  value={option}
-                  checked={look === option || (option === 'pure' && look === 'overlay' && product !== 'photo')}
-                  onChange={() => setLook(option)}
-                />
-                <span>{t(LOOK_LABEL[option])}</span>
-              </label>
-            ))}
-          </fieldset>
-          {/* Only for "On the photo": two independent choices, each a group of
-              option cards over real radio inputs, sized for a thumb. */}
-          {product === 'photo' && look === 'overlay' && (
-            <div className="party-print-overlay-options">
-              <fieldset className="party-print-choice">
-                <legend>{t('partyPrint.overlayText')}</legend>
-                <div className="party-print-choice-grid">
-                  {OVERLAY_TEXTS.map((option) => (
-                    <label key={option} className="party-print-option">
-                      <input
-                        type="radio"
-                        className="party-print-option-input"
-                        name="party-print-overlay-text"
-                        value={option}
-                        checked={overlayText === option}
-                        onChange={() => setOverlayText(option)}
-                      />
-                      <span
-                        className="party-print-swatch"
-                        aria-hidden="true"
-                        style={{ backgroundColor: OVERLAY_TEXT[option].ink }}
-                      />
-                      <span>{t(`partyPrint.overlayText.${option}`)}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-              <fieldset className="party-print-choice">
-                <legend>{t('partyPrint.overlayLogo')}</legend>
-                <div className="party-print-choice-grid">
-                  {OVERLAY_LOGOS.map((option) => (
-                    <label key={option} className="party-print-option">
-                      <input
-                        type="radio"
-                        className="party-print-option-input"
-                        name="party-print-overlay-logo"
-                        value={option}
-                        checked={overlayLogo === option}
-                        onChange={() => setOverlayLogo(option)}
-                      />
-                      <span className="party-print-swatch party-print-swatch-mark" aria-hidden="true">
-                        <img src={OVERLAY_LOGO[option].swatch} alt="" />
-                      </span>
-                      <span>{t(`partyPrint.overlayLogo.${option}`)}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-            </div>
-          )}
-          {submitError && (
-            <p className="party-print-error" role="alert">{t(submitError)}</p>
-          )}
-          <div className="party-print-actions">
-            <button
-              type="button"
-              className="party-print-secondary"
-              disabled={submitting}
-              onClick={() => { setCropIndex(chosen.length - 1); setStep('crop'); }}
-            >
-              {t('partyPrint.previous')}
-            </button>
-            <button
-              type="button"
-              className="party-print-primary"
-              disabled={submitting}
-              onClick={() => { void submit(); }}
-            >
-              {t(submitting ? 'partyPrint.submitting' : 'partyPrint.submit')}
-            </button>
-          </div>
-        </section>
-      )}
+            {/* Only for "On the photo": two independent choices, each a group
+                of option cards over real radio inputs, sized for a thumb. */}
+            {layout === 'photo' && look === 'overlay' && (
+              <div className="party-print-overlay-options">
+                <fieldset className="party-print-choice">
+                  <legend>{t('partyPrint.overlayText')}</legend>
+                  <div className="party-print-choice-grid">
+                    {OVERLAY_TEXTS.map((option) => (
+                      <label key={option} className="party-print-option">
+                        <input
+                          type="radio"
+                          className="party-print-option-input"
+                          name="party-print-overlay-text"
+                          value={option}
+                          checked={overlayText === option}
+                          onChange={() => setOverlayText(option)}
+                        />
+                        <span
+                          className="party-print-swatch"
+                          aria-hidden="true"
+                          style={{ backgroundColor: OVERLAY_TEXT[option].ink }}
+                        />
+                        <span>{t(`partyPrint.overlayText.${option}`)}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                <fieldset className="party-print-choice">
+                  <legend>{t('partyPrint.overlayLogo')}</legend>
+                  <div className="party-print-choice-grid">
+                    {OVERLAY_LOGOS.map((option) => (
+                      <label key={option} className="party-print-option">
+                        <input
+                          type="radio"
+                          className="party-print-option-input"
+                          name="party-print-overlay-logo"
+                          value={option}
+                          checked={overlayLogo === option}
+                          onChange={() => setOverlayLogo(option)}
+                        />
+                        <span className="party-print-swatch party-print-swatch-mark" aria-hidden="true">
+                          <img src={OVERLAY_LOGO[option].swatch} alt="" />
+                        </span>
+                        <span>{t(`partyPrint.overlayLogo.${option}`)}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              </div>
+            )}
+          </>
+        )}
+      />
     </PrintShell>
   );
 }

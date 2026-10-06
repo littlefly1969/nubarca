@@ -25,6 +25,8 @@ export interface PrintTarget {
   offline: boolean;
   /** A loan's sheets still allowed: null is no ceiling, undefined is the reader's own printer. */
   sheetsLeft?: number | null;
+  /** The printer cuts a 10x15 into the twin strip's two strips. */
+  cutsStrips: boolean;
 }
 
 const KEY = (stationId: string, deviceId: string) => `${stationId}:${deviceId}`;
@@ -55,6 +57,7 @@ export function printTargets(stations: readonly PrintStation[], shared: readonly
         mediaRemaining: device.mediaRemainingPrints ?? null,
         mediaObservedAt: device.mediaRemainingObservedAt ?? null,
         offline,
+        cutsStrips: device.cutsStrips === true,
       };
     }));
   const lent = shared.map((printer): PrintTarget => {
@@ -76,6 +79,7 @@ export function printTargets(stations: readonly PrintStation[], shared: readonly
       mediaObservedAt: printer.mediaRemainingObservedAt ?? null,
       offline,
       sheetsLeft,
+      cutsStrips: printer.cutsStrips === true,
     };
   });
   return [...own, ...lent];

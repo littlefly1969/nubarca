@@ -33,6 +33,8 @@ const STATUS_KEYS: Record<PrintStation['status'], MessageKey> = {
 const KIND_KEYS: Record<string, MessageKey> = {
   diagnostic: 'print.kind.diagnostic',
   'owner-photo': 'print.kind.ownerPhoto',
+  'owner-grid4': 'print.kind.ownerGrid4',
+  'owner-strip4': 'print.kind.ownerStrip4',
   'party-photo': 'print.kind.partyPhoto',
   'party-grid4': 'print.kind.partyGrid4',
   'party-strip4': 'print.kind.partyStrip4',

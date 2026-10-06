@@ -1,0 +1,46 @@
+/* The owner's own choices in the print studio, in the studio's own language
+   (PartyPrintPage.css): the printer, the line, the mark. */
+
+/* A printer is a sentence, not a pill: it wraps, and stays a thumb's target. */
+.owner-print-printers .party-print-theme {
+  width: 100%;
+  border-radius: 0.8rem;
+  line-height: 1.35;
+}
+
+.owner-print-printers .party-print-theme:has(input:disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.owner-print-words {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.owner-print-caption {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.88rem;
+}
+
+.owner-print-caption input {
+  min-height: 2.75rem;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 0.8rem;
+  background: rgb(245 247 251 / 6%);
+  color: inherit;
+  font: inherit;
+}
+
+.owner-print-caption input:focus-visible {
+  outline: 2px solid var(--brand-cyan-glow);
+  outline-offset: 2px;
+}
+
+.owner-print-caption input[aria-invalid='true'] {
+  border-color: var(--danger, #e5484d);
+}

@@ -47,6 +47,7 @@ import { PartyPage } from './pages/PartyPage';
 import { PartyInvitationPage } from './pages/PartyInvitationPage';
 import { PartyUploadPage } from './pages/PartyUploadPage';
 import { AlbumSharePage } from './pages/AlbumSharePage';
+import { OwnerPrintPage } from './print/OwnerPrintPage';
 import { PartyChallengesPage } from './pages/PartyChallengesPage';
 import { PartyGamePage } from './pages/PartyGamePage';
 import { PartyTvStagePage } from './pages/PartyTvStagePage';
@@ -138,6 +139,16 @@ export function App() {
             element={
               <ProtectedRoute>
                 <TvPairApprovalPage />
+              </ProtectedRoute>
+            }
+          />
+          {/* An owner's print studio: the party's own path to a sheet, full
+              screen, for one's own photographs on one's own (or a lent) printer. */}
+          <Route
+            path="/print"
+            element={
+              <ProtectedRoute>
+                <OwnerPrintPage />
               </ProtectedRoute>
             }
           />

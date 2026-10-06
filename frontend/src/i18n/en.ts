@@ -4141,6 +4141,8 @@ const en: Partial<Record<MessageKey, string>> = {
   'print.queueTitle': 'Queue',
   'print.kind.diagnostic': 'Test page',
   'print.kind.ownerPhoto': 'Album photo',
+  'print.kind.ownerStrip4': 'Strips from the album',
+  'print.kind.ownerGrid4': '4 photos from the album',
   'print.kind.partyPhoto': 'Party photo',
   'print.kind.partyGrid4': '4 photos',
   'print.kind.partyStrip4': 'Strips',
@@ -4364,6 +4366,18 @@ const en: Partial<Record<MessageKey, string>> = {
   'ownerPrint.error.photo': 'This photo cannot be printed.',
   'ownerPrint.error.render': 'The print could not be prepared. Try again.',
   'ownerPrint.error.generic': 'Sending failed. Try again.',
+  'ownerPrint.brand': 'NubArca signature',
+  'ownerPrint.captionInvalid': 'At most {max} characters, no emoji',
+  'ownerPrint.captionHelp': 'One line under the photos, up to {max} characters',
+  'ownerPrint.caption': 'Text',
+  'ownerPrint.style.framed': 'Frame',
+  'ownerPrint.style.fullBleed': 'Full',
+  'ownerPrint.style': 'Style',
+  'ownerPrint.printAnother': 'Print another',
+  'ownerPrint.backToLibrary': 'Back to the library',
+  'ownerPrint.backToAlbum': 'Back to the album',
+  'ownerPrint.error.caption': 'The text cannot be printed: one line, at most 40 characters, no emoji.',
+  'ownerPrint.format.photoHelp': 'One photo, full or framed',
 };
 
 export default en;

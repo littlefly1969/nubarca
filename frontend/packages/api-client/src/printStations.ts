@@ -211,14 +211,22 @@ export function revokePrinterShare(shareId: string): Promise<void> {
 
 /** One of the owner's own photographs, printed on their printer or one lent to them. */
 export interface OwnerPhotoPrintRequest {
-  fileItemId: string;
   printStationId: string;
   printerDeviceId: string;
   /** The paper the composition was made for: refused as paper_changed if another is loaded. */
   expectedPaperSize: PrintPaperSize;
-  orientation: 'portrait' | 'landscape';
-  /** The shared PhotoPlacement on the whole sheet. */
-  placement: { centerX: number; centerY: number; zoom: number };
+  /** A format of the shared print catalogue. */
+  layout: 'photo' | 'grid4' | 'twinStrip4';
+  /** One photograph: Piena (`fullBleed`) or Cornice (`framed`). Four and the strips are framed. */
+  style: 'fullBleed' | 'framed';
+  /** The photographs in the order they were arranged, each placed in its slot (the shared PhotoPlacement). */
+  photos: { fileItemId: string; placement: { centerX: number; centerY: number; zoom: number } }[];
+  /** Which way a single photograph's sheet stands; absent for four and the strips. */
+  orientation?: 'portrait' | 'landscape';
+  /** One line of the owner's own in a framed sheet's band. */
+  caption?: string;
+  /** The NubArca wordmark in a framed sheet's band. */
+  brand?: boolean;
   includeDate: boolean;
   /** With the date: the language its format follows, and the zone "today" is read in. */
   dateLocale?: 'it' | 'en' | 'es' | 'de';

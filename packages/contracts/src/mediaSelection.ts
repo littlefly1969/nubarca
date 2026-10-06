@@ -66,6 +66,7 @@ export function getMediaSelectionCapabilities(
     canTrash: hasAny,
     canRemoveFromCurrentAlbum: hasAny && source === 'album',
     canUsePhotoOnlyDestinations: allImages,
-    canPrintPhoto: count === 1 && allImages && scope === 'active',
+    // One to eight photographs: as many as the largest print format takes (the twin strip's eight).
+    canPrintPhoto: count >= 1 && count <= 8 && allImages && scope === 'active',
   };
 }

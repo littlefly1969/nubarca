@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import {
   ApiError,
   bulkRemoveAlbumItems,
   restoreToMediaLibrary,
   type FileMetadata,
-  type ImageMediaItem,
   type ImageSortDirection,
   type ImageSortField,
 } from '@nubarca/api-client';
@@ -48,7 +47,6 @@ import { MediaGrid, type SemanticTileMatches } from './MediaGrid';
 import { MediaWorkspaceSelectionBar } from './MediaWorkspaceSelectionBar';
 import { getMediaSelectionCapabilities } from './mediaSelectionCapabilities';
 import { buildMediaSelectionActions, type MediaSelectionActionId } from './mediaSelectionActions';
-import { OwnerPhotoPrintDialog } from './OwnerPhotoPrintDialog';
 import {
   buildFilterChips,
   clearActiveFilters,
@@ -120,7 +118,7 @@ export function MediaWorkspace({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
-  const [printItem, setPrintItem] = useState<ImageMediaItem | null>(null);
+  const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -418,15 +416,20 @@ export function MediaWorkspace({
       case 'trash': setTrashOpen(true); break;
       case 'album': setPickerOpen(true); break;
       case 'print': {
-        // One photograph, by the capability's own rule; the dialog prints it.
-        const [only] = selectedItems;
-        if (only?.kind === 'image') setPrintItem(only);
+        // The print studio, with the photographs already chosen — in the order
+        // they were selected — and, in an album, the album to choose more from.
+        const files = [...selection.selected].filter((fileId) =>
+          selectedItems.some((it) => it.id === fileId && it.kind === 'image'));
+        const query = new URLSearchParams();
+        if (source.kind === 'album') query.set('album', source.albumId);
+        query.set('files', files.join(','));
+        navigate(`/print?${query.toString()}`);
         break;
       }
       default: runPhotoDestination(id);
     }
   }, [actionModel, restoreSelected, removeFromAlbum, moveToPersonal, moveToExcluded, selection, runPhotoDestination,
-    selectedItems]);
+    selectedItems, navigate, source]);
 
   const semantic = isSemanticActive(identity);
   // Same source as the chips rendered below the command bar, so the badge on
@@ -623,11 +626,6 @@ export function MediaWorkspace({
         onClose={() => setSheetOpen(false)}
         returnFocusRef={filtersButtonRef}
       />
-
-      {printItem && (
-        // The photograph stays selected: printing it moves nothing.
-        <OwnerPhotoPrintDialog item={printItem} onClose={() => setPrintItem(null)} />
-      )}
 
       {trashOpen && (
         <TrashConfirmation

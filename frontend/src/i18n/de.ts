@@ -3804,6 +3804,8 @@ const de: Partial<Record<MessageKey, string>> = {
   'print.queueTitle': 'Warteschlange',
   'print.kind.diagnostic': 'Testseite',
   'print.kind.ownerPhoto': 'Albumfoto',
+  'print.kind.ownerStrip4': 'Streifen aus dem Album',
+  'print.kind.ownerGrid4': '4 Fotos aus dem Album',
   'print.kind.partyPhoto': 'Partyfoto',
   'print.kind.partyGrid4': '4 Fotos',
   'print.kind.partyStrip4': 'Streifen',
@@ -4017,6 +4019,18 @@ const de: Partial<Record<MessageKey, string>> = {
   'ownerPrint.error.photo': 'Dieses Foto kann nicht gedruckt werden.',
   'ownerPrint.error.render': 'Der Druck konnte nicht vorbereitet werden. Versuche es erneut.',
   'ownerPrint.error.generic': 'Senden fehlgeschlagen. Versuche es erneut.',
+  'ownerPrint.brand': 'NubArca-Signatur',
+  'ownerPrint.captionInvalid': 'Höchstens {max} Zeichen, keine Emojis',
+  'ownerPrint.captionHelp': 'Eine Zeile unter den Fotos, bis zu {max} Zeichen',
+  'ownerPrint.caption': 'Text',
+  'ownerPrint.style.framed': 'Rahmen',
+  'ownerPrint.style.fullBleed': 'Randlos',
+  'ownerPrint.style': 'Stil',
+  'ownerPrint.printAnother': 'Noch eins drucken',
+  'ownerPrint.backToLibrary': 'Zurück zur Mediathek',
+  'ownerPrint.backToAlbum': 'Zurück zum Album',
+  'ownerPrint.error.caption': 'Der Text kann nicht gedruckt werden: eine Zeile, höchstens 40 Zeichen, keine Emojis.',
+  'ownerPrint.format.photoHelp': 'Ein Foto, randlos oder mit Rahmen',
 };
 
 export default de;

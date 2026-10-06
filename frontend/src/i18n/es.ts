@@ -3804,6 +3804,8 @@ const es: Partial<Record<MessageKey, string>> = {
   'print.queueTitle': 'Cola',
   'print.kind.diagnostic': 'Página de prueba',
   'print.kind.ownerPhoto': 'Foto del álbum',
+  'print.kind.ownerStrip4': 'Tiras del álbum',
+  'print.kind.ownerGrid4': '4 fotos del álbum',
   'print.kind.partyPhoto': 'Foto de la fiesta',
   'print.kind.partyGrid4': '4 fotos',
   'print.kind.partyStrip4': 'Tiras',
@@ -4017,6 +4019,18 @@ const es: Partial<Record<MessageKey, string>> = {
   'ownerPrint.error.photo': 'Esta foto no se puede imprimir.',
   'ownerPrint.error.render': 'No se ha podido preparar la impresión. Inténtalo de nuevo.',
   'ownerPrint.error.generic': 'No se ha podido enviar. Inténtalo de nuevo.',
+  'ownerPrint.brand': 'Firma NubArca',
+  'ownerPrint.captionInvalid': 'Como máximo {max} caracteres, sin emojis',
+  'ownerPrint.captionHelp': 'Una línea bajo las fotos, hasta {max} caracteres',
+  'ownerPrint.caption': 'Texto',
+  'ownerPrint.style.framed': 'Marco',
+  'ownerPrint.style.fullBleed': 'A sangre',
+  'ownerPrint.style': 'Estilo',
+  'ownerPrint.printAnother': 'Imprimir otra',
+  'ownerPrint.backToLibrary': 'Volver a la biblioteca',
+  'ownerPrint.backToAlbum': 'Volver al álbum',
+  'ownerPrint.error.caption': 'El texto no se puede imprimir: una línea, como máximo 40 caracteres, sin emojis.',
+  'ownerPrint.format.photoHelp': 'Una foto, a sangre o con marco',
 };
 
 export default es;
