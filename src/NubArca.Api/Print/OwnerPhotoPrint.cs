@@ -23,7 +23,55 @@ public sealed record OwnerPhotoPrintSubmitRequest(
     /// <summary>"it", "en", "es" or "de" — the date's written form.</summary>
     string? DateLocale = null,
     /// <summary>The browser's IANA zone, so "today" is the day the person sees.</summary>
-    string? TimeZone = null);
+    string? TimeZone = null,
+    /// <summary>A format of the shared catalogue (PrintLayouts). Absent: one photograph.</summary>
+    string? Layout = null,
+    /// <summary>
+    /// "fullBleed" (Piena: the photograph to the edges, the date on it — the
+    /// default for one photograph) or "framed" (Cornice: a border and a band).
+    /// Four photographs and the strips are always framed.
+    /// </summary>
+    string? Style = null,
+    /// <summary>
+    /// The photographs in the order they were arranged, each with its framing.
+    /// Absent: <see cref="FileItemId"/> and <see cref="Placement"/>, the
+    /// one-photograph request every earlier client sends.
+    /// </summary>
+    IReadOnlyList<OwnerPrintPhotoRequest>? Photos = null,
+    /// <summary>One line of the owner's own in a framed sheet's band (OwnerPrintText).</summary>
+    string? Caption = null,
+    /// <summary>The NubArca wordmark in a framed sheet's band. Off unless asked for.</summary>
+    bool Brand = false);
+
+/// <summary>One photograph of a print and how it is framed in its slot.</summary>
+public sealed record OwnerPrintPhotoRequest(Guid? FileItemId, PartyPrintPlacementRequest? Placement);
+
+/// <summary>
+/// The bounds on the one line an owner may write on their own print.
+///
+/// One line, short enough for the band to show at a size that reads, with no
+/// control characters or breaks — and nothing the print's typefaces cannot
+/// draw: an emoji would come out as an empty box, so it is refused rather than
+/// printed as one. Refused, never silently truncated: the owner sees in the
+/// preview exactly what the paper will say.
+/// </summary>
+public static class OwnerPrintText
+{
+    public const int CaptionMaxLength = 40;
+
+    public static bool TryNormaliseCaption(string? value, out string? normalised)
+    {
+        normalised = null;
+        if (value is null) return true;
+        var flat = new string(value.Select(c => char.IsControl(c) ? ' ' : c).ToArray());
+        while (flat.Contains("  ", StringComparison.Ordinal)) flat = flat.Replace("  ", " ", StringComparison.Ordinal);
+        flat = flat.Trim();
+        if (flat.Length == 0) return true;
+        if (flat.Length > CaptionMaxLength || flat.Any(char.IsSurrogate)) return false;
+        normalised = flat;
+        return true;
+    }
+}
 
 /// <summary>An accepted direct print — the job, its short code, and how many sheets wait ahead of it.</summary>
 public sealed record OwnerPhotoPrintAccepted(
@@ -42,6 +90,10 @@ public sealed record OwnerPhotoPrintDate(string Date, string Source);
 public static class OwnerPhotoPrintErrors
 {
     public const string InvalidRequest = "invalid_request";
+    /// <summary>A format, style or count of photographs the catalogue does not have.</summary>
+    public const string InvalidLayout = "invalid_layout";
+    /// <summary>A line too long for the band, or one the print cannot draw.</summary>
+    public const string InvalidCaption = "invalid_caption";
     public const string NotFound = "not_found";
     public const string InvalidSource = "invalid_source";
     public const string NotImage = "not_image";

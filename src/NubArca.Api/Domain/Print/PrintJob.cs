@@ -28,7 +28,15 @@ public sealed class PrintJob
 public static class PrintJobKinds
 {
     public const string Diagnostic = "diagnostic";
+
+    // An owner's own sheets, from their library or an album: one photograph,
+    // four, or the twin strip the printer cuts in two (PrintFormats.Strip2x6Pair)
+    // — the formats of the shared catalogue (Print/PrintLayouts).
     public const string OwnerPhoto = "owner-photo";
+    public const string OwnerGrid4 = "owner-grid4";
+    public const string OwnerStrip4 = "owner-strip4";
+
+    public static bool IsOwner(string value) => value is OwnerPhoto or OwnerGrid4 or OwnerStrip4;
 
     // Guest prints from a party. A photo and four photos compose one sheet of
     // the printer's loaded paper; the twin strip composes a 10x15 sheet that

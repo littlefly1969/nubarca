@@ -88,7 +88,22 @@ public sealed record PartyPrintComposition(
     /// <summary>Text and symbol colours of the "On the photo" look. Null is its default.</summary>
     PartyPrintOverlay? Overlay = null,
     /// <summary>The paper the sheet is for (a PrintPapers id). The twin strip is always 10x15.</summary>
-    string Paper = Domain.Print.PrintPapers.Photo10x15);
+    string Paper = Domain.Print.PrintPapers.Photo10x15,
+    /// <summary>
+    /// What a framed sheet's bands say. Null is the PARTY's words — its name,
+    /// the host's line, the guest's number and the NubArca mark — so every
+    /// party composition is drawn exactly as it always was; an owner's print
+    /// passes its own line, its date and whether the mark is wanted.
+    /// </summary>
+    PrintSheetWords? Words = null);
+
+/// <summary>
+/// The words in a framed sheet's band: a title line (a party's name, or an
+/// owner's own line), a smaller line under it (the host's), a mark at the right
+/// of the signature row (a guest's number, or an owner's date), and whether the
+/// NubArca wordmark signs the left of that row. Any of them may be absent.
+/// </summary>
+public sealed record PrintSheetWords(string? Title, string? Line, string? Mark, bool Brand);
 
 /// <summary>
 /// Draws the sheet that is actually printed.
@@ -711,26 +726,36 @@ public sealed class PartyPrintComposer
         Image<Rgba32> sheet, PartyPrintComposition composition,
         ThemePalette palette, Rectangle area, bool strip = false)
     {
-        // Only three things may ever appear on the paper: the party's name, the
-        // line the HOST configured, and the wordmark. A guest writes nothing —
-        // which is what keeps a physical print free of arbitrary text.
-        // Three things share this strip of paper — the party's name, the host's
-        // line, the wordmark — so the area is DIVIDED between them rather than
-        // each being placed at its own fraction, which is how the footer and the
-        // wordmark ended up drawn on top of each other.
-        var footer = Truncate(composition.FooterText ?? string.Empty, Domain.Print.PartyPrintLimits.FooterMaxLength);
+        // A party's band holds only what may ever appear on its paper: the
+        // party's name, the line the HOST configured, the guest's number and the
+        // wordmark. A guest writes nothing. An owner's band is the owner's own
+        // line, the date and — only if asked — the mark.
+        var words = composition.Words ?? new PrintSheetWords(
+            composition.PartyName,
+            composition.FooterText,
+            composition.PublicSequence > 0 ? $"#{composition.PublicSequence}" : null,
+            Brand: true);
+
+        // The things that share this strip of paper are given a DIVIDED area
+        // rather than each being placed at its own fraction, which is how the
+        // footer and the wordmark ended up drawn on top of each other.
+        var footer = Truncate(words.Line ?? string.Empty, Domain.Print.PartyPrintLimits.FooterMaxLength);
         var hasFooter = footer.Length > 0;
         var sizes = MeasureFooter(area.Height, composition.Theme, hasFooter, strip);
 
-        var nameFont = _display.CreateFont(sizes.NameSize, FontStyle.Bold);
-        sheet.Mutate(x => x.DrawText(
-            new RichTextOptions(nameFont)
-            {
-                Origin = new PointF(area.X + (area.Width / 2f), area.Y + (sizes.NameBand / 2f)),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-            },
-            Truncate(composition.PartyName, PartyPrintGeometry.PartyNameMaxLength), palette.Foreground));
+        var title = Truncate(words.Title ?? string.Empty, PartyPrintGeometry.PartyNameMaxLength);
+        if (title.Length > 0)
+        {
+            var nameFont = _display.CreateFont(sizes.NameSize, FontStyle.Bold);
+            sheet.Mutate(x => x.DrawText(
+                new RichTextOptions(nameFont)
+                {
+                    Origin = new PointF(area.X + (area.Width / 2f), area.Y + (sizes.NameBand / 2f)),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                },
+                title, palette.Foreground));
+        }
 
         if (hasFooter)
         {
@@ -747,13 +772,13 @@ public sealed class PartyPrintComposer
                 footer, palette.Muted));
         }
 
-        // The signature row: wordmark left, the guest's number right, sharing a
-        // baseline so the foot of the sheet reads as one line rather than two
-        // things that happen to be near each other.
+        // The signature row: wordmark left, the mark right, sharing a baseline
+        // so the foot of the sheet reads as one line rather than two things that
+        // happen to be near each other.
         var markRow = new Rectangle(
             area.X, area.Y + (int)sizes.TextBand, area.Width, (int)sizes.MarkBand);
-        DrawWordmark(sheet, palette, markRow, sizes.WordmarkWidthFraction);
-        DrawSequence(sheet, palette, markRow, composition.PublicSequence, sizes.NumberSize);
+        if (words.Brand) DrawWordmark(sheet, palette, markRow, sizes.WordmarkWidthFraction);
+        DrawMark(sheet, palette, markRow, words.Mark, sizes.NumberSize);
     }
 
     /// <summary>How the footer band is shared out, and how large each thing in it is drawn, in pixels.</summary>
@@ -838,16 +863,16 @@ public sealed class PartyPrintComposer
     }
 
     /// <summary>
-    /// The guest's queue number, bottom-right, opposite the wordmark.
-    ///
-    /// This is the same number their phone showed when the print was accepted,
-    /// so a stack of sheets on the collection table can be matched to the people
-    /// waiting for them without anybody reading a name off the paper.
+    /// The mark at the right of the signature row, opposite the wordmark: a
+    /// guest's queue number — the same one their phone showed when the print
+    /// was accepted, so a stack of sheets on the collection table can be
+    /// matched to the people waiting for them without anybody reading a name
+    /// off the paper — or an owner's date.
     /// </summary>
-    private void DrawSequence(
-        Image<Rgba32> sheet, ThemePalette palette, Rectangle area, long sequence, float size)
+    private void DrawMark(
+        Image<Rgba32> sheet, ThemePalette palette, Rectangle area, string? mark, float size)
     {
-        if (sequence <= 0) return;
+        if (string.IsNullOrEmpty(mark)) return;
         var font = _display.CreateFont(size, FontStyle.Bold);
         sheet.Mutate(x => x.DrawText(
             new RichTextOptions(font)
@@ -856,7 +881,7 @@ public sealed class PartyPrintComposer
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Bottom,
             },
-            $"#{sequence}", palette.Muted));
+            mark, palette.Muted));
     }
 
 

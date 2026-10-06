@@ -493,6 +493,7 @@ public sealed class OwnerPhotoPrintTests : IDisposable
         var service = new OwnerPhotoPrintService(db, new PrinterAccess(db),
             sources ?? provider.GetRequiredService<IPrintPhotoSourceReader>(),
             provider.GetRequiredService<PrintArtifactRenderer>(),
+            provider.GetRequiredService<PartyPrintComposer>(),
             artifacts ?? provider.GetRequiredService<NubArca.Api.Storage.IDerivedBlobStorage>(),
             TimeProvider.System, provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<PrintOptions>>(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<OwnerPhotoPrintService>.Instance);
@@ -645,6 +646,174 @@ public sealed class OwnerPhotoPrintTests : IDisposable
             Body(photo, printer, orientation: "portrait", zoom: contain))).StatusCode);
         using var plain = await PrintedSheetAsync(printer);
         Assert.Equal(0, BrightPixels(plain, (int)anchor.X - 160, (int)anchor.Y - 50, 160, 50));
+    }
+
+    // --- the album's formats: the catalogue every print shares ------------------
+
+    private static object SheetBody(Printer printer, string layout, string? style, IEnumerable<Guid> photos,
+        string? caption = null, bool brand = false, bool includeDate = false, string? orientation = null,
+        string paper = "10x15") => new
+    {
+        printStationId = printer.StationId, printerDeviceId = printer.DeviceId, expectedPaperSize = paper,
+        layout, style, orientation, caption, brand, includeDate, dateLocale = "it", timeZone = "Europe/Rome",
+        photos = photos.Select(id => new { fileItemId = id, placement = new { centerX = 0.5, centerY = 0.5, zoom = 1.0 } }),
+    };
+
+    /// <summary>The printer reports the twin strip's cut: a second queue with the driver's "2inch cut".</summary>
+    private Task<HttpResponseMessage> HeartbeatCutting(string credential) =>
+        Agent(HttpMethod.Post, "/api/print-agent/heartbeat", credential, new
+        {
+            agentVersion = "0.5.0",
+            devices = new[]
+            {
+                new
+                {
+                    deviceKey = "dnp", displayName = "DNP DS-RX1HS", manufacturer = "DNP", model = "DS-RX1HS",
+                    adapterKind = "cups",
+                    capabilities = new { formats = new[] { "10x15", "13x18", "20x15", "2x6x2" }, color = true },
+                    observedState = "ready",
+                    mediaRemaining = new { available = true, remainingPrints = 187, ageSeconds = 0 },
+                },
+            },
+        });
+
+    [Fact]
+    public async Task A_Framed_Photograph_Carries_The_Owners_Line_And_Date_In_Its_Band_And_The_Mark_Only_If_Asked()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var photo = await PhotoAsync(people.Owner, 200, 300, new DateTime(2019, 7, 1, 12, 0, 0, DateTimeKind.Utc));
+
+        var response = await Submit(people.Owner, SheetBody(printer, "photo", "framed", [photo],
+            caption: "  Estate   al lago ", includeDate: true, orientation: "portrait"));
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        var job = await Db(db => db.PrintJobs.OrderByDescending(j => j.CreatedAt).FirstAsync());
+        Assert.Equal(PrintJobKinds.OwnerPhoto, job.Kind);
+        Assert.Equal("10x15", job.Format);
+        var spec = JsonDocument.Parse(job.RenderSpecificationJson).RootElement;
+        Assert.Equal("framed", spec.GetProperty("style").GetString());
+        Assert.Equal("Estate al lago", spec.GetProperty("caption").GetString());
+        Assert.False(spec.GetProperty("brand").GetBoolean());
+        Assert.Equal("2019-07-01", spec.GetProperty("resolvedDate").GetString());
+
+        // The party's frame, in white: the photograph inside a border, a band under it.
+        using var framed = await PrintedSheetAsync(printer);
+        Assert.Equal((1200, 1800), (framed.Width, framed.Height));
+        var slot = PrintLayouts.PhotoSlot("10x15", portrait: true);
+        var band = PrintLayouts.PhotoFooter("10x15", portrait: true);
+        // The party's own paper white (Cloud White), not a tint.
+        Assert.True(framed[20, 20] is { R: > 240, G: > 240, B: > 240 }, $"border {framed[20, 20]}");
+        Assert.True(framed[600, (int)((slot.Y + slot.Height / 2) * 1800)].R > 150, "the photograph is in its slot");
+        var (bandTop, bandHeight) = ((int)(band.Y * 1800) + 2, (int)(band.Height * 1800) - 4);
+        // The line is written across the middle of the band, the date at its right.
+        Assert.True(BrightPixelsNotWhite(framed, 300, bandTop, 600, bandHeight / 2) > 100, "the owner's line");
+        Assert.True(BrightPixelsNotWhite(framed, 900, bandTop + bandHeight / 2, 240, bandHeight / 2) > 50, "the date");
+        // No mark was asked for: the left of the signature row is paper.
+        var markRow = (x: (int)(band.X * 1200), y: bandTop + bandHeight / 2, w: 300, h: bandHeight / 2);
+        Assert.Equal(0, BrightPixelsNotWhite(framed, markRow.x, markRow.y, markRow.w, markRow.h));
+
+        Assert.Equal(HttpStatusCode.Accepted, (await Submit(people.Owner, SheetBody(printer, "photo", "framed", [photo],
+            caption: "Estate al lago", brand: true, includeDate: true, orientation: "portrait"))).StatusCode);
+        using var signed = await PrintedSheetAsync(printer);
+        Assert.True(BrightPixelsNotWhite(signed, markRow.x, markRow.y, markRow.w, markRow.h) > 50, "the NubArca mark");
+    }
+
+    [Fact]
+    public async Task Four_Photographs_And_The_Twin_Strip_Are_One_Sheet_Each_And_A_Strip_Needs_A_Printer_That_Cuts()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var photos = new List<Guid>();
+        for (var i = 0; i < 8; i++) photos.Add(await PhotoAsync(people.Owner));
+
+        var grid = await Submit(people.Owner, SheetBody(printer, "grid4", null, photos.Take(4)));
+        Assert.Equal(HttpStatusCode.Accepted, grid.StatusCode);
+        var gridJob = await Db(db => db.PrintJobs.OrderByDescending(j => j.CreatedAt).FirstAsync());
+        Assert.Equal(PrintJobKinds.OwnerGrid4, gridJob.Kind);
+        Assert.Equal("10x15", gridJob.Format);
+        Assert.Equal(Enumerable.Range(0, 4), (await Db(db => db.PrintJobSources.Where(s => s.PrintJobId == gridJob.Id)
+            .OrderBy(s => s.SlotIndex).ToListAsync())).Select(s => s.SlotIndex));
+
+        // A printer that does not cut cannot make two strips of one sheet.
+        var uncut = await Submit(people.Owner, SheetBody(printer, "twinStrip4", null, photos.Take(4)));
+        Assert.Equal(HttpStatusCode.Conflict, uncut.StatusCode);
+        Assert.Equal("format_unsupported", await Error(uncut));
+
+        (await HeartbeatCutting(printer.Credential)).EnsureSuccessStatusCode();
+        foreach (var count in new[] { 4, 8 })
+        {
+            // Four is the same strip twice — one to keep, one to give — eight is two.
+            var strip = await Submit(people.Owner, SheetBody(printer, "twinStrip4", "framed", photos.Take(count)));
+            Assert.Equal(HttpStatusCode.Accepted, strip.StatusCode);
+            var job = await Db(db => db.PrintJobs.OrderByDescending(j => j.CreatedAt).FirstAsync());
+            Assert.Equal(PrintJobKinds.OwnerStrip4, job.Kind);
+            Assert.Equal(PrintFormats.Strip2x6Pair, job.Format);
+            Assert.Equal(count, await Db(db => db.PrintJobSources.CountAsync(s => s.PrintJobId == job.Id)));
+        }
+    }
+
+    [Fact]
+    public async Task What_The_Catalogue_Does_Not_Have_And_Words_The_Band_Cannot_Hold_Are_Refused_And_Cost_Nothing()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var photos = new List<Guid>();
+        for (var i = 0; i < 4; i++) photos.Add(await PhotoAsync(people.Owner));
+        var marios = await PhotoAsync(people.Mario);
+
+        foreach (var (body, error) in new (object, string)[]
+        {
+            (SheetBody(printer, "collage", null, photos.Take(1)), "invalid_layout"),
+            (SheetBody(printer, "grid4", "fullBleed", photos.Take(4)), "invalid_layout"),
+            (SheetBody(printer, "grid4", null, photos.Take(3)), "invalid_layout"),
+            (SheetBody(printer, "grid4", null, [photos[0], photos[1], photos[2], photos[0]]), "invalid_layout"),
+            (SheetBody(printer, "photo", "framed", photos.Take(1), caption: new string('a', 41), orientation: "portrait"), "invalid_caption"),
+            (SheetBody(printer, "photo", "framed", photos.Take(1), caption: "Festa \U0001F389", orientation: "portrait"), "invalid_caption"),
+            (SheetBody(printer, "photo", "fullBleed", photos.Take(1), caption: "Sulla foto?", orientation: "portrait"), "invalid_request"),
+            (SheetBody(printer, "photo", "framed", photos.Take(1)), "invalid_orientation"),
+        })
+        {
+            var refused = await Submit(people.Owner, body);
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            Assert.Equal(error, await Error(refused));
+        }
+
+        // Someone else's photograph among one's own is the same "not found" as a missing one.
+        var foreign = await Submit(people.Owner, SheetBody(printer, "grid4", null, [photos[0], photos[1], photos[2], marios]));
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+        Assert.Equal(0, await Db(db => db.PrintJobs.CountAsync()));
+
+        // Forty characters is the line, exactly.
+        Assert.Equal(HttpStatusCode.Accepted, (await Submit(people.Owner, SheetBody(printer, "photo", "framed",
+            photos.Take(1), caption: new string('a', 40), orientation: "portrait"))).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_Key_Is_One_Sheet_Of_Any_Format_And_Another_Composition_Under_It_Is_Refused()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var photos = new List<Guid>();
+        for (var i = 0; i < 4; i++) photos.Add(await PhotoAsync(people.Owner));
+
+        var body = SheetBody(printer, "grid4", null, photos, caption: "Gita");
+        var first = await Submit(people.Owner, body, "sheet-key");
+        var retry = await Submit(people.Owner, body, "sheet-key");
+        Assert.Equal((await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("jobId").GetGuid(),
+            (await retry.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("jobId").GetGuid());
+
+        foreach (var changed in new[]
+        {
+            SheetBody(printer, "grid4", null, photos, caption: "Gita al mare"),
+            SheetBody(printer, "grid4", null, [photos[1], photos[0], photos[2], photos[3]], caption: "Gita"),
+            SheetBody(printer, "grid4", null, photos, caption: "Gita", brand: true),
+        })
+        {
+            var refused = await Submit(people.Owner, changed, "sheet-key");
+            Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+            Assert.Equal("idempotency_conflict", await Error(refused));
+        }
+        Assert.Equal(1, await Db(db => db.PrintJobs.CountAsync()));
     }
 
     /// <summary>Near-white pixels inside the (red) photograph: the date's letters.</summary>

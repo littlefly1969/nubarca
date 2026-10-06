@@ -156,7 +156,7 @@ public sealed class OwnerPhotoPrintRacePostgresTests : IAsyncLifetime
     // --- helpers -----------------------------------------------------------
 
     private OwnerPhotoPrintService Service(AppDbContext db) => new(
-        db, new PrinterAccess(db), new Sources(), new PrintArtifactRenderer(), new MemoryArtifacts(),
+        db, new PrinterAccess(db), new Sources(), new PrintArtifactRenderer(), new PartyPrintComposer(), new MemoryArtifacts(),
         TimeProvider.System, Options.Create(new PrintOptions()), NullLogger<OwnerPhotoPrintService>.Instance);
 
     private AppDbContext NewContext() => new(_dbOptions!);
