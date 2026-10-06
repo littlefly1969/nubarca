@@ -12,7 +12,7 @@ using SixLabors.ImageSharp;
 
 namespace NubArca.Api.Files;
 
-public sealed class FileItemService : IFileItemService
+public sealed partial class FileItemService : IFileItemService
 {
     private const int MaxNameLength = 255;
     private const int MaxMimeTypeLength = 255;
@@ -1386,7 +1386,8 @@ public sealed class FileItemService : IFileItemService
         // unified media workspace sets this to (cursor == null) so the total is
         // computed once per query, not on every load-more; the legacy image/video
         // callers keep the default (always count) so their contract is unchanged.
-        bool computeTotalCount = true)
+        bool computeTotalCount = true,
+        bool includeBoundary = false)
     {
         var query = BuildGalleryQuery(ownerUserId, filters, kind);
         var cursorFingerprint = cursorFingerprintOverride ?? filters.Fingerprint();
@@ -1403,7 +1404,7 @@ public sealed class FileItemService : IFileItemService
         // the client keeps the first page's total.
         var totalCount = computeTotalCount ? await query.CountAsync(cancellationToken) : -1;
 
-        var seek = cursor is not null ? ApplyCursorSeek(query, cursor) : query;
+        var seek = cursor is not null ? ApplyCursorSeek(query, cursor, includeBoundary) : query;
 
         var ordered = ApplyOrdering(seek, sort, direction);
 
@@ -1849,7 +1850,7 @@ public sealed class FileItemService : IFileItemService
     // The effective DateTaken seek correlates each FileItem to its metadata
     // rows the same way ApplyOrdering does.
     private IQueryable<FileItem> ApplyCursorSeek(
-        IQueryable<FileItem> query, ImageCursor cursor)
+        IQueryable<FileItem> query, ImageCursor cursor, bool inclusive = false)
     {
         var asc = cursor.Direction == ImageSortDirection.Asc;
         var cursorId = cursor.Id;
@@ -1871,7 +1872,7 @@ public sealed class FileItemService : IFileItemService
                             .FirstOrDefault() ?? f.Name).ToLower(),
                     })
                     .Where(x => string.Compare(x.Key, sName) > 0
-                        || (x.Key == sName && x.File.Id.CompareTo(cursorId) > 0))
+                        || (x.Key == sName && x.File.Id.CompareTo(cursorId) > (inclusive ? -1 : 0)))
                     .Select(x => x.File)
                 : query
                     .Select(f => new
@@ -1883,28 +1884,28 @@ public sealed class FileItemService : IFileItemService
                             .FirstOrDefault() ?? f.Name).ToLower(),
                     })
                     .Where(x => string.Compare(x.Key, sName) < 0
-                        || (x.Key == sName && x.File.Id.CompareTo(cursorId) < 0))
+                        || (x.Key == sName && x.File.Id.CompareTo(cursorId) < (inclusive ? 1 : 0)))
                     .Select(x => x.File),
             ImageSortField.Size when cursor.PrimaryNumber is long n => asc
                 ? query.Where(f => f.SizeBytes > n
-                    || (f.SizeBytes == n && f.Id.CompareTo(cursorId) > 0))
+                    || (f.SizeBytes == n && f.Id.CompareTo(cursorId) > (inclusive ? -1 : 0)))
                 : query.Where(f => f.SizeBytes < n
-                    || (f.SizeBytes == n && f.Id.CompareTo(cursorId) < 0)),
+                    || (f.SizeBytes == n && f.Id.CompareTo(cursorId) < (inclusive ? 1 : 0))),
             // Slice 88: seek on the denormalized EffectiveDateTaken column so the
             // (date, Id) keyset predicate maps onto the effdate index.
             ImageSortField.DateTaken when cursor.PrimaryDate is DateTime dt => asc
                 ? query.Where(f =>
                     f.EffectiveDateTaken > dt
-                    || (f.EffectiveDateTaken == dt && f.Id.CompareTo(cursorId) > 0))
+                    || (f.EffectiveDateTaken == dt && f.Id.CompareTo(cursorId) > (inclusive ? -1 : 0)))
                 : query.Where(f =>
                     f.EffectiveDateTaken < dt
-                    || (f.EffectiveDateTaken == dt && f.Id.CompareTo(cursorId) < 0)),
+                    || (f.EffectiveDateTaken == dt && f.Id.CompareTo(cursorId) < (inclusive ? 1 : 0))),
             // Default to created-sort semantics (any cursor with a date primary)
             _ when cursor.PrimaryDate is DateTime d => asc
                 ? query.Where(f => f.CreatedAt > d
-                    || (f.CreatedAt == d && f.Id.CompareTo(cursorId) > 0))
+                    || (f.CreatedAt == d && f.Id.CompareTo(cursorId) > (inclusive ? -1 : 0)))
                 : query.Where(f => f.CreatedAt < d
-                    || (f.CreatedAt == d && f.Id.CompareTo(cursorId) < 0)),
+                    || (f.CreatedAt == d && f.Id.CompareTo(cursorId) < (inclusive ? 1 : 0))),
             _ => query,
         };
     }

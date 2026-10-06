@@ -25,10 +25,11 @@ export interface WallSentinelInput {
   ready: boolean;
   hasMore: boolean;
   loadMore(): void;
+  preloadMargin?: string;
 }
 
 /** Attach the returned setter to the sentinel element below the wall. */
-export function useWallSentinel({ ready, hasMore, loadMore }: WallSentinelInput) {
+export function useWallSentinel({ ready, hasMore, loadMore, preloadMargin = PRELOAD_MARGIN }: WallSentinelInput) {
   const viewportRef = useAppScrollViewport();
   const visibleRef = useRef(false);
   const loadMoreRef = useRef(loadMore);
@@ -46,7 +47,7 @@ export function useWallSentinel({ ready, hasMore, loadMore }: WallSentinelInput)
         visibleRef.current = entries.some((e) => e.isIntersecting);
         if (visibleRef.current) loadMoreRef.current();
       },
-      { root: viewportRef?.current ?? null, rootMargin: PRELOAD_MARGIN },
+      { root: viewportRef?.current ?? null, rootMargin: preloadMargin },
     );
     observer.observe(node);
     return () => {
@@ -56,7 +57,7 @@ export function useWallSentinel({ ready, hasMore, loadMore }: WallSentinelInput)
       // result.
       visibleRef.current = false;
     };
-  }, [node, viewportRef]);
+  }, [node, viewportRef, preloadMargin]);
 
   useEffect(() => {
     if (ready && hasMore && visibleRef.current) loadMoreRef.current();

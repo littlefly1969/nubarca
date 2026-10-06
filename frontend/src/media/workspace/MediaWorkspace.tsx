@@ -37,6 +37,8 @@ export interface MediaPhotoDestination {
   // Returns an optional already-localized notice to surface on success.
   run(ids: string[]): Promise<string | void> | string | void;
 }
+import { MediaFastNavigation, canFastNavigate } from './MediaFastNavigation';
+import { mediaNavigationKey } from './mediaNavigation';
 import { useMediaWorkspace } from './useMediaWorkspace';
 import { useWallSentinel } from './useWallSentinel';
 import { MediaKindTabs } from './MediaKindTabs';
@@ -114,6 +116,24 @@ export function MediaWorkspace({
     },
   });
   const { selection, viewer } = ws;
+  const [visibleKey, setVisibleKey] = useState<string | null>(null);
+  const [previousFailed, setPreviousFailed] = useState(false);
+  const navigationLayoutRef = useRef<HTMLDivElement>(null);
+  const fastNavigation = canFastNavigate(identity);
+  const visibleItem = useCallback((item: import('@nubarca/api-client').MediaItem) => {
+    setVisibleKey(mediaNavigationKey(item, identity.sort));
+  }, [identity.sort]);
+  useEffect(() => {
+    setPreviousFailed(false);
+    const node = navigationLayoutRef.current;
+    const chrome = node?.closest('.ws-page')?.querySelector<HTMLElement>('.ws-sticky-chrome');
+    if (!node || !chrome || typeof ResizeObserver === 'undefined') return;
+    const measure = () => node.style.setProperty('--media-navigation-chrome-height', `${chrome.getBoundingClientRect().height}px`);
+    const observer = new ResizeObserver(measure);
+    observer.observe(chrome); measure();
+    return () => observer.disconnect();
+  }, [fastNavigation, ws.items.length > 0]);
+
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -267,6 +287,17 @@ export function MediaWorkspace({
   // Rooted in the application scroll viewport and self-chaining while the
   // sentinel stays inside the preload margin — see useWallSentinel, which the
   // shared album wall uses too so both walls page identically.
+  const previousLoader = useRef(ws.loadPrevious);
+  previousLoader.current = ws.loadPrevious;
+  const previousSentinel = useWallSentinel({
+    ready: !ws.navigationBusy && (ws.phase.kind === 'ready' || ws.phase.kind === 'end'),
+    hasMore: ws.previousCursor !== null,
+    preloadMargin: '240px 0px',
+    loadMore: () => {
+      if (!previousFailed && !ws.navigationBusy && !ws.loadingMore)
+        void previousLoader.current().then((ok) => { if (!ok) setPreviousFailed(true); });
+    },
+  });
   const loadMoreRef = useRef(ws.loadMore);
   loadMoreRef.current = ws.loadMore;
   const setSentinelNode = useWallSentinel({
@@ -357,10 +388,7 @@ export function MediaWorkspace({
     return map;
   }, [ws.semanticEvidence]);
 
-  const selectedItems = useMemo(
-    () => ws.items.filter((it) => selection.isSelected(it.id)),
-    [ws.items, selection],
-  );
+  const selectedItems = ws.selectedItems;
   const capabilities = getMediaSelectionCapabilities({
     items: selectedItems,
     source: source.kind,
@@ -534,14 +562,28 @@ export function MediaWorkspace({
         )}
 
         {!isEmpty && (
-          <MediaGrid
-            items={ws.items}
-            orderedIds={ws.orderedIds}
-            selection={selection}
-            onOpen={(index, atMs) => viewer.open(index, atMs)}
-            semanticTimestamps={semanticTimestamps}
-            semanticMatches={semanticMatches}
-          />
+          <div ref={navigationLayoutRef} className={fastNavigation ? 'media-navigation-layout' : undefined}>
+            <div style={{ minWidth: 0 }}>
+              {ws.previousCursor && <div ref={previousSentinel} aria-hidden="true" className="gallery-scroll-sentinel" />}
+              {ws.previousCursor && <button type="button" className="row-action media-navigation-previous"
+                disabled={ws.navigationBusy} onClick={() => {
+                  setPreviousFailed(false);
+                  void ws.loadPrevious().then((ok) => setPreviousFailed(!ok));
+                }}>{ws.navigationBusy ? t('mediaNav.loading') : t(previousFailed ? 'mediaNav.previousRetry' : 'mediaNav.previous')}</button>}
+              <MediaGrid
+                items={ws.items}
+                orderedIds={ws.orderedIds}
+                selection={selection}
+                onOpen={(index, atMs) => viewer.open(index, atMs)}
+                semanticTimestamps={semanticTimestamps}
+                semanticMatches={semanticMatches}
+                scrollTarget={ws.scrollTarget}
+                onVisibleItem={visibleItem}
+              />
+            </div>
+            {fastNavigation && <MediaFastNavigation identity={identity} revision={ws.navigationRevision}
+              currentKey={visibleKey} busy={ws.navigationBusy} onJump={ws.jumpTo} onAuthError={invalidateAuth} />}
+          </div>
         )}
 
         <div className="gallery-scroll-footer">

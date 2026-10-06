@@ -4,6 +4,7 @@ import {
   listImages,
   listMedia,
   listAlbumMedia,
+  getMediaWindow,
   searchSemanticMedia,
   type ImageItem,
   type ListImagesQuery,
@@ -62,6 +63,13 @@ export interface SemanticEvidence {
 
 export interface UseMediaWorkspaceResult {
   items: MediaItem[];
+  selectedItems: MediaItem[];
+  navigationBusy: boolean;
+  navigationRevision: number;
+  previousCursor: string | null;
+  scrollTarget: { id: string; revision: number } | null;
+  jumpTo(target: string): Promise<boolean>;
+  loadPrevious(): Promise<boolean>;
   orderedIds: string[];
   total: number | null;
   photoCount: number | null;
@@ -305,6 +313,11 @@ export function useMediaWorkspace(
   const selection = useMediaSelection();
 
   const [items, setItems] = useState<MediaItem[]>([]);
+  const [previousCursor, setPreviousCursor] = useState<string | null>(null);
+  const [navigationBusy, setNavigationBusy] = useState(false);
+  const [navigationRevision, setNavigationRevision] = useState(0);
+  const [scrollTarget, setScrollTarget] = useState<{ id: string; revision: number } | null>(null);
+  const selectedCache = useRef(new Map<string, MediaItem>());
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [total, setTotal] = useState<number | null>(null);
   const [photoCount, setPhotoCount] = useState<number | null>(null);
@@ -345,6 +358,11 @@ export function useMediaWorkspace(
     const gen = generationRef.current;
     loadingRef.current = true;
     setItems([]);
+    setPreviousCursor(null);
+    setNavigationBusy(false);
+    setScrollTarget(null);
+    selectedCache.current.clear();
+    setNavigationRevision((v) => v + 1);
     setNextCursor(null);
     setTotal(null);
     setViewerIndex(null);
@@ -376,7 +394,10 @@ export function useMediaWorkspace(
       }
     })();
 
-    return () => controller.abort();
+    return () => {
+      generationRef.current += 1;
+      controllerRef.current?.abort();
+    };
     // Refetch keyed on the query identity fingerprint + source, not object
     // identity — a structurally-equal setIdentity does not refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -435,9 +456,15 @@ export function useMediaWorkspace(
     // The robust refresh is a first-page refetch keyed off a generation bump.
     generationRef.current += 1;
     const gen = generationRef.current;
+    controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
     loadingRef.current = true;
+    setPreviousCursor(null);
+    setNavigationBusy(false);
+    setScrollTarget(null);
+    setNavigationRevision((v) => v + 1);
+    selectedCache.current.clear();
     selection.clear();
     setViewerIndex(null);
     setSemanticNotice(null);
@@ -467,6 +494,64 @@ export function useMediaWorkspace(
     })();
   }, [identity, source, selection, handleError, translate.loadError, noticeFor]);
 
+  const navigateWindow = useCallback(async (target: string | null): Promise<boolean> => {
+    const before = target === null;
+    if (before && (loadingRef.current || previousCursor === null)) return false;
+    if (isSemanticActive(identity) || identity.sort === 'size' || identity.filters.photo.similarTo) return false;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    const gen = ++generationRef.current;
+    loadingRef.current = true;
+    setNavigationBusy(true);
+    // A stalled read must leave the current wall usable, not wait forever.
+    const deadline = window.setTimeout(() => controller.abort(), 30_000);
+    try {
+      const data = await getMediaWindow(source.kind === 'album' ? source.albumId : null,
+        { ...queryToWire(identity, before ? previousCursor : null),
+          target: target ?? undefined, before }, controller.signal);
+      if (controller.signal.aborted || gen !== generationRef.current) return false;
+      if (data.items.length === 0) { if (before) setPreviousCursor(null); return false; }
+      if (before) {
+        const seen = new Set(items.map((it) => it.id));
+        const prefix = data.items.filter((it) => !seen.has(it.id));
+        setItems([...prefix, ...items]);
+        setViewerIndex((index) => index === null ? null : index + prefix.length);
+        setPreviousCursor(data.previousCursor);
+      } else {
+        setViewerIndex(null);
+        for (const id of selectedCache.current.keys()) if (!selection.isSelected(id)) selectedCache.current.delete(id);
+        for (const item of items) if (selection.isSelected(item.id)) selectedCache.current.set(item.id, item);
+        setItems(data.items);
+        setNextCursor(data.nextCursor);
+        setPreviousCursor(data.previousCursor);
+        setScrollTarget((prev) => ({ id: data.items[0].id, revision: (prev?.revision ?? 0) + 1 }));
+        setPhase(data.nextCursor ? { kind: 'ready' } : { kind: 'end' });
+      }
+      return true;
+    } catch (err) {
+      if (gen === generationRef.current) {
+        handleError(err, translate.loadError);
+        // A bucket may have vanished or been renamed; re-read the aggregate.
+        if (err instanceof ApiError && err.status === 404) setNavigationRevision((v) => v + 1);
+      }
+      return false;
+    } finally {
+      window.clearTimeout(deadline);
+      if (gen === generationRef.current) {
+        loadingRef.current = false;
+        setNavigationBusy(false);
+        // An interrupted load-more may still have left its old phase behind.
+        setPhase((prev) => prev.kind === 'loadingMore' ? { kind: 'ready' } : prev);
+      }
+    }
+  }, [identity, source, previousCursor, items, selection, handleError, translate.loadError]);
+
+  const selectedItems = useMemo(() => {
+    const available = new Map([...selectedCache.current, ...items.map((it) => [it.id, it] as const)]);
+    return [...selection.selected].flatMap((id) => available.has(id) ? [available.get(id)!] : []);
+  }, [items, selection.selected]);
+
   const removeLoadedIds = useCallback((ids: string[]) => {
     const set = new Set(ids);
     setItems((prev) => {
@@ -475,6 +560,7 @@ export function useMediaWorkspace(
     });
     setTotal((prev) => (prev !== null ? Math.max(0, prev - ids.length) : prev));
     selection.clear();
+    setNavigationRevision((v) => v + 1);
   }, [selection]);
 
   const reconcileAfterPartialMutation = useCallback(() => {
@@ -484,6 +570,8 @@ export function useMediaWorkspace(
   }, [selection, refresh]);
 
   const patchItem = useCallback((id: string, patch: Partial<MediaItem>) => {
+    if (selectedCache.current.has(id)) selectedCache.current.set(id, { ...selectedCache.current.get(id)!, ...patch } as MediaItem);
+    setNavigationRevision((v) => v + 1);
     setItems((prev) => prev.map((it) => (it.id === id ? ({ ...it, ...patch } as MediaItem) : it)));
   }, []);
 
@@ -512,6 +600,13 @@ export function useMediaWorkspace(
 
   return {
     items,
+    selectedItems,
+    navigationBusy,
+    navigationRevision,
+    previousCursor,
+    scrollTarget,
+    jumpTo: (target) => navigateWindow(target),
+    loadPrevious: () => navigateWindow(null),
     orderedIds,
     total,
     photoCount,

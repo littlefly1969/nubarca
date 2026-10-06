@@ -5,6 +5,14 @@ namespace NubArca.Api.Files;
 
 public interface IFileItemService
 {
+    Task<NubArca.Api.Media.MediaNavigationIndex> MediaNavigationAsync(
+        Guid ownerUserId, ImageFilters filters, MediaKindScope kind, ImageSortField sort,
+        ImageSortDirection direction, CancellationToken cancellationToken);
+    Task<NubArca.Api.Media.MediaNavigationWindow?> MediaWindowAsync(
+        Guid ownerUserId, ImageFilters filters, MediaKindScope kind, ImageSortField sort,
+        ImageSortDirection direction, int limit, string? target, ImageCursor? cursor,
+        bool before, CancellationToken cancellationToken);
+
     Task<FileItem> CreateAsync(
         Guid ownerUserId,
         Guid? parentFolderId,

@@ -242,3 +242,22 @@ export function fileItemPath(fileItemId: string): string {
 export function fileRestorePath(fileItemId: string): string {
   return `/api/files/${fileItemId}/restore`;
 }
+
+// Owner-private fast navigation over the exact filtered collection.
+export interface MediaNavigationBucket { key: string; count: number }
+export interface MediaNavigationIndex { buckets: MediaNavigationBucket[] }
+export interface MediaNavigationWindow {
+  items: MediaItem[];
+  nextCursor: string | null;
+  previousCursor: string | null;
+}
+export interface MediaWindowQuery extends ListMediaQuery {
+  target?: string;
+  before?: boolean;
+}
+export function mediaWindowQueryToParams(query: MediaWindowQuery): QueryParams {
+  const navigation = new QueryBuilder();
+  navigation.setOptional('target', query.target);
+  if (query.before) navigation.setBool('before', true);
+  return [...mediaQueryToParams(query), ...navigation.build()];
+}

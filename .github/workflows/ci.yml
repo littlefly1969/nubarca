@@ -157,13 +157,14 @@ jobs:
       # Share's, and the party guest book's against the game (one holder of the
       # television) and against the end of the party (never on after it), and an
       # owner's direct print (one key, one sheet; a loan's last sheet taken once).
-      - name: Run concurrency tests
+      # Navigation also needs the real provider's collation, grouping and seeks.
+      - name: Run concurrency and media navigation tests
         run: >-
           dotnet test tests/NubArca.Api.Tests/NubArca.Api.Tests.csproj
           --configuration Release
           --no-restore
           --no-build
-          --filter "FullyQualifiedName~AlbumShareConcurrencyPostgresTests|FullyQualifiedName~PartyGuestbookGameRacePostgresTests|FullyQualifiedName~PartyGuestbookEndLiveRacePostgresTests|FullyQualifiedName~OwnerPhotoPrintRacePostgresTests"
+          --filter "FullyQualifiedName~AlbumShareConcurrencyPostgresTests|FullyQualifiedName~PartyGuestbookGameRacePostgresTests|FullyQualifiedName~PartyGuestbookEndLiveRacePostgresTests|FullyQualifiedName~OwnerPhotoPrintRacePostgresTests|FullyQualifiedName~MediaNavigationPostgresTests"
           --logger "console;verbosity=normal"
           --logger trx
           --results-directory "$GITHUB_WORKSPACE/TestResults/backend-concurrency"
