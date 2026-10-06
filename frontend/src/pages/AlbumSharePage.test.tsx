@@ -1,11 +1,26 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { I18nProvider } from '../i18n';
 import { installFetchMock, jsonResponse } from '../test-utils';
 import { AlbumSharePage } from './AlbumSharePage';
 import { HomeScreenAppCanonical, homeScreenAppNavigation } from '../homeScreen/homeScreen';
+import { MockUploadXhr } from '../test-utils/MockUploadXhr';
+import { fileKey, loadDone, markDone } from '../uploads/uploadQueueStore';
+
+vi.mock('../uploads/uploadQueueStore', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../uploads/uploadQueueStore')>(),
+  loadDone: vi.fn(async () => new Set<string>()),
+  markDone: vi.fn(async () => {}),
+}));
+
+beforeEach(() => {
+  MockUploadXhr.sent = [];
+  vi.stubGlobal('XMLHttpRequest', MockUploadXhr);
+  vi.mocked(loadDone).mockReset().mockResolvedValue(new Set());
+  vi.mocked(markDone).mockReset().mockResolvedValue(undefined);
+});
 
 /**
  * THE PUBLIC PAGE somebody opens from a message.
@@ -28,6 +43,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  Reflect.deleteProperty(navigator, 'wakeLock');
   window.history.replaceState(null, '', '/');
   document.title = '';
   document.head.innerHTML = '';
@@ -339,5 +355,187 @@ describe('inside the album\'s own app', () => {
     await user.click(screen.getByTestId('album-share-verify'));
 
     await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+  });
+});
+
+// Uploads must show the difference between bytes transferred and files saved.
+describe('upload feedback and recovery', () => {
+  const photos = () => [
+    new File(['one'], 'one.jpg', { type: 'image/jpeg', lastModified: 1 }),
+    new File(['two'], 'two.jpg', { type: 'image/jpeg', lastModified: 2 }),
+  ];
+  async function pick(files = photos()) {
+    await userEvent.upload(await screen.findByTestId('album-share-input'), files);
+    await waitFor(() => expect(MockUploadXhr.sent.length).toBeGreaterThan(0));
+  }
+  async function finish(index = 0, report?: unknown, status?: number) {
+    await act(async () => { MockUploadXhr.sent[index].finish(report, status); });
+  }
+
+  it('offers a named custom picker and the album cover above the gallery', async () => {
+    serve({ coverUrl: '/cover-preview' });
+    mount();
+    expect(await screen.findByRole('button', { name: 'Scegli foto e video' })).toBeEnabled();
+    expect(screen.getByText('Album condiviso')).toBeInTheDocument();
+    expect(document.querySelector('.album-share-cover')).toHaveAttribute('src', '/cover-preview');
+    expect(screen.getByTestId('album-share-input')).toHaveClass('party-contribution-file-input');
+  });
+
+  it('shows real per-file progress, waits at 100%, then sends the next file', async () => {
+    serve(); mount(); await pick();
+    expect(screen.getByRole('button', { name: 'Caricamento in corso' })).toBeDisabled();
+    expect(MockUploadXhr.sent).toHaveLength(1);
+    act(() => MockUploadXhr.sent[0].progress(50, 100));
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
+    expect(screen.getByText('File 1 di 2 · 50%')).toBeInTheDocument();
+    act(() => MockUploadXhr.sent[0].upload.onload?.());
+    expect(screen.getByText('Salvataggio in corso')).toBeInTheDocument();
+    expect(screen.getByText('0 di 2 file salvati')).toBeInTheDocument();
+    expect(screen.queryByText('Caricamento completato')).toBeNull();
+    expect(screen.getByText(/Attendi qui/)).toBeInTheDocument();
+    await finish();
+    await waitFor(() => expect(MockUploadXhr.sent).toHaveLength(2));
+    expect(screen.getByText('1 di 2 file salvati')).toBeInTheDocument();
+    await finish(1);
+    expect(await screen.findByText('Caricamento completato')).toBeInTheDocument();
+    expect(screen.getByText('2 di 2 file salvati')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Scegli foto e video' })).toBeEnabled();
+  });
+
+  it('warns before closing only while an upload is active', async () => {
+    serve(); mount(); await pick([photos()[0]]);
+    const active = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(active);
+    expect(active.defaultPrevented).toBe(true);
+    await finish();
+    const idle = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(idle);
+    expect(idle.defaultPrevented).toBe(false);
+  });
+
+  it('keeps the final confirmation even when the last available slot closes uploads', async () => {
+    let refreshed = false;
+    installFetchMock({
+      [`GET /api/album-share/${TOKEN}`]: () => jsonResponse(album(refreshed ? { canUpload: false, uploadsRemaining: 0 } : {})),
+      [`GET /api/album-share/${TOKEN}/items`]: () => jsonResponse(items()),
+    });
+    mount(); await pick([photos()[0]]);
+    refreshed = true;
+    await finish();
+    expect(await screen.findByText('Caricamento completato')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Scegli foto e video' })).toBeDisabled());
+    expect(screen.getByTestId('album-share-progress')).toHaveTextContent('1 di 1 file salvati');
+  });
+
+  it('does not claim success or remember a file for an invalid success response', async () => {
+    serve(); mount(); await pick();
+    await finish(0, '<html>proxy response</html>');
+    expect(await screen.findByText('Caricamento da completare')).toBeInTheDocument();
+    expect(markDone).not.toHaveBeenCalled();
+    expect(MockUploadXhr.sent).toHaveLength(1);
+    expect(screen.getByText(/Controlla l’album prima/)).toBeInTheDocument();
+    expect(screen.getByText('1 file ancora da inviare')).toBeInTheDocument();
+  });
+
+  it('stops on a quota report, preserves the result through refresh, and does not call it a failed file', async () => {
+    let refreshed = false;
+    installFetchMock({
+      [`GET /api/album-share/${TOKEN}`]: () => jsonResponse(album(refreshed ? { canUpload: false, uploadsRemaining: 0 } : {})),
+      [`GET /api/album-share/${TOKEN}/items`]: () => jsonResponse(items()),
+    });
+    mount(); await pick(); refreshed = true;
+    await finish(0, { accepted: 0, rejected: 0, stopped: 'upload_limit_reached' });
+    expect(await screen.findByTestId('album-share-limit')).toBeInTheDocument();
+    expect(screen.getByText('2 file ancora da inviare')).toBeInTheDocument();
+    expect(screen.queryByText(/file senza conferma/)).toBeNull();
+    expect(MockUploadXhr.sent).toHaveLength(1);
+    expect(markDone).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [429, /Troppi caricamenti/], [401, /L’accesso è cambiato/], [404, /L’accesso è cambiato/],
+    [503, /Connessione interrotta/],
+  ])('stops the queue after HTTP %s', async (status, message) => {
+    serve(); mount(); await pick();
+    await finish(0, {}, status as number);
+    expect(await screen.findByText(message as RegExp)).toBeInTheDocument();
+    expect(MockUploadXhr.sent).toHaveLength(1);
+    expect(screen.queryByText('Caricamento completato')).toBeNull();
+  });
+
+  it('keeps successful files saved and retries only the missing files after network loss', async () => {
+    serve(); mount(); await pick(); await finish();
+    await waitFor(() => expect(MockUploadXhr.sent).toHaveLength(2));
+    await act(async () => MockUploadXhr.sent[1].onerror?.());
+    expect(await screen.findByText('Caricamento da completare')).toBeInTheDocument();
+    expect(screen.getByText('1 di 2 file salvati')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Riprova i file mancanti' }));
+    await waitFor(() => expect(MockUploadXhr.sent).toHaveLength(3));
+    expect((MockUploadXhr.sent[2].body?.get('file') as File).name).toBe('two.jpg');
+    await finish(2);
+    expect(await screen.findByText('Caricamento completato')).toBeInTheDocument();
+    expect(markDone).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not discard the result when refreshing the gallery fails', async () => {
+    let broken = false;
+    installFetchMock({
+      [`GET /api/album-share/${TOKEN}`]: () => broken ? new Response(null, { status: 503 }) : jsonResponse(album()),
+      [`GET /api/album-share/${TOKEN}/items`]: () => jsonResponse(items()),
+    });
+    mount(); await pick([photos()[0]]); broken = true;
+    await finish();
+    expect(await screen.findByText(/Non riesco ad aggiornare le foto/)).toBeInTheDocument();
+    expect(screen.getByText('Caricamento completato')).toBeInTheDocument();
+    expect(screen.getByTestId('album-share-grid')).toBeInTheDocument();
+    expect(screen.queryByTestId('album-share-gone')).toBeNull();
+  });
+
+  it('skips confirmed files on a new selection even if browser storage refuses writes', async () => {
+    vi.mocked(markDone).mockRejectedValue(new Error('storage denied'));
+    serve(); mount(); const files = photos(); await pick([files[0]]); await finish();
+    expect(await screen.findByText('Caricamento completato')).toBeInTheDocument();
+    await userEvent.upload(screen.getByTestId('album-share-input'), files);
+    await waitFor(() => expect(MockUploadXhr.sent).toHaveLength(2));
+    expect((MockUploadXhr.sent[1].body?.get('file') as File).name).toBe('two.jpg');
+    await finish(1);
+    expect(await screen.findByText('1 già caricata, saltata')).toBeInTheDocument();
+  });
+
+  it('resumes a previous visit by skipping only files with a stored confirmation', async () => {
+    const files = photos();
+    vi.mocked(loadDone).mockResolvedValue(new Set([fileKey(files[0])]));
+    serve(); mount(); await pick(files);
+    expect(MockUploadXhr.sent).toHaveLength(1);
+    expect((MockUploadXhr.sent[0].body?.get('file') as File).name).toBe('two.jpg');
+    await finish();
+    expect(await screen.findByText('1 già caricata, saltata')).toBeInTheDocument();
+    expect(screen.getByText('1 di 1 file salvati')).toBeInTheDocument();
+  });
+
+  it('releases wake lock and aborts the active request on unmount without starting another file', async () => {
+    const release = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: {
+      request: vi.fn(async () => ({ released: false, release, addEventListener: vi.fn() })),
+    } });
+    serve(); mount(); await pick();
+    cleanup();
+    await waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+    expect(MockUploadXhr.sent[0].aborted).toBe(true);
+    expect(MockUploadXhr.sent).toHaveLength(1);
+  });
+
+  it('distinguishes temporary opening failures from a revoked link and lets the visitor retry', async () => {
+    let broken = true;
+    installFetchMock({
+      [`GET /api/album-share/${TOKEN}`]: () => broken ? new Response(null, { status: 503 }) : jsonResponse(album()),
+      [`GET /api/album-share/${TOKEN}/items`]: () => jsonResponse(items()),
+    });
+    mount();
+    expect(await screen.findByText(/Non riesco ad aprire l’album/)).toBeInTheDocument();
+    expect(screen.queryByTestId('album-share-gone')).toBeNull();
+    broken = false;
+    await userEvent.click(screen.getByRole('button', { name: 'Riprova' }));
+    expect(await screen.findByTestId('album-share-grid')).toBeInTheDocument();
   });
 });

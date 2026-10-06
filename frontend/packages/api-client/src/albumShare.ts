@@ -199,20 +199,62 @@ export function uploadToAlbumShareWithProgress(
   const url = `/api/album-share/${encodeURIComponent(token)}/upload`;
 
   return new Promise<AlbumShareUploadReport>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('aborted', 'AbortError'));
+      return;
+    }
     const xhr = new XMLHttpRequest();
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const abort = () => xhr.abort();
+    const finish = (report: AlbumShareUploadReport | null, error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      if (report) resolve(report); else reject(error);
+    };
+    // Bound inactivity, not the duration of a large video that is still moving.
+    // Saving can include decoding/probing, so allow five minutes after transfer.
+    const armDeadline = (ms: number) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        finish(null, new DOMException('upload timed out', 'TimeoutError'));
+        xhr.abort();
+      }, ms);
+    };
     xhr.open('POST', url);
     xhr.withCredentials = true;
-    if (onProgress && xhr.upload) {
+    if (xhr.upload) {
       xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total);
+        if (settled) return;
+        armDeadline(120_000);
+        if (e.lengthComputable && e.total > 0) {
+          const fraction = Math.max(0, Math.min(1, e.loaded / e.total));
+          if (fraction === 1) armDeadline(300_000);
+          onProgress?.(fraction);
+        }
+      };
+      xhr.upload.onload = () => {
+        if (settled) return;
+        armDeadline(300_000);
+        onProgress?.(1);
       };
     }
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
-          resolve(JSON.parse(xhr.responseText) as AlbumShareUploadReport);
+          const report = JSON.parse(xhr.responseText) as AlbumShareUploadReport;
+          // A proxy returning HTML (or an incomplete body) is not confirmation.
+          if (!report || !Number.isInteger(report.accepted) || !Number.isInteger(report.rejected)
+            || report.accepted < 0 || report.rejected < 0 || report.accepted + report.rejected > 1
+            || (report.stopped !== null && typeof report.stopped !== 'string')
+            || (report.accepted + report.rejected === 0 && !report.stopped)) {
+            throw new Error('invalid upload report');
+          }
+          finish(report);
         } catch {
-          resolve({ accepted: 1, rejected: 0, stopped: null });
+          finish(null, new Error('invalid upload report'));
         }
         return;
       }
@@ -222,13 +264,15 @@ export function uploadToAlbumShareWithProgress(
       try {
         code = (JSON.parse(xhr.responseText) as { error?: string }).error ?? null;
       } catch { /* a body we cannot read is simply a failure */ }
-      reject(Object.assign(new Error(`upload failed (${xhr.status})`), {
+      finish(null, Object.assign(new Error(`upload failed (${xhr.status})`), {
         status: xhr.status, code,
       }));
     };
-    xhr.onerror = () => reject(new Error('network error'));
-    xhr.onabort = () => reject(new DOMException('aborted', 'AbortError'));
-    signal?.addEventListener('abort', () => xhr.abort(), { once: true });
-    xhr.send(form);
+    xhr.onerror = () => finish(null, new Error('network error'));
+    xhr.onabort = () => finish(null, new DOMException('aborted', 'AbortError'));
+    xhr.ontimeout = () => finish(null, new DOMException('upload timed out', 'TimeoutError'));
+    signal?.addEventListener('abort', abort, { once: true });
+    armDeadline(120_000);
+    try { xhr.send(form); } catch (error) { finish(null, error as Error); }
   });
 }
