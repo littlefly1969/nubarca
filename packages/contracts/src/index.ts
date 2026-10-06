@@ -14,6 +14,7 @@ export * from './mediaSelection.ts';
 export * from './sharing.ts';
 export * from './party.ts';
 export * from './photoPlacement.ts';
+export * from './printLayouts.ts';
 export * from './ownerPhotoPrintDate.ts';
 export * from './partyRsvp.ts';
 export * from './partyAttendance.ts';

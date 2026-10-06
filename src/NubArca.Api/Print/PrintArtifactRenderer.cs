@@ -115,7 +115,7 @@ public sealed class PrintArtifactRenderer
         var info = Image.Identify(source.Span);
         var (w, h) = Oriented(info);
         var portrait = h > w;
-        var (sheetW, sheetH) = PartyPrintGeometry.Sheet(Domain.Print.PrintPapers.Photo10x15, portrait);
+        var (sheetW, sheetH) = PrintLayouts.Sheet(Domain.Print.PrintPapers.Photo10x15, portrait);
         return await RenderOwnerPhotoAsync(new OwnerPhotoComposition(
             source.ToArray(), Domain.Print.PrintPapers.Photo10x15, portrait,
             new PhotoPlacement(0.5, 0.5,
@@ -135,7 +135,7 @@ public sealed class PrintArtifactRenderer
     {
         using var source = Image.Load<Rgba32>(composition.Bytes);
         source.Mutate(x => x.AutoOrient());
-        var (w, h) = PartyPrintGeometry.Sheet(composition.Paper, composition.Portrait);
+        var (w, h) = PrintLayouts.Sheet(composition.Paper, composition.Portrait);
         using var sheet = new Image<Rgba32>(w, h, OwnerBand);
         var frame = new Rectangle(0, 0, w, h);
         PartyPrintComposer.DrawPlaced(sheet, source, composition.Placement, frame, OwnerBand);

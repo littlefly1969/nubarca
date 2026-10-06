@@ -220,8 +220,10 @@ public sealed class PartyPrintBudgetTests : IDisposable
     [Fact]
     public void Product_Rules_State_What_Each_Print_Composes()
     {
-        Assert.Equal(1, PartyPrintProducts.RequiredPhotos(PartyPrintProducts.Photo));
-        Assert.Equal(8, PartyPrintProducts.RequiredPhotos(PartyPrintProducts.TwinStrip4));
+        Assert.Equal([1], PrintLayouts.PhotoCounts(PartyPrintProducts.Photo));
+        Assert.Equal([4], PrintLayouts.PhotoCounts(PartyPrintProducts.Grid4));
+        // The same strip twice, or two different ones.
+        Assert.Equal([4, 8], PrintLayouts.PhotoCounts(PartyPrintProducts.TwinStrip4));
         Assert.True(PartyPrintProducts.IsKnown("photo"));
         Assert.False(PartyPrintProducts.IsKnown("collage"));
         // Both party kinds print on the same paper: the strip is a composition,

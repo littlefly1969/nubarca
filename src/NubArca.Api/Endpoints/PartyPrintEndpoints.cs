@@ -84,10 +84,11 @@ public static class PartyPrintEndpoints
                 .Where(p => p.State is not null)
                 .Select(p => new PartyPrintFormatDto(
                     p.Id, p.State!.Enabled, p.State.Remaining,
-                    PartyPrintProducts.RequiredPhotos(p.Id),
+                    PrintLayouts.MaxPhotos(p.Id),
                     YoursLeft(p.State.PerGuest, used.Used(p.Id)),
                     access.CutByPrinter(p.Id),
-                    access.Paper))
+                    access.Paper,
+                    PrintLayouts.PhotoCounts(p.Id)))
                 .ToList();
 
             return Results.Ok(new PartyPrintManifestDto(
@@ -312,7 +313,13 @@ public sealed record PartyPrintFormatDto(
     /// </summary>
     bool CutByPrinter = false,
     /// <summary>The paper this product is printed on.</summary>
-    string PaperSize = PrintPapers.Photo10x15);
+    string PaperSize = PrintPapers.Photo10x15,
+    /// <summary>
+    /// Every number of photographs the format takes — a twin strip four (the
+    /// same strip twice) or eight. <see cref="RequiredPhotos"/> stays the
+    /// largest, for a studio from before the choice.
+    /// </summary>
+    IReadOnlyList<int>? PhotoCounts = null);
 
 /// <summary>A choosable photograph: safe derived URLs only, never an original.</summary>
 public sealed record PartyPrintPhotoDto(Guid Id, string ThumbnailUrl, string PreviewUrl);

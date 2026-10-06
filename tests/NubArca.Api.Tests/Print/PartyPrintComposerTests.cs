@@ -50,10 +50,10 @@ public sealed class PartyPrintComposerTests
         // out a third shorter on the widest sheets, with the type shrinking
         // inside it. Both sheets are 10cm on the short edge; the strip of paper
         // under the picture must be the same on both.
-        var portrait = PartyPrintGeometry.PhotoFooterFraction
-            * Math.Min(PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight);
-        var landscape = PartyPrintGeometry.PhotoFooterFraction
-            * Math.Min(PartyPrintGeometry.LandscapeWidth, PartyPrintGeometry.LandscapeHeight);
+        var portrait = PrintLayouts.PhotoFooterFraction
+            * Math.Min(PrintLayouts.PortraitWidth, PrintLayouts.PortraitHeight);
+        var landscape = PrintLayouts.PhotoFooterFraction
+            * Math.Min(PrintLayouts.LandscapeWidth, PrintLayouts.LandscapeHeight);
         Assert.Equal(portrait, landscape);
         // And large enough to hold three things legibly: ~17mm at 300dpi.
         Assert.InRange(portrait, 190, 220);
@@ -140,8 +140,8 @@ public sealed class PartyPrintComposerTests
             PartyPrintProducts.TwinStrip4, PartyPrintTheme.Pure, photos,
             "Festa", null, 0, PartyPrintOrientation.Landscape), default);
         using var sheet = Image.Load(asked);
-        Assert.Equal(PartyPrintGeometry.PortraitWidth, sheet.Width);
-        Assert.Equal(PartyPrintGeometry.PortraitHeight, sheet.Height);
+        Assert.Equal(PrintLayouts.PortraitWidth, sheet.Width);
+        Assert.Equal(PrintLayouts.PortraitHeight, sheet.Height);
     }
 
     private static PartyPrintComposition Composition(
@@ -168,29 +168,30 @@ public sealed class PartyPrintComposerTests
 
         using var sheet = Image.Load<Rgba32>(bytes);
         // One 10x15 sheet, portrait — not a new paper size.
-        Assert.Equal(PartyPrintGeometry.PortraitWidth, sheet.Width);
-        Assert.Equal(PartyPrintGeometry.PortraitHeight, sheet.Height);
+        Assert.Equal(PrintLayouts.PortraitWidth, sheet.Width);
+        Assert.Equal(PrintLayouts.PortraitHeight, sheet.Height);
 
         // Eight slots, eight DIFFERENT photographs: the first strip carries
         // photographs 1–4 in order, the second 5–8. Two copies of one strip is
         // exactly what a guest who chose eight did not ask for.
-        var samples = Enumerable.Range(0, PartyPrintGeometry.StripsPerSheet)
-            .SelectMany(strip => Enumerable.Range(0, PartyPrintGeometry.SlotsPerStrip)
+        var samples = Enumerable.Range(0, PrintLayouts.StripsPerSheet)
+            .SelectMany(strip => Enumerable.Range(0, PrintLayouts.SlotsPerStrip)
                 .Select(slot => SampleSlot(sheet, strip, slot)))
             .ToList();
         Assert.Equal(8, samples.Distinct().Count());
-        for (var slot = 0; slot < PartyPrintGeometry.SlotsPerStrip; slot++)
+        for (var slot = 0; slot < PrintLayouts.SlotsPerStrip; slot++)
             Assert.NotEqual(SampleSlot(sheet, 0, slot), SampleSlot(sheet, 1, slot));
     }
 
     [Fact]
-    public async Task Four_Photographs_Still_Make_A_Sheet_Of_Two_Copies()
+    public async Task Four_Photographs_Make_The_Same_Strip_Twice()
     {
-        // A client from before eight: nothing breaks, the strip is repeated.
+        // Four is a choice — one strip to keep, the same one to give — and the
+        // second strip repeats the first, slot for slot.
         var bytes = await new PartyPrintComposer().RenderAsync(
             Composition(PartyPrintProducts.TwinStrip4, PartyPrintTheme.Pure, 4), default);
         using var sheet = Image.Load<Rgba32>(bytes);
-        for (var slot = 0; slot < PartyPrintGeometry.SlotsPerStrip; slot++)
+        for (var slot = 0; slot < PrintLayouts.SlotsPerStrip; slot++)
             Assert.Equal(SampleSlot(sheet, 0, slot), SampleSlot(sheet, 1, slot));
     }
 
@@ -203,8 +204,8 @@ public sealed class PartyPrintComposerTests
     private static byte[] SheetPhoto(string kind, bool portrait = true)
     {
         var (w, h) = portrait
-            ? (PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight)
-            : (PartyPrintGeometry.LandscapeWidth, PartyPrintGeometry.LandscapeHeight);
+            ? (PrintLayouts.PortraitWidth, PrintLayouts.PortraitHeight)
+            : (PrintLayouts.LandscapeWidth, PrintLayouts.LandscapeHeight);
         using var image = new Image<Rgba32>(w, h);
         image.ProcessPixelRows(rows =>
         {
@@ -279,8 +280,8 @@ public sealed class PartyPrintComposerTests
     private const string LongLine = "Grazie a tutti di essere venuti, è stata una notte che ricorderemo";
 
     private static (int W, int H) Sheet(bool portrait) => portrait
-        ? (PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight)
-        : (PartyPrintGeometry.LandscapeWidth, PartyPrintGeometry.LandscapeHeight);
+        ? (PrintLayouts.PortraitWidth, PrintLayouts.PortraitHeight)
+        : (PrintLayouts.LandscapeWidth, PrintLayouts.LandscapeHeight);
 
     [Theory]
     [InlineData(true, "Una notte da ricordare")]
@@ -526,8 +527,8 @@ public sealed class PartyPrintComposerTests
         // shortens — it never runs under the number.
         var composer = new PartyPrintComposer();
         var (w, h) = portrait
-            ? (PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight)
-            : (PartyPrintGeometry.LandscapeWidth, PartyPrintGeometry.LandscapeHeight);
+            ? (PrintLayouts.PortraitWidth, PrintLayouts.PortraitHeight)
+            : (PrintLayouts.LandscapeWidth, PrintLayouts.LandscapeHeight);
         var composition = OnThePhoto([], PartyPrintOverlayText.White, PartyPrintOverlayLogo.Light,
             footer: LongLine,
             number: 12345,
@@ -568,7 +569,7 @@ public sealed class PartyPrintComposerTests
             footer: null, number: 987,
             name: "Il matrimonio di Giulia Rossi e Matteo Bianchi, finalmente");
         var layout = composer.LayoutOverlayText(
-            composition, PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight);
+            composition, PrintLayouts.PortraitWidth, PrintLayouts.PortraitHeight);
         Assert.Null(layout.Footer);
         Assert.False(layout.Title.Box.IntersectsWith(layout.Number!.Box));
         Assert.True(layout.Title.Box.Right < layout.Number.Box.Left);
@@ -648,12 +649,12 @@ public sealed class PartyPrintComposerTests
         // its symbol a smudge on paper — and the number was squinted at.
         using var sheet = Image.Load<Rgba32>(await new PartyPrintComposer().RenderAsync(
             Composition(PartyPrintProducts.TwinStrip4, theme, 8) with { PublicSequence = 1000 }, default));
-        const int w = PartyPrintGeometry.PortraitWidth;
-        const int h = PartyPrintGeometry.PortraitHeight;
-        var stripW = PartyPrintGeometry.StripWidthFraction * w;
-        var footX = (int)Math.Round(PartyPrintGeometry.StripMarginFraction * w);
-        var footH = PartyPrintGeometry.StripFooterFraction * h;
-        var footBottom = (int)Math.Round((1.0 - PartyPrintGeometry.StripMarginFraction) * h);
+        const int w = PrintLayouts.PortraitWidth;
+        const int h = PrintLayouts.PortraitHeight;
+        var stripW = PrintLayouts.StripWidthFraction * w;
+        var footX = (int)Math.Round(PrintLayouts.StripMarginFraction * w);
+        var footH = PrintLayouts.StripFooterFraction * h;
+        var footBottom = (int)Math.Round((1.0 - PrintLayouts.StripMarginFraction) * h);
         // The signature row: the lower part of the strip's foot.
         var rowTop = (int)(footBottom - (footH * 0.38));
         var paper = sheet[footX + (int)(stripW / 2), footBottom - 2];
@@ -735,7 +736,7 @@ public sealed class PartyPrintComposerTests
                 Orientation = portrait ? PartyPrintOrientation.Portrait : PartyPrintOrientation.Landscape,
             }, default));
         var (w, h) = (sheet.Width, sheet.Height);
-        var (fx, fy, fw, fh) = PartyPrintGeometry.PhotoFooter(PrintPapers.Photo10x15, portrait);
+        var (fx, fy, fw, fh) = PrintLayouts.PhotoFooter(PrintPapers.Photo10x15, portrait);
         var left = (int)(fx * w);
         var right = (int)((fx + fw) * w);
         var bottom = (int)((fy + fh) * h);
@@ -890,7 +891,7 @@ public sealed class PartyPrintComposerTests
 
     private static Rgba32 SampleGrid(Image<Rgba32> sheet, string paper, int index)
     {
-        var (x, y, w, h) = PartyPrintGeometry.GridSlot(paper, index);
+        var (x, y, w, h) = PrintLayouts.GridSlot(paper, index);
         return sheet[(int)((x + (w / 2)) * sheet.Width), (int)((y + (h / 2)) * sheet.Height)];
     }
 
@@ -915,8 +916,8 @@ public sealed class PartyPrintComposerTests
         }
 
         // The four never overlap, and stay clear of the footer and the edges.
-        var slots = Enumerable.Range(0, 4).Select(i => PartyPrintGeometry.GridSlot(paper, i)).ToList();
-        var footer = PartyPrintGeometry.GridFooter(paper);
+        var slots = Enumerable.Range(0, 4).Select(i => PrintLayouts.GridSlot(paper, i)).ToList();
+        var footer = PrintLayouts.GridFooter(paper);
         for (var a = 0; a < 4; a++)
         {
             var sa = slots[a];
@@ -968,30 +969,30 @@ public sealed class PartyPrintComposerTests
             var photo = new SortedDictionary<string, object>(StringComparer.Ordinal);
             foreach (var portrait in new[] { true, false })
             {
-                var (w, h) = PartyPrintGeometry.Sheet(paper, portrait);
+                var (w, h) = PrintLayouts.Sheet(paper, portrait);
                 photo[portrait ? "portrait" : "landscape"] = new
                 {
                     sheet = new[] { w, h },
-                    slot = R(PartyPrintGeometry.PhotoSlot(paper, portrait)),
-                    footer = R(PartyPrintGeometry.PhotoFooter(paper, portrait)),
+                    slot = R(PrintLayouts.PhotoSlot(paper, portrait)),
+                    footer = R(PrintLayouts.PhotoFooter(paper, portrait)),
                 };
             }
             products[PartyPrintProducts.Photo] = photo;
-            var (gw, gh) = PartyPrintGeometry.Sheet(paper, PartyPrintGeometry.GridPortrait(paper));
+            var (gw, gh) = PrintLayouts.Sheet(paper, PrintLayouts.GridPortrait(paper));
             products[PartyPrintProducts.Grid4] = new
             {
                 sheet = new[] { gw, gh },
-                slots = Enumerable.Range(0, 4).Select(i => R(PartyPrintGeometry.GridSlot(paper, i))).ToArray(),
-                footer = R(PartyPrintGeometry.GridFooter(paper)),
+                slots = Enumerable.Range(0, 4).Select(i => R(PrintLayouts.GridSlot(paper, i))).ToArray(),
+                footer = R(PrintLayouts.GridFooter(paper)),
             };
             if (PartyPrintProducts.Allowed(paper, PartyPrintProducts.TwinStrip4))
             {
                 products[PartyPrintProducts.TwinStrip4] = new
                 {
-                    sheet = new[] { PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight },
-                    slots = Enumerable.Range(0, PartyPrintGeometry.StripsPerSheet)
-                        .SelectMany(strip => Enumerable.Range(0, PartyPrintGeometry.SlotsPerStrip)
-                            .Select(slot => R(PartyPrintGeometry.StripSlot(strip, slot))))
+                    sheet = new[] { PrintLayouts.PortraitWidth, PrintLayouts.PortraitHeight },
+                    slots = Enumerable.Range(0, PrintLayouts.StripsPerSheet)
+                        .SelectMany(strip => Enumerable.Range(0, PrintLayouts.SlotsPerStrip)
+                            .Select(slot => R(PrintLayouts.StripSlot(strip, slot))))
                         .ToArray(),
                 };
             }
@@ -1045,13 +1046,13 @@ public sealed class PartyPrintComposerTests
         // would sit exactly under the blade, and a cut a fraction of a
         // millimetre off leaves it on a strip's edge — so there is none, ever.
         var composer = new PartyPrintComposer();
-        var centre = PartyPrintGeometry.PortraitWidth / 2;
+        var centre = PrintLayouts.PortraitWidth / 2;
         foreach (var theme in new[] { PartyPrintTheme.Pure, PartyPrintTheme.Midnight, PartyPrintTheme.Event })
         {
             using var sheet = Image.Load<Rgba32>(await composer.RenderAsync(
                 Composition(PartyPrintProducts.TwinStrip4, theme, 8), default));
             // The gutter's ends, top and bottom, are the paper's colour.
-            foreach (var y in new[] { 10, PartyPrintGeometry.PortraitHeight - 10 })
+            foreach (var y in new[] { 10, PrintLayouts.PortraitHeight - 10 })
                 Assert.True(Distance(sheet[centre, y], sheet[centre - 12, y]) <= 6,
                     $"{theme}: a cut mark at ({centre},{y})");
         }
@@ -1059,7 +1060,7 @@ public sealed class PartyPrintComposerTests
 
     private static Rgba32 SampleSlot(Image<Rgba32> sheet, int strip, int slot)
     {
-        var (x, y, w, h) = PartyPrintGeometry.StripSlot(strip, slot);
+        var (x, y, w, h) = PrintLayouts.StripSlot(strip, slot);
         return sheet[
             (int)((x + (w / 2)) * sheet.Width),
             (int)((y + (h / 2)) * sheet.Height)];
@@ -1076,8 +1077,8 @@ public sealed class PartyPrintComposerTests
             "Giulia & Matteo", null), default);
         using (var sheet = Image.Load<Rgba32>(landscape))
         {
-            Assert.Equal(PartyPrintGeometry.LandscapeWidth, sheet.Width);
-            Assert.Equal(PartyPrintGeometry.LandscapeHeight, sheet.Height);
+            Assert.Equal(PrintLayouts.LandscapeWidth, sheet.Width);
+            Assert.Equal(PrintLayouts.LandscapeHeight, sheet.Height);
         }
 
         // A portrait photograph gets a portrait sheet rather than white bars.
@@ -1087,8 +1088,8 @@ public sealed class PartyPrintComposerTests
             "Giulia & Matteo", null), default);
         using (var sheet = Image.Load<Rgba32>(portrait))
         {
-            Assert.Equal(PartyPrintGeometry.PortraitWidth, sheet.Width);
-            Assert.Equal(PartyPrintGeometry.PortraitHeight, sheet.Height);
+            Assert.Equal(PrintLayouts.PortraitWidth, sheet.Width);
+            Assert.Equal(PrintLayouts.PortraitHeight, sheet.Height);
         }
     }
 
@@ -1148,11 +1149,11 @@ public sealed class PartyPrintComposerTests
     {
         // The numbers the preview mirrors: if these stop adding up, a strip runs
         // off the paper, so they are asserted rather than assumed.
-        for (var strip = 0; strip < PartyPrintGeometry.StripsPerSheet; strip++)
+        for (var strip = 0; strip < PrintLayouts.StripsPerSheet; strip++)
         {
-            for (var slot = 0; slot < PartyPrintGeometry.SlotsPerStrip; slot++)
+            for (var slot = 0; slot < PrintLayouts.SlotsPerStrip; slot++)
             {
-                var (x, y, w, h) = PartyPrintGeometry.StripSlot(strip, slot);
+                var (x, y, w, h) = PrintLayouts.StripSlot(strip, slot);
                 Assert.True(x >= 0 && y >= 0, $"slot {strip}/{slot} starts off the sheet");
                 Assert.True(x + w <= 1.0001, $"slot {strip}/{slot} runs off the right edge");
                 Assert.True(y + h <= 1.0001, $"slot {strip}/{slot} runs off the bottom");
@@ -1161,10 +1162,10 @@ public sealed class PartyPrintComposerTests
         }
 
         // The two strips do not overlap, and the gutter between them is real.
-        var (leftX, _, leftW, _) = PartyPrintGeometry.StripSlot(0, 0);
-        var (rightX, _, _, _) = PartyPrintGeometry.StripSlot(1, 0);
+        var (leftX, _, leftW, _) = PrintLayouts.StripSlot(0, 0);
+        var (rightX, _, _, _) = PrintLayouts.StripSlot(1, 0);
         Assert.True(rightX >= leftX + leftW, "the twin strips overlap");
-        Assert.Equal(PartyPrintGeometry.StripGutterFraction, rightX - (leftX + leftW), 3);
+        Assert.Equal(PrintLayouts.StripGutterFraction, rightX - (leftX + leftW), 3);
     }
 
     [Fact]

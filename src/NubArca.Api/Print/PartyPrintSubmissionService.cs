@@ -88,12 +88,12 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 200)
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
 
-        var required = PartyPrintProducts.RequiredPhotos(productId);
-        if (request.Slots.Count != required)
+        // As many photographs as the format takes — a twin strip four (the same
+        // strip twice) or eight (two strips) — and each a DIFFERENT one: the
+        // same picture twice on one sheet is not what was asked for.
+        if (!PrintLayouts.PhotoCounts(productId).Contains(request.Slots.Count))
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
-        // Four photographs are four DIFFERENT photographs, and so are a twin
-        // strip's eight: the same picture twice is not what was asked for.
-        if (request.Slots.Select(s => s.ItemId).Distinct().Count() != required)
+        if (request.Slots.Select(s => s.ItemId).Distinct().Count() != request.Slots.Count)
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
         // Each photograph is framed ONE way: by a placement (a current studio)
         // or by the four crop fractions (a page from before placements). Both
@@ -147,8 +147,8 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             _db, access.OwnerUserId, request.Slots.Select(s => s.ItemId).ToList(), cancellationToken);
         double? FrameAspectOf(Guid itemId)
         {
-            if (productId == PartyPrintProducts.TwinStrip4) return PartyPrintGeometry.StripSlotAspect();
-            if (productId == PartyPrintProducts.Grid4) return PartyPrintGeometry.GridSlotAspect(paper);
+            if (productId == PartyPrintProducts.TwinStrip4) return PrintLayouts.SlotAspect(PrintLayouts.TwinStrip4, PrintLayouts.Framed, Domain.Print.PrintPapers.Photo10x15, portrait: true);
+            if (productId == PartyPrintProducts.Grid4) return PrintLayouts.SlotAspect(PrintLayouts.Grid4, PrintLayouts.Framed, paper, portrait: true);
             if (!shapes.TryGetValue(itemId, out var aspect) && orientation == PartyPrintOrientation.FollowPhoto)
                 return null;
             // The composer's own rule: the sheet follows the photograph unless turned.
@@ -159,8 +159,8 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 _ => aspect <= 1,
             };
             return theme == PartyPrintTheme.Overlay
-                ? PartyPrintGeometry.OverlaySlotAspect(portrait, paper)
-                : PartyPrintGeometry.PhotoSlotAspect(portrait, paper);
+                ? PrintLayouts.SlotAspect(PrintLayouts.Photo, PrintLayouts.FullBleed, paper, portrait)
+                : PrintLayouts.SlotAspect(PrintLayouts.Photo, PrintLayouts.Framed, paper, portrait);
         }
         foreach (var slot in request.Slots)
         {

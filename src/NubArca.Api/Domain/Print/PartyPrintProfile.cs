@@ -81,23 +81,25 @@ public sealed class PartyPrintProfile
 }
 
 /// <summary>
-/// What a guest can print. A PRODUCT is a composition; the paper is the
-/// printer's (<see cref="PrintPapers"/>). The two stay independent, and only the
-/// combinations in <see cref="Allowed"/> exist.
+/// What a guest can print: the formats of the shared catalogue
+/// (<see cref="NubArca.Api.Print.PrintLayouts"/>) a party offers, each with its
+/// own switch and budget. A PRODUCT is a composition; the paper is the
+/// printer's (<see cref="PrintPapers"/>), and only the catalogue's combinations
+/// exist.
 /// </summary>
 public static class PartyPrintProducts
 {
     /// <summary>One photograph on the sheet.</summary>
-    public const string Photo = "photo";
+    public const string Photo = NubArca.Api.Print.PrintLayouts.Photo;
 
     /// <summary>Four photographs on one sheet, two by two.</summary>
-    public const string Grid4 = "grid4";
+    public const string Grid4 = NubArca.Api.Print.PrintLayouts.Grid4;
 
     /// <summary>
     /// Two strips of four photographs on one 10x15 sheet, which the printer
-    /// cuts apart: always both strips, eight photographs, never one strip.
+    /// cuts apart: always both strips — the same four twice, or eight.
     /// </summary>
-    public const string TwinStrip4 = "twinStrip4";
+    public const string TwinStrip4 = NubArca.Api.Print.PrintLayouts.TwinStrip4;
 
     /// <summary>The twin strip's first name, still accepted from a page opened before the rename.</summary>
     public const string LegacyStrip4 = "strip4";
@@ -112,31 +114,11 @@ public static class PartyPrintProducts
         _ => string.Empty,
     };
 
-    public static bool IsKnown(string value) => value is Photo or Grid4 or TwinStrip4;
+    public static bool IsKnown(string value) => NubArca.Api.Print.PrintLayouts.IsKnown(value);
 
-    /// <summary>
-    /// How many DIFFERENT source photographs a product composes: one, four,
-    /// and for the twin strip four per strip, so the two keepsakes a sheet
-    /// yields are not copies of each other.
-    /// </summary>
-    public static int RequiredPhotos(string product) => product switch
-    {
-        Grid4 => 4,
-        TwinStrip4 => 8,
-        _ => 1,
-    };
-
-    /// <summary>
-    /// THE matrix: which product each paper can make. A photo and four photos
-    /// on any of the three; the twin strip only on 10x15, which is the sheet
-    /// the printer knows how to cut into two strips. Nothing else exists.
-    /// </summary>
-    public static bool Allowed(string paper, string product) => product switch
-    {
-        Photo or Grid4 => PrintPapers.IsKnown(paper),
-        TwinStrip4 => paper == PrintPapers.Photo10x15,
-        _ => false,
-    };
+    /// <summary>Which product each paper can make — the catalogue's matrix.</summary>
+    public static bool Allowed(string paper, string product) =>
+        NubArca.Api.Print.PrintLayouts.Allowed(paper, product);
 }
 
 /// <summary>Bounds the host's own settings. Not a guess: an explicit contract.</summary>

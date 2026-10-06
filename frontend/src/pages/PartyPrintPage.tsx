@@ -572,6 +572,9 @@ function SheetPreview(props: SheetProps) {
         <div
           key={strip}
           data-testid={`party-print-strip-${strip}`}
+          // Four photographs: the second strip is the first again, and says
+          // nothing the first did not.
+          aria-hidden={strip > 0 && chosen.length <= SLOTS_PER_STRIP ? 'true' : undefined}
         >
           {Array.from({ length: SLOTS_PER_STRIP }, (_, index) => {
             const rect = stripSlot(strip, index);
@@ -619,6 +622,9 @@ export function PartyPrintPage() {
 
   const [step, setStep] = useState<Step>('format');
   const [product, setProduct] = useState<PartyPrintProduct | null>(null);
+  // How many photographs THIS composition takes, where a format offers a
+  // choice: a twin strip of four (the same strip twice) or of eight.
+  const [photoCount, setPhotoCount] = useState<number | null>(null);
   const [chosen, setChosen] = useState<string[]>([]);
   const [views, setViews] = useState<Record<string, CropView>>({});
   const [aspects, setAspects] = useState<Record<string, number>>({});
@@ -736,7 +742,9 @@ export function PartyPrintPage() {
   const format = manifest?.formats.find((f) => f.type === product) ?? null;
   // The paper is a fact about the printer: every product on offer is a sheet of it.
   const paper: PaperSize = manifest?.paperSize ?? '10x15';
-  const required = format?.requiredPhotos ?? 1;
+  const required = photoCount ?? format?.requiredPhotos ?? 1;
+  // Four photographs on a twin strip: one strip, printed twice.
+  const sameStrip = product === 'twinStrip4' && required === SLOTS_PER_STRIP;
   const printable = manifest?.formats.filter((f) => f.enabled) ?? [];
   const anyLeft = printable.some((f) => leftFor(f) > 0);
 
@@ -791,6 +799,7 @@ export function PartyPrintPage() {
     setSent(null);
     setSubmitError(null);
     setProduct(null);
+    setPhotoCount(null);
     setChosen([]);
     setViews({});
     setCropIndex(0);
@@ -935,20 +944,30 @@ export function PartyPrintPage() {
             <p className="party-print-error" role="alert">{t(submitError)}</p>
           )}
           <ul className="party-print-formats">
-            {printable.map((option) => {
+            {printable.flatMap((option) => (
+              // A format with a choice of how many photographs — the twin strip:
+              // the same four twice, or eight — is offered as each of them.
+              [...(option.photoCounts && option.photoCounts.length > 1
+                ? option.photoCounts
+                : [option.requiredPhotos])].sort((a, b) => a - b).map((count) => ({ option, count }))
+            )).map(({ option, count }) => {
               const left = leftFor(option);
               const out = left <= 0;
+              const same = option.type === 'twinStrip4' && count === SLOTS_PER_STRIP;
               return (
-                <li key={option.type}>
+                <li key={`${option.type}-${count}`}>
                   <button
                     type="button"
                     className="party-print-format"
-                    data-testid={`party-print-format-${option.type}`}
+                    data-testid={count === option.requiredPhotos
+                      ? `party-print-format-${option.type}`
+                      : `party-print-format-${option.type}-${count}`}
                     data-exhausted={out ? 'true' : undefined}
                     disabled={out}
                     onClick={() => {
                       setSubmitError(null);
                       setProduct(option.type);
+                      setPhotoCount(count);
                       setChosen([]);
                       setStep('select');
                     }}
@@ -960,10 +979,14 @@ export function PartyPrintPage() {
                     </span>
                     <span className="party-print-format-text">
                       <strong>
-                        {t(`partyPrint.format.${option.type}`, { paper: PAPER_LABEL[paper] })}
+                        {same
+                          ? t('partyPrint.format.twinStrip4Same')
+                          : t(`partyPrint.format.${option.type}`, { paper: PAPER_LABEL[paper] })}
                       </strong>
                       <span className="party-print-format-help">
-                        {t(`partyPrint.format.${option.type}Help`)}
+                        {same
+                          ? t('partyPrint.format.twinStrip4SameHelp')
+                          : t(`partyPrint.format.${option.type}Help`)}
                       </span>
                     </span>
                     <span className="party-print-format-left">
@@ -988,7 +1011,7 @@ export function PartyPrintPage() {
         <section className="party-print-step" aria-labelledby="party-print-heading">
           <h2 className="party-print-heading" id="party-print-heading">
             {t(product === 'twinStrip4'
-              ? 'partyPrint.selectStrip'
+              ? (sameStrip ? 'partyPrint.selectStripSame' : 'partyPrint.selectStrip')
               : product === 'grid4' ? 'partyPrint.selectGrid' : 'partyPrint.selectPhoto')}
           </h2>
           <p className="party-print-count" role="status">
@@ -1074,7 +1097,9 @@ export function PartyPrintPage() {
             {t('partyPrint.step.arrange')}
           </h2>
           <p className="party-print-hint">
-            {t(product === 'grid4' ? 'partyPrint.arrangeHelpGrid' : 'partyPrint.arrangeHelp')}
+            {t(product === 'grid4'
+              ? 'partyPrint.arrangeHelpGrid'
+              : sameStrip ? 'partyPrint.arrangeHelpStripSame' : 'partyPrint.arrangeHelp')}
           </p>
           {/* Reordering is BUTTONS, not only dragging: the order is part of the
               composition, and it must be reachable by keyboard, by screen
@@ -1110,6 +1135,20 @@ export function PartyPrintPage() {
             );
             // The twin strip is two strips: the first four on one, the next
             // four on the other — shown as the two groups they will be.
+            if (sameStrip) {
+              return (
+                <section
+                  className="party-print-order-group"
+                  aria-labelledby="party-print-strip-heading-same"
+                  data-testid="party-print-order-strip-same"
+                >
+                  <h3 className="party-print-order-heading" id="party-print-strip-heading-same">
+                    {t('partyPrint.sameStrip')}
+                  </h3>
+                  <ol className="party-print-order">{chosen.map(row)}</ol>
+                </section>
+              );
+            }
             return product === 'twinStrip4'
               ? [0, 1].map((strip) => (
                 <section

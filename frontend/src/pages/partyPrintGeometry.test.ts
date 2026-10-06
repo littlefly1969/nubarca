@@ -19,6 +19,7 @@ import {
 
 /** Every constant this file mirrors, and where it is mirrored FROM. */
 const SERVER_GEOMETRY = 'src/NubArca.Api/Print/PartyPrintGeometry.cs';
+const SERVER_LAYOUTS = 'src/NubArca.Api/Print/PrintLayouts.cs';
 const SERVER_LIMITS = 'src/NubArca.Api/Domain/Print/PartyPrintProfile.cs';
 const SERVER_QR_CARD = 'src/NubArca.Api/Print/PartyQrCard.cs';
 
@@ -31,12 +32,15 @@ describe('party print geometry', () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const source = readFileSync(resolve(process.cwd(), '..', SERVER_GEOMETRY), 'utf8');
+    // WHERE things sit is the shared catalogue's (PrintLayouts.cs, held to
+    // @nubarca/contracts by printLayouts.cases.json); the party's decoration is
+    // PartyPrintGeometry.cs. A number is read from whichever of the two holds it.
+    const layouts = readFileSync(resolve(process.cwd(), '..', SERVER_LAYOUTS), 'utf8');
 
     const constant = (name: string): number => {
-      const match = source.match(
-        new RegExp(`${name}\\s*=\\s*([0-9.]+)`),
-      );
-      if (!match) throw new Error(`${name} is no longer in ${SERVER_GEOMETRY}`);
+      const pattern = new RegExp(`${name}\\s*=\\s*([0-9.]+)`);
+      const match = source.match(pattern) ?? layouts.match(pattern);
+      if (!match) throw new Error(`${name} is in neither ${SERVER_GEOMETRY} nor ${SERVER_LAYOUTS}`);
       return Number(match[1]);
     };
 

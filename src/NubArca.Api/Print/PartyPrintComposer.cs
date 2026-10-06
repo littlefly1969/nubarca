@@ -205,7 +205,7 @@ public sealed class PartyPrintComposer
             PartyPrintOrientation.Landscape => false,
             _ => source.Height >= source.Width,
         };
-        var (w, h) = PartyPrintGeometry.Sheet(composition.Paper, portrait);
+        var (w, h) = PrintLayouts.Sheet(composition.Paper, portrait);
 
         var sheet = new Image<Rgba32>(w, h);
         var palette = Palette(composition.Theme);
@@ -214,10 +214,10 @@ public sealed class PartyPrintComposer
         // Short edge, not height: see PhotoFooterFraction. The sheet turns; the
         // strip of paper under the photograph must not.
         DrawFramed(sheet, source, photo,
-            ToPixels(PartyPrintGeometry.PhotoSlot(composition.Paper, portrait), w, h),
+            ToPixels(PrintLayouts.PhotoSlot(composition.Paper, portrait), w, h),
             composition.Theme, palette);
         DrawFooter(sheet, composition, palette,
-            ToPixels(PartyPrintGeometry.PhotoFooter(composition.Paper, portrait), w, h));
+            ToPixels(PrintLayouts.PhotoFooter(composition.Paper, portrait), w, h));
         return sheet;
     }
 
@@ -234,46 +234,31 @@ public sealed class PartyPrintComposer
     /// the order the guest arranged. Each keeps its own crop. One footer signs
     /// the sheet. No cut marks: nothing here is meant to be cut.
     /// </summary>
-    private Image<Rgba32> RenderGrid4(PartyPrintComposition composition)
-    {
-        var paper = composition.Paper;
-        var (w, h) = PartyPrintGeometry.Sheet(paper, PartyPrintGeometry.GridPortrait(paper));
-        var sheet = new Image<Rgba32>(w, h);
-        var palette = Palette(composition.Theme);
-        sheet.Mutate(x => x.Fill(palette.Background));
-
-        var sources = composition.Photos
-            .Select(p => (Photo: p, Image: LoadOriented(p.Bytes)))
-            .ToList();
-        try
-        {
-            for (var index = 0; index < 4; index++)
-            {
-                var (photo, image) = sources[index % sources.Count];
-                DrawFramed(sheet, image, photo,
-                    ToPixels(PartyPrintGeometry.GridSlot(paper, index), w, h), composition.Theme, palette);
-            }
-            DrawFooter(sheet, composition, palette, ToPixels(PartyPrintGeometry.GridFooter(paper), w, h));
-            return sheet;
-        }
-        finally
-        {
-            foreach (var (_, image) in sources) image.Dispose();
-        }
-    }
+    private Image<Rgba32> RenderGrid4(PartyPrintComposition composition) =>
+        RenderSlots(composition, PrintLayouts.Grid4, strip: false);
 
     // --- Two strips of four, cut apart by the printer -------------------------
 
     /// <summary>
     /// The twin strip: two strips of four on one portrait 10x15, photographs
-    /// 1–4 on the left and 5–8 on the right. The printer cuts the sheet in two,
-    /// so it carries no marks to cut along — a tick would sit exactly under the
+    /// 1–4 on the left and 5–8 on the right — or the same four on both, one
+    /// strip to keep and one to give. The printer cuts the sheet in two, so it
+    /// carries no marks to cut along — a tick would sit exactly under the
     /// blade, and a cut a fraction of a millimetre off would leave it on a strip.
     /// </summary>
-    private Image<Rgba32> RenderStrip(PartyPrintComposition composition)
+    private Image<Rgba32> RenderStrip(PartyPrintComposition composition) =>
+        RenderSlots(composition, PrintLayouts.TwinStrip4, strip: true);
+
+    /// <summary>
+    /// A sheet of several photographs, laid out by the catalogue: each slot in
+    /// the order they were arranged — a twin strip's first strip, then its
+    /// second, which repeats the first when only four were given — and the
+    /// bands that sign it.
+    /// </summary>
+    private Image<Rgba32> RenderSlots(PartyPrintComposition composition, string layout, bool strip)
     {
-        const int w = PartyPrintGeometry.PortraitWidth;
-        const int h = PartyPrintGeometry.PortraitHeight;
+        var arranged = PrintLayouts.Arrange(layout, PrintLayouts.Framed, composition.Paper, portrait: true);
+        var (w, h) = (arranged.Width, arranged.Height);
         var sheet = new Image<Rgba32>(w, h);
         var palette = Palette(composition.Theme);
         sheet.Mutate(x => x.Fill(palette.Background));
@@ -283,26 +268,15 @@ public sealed class PartyPrintComposer
             .ToList();
         try
         {
-            // Eight photographs, four per strip: one sheet, two keepsakes.
-            for (var strip = 0; strip < PartyPrintGeometry.StripsPerSheet; strip++)
+            for (var index = 0; index < arranged.Slots.Count; index++)
             {
-                for (var slotIndex = 0; slotIndex < PartyPrintGeometry.SlotsPerStrip; slotIndex++)
-                {
-                    var (fx, fy, fw, fh) = PartyPrintGeometry.StripSlot(strip, slotIndex);
-                    var rect = new Rectangle(
-                        (int)Math.Round(fx * w), (int)Math.Round(fy * h),
-                        (int)Math.Round(fw * w), (int)Math.Round(fh * h));
-                    // Strip 0 takes photographs 1–4, strip 1 takes 5–8. A
-                    // composition of only four (an older client) repeats them.
-                    var (photo, image) = sources[
-                        ((strip * PartyPrintGeometry.SlotsPerStrip) + slotIndex) % sources.Count];
-                    DrawFramed(sheet, image, photo, rect, composition.Theme, palette);
-                }
-
-                DrawFooter(sheet, composition, palette,
-                    ToPixels(PartyPrintGeometry.StripFooter(strip), w, h), strip: true);
+                var (photo, image) = sources[index % sources.Count];
+                DrawFramed(sheet, image, photo, ToPixels(arranged.Slots[index], w, h), composition.Theme, palette);
             }
-
+            foreach (var band in arranged.Bands)
+            {
+                DrawFooter(sheet, composition, palette, ToPixels(band, w, h), strip);
+            }
             return sheet;
         }
         finally
@@ -322,8 +296,8 @@ public sealed class PartyPrintComposer
     /// </summary>
     private Image<Rgba32> RenderQrCard(PartyQrCardComposition card)
     {
-        const int w = PartyPrintGeometry.PortraitWidth;
-        const int h = PartyPrintGeometry.PortraitHeight;
+        const int w = PrintLayouts.PortraitWidth;
+        const int h = PrintLayouts.PortraitHeight;
         var sheet = new Image<Rgba32>(w, h);
         var palette = Palette(PartyPrintTheme.Pure);
         sheet.Mutate(x => x.Fill(palette.Background));
@@ -335,12 +309,12 @@ public sealed class PartyPrintComposer
         // host's line, no number.
         var foot = new PartyPrintComposition(
             Domain.Print.PartyPrintProducts.TwinStrip4, PartyPrintTheme.Pure, [photo], card.PartyName, FooterText: null);
-        for (var strip = 0; strip < PartyPrintGeometry.StripsPerSheet; strip++)
+        for (var strip = 0; strip < PrintLayouts.StripsPerSheet; strip++)
         {
             DrawFramed(sheet, source, photo, ToPixels(PartyPrintGeometry.QrCardCell(strip, 0), w, h),
                 PartyPrintTheme.Pure, palette);
             DrawQrCell(sheet, code, card.Line, ToPixels(PartyPrintGeometry.QrCardCell(strip, 1), w, h), palette);
-            DrawFooter(sheet, foot, palette, ToPixels(PartyPrintGeometry.StripFooter(strip), w, h), strip: true);
+            DrawFooter(sheet, foot, palette, ToPixels(PrintLayouts.StripFooter(strip), w, h), strip: true);
         }
         return sheet;
     }
@@ -429,7 +403,7 @@ public sealed class PartyPrintComposer
             PartyPrintOrientation.Landscape => false,
             _ => source.Height >= source.Width,
         };
-        var (w, h) = PartyPrintGeometry.Sheet(composition.Paper, portrait);
+        var (w, h) = PrintLayouts.Sheet(composition.Paper, portrait);
 
         var overlay = composition.Overlay ?? PartyPrintOverlay.Default;
         var ink = TextInk(overlay.Text);
