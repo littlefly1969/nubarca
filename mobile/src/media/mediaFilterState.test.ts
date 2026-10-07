@@ -186,3 +186,14 @@ test('a video-tab filter never rides a photo query', () => {
   // And it does not change the photo tab's generation either.
   assert.equal(generationOf(withVideoJunk), generationOf(photo));
 });
+
+test('removing semantic via chips, clear-all or sheet returns to canonical chronology', () => {
+  const semantic = { ...initialIdentity('image'), sort: 'name' as const, direction: 'asc' as const };
+  semantic.filters.photo.visualQuery = 'mare';
+  for (const physical of [withChipCleared(semantic, 'visual'), withFiltersCleared(semantic),
+    withFilters(semantic, initialIdentity('image').filters)]) {
+    assert.equal(physical.sort, 'datetaken');
+    assert.equal(physical.direction, 'desc');
+    assert.equal(physical.filters.photo.visualQuery, '');
+  }
+});

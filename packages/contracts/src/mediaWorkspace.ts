@@ -145,7 +145,7 @@ export function emptyIdentity(source: MediaWorkspaceSource): MediaWorkspaceIdent
     libraryScope: 'active',
     mediaKind: 'all',
     filters: emptyMediaFilters(),
-    sort: 'created',
+    sort: 'datetaken',
     direction: 'desc',
   };
 }
@@ -201,6 +201,16 @@ export function inertUnderSemantic(identity: MediaWorkspaceIdentity): FilterChip
 
 export function isSemanticActive(identity: MediaWorkspaceIdentity): boolean {
   return identity.filters.photo.visualQuery.trim().length > 0;
+}
+
+/** Leaving relevance-ranked results always restores the canonical timeline. */
+export function normalizeMediaWorkspaceTransition(
+  previous: MediaWorkspaceIdentity,
+  next: MediaWorkspaceIdentity,
+): MediaWorkspaceIdentity {
+  return isSemanticActive(previous) && !isSemanticActive(next)
+    ? { ...next, sort: 'datetaken', direction: 'desc' }
+    : next;
 }
 
 // Build the unified wire query for a given accumulator cursor (null = first

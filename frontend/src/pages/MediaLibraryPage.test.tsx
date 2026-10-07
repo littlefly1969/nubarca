@@ -98,3 +98,31 @@ describe('MediaLibraryPage — shared-album add context', () => {
     expect(screen.queryByTestId('library-add-context')).not.toBeInTheDocument();
   });
 });
+
+it.each(['name', 'created'] as const)('a scope remount after semantic search resets %s ascending to acquisition descending', async (sort) => {
+  const mock = installFetchMock({
+    'GET /api/media': () => jsonResponse(emptyPage),
+    'GET /api/people': () => jsonResponse([]),
+    'GET /api/media/semantic': () => jsonResponse({ items: [], nextCursor: null, total: 0, semanticStatus: 'ok' }),
+  });
+  render(<AuthedWrapper><MemoryRouter initialEntries={[`/media?sort=${sort}&direction=asc`]}><Routes>
+    <Route path="/media" element={<MediaLibraryPage key="active" scope="active" />} />
+    <Route path="/media/excluded" element={<MediaLibraryPage key="excluded" scope="excluded" />} />
+  </Routes></MemoryRouter></AuthedWrapper>);
+  await screen.findByTestId('ws-empty');
+  expect(screen.getByTestId('ws-sort').querySelector('select')).toHaveValue(`${sort}:asc`);
+  await userEvent.click(screen.getByTestId('ws-open-filters'));
+  await userEvent.type(await screen.findByTestId('filter-visual'), 'mare');
+  await userEvent.click(screen.getByTestId('filter-apply'));
+  await waitFor(() => expect(screen.queryByTestId('ws-sort')).not.toBeInTheDocument());
+  await userEvent.click(screen.getByRole('tab', { name: 'Esclusi' }));
+  await waitFor(() => {
+    const physical = mock.calls.filter((request) => request.url.startsWith('/api/media?')).at(-1)!;
+    const query = new URL(physical.url, 'http://localhost').searchParams;
+    expect(query.get('scope')).toBe('excluded');
+    expect(query.get('sort')).toBe('datetaken');
+    expect(query.get('direction')).toBe('desc');
+  });
+  expect(screen.getByTestId('ws-sort').querySelector('select')).toHaveValue('datetaken:desc');
+  expect(screen.queryByTestId('media-chip-visual')).not.toBeInTheDocument();
+});

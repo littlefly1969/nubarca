@@ -17,6 +17,7 @@ import {
   clearActiveFilters,
   clearChip,
   emptyIdentity,
+  normalizeMediaWorkspaceTransition,
   queryFingerprint,
   queryToWire,
   type FilterChipDescriptor,
@@ -37,10 +38,6 @@ export function initialIdentity(
 ): MediaWorkspaceIdentity {
   const identity = emptyIdentity(source);
   identity.mediaKind = kind;
-  // The phone's library default: newest capture first, matching what the tabs
-  // showed before filters existed.
-  identity.sort = 'datetaken';
-  identity.direction = 'desc';
   return identity;
 }
 
@@ -92,12 +89,12 @@ export function withChipCleared(
   identity: MediaWorkspaceIdentity,
   kind: FilterChipKind,
 ): MediaWorkspaceIdentity {
-  return { ...identity, filters: clearChip(identity.filters, kind) };
+  return normalizeMediaWorkspaceTransition(identity, { ...identity, filters: clearChip(identity.filters, kind) });
 }
 
 /** Clear everything meaningful for the current kind. */
 export function withFiltersCleared(identity: MediaWorkspaceIdentity): MediaWorkspaceIdentity {
-  return { ...identity, filters: clearActiveFilters(identity) };
+  return normalizeMediaWorkspaceTransition(identity, { ...identity, filters: clearActiveFilters(identity) });
 }
 
 /** Replace the filter block wholesale (what the sheet's "Apply" does). */
@@ -105,7 +102,7 @@ export function withFilters(
   identity: MediaWorkspaceIdentity,
   filters: MediaWorkspaceFilters,
 ): MediaWorkspaceIdentity {
-  return { ...identity, filters };
+  return normalizeMediaWorkspaceTransition(identity, { ...identity, filters });
 }
 
 // ── People selection helpers (§13) ──────────────────────────────────────────

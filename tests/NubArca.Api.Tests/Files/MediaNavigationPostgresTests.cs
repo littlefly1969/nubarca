@@ -130,6 +130,30 @@ public sealed class MediaNavigationPostgresTests(PostgresContainerFixture fixtur
         Assert.True(ImageCursor.TryParse(previous.NextCursor, out var next));
         var back = await files.ListMediaPageAsync(owner, 7, next, filters, MediaKindScope.Image, sort, direction);
         Assert.Equal(window.Items.Select(item => item.Id), back.Items.Select(item => item.Id));
+        if (sort == ImageSortField.DateTaken && direction == ImageSortDirection.Desc)
+        {
+            // Walk across every tied-date boundary in the production provider.
+            // Compare with PostgreSQL's own date/UUID order, not a client UUID
+            // comparer whose tie-break ordering could differ from the database.
+            var expected = await db.FileItems.Where(f => f.OwnerUserId == owner && f.PrivateVaultId == null)
+                .OrderByDescending(f => f.EffectiveDateTaken).ThenByDescending(f => f.Id)
+                .Select(f => f.Id).ToListAsync();
+            var paged = new List<Guid>();
+            ImageCursor? continuation = null;
+            do
+            {
+                var page = await files.ListMediaPageAsync(owner, 7, continuation, filters, MediaKindScope.Image, sort, direction);
+                paged.AddRange(page.Items.Select(item => item.Id));
+                Assert.True(paged.Count <= expected.Count, "Cursor pagination must not repeat a page.");
+                continuation = null;
+                if (page.NextCursor is not null)
+                {
+                    Assert.True(ImageCursor.TryParse(page.NextCursor, out continuation));
+                }
+            } while (continuation is not null);
+            Assert.Equal(expected, paged);
+            Assert.Equal(expected.Count, paged.Distinct().Count());
+        }
         Assert.Null(db.Database.CurrentTransaction);
         Assert.Equal(originalJit, await db.Database.SqlQueryRaw<string>("SELECT current_setting('jit') AS \"Value\"").SingleAsync());
     }

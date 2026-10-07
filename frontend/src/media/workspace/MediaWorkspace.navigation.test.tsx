@@ -57,11 +57,13 @@ it('resumes automatic previous paging after a failed previous read followed by a
   });
   await jump('2023-06');
   await screen.findByRole('button', { name: 'Mostra i contenuti precedenti' });
-  setIntersecting(previousSentinel(), true);
+  const sentinel = previousSentinel();
+  setIntersecting(sentinel, true);
   await screen.findByRole('button', { name: 'Riprova a caricare i contenuti precedenti' });
   await jump('2023-07');
-  // The same sentinel remains visible: a successful jump must resume the
-  // chain without requiring a fresh intersection event or a manual retry.
+  // Native observers deliver an initial intersection after re-observation.
+  // The jump must recover on this fresh evaluation, without a manual retry.
+  setIntersecting(previousSentinel(), true);
   await waitFor(() => expect(previousCalls).toBe(2));
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Riprova a caricare i contenuti precedenti' })).not.toBeInTheDocument());
 });
@@ -81,9 +83,11 @@ it.each(['abort', 'late failure'])('ignores an earlier-page %s that settles afte
   });
   await jump('2023-06');
   await screen.findByRole('button', { name: 'Mostra i contenuti precedenti' });
-  setIntersecting(previousSentinel(), true);
+  const sentinel = previousSentinel();
+  setIntersecting(sentinel, true);
   await waitFor(() => expect(previousCalls).toBe(1));
-  setIntersecting(previousSentinel(), false);
+  // The busy previous observer is disconnected; late callbacks must be inert.
+  setIntersecting(sentinel, false);
   await jump('2023-07');
   await screen.findByRole('button', { name: 'Mostra i contenuti precedenti' });
   if (settlement === 'late failure') await act(async () => settle!(jsonResponse({}, 503)));
