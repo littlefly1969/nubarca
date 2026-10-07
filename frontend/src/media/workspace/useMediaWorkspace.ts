@@ -314,7 +314,7 @@ export interface UseMediaWorkspaceOptions {
 export function useMediaWorkspace(
   { source, identity, onAuthError, translate }: UseMediaWorkspaceOptions,
 ): UseMediaWorkspaceResult {
-  const selection = useMediaSelection();
+  const selection = useMediaSelection({ explicitMode: true });
 
   const [items, setItems] = useState<MediaItem[]>([]);
   const [previousCursor, setPreviousCursor] = useState<string | null>(null);

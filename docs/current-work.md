@@ -125,6 +125,17 @@ is built is described by `ARCHITECTURE.md`.
   Public/member album projections keep their curated order and expose no new
   names or capture dates. PostgreSQL CI measures 50k/100k synthetic collections
   and retains full query plans; see [performance acceptance](media-navigation-performance.md).
+- Library and owner albums share explicit browse/select interaction modes:
+  ordinary taps open the viewer, touch/pen long-press selects, and selected ids
+  survive timeline jumps. Native scroll, pointer cancellation and movement cancel
+  pending holds. The full-width wall has a localized fast-navigation handle that
+  expands into an overlay, while context headers scroll away above compact sticky
+  kind/tools rows and one scrolling chip row. Mobile sort is hidden; secondary
+  scope/organization commands use overflow. The dock compensates its height and
+  the bottom safe area. Owner album Share remains first-class; content, copy,
+  print and settings are separate overflow commands. Photo Presentation uses the
+  current physical Foto result and is absent for All/Video and semantic
+  results. Recipient/public playback and access semantics remain separate.
 - Viewers: ONE engine (`src/mediaView`: zoomable photograph — pinch, double
   tap, pan — the stage filling the viewer so a picture stays whole in
   landscape, chrome that steps aside after 2.6 s, keys with keyboard ownership,

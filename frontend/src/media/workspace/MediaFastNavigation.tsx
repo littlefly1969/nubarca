@@ -3,6 +3,7 @@ import { ApiError, getMediaNavigation, type MediaNavigationBucket } from '@nubar
 import { Sheet } from '../../components/Overlay';
 import { useAppScrollViewport } from '../../components/appScroll';
 import { useI18n } from '../../i18n';
+import { Icon } from '../../components/icons/Icon';
 import { isSemanticActive, queryFingerprint, queryToWire, type MediaWorkspaceIdentity } from './mediaWorkspaceQuery';
 import { navigationIndexAt, navigationLabel } from './mediaNavigation';
 import './MediaFastNavigation.css';
@@ -30,6 +31,11 @@ export function MediaFastNavigation({ identity, revision, currentKey, busy, onJu
   const [choosing, setChoosing] = useState(false);
   const [choice, setChoice] = useState('');
   const [dragging, setDragging] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const interaction = useRef({ busy, choosing, dragging, feedback });
+  const keyboardUsing = useRef(false);
+  interaction.current = { busy, choosing, dragging, feedback };
   const drag = useRef<number | null>(null);
   const pending = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -43,6 +49,24 @@ export function MediaFastNavigation({ identity, revision, currentKey, busy, onJu
   jump.current = onJump;
   const fingerprint = queryFingerprint(identity);
   const enabled = canFastNavigate(identity);
+
+  function stopCollapse() {
+    if (collapseTimer.current) clearTimeout(collapseTimer.current);
+    collapseTimer.current = null;
+  }
+
+  function scheduleCollapse() {
+    stopCollapse();
+    collapseTimer.current = setTimeout(() => {
+      const live = interaction.current;
+      if (live.busy || live.choosing || live.dragging || live.feedback === 'loading' || live.feedback === 'error') return;
+      if (keyboardUsing.current && rail.current?.contains(document.activeElement)) return;
+      if (window.matchMedia?.('(hover: hover)').matches && rail.current?.contains(document.activeElement)) return;
+      setExpanded(false); setActiveIndex(null);
+    }, 2400);
+  }
+
+  useEffect(() => stopCollapse, []);
 
   useEffect(() => {
     const node = rail.current;
@@ -70,7 +94,7 @@ export function MediaFastNavigation({ identity, revision, currentKey, busy, onJu
       observer?.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [viewportRef, buckets.length, dragging]);
+  }, [viewportRef, buckets.length, dragging, expanded]);
 
   useEffect(() => {
     request.current += 1;
@@ -81,6 +105,8 @@ export function MediaFastNavigation({ identity, revision, currentKey, busy, onJu
     setFeedback('idle');
     setChoosing(false);
     setDragging(false);
+    setExpanded(false);
+    stopCollapse();
     drag.current = null;
     if (!enabled) return;
     let disposed = false;
@@ -119,10 +145,13 @@ export function MediaFastNavigation({ identity, revision, currentKey, busy, onJu
     const id = ++request.current;
     setActiveIndex(index);
     setFeedback('loading');
+    setExpanded(true);
+    stopCollapse();
     if (hideTimer.current) clearTimeout(hideTimer.current);
     const ok = await jump.current(key);
     if (id !== request.current) return;
     setFeedback(ok ? 'idle' : 'error');
+    if (ok) scheduleCollapse();
     if (ok) hideTimer.current = setTimeout(() => {
       if (drag.current === null) setActiveIndex(null);
     }, 1200);
@@ -137,7 +166,9 @@ export function MediaFastNavigation({ identity, revision, currentKey, busy, onJu
     timer.current = setTimeout(() => { void commit(pending.current); }, 180);
   }
 
-  function keyboard(event: KeyboardEvent<HTMLDivElement>) {
+  function keyboard(event: KeyboardEvent<HTMLElement>) {
+    keyboardUsing.current = true;
+    stopCollapse();
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault(); event.stopPropagation(); openChooser(); return;
     }
@@ -151,7 +182,7 @@ export function MediaFastNavigation({ identity, revision, currentKey, busy, onJu
     }
   }
 
-  function openChooser() { setChoice(selectedBucket?.key ?? buckets[0]?.key ?? ''); setChoosing(true); }
+  function openChooser() { stopCollapse(); setChoice(selectedBucket?.key ?? buckets[0]?.key ?? ''); setChoosing(true); }
 
   if (!enabled || (buckets.length < 2 && !indexError)) return null;
   if (indexError) return <aside className="media-fast-nav"><button type="button" className="media-fast-nav__retry"
@@ -163,13 +194,39 @@ export function MediaFastNavigation({ identity, revision, currentKey, busy, onJu
   const choiceYear = choice.slice(0, 4);
 
   return (
-    <aside ref={rail} className="media-fast-nav" data-dragging={dragging} aria-label={t('mediaNav.label')}>
-      <button type="button" className="media-fast-nav__choose" onClick={openChooser}
+    <aside ref={rail} className="media-fast-nav" data-dragging={dragging} data-expanded={expanded}
+      aria-label={t('mediaNav.label')}
+      onPointerDownCapture={() => { keyboardUsing.current = false; }}
+      onKeyDownCapture={() => { keyboardUsing.current = true; stopCollapse(); }}
+      onMouseEnter={() => { if (window.matchMedia?.('(hover: hover)').matches) { stopCollapse(); setExpanded(true); } }}
+      onMouseLeave={() => {
+        if (window.matchMedia?.('(hover: hover)').matches && !dragging && !busy && !choosing
+          && feedback !== 'loading' && feedback !== 'error'
+          && !rail.current?.contains(document.activeElement)) setExpanded(false);
+      }}
+      onFocusCapture={() => { if (window.matchMedia?.('(hover: hover)').matches) { stopCollapse(); setExpanded(true); } }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null) && !dragging && !busy && !choosing
+          && feedback !== 'loading' && feedback !== 'error') {
+          keyboardUsing.current = false;
+          if (window.matchMedia?.('(hover: hover)').matches) setExpanded(false);
+          else scheduleCollapse();
+        }
+      }}>
+      <button type="button" className="media-fast-nav__handle" aria-label={t('mediaNav.open')}
+        aria-expanded={expanded} data-testid="media-navigation-handle"
+        onClick={() => { setExpanded(true); scheduleCollapse(); }}
+        onKeyDown={(event) => {
+          if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'PageDown', 'PageUp'].includes(event.key)) {
+            setExpanded(true); keyboard(event);
+          }
+        }}><Icon name={identity.sort === 'name' ? 'sort' : 'calendar'} /></button>
+      <button type="button" className="media-fast-nav__choose" hidden={!expanded} onClick={openChooser}
         aria-label={t('mediaNav.goTo')} title={t('mediaNav.goTo')}>
         {dateMode ? <><span>{selectedBucket.key.slice(0, 4)}</span><span>{navigationLabel(selectedBucket.key, lang, true).replace(selectedBucket.key.slice(0, 4), '').trim()}</span></>
           : navigationLabel(selectedBucket.key, lang)}
       </button>
-      <div className="media-fast-nav__track" role="slider" tabIndex={0}
+      <div className="media-fast-nav__track" role="slider" tabIndex={0} hidden={!expanded}
         aria-label={t(dateMode ? 'mediaNav.timeline' : 'mediaNav.alphabet')}
         aria-orientation="vertical" aria-valuemin={0} aria-valuemax={buckets.length - 1}
         aria-valuenow={selected} aria-valuetext={navigationLabel(selectedBucket.key, lang)}
@@ -177,6 +234,7 @@ export function MediaFastNavigation({ identity, revision, currentKey, busy, onJu
         onPointerDown={(event) => {
           if (!event.isPrimary || event.button !== 0) return;
           event.preventDefault();
+          stopCollapse();
           event.currentTarget.focus();
           drag.current = event.pointerId;
           dragGeometry.current = event.currentTarget.getBoundingClientRect();
@@ -193,11 +251,19 @@ export function MediaFastNavigation({ identity, revision, currentKey, busy, onJu
           dragGeometry.current = null;
           event.currentTarget.releasePointerCapture(event.pointerId);
           void commit(pending.current);
+          scheduleCollapse();
         }}
         onPointerCancel={() => {
           if (timer.current) clearTimeout(timer.current);
           drag.current = null; setDragging(false); setActiveIndex(null);
           dragGeometry.current = null;
+          scheduleCollapse();
+        }}
+        onLostPointerCapture={(event) => {
+          if (drag.current !== event.pointerId) return;
+          if (timer.current) clearTimeout(timer.current);
+          drag.current = null; setDragging(false); setActiveIndex(null);
+          dragGeometry.current = null; scheduleCollapse();
         }}>
         <span className="media-fast-nav__line" aria-hidden="true" />
         {labels.map((index) => <span className="media-fast-nav__tick" key={index}
@@ -220,7 +286,7 @@ export function MediaFastNavigation({ identity, revision, currentKey, busy, onJu
             onClick={() => { void commit(selected, true); }}>{t('common.tryAgain')}</button>}
         </div>}
       </div>
-      {choosing && <Sheet title={t('mediaNav.goTo')} onClose={() => setChoosing(false)} layer="workspace" ownsKeyboard
+      {choosing && <Sheet title={t('mediaNav.goTo')} onClose={() => { setChoosing(false); scheduleCollapse(); }} layer="workspace" ownsKeyboard
         className="media-navigation-sheet" testId="media-navigation-sheet">
         <form className="media-fast-nav__form" onSubmit={(event) => {
           event.preventDefault(); setChoosing(false); committed.current = null;

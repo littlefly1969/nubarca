@@ -13,7 +13,12 @@ import { useCallback, useRef, useState } from 'react';
 //   * The per-tile checkbox (always visible on touch / in selection mode,
 //     hover-visible on desktop) toggles that tile — Shift extends a range.
 //   * Escape clears; Ctrl/Cmd+A selects all currently-visible ids.
+// The unified workspace opts into explicit browse/select modes: ordinary taps
+// toggle in select mode, even at zero selected items. Other callers retain their
+// existing plain-click viewer behavior.
 export interface MediaSelection {
+  mode: 'browse' | 'select';
+  enterSelection(id?: string): void;
   selected: ReadonlySet<string>;
   count: number;
   isSelectionActive: boolean;
@@ -33,22 +38,26 @@ export interface MediaSelection {
   toggleViaControl(id: string, index: number, orderedIds: readonly string[], shift: boolean): void;
 }
 
-export function useMediaSelection(): MediaSelection {
+export function useMediaSelection({ explicitMode = false }: { explicitMode?: boolean } = {}): MediaSelection {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [mode, setMode] = useState<'browse' | 'select'>('browse');
   // Identity of the last individually-toggled tile: paging and jumps change indexes.
   const anchorRef = useRef<string | null>(null);
 
   const clear = useCallback(() => {
+    setMode('browse');
     anchorRef.current = null;
     setSelected((prev) => (prev.size === 0 ? prev : new Set()));
   }, []);
 
   const selectAll = useCallback((ids: string[]) => {
+    setMode(ids.length > 0 ? 'select' : 'browse');
     setSelected(new Set(ids));
     anchorRef.current = ids[0] ?? null;
   }, []);
 
   const toggleOne = useCallback((id: string) => {
+    setMode('select');
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -59,6 +68,7 @@ export function useMediaSelection(): MediaSelection {
   }, []);
 
   const selectRange = useCallback((index: number, orderedIds: readonly string[]) => {
+    setMode('select');
     const held = anchorRef.current === null ? -1 : orderedIds.indexOf(anchorRef.current);
     const anchor = held >= 0 ? held : index;
     const from = Math.min(anchor, index);
@@ -83,13 +93,13 @@ export function useMediaSelection(): MediaSelection {
         selectRange(index, orderedIds);
         return 'selected';
       }
-      if (modifiers.ctrlOrMeta) {
+      if (modifiers.ctrlOrMeta || (explicitMode && mode === 'select')) {
         toggleOne(id);
         return 'selected';
       }
       return 'open';
     },
-    [selectRange, toggleOne],
+    [selectRange, toggleOne, explicitMode, mode],
   );
 
   const toggleViaControl = useCallback(
@@ -103,10 +113,20 @@ export function useMediaSelection(): MediaSelection {
     [selectRange, toggleOne],
   );
 
+  const enterSelection = useCallback((id?: string) => {
+    setMode('select');
+    if (id !== undefined) {
+      anchorRef.current = id;
+      setSelected((prev) => new Set([...prev, id]));
+    }
+  }, []);
+
   return {
+    mode,
+    enterSelection,
     selected,
     count: selected.size,
-    isSelectionActive: selected.size > 0,
+    isSelectionActive: explicitMode ? mode === 'select' : selected.size > 0,
     isSelected: (id: string) => selected.has(id),
     clear,
     selectAll,

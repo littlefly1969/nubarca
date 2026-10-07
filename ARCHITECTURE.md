@@ -944,6 +944,31 @@ Large lists use opaque seek cursors bound to the requested sort, direction, scop
 
 Semantic retrieval is not allowed to widen physical access. Date, person, favorite, media type, album, library scope, owner, active state, and Vault exclusion are applied before semantic ranking. The text embedding ranks only the already-authorized candidate set.
 
+### 13.5 Owner workspace interaction and chrome
+
+Library and owner albums share explicit `browse`/`select` interaction modes.
+Browse taps open the viewer without persistent selection controls; a primary
+touch/pen hold of 480 ms enters select mode and selects that media. Movement over
+10 px, native scroll, pointer cancellation and loss of capture cancel the hold;
+the click following a completed hold is consumed. Select mode survives an empty
+selection and timeline jumps until explicitly cleared. Ctrl/Cmd toggling and
+Shift ranges retain identity anchors across paging; cached selected media from
+earlier windows remain available to bulk actions.
+
+Context headers scroll away. Only media-kind tabs, one tool row and a single
+horizontally scrolling chip row stay sticky. Mobile scope and organization
+commands live in overflow; physical sort remains a desktop option. The localized
+fast-navigation handle expands into an overlay on the full-width wall, never a
+reserved column or an invisible full-height gesture target. Dragging, keyboard
+focus and pending/retry feedback keep navigation usable before it collapses.
+The selection dock compensates the wall's bottom padding and iOS safe area.
+
+The owner album header exposes Share beside overflow for content management,
+sending an independent copy, printing and settings. Photo Presentation belongs
+to the physical Foto result, with the current filters and loaded/paged sequence;
+it is absent for All, Video and semantic results. Recipient/public
+album playback, permissions and sharing/copy semantics are separate and unchanged.
+
 ## 14. Albums, shares, and Party
 
 ### 14.1 Albums

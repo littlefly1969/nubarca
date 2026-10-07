@@ -49,6 +49,8 @@ beforeEach(() => {
 
 function makeSelection(over: Partial<MediaSelection> = {}): MediaSelection {
   return {
+    mode: 'browse',
+    enterSelection: vi.fn(),
     selected: new Set(),
     count: 0,
     isSelectionActive: false,

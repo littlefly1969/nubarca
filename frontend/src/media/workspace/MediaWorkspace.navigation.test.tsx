@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -30,12 +30,14 @@ async function setup(handler: MockHandler) {
   });
   render(<MemoryRouter><AuthedWrapper><MediaWorkspace source={source}
     identity={{ ...emptyIdentity(source), sort: 'datetaken' }} onIdentityChange={vi.fn()} searchPlaceholder="Cerca" /></AuthedWrapper></MemoryRouter>);
+  await userEvent.click(await screen.findByTestId('media-navigation-handle'));
   await screen.findByRole('slider', {}, { timeout: 5000 });
   return mock;
 }
 
 async function jump(month: string) {
   const user = userEvent.setup();
+  await user.click(screen.getByTestId('media-navigation-handle'));
   await user.click(screen.getByRole('button', { name: 'Vai a…' }));
   const dialog = await screen.findByRole('dialog');
   await user.selectOptions(within(dialog).getByLabelText('Mese'), month);
@@ -45,6 +47,30 @@ async function jump(month: string) {
 function previousSentinel() {
   return activeIntersectionObservers().find((observer) => observer.rootMargin === '240px 0px')!.elements[0];
 }
+
+it('preserves long-press selection through a timeline jump and selects a second month', async () => {
+  class TouchPointerEvent extends MouseEvent {
+    pointerId = 1; isPrimary = true; pointerType = 'touch';
+  }
+  vi.stubGlobal('PointerEvent', TouchPointerEvent);
+  await setup(() => jsonResponse({ items: [photo('B')], nextCursor: null, previousCursor: null }));
+  const tileA = screen.getAllByTestId('media-open')[0];
+  vi.useFakeTimers();
+  fireEvent.pointerDown(tileA, { button: 0 });
+  act(() => vi.advanceTimersByTime(480));
+  fireEvent.pointerUp(tileA); fireEvent.click(tileA);
+  vi.useRealTimers();
+  expect(screen.getByTestId('media-selection-count')).toHaveTextContent('1');
+  await jump('2023-07');
+  const tileB = await screen.findByRole('button', { name: 'Seleziona B' });
+  await userEvent.click(tileB);
+  expect(screen.getByTestId('media-selection-count')).toHaveTextContent('2');
+  expect(tileB).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.queryByTestId('media-viewer')).not.toBeInTheDocument();
+  await userEvent.click(screen.getByTestId('media-sel-clear'));
+  expect(screen.queryByTestId('media-selection-bar')).not.toBeInTheDocument();
+  expect(tileB).not.toHaveAttribute('aria-pressed');
+});
 
 it('resumes automatic previous paging after a failed previous read followed by a successful jump', async () => {
   let previousCalls = 0;

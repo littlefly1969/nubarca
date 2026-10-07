@@ -17,9 +17,10 @@ import type { MediaSelectionActionId, MediaSelectionActionModel } from './mediaS
 // model, so a mixed selection never sees a photo-only destination and a user
 // without private-vault.access never sees Personal.
 //
-// Renders nothing when the selection is empty.
+// Explicit selection mode keeps the dock available even at zero selected items.
 
 interface Props {
+  active?: boolean;
   count: number;
   busy: boolean;
   actions: MediaSelectionActionModel;
@@ -29,10 +30,10 @@ interface Props {
 }
 
 export function MediaWorkspaceSelectionBar({
-  count, busy, actions, restoreBusy = false, onAction, onClear,
+  count, busy, actions, restoreBusy = false, onAction, onClear, active = count > 0,
 }: Props) {
   const { t, tn } = useI18n();
-  if (count === 0) return null;
+  if (!active) return null;
 
   const label = tn(count, 'gallerySel.itemsSelected');
 
@@ -45,6 +46,7 @@ export function MediaWorkspaceSelectionBar({
     >
       <span className="ws-dock-count" data-testid="media-selection-count">
         <Icon name="check" size={15} />
+        <span className="ws-dock-count-number" aria-hidden="true">{count}</span>
         <span className="ws-dock-count-text">{label}</span>
       </span>
 
