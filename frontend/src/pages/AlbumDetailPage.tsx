@@ -16,6 +16,8 @@ import { AlbumSharePanel } from '../albums/AlbumSharePanel';
 import { AlbumSharedContentPanel } from '../albums/AlbumSharedContentPanel';
 import { AlbumCopyPanel } from '../albums/AlbumCopyPanel';
 import { MediaWorkspace } from '../media/workspace/MediaWorkspace';
+import { WorkspaceMenu } from '../media/workspace/WorkspaceMenu';
+import { Icon } from '../components/icons/Icon';
 import {
   filtersToUrlParams,
   identityFromUrlParams,
@@ -42,7 +44,7 @@ export function AlbumDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [status, setStatus] = useState<HeaderStatus>({ kind: 'loading' });
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const overflowButtonRef = useRef<HTMLButtonElement>(null);
   // SHARE-ALBUM-01: sharing is its OWN entry point, not a row buried in
   // Settings next to Show-on-TV and Party. Those grant public/device
   // visibility; this grants a named person an authenticated, revocable
@@ -54,7 +56,6 @@ export function AlbumDetailPage() {
   // members, so an unshared album keeps exactly the surface it had before and
   // there are never two near-identical views of the same album on screen.
   const [contentOpen, setContentOpen] = useState(false);
-  const contentButtonRef = useRef<HTMLButtonElement>(null);
   // SHARE-COPY-01: "Send a copy" is its OWN entry point, next to but distinct
   // from "Share". Sharing grants revocable access to media that stays yours;
   // sending a copy gives away an independent album you can never take back.
@@ -65,7 +66,6 @@ export function AlbumDetailPage() {
   // SharedAlbumDetailPage instead — so the button is owner-only by construction,
   // and the backend answers any other caller with a 404 regardless.
   const [copyOpen, setCopyOpen] = useState(false);
-  const copyButtonRef = useRef<HTMLButtonElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const source = useMemo<MediaWorkspaceSource>(
@@ -126,30 +126,13 @@ export function AlbumDetailPage() {
 
   return (
     <section className="ws-page-outer" data-testid="album-detail-page">
-      <header className="ws-page-header album-detail-header">
-        <Link to="/albums" className="back-link">{t('albumDetail.backToAlbums')}</Link>
+      <header className="ws-page-header album-detail-header album-owner-context">
         <div className="album-detail-title-row">
-          <div>
-            <h1>{album.name}</h1>
-            {album.description && <p className="album-description">{album.description}</p>}
-          </div>
+          <Link to="/albums" className="album-context-back" aria-label={t('albumDetail.backToAlbums')}>
+            <Icon name="chevron-left" />
+          </Link>
+          <h1 title={album.name}>{album.name}</h1>
           <div className="album-detail-header-actions">
-            {/* Always offered to the owner. This used to appear only once the
-                album had a member, which quietly made the album's own content
-                controls — reordering, editorial removal and CHOOSING THE COVER
-                — unreachable on an unshared album. The cover is not a sharing
-                concern: a party invitation shows the cover the host CHOSE and
-                nothing else, so a host with a private album had no way to give
-                their invitation a photograph at all. */}
-            <button
-              type="button"
-              ref={contentButtonRef}
-              className="row-action"
-              data-testid="album-open-content"
-              onClick={() => setContentOpen(true)}
-            >
-              {t('albumContent.tab')}
-            </button>
             <button
               type="button"
               ref={shareButtonRef}
@@ -159,35 +142,16 @@ export function AlbumDetailPage() {
             >
               {t('albumShare.openButton')}
             </button>
-            <button
-              type="button"
-              ref={copyButtonRef}
-              className="row-action"
-              data-testid="album-open-copy"
-              onClick={() => setCopyOpen(true)}
-            >
-              {t('albumCopy.openButton')}
-            </button>
-            {/* Always offered: the print studio opens on this album's
-                photographs — choosing first, as at a party. */}
-            <Link
-              to={`/print?album=${encodeURIComponent(album.id)}`}
-              className="row-action"
-              data-testid="album-open-print"
-            >
-              {t('ownerPrint.action')}
-            </Link>
-            <button
-              type="button"
-              ref={settingsButtonRef}
-              className="row-action"
-              data-testid="album-open-settings"
-              onClick={() => setSettingsOpen(true)}
-            >
-              {t('mediaWs.albumSettings')}
-            </button>
+            <WorkspaceMenu label={t('mediaWs.albumActions')} testId="album-more-actions" buttonRef={overflowButtonRef}
+              actions={[
+                { id: 'content', label: t('albumContent.tab'), icon: 'edit', testId: 'album-open-content', onSelect: () => setContentOpen(true) },
+                { id: 'copy', label: t('albumCopy.openButton'), icon: 'shares', testId: 'album-open-copy', onSelect: () => setCopyOpen(true) },
+                { id: 'print', label: t('ownerPrint.action'), icon: 'print', testId: 'album-open-print', href: `/print?album=${encodeURIComponent(album.id)}` },
+                { id: 'settings', label: t('mediaWs.albumSettings'), icon: 'info', testId: 'album-open-settings', onSelect: () => setSettingsOpen(true) },
+              ]} />
           </div>
         </div>
+        {album.description && <p className="album-description">{album.description}</p>}
       </header>
 
       {/* ONE heavy media surface at a time. While the content manager is open
@@ -202,12 +166,7 @@ export function AlbumDetailPage() {
           identity={identity}
           onIdentityChange={onIdentityChange}
           searchPlaceholder={t('mediaWs.searchAlbum')}
-          // Album Play, the same control a recipient gets on a shared album. It
-          // plays the CURRENT result — tab, search and filters included — and
-          // mutates nothing, which is what makes it safe to offer on both sides.
-          // It is not Party and it is not Show-on-TV: those stay in Settings,
-          // where publishing decisions belong.
-          showPlay
+          showPhotoPresentation
         />
       )}
 
@@ -225,7 +184,7 @@ export function AlbumDetailPage() {
           albumId={albumId}
           albumName={album.name}
           onClose={() => setCopyOpen(false)}
-          returnFocusRef={copyButtonRef}
+          returnFocusRef={overflowButtonRef}
         />
       )}
 
@@ -233,7 +192,7 @@ export function AlbumDetailPage() {
         <AlbumSharedContentPanel
           albumId={albumId}
           onClose={() => setContentOpen(false)}
-          returnFocusRef={contentButtonRef}
+          returnFocusRef={overflowButtonRef}
         />
       )}
 
@@ -246,7 +205,7 @@ export function AlbumDetailPage() {
           onPartyUpdated={(updatedParty) => setStatus({ kind: 'ready', album, party: updatedParty })}
           onDeleted={() => navigate('/albums')}
           onClose={() => setSettingsOpen(false)}
-          returnFocusRef={settingsButtonRef}
+          returnFocusRef={overflowButtonRef}
         />
       )}
     </section>

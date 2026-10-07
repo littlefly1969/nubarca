@@ -75,12 +75,7 @@ interface Props {
   // Album-context callback so the page can refresh its header counts/cover after
   // a membership change. Ignored for the library source.
   onAlbumMembershipChanged?(): void;
-  // Offer album Play: open the CURRENT sequence and walk it, photos for a
-  // bounded moment and videos until they end. A pure viewer operation — it
-  // mutates nothing, which is why the shared album offers the identical control.
-  // Off for the library, where "play my whole library" is not a thing anybody
-  // asked for.
-  showPlay?: boolean;
+  showPhotoPresentation?: boolean;
   // An album the destination picker should open already pointing at — set when
   // the user arrived here from a shared album's "Add from library". It only
   // preselects: the Library stays the ordinary Library, and every other
@@ -95,7 +90,7 @@ export function MediaWorkspace({
   searchPlaceholder,
   photoDestinations = [],
   onAlbumMembershipChanged,
-  showPlay = false,
+  showPhotoPresentation = false,
   preselectedAlbumId,
 }: Props) {
   const { t, tn } = useI18n();
@@ -287,7 +282,7 @@ export function MediaWorkspace({
   const anyOverlayOpen = viewer.isOpen || sheetOpen || trashOpen || pickerOpen || moveToPersonal.isOpen || moveToExcluded.isOpen;
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape' && !anyOverlayOpen && selection.count > 0) { selection.clear(); return; }
+      if (e.key === 'Escape' && !anyOverlayOpen && selection.isSelectionActive) { selection.clear(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
         const tag = (e.target as HTMLElement | null)?.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
@@ -499,7 +494,8 @@ export function MediaWorkspace({
   }
 
   return (
-    <section className={`ws-page${selection.isSelectionActive ? ' has-bulk-bar' : ''}`} aria-busy={ws.loading}>
+    <section className={`ws-page media-workspace${selection.isSelectionActive ? ' has-bulk-bar' : ''}`}
+      data-interaction-mode={selection.mode} aria-busy={ws.loading}>
       {/* Everything that describes or changes the current result, as ONE region.
           On desktop it stays put at the top of the application scroll viewport
           while the wall passes underneath, so a user thousands of pixels into a
@@ -513,15 +509,15 @@ export function MediaWorkspace({
             panelId={PANEL_ID}
             counts={ws.total !== null ? { all: ws.total, image: ws.photoCount ?? 0, video: ws.videoCount ?? 0 } : null}
           />
-          {showPlay && (
+          {showPhotoPresentation && identity.mediaKind === 'image' && !semantic && (
             <button
               type="button"
               className="row-action album-play-button"
-              data-testid="album-play"
+              data-testid="album-presentation"
               disabled={ws.items.length === 0}
               onClick={() => play.start(0)}
             >
-              {t('albumPlay.start')}
+              {t('mediaWs.presentation')}
             </button>
           )}
         </div>
@@ -540,6 +536,9 @@ export function MediaWorkspace({
           onChangeSort={changeSort}
           scope={identity.libraryScope}
           onChangeScope={changeScope}
+          selectionMode={selection.isSelectionActive}
+          onEnterSelection={() => selection.enterSelection()}
+          onClearSelection={selection.clear}
           // Library only: album detail, shared albums and People grids pass
           // nothing, so the control does not exist there at all.
           unassignedOnly={source.kind === 'library'
@@ -597,6 +596,7 @@ export function MediaWorkspace({
                 items={ws.items}
                 orderedIds={ws.orderedIds}
                 selection={selection}
+                interactionMode={selection.mode}
                 onOpen={(index, atMs) => viewer.open(index, atMs)}
                 semanticTimestamps={semanticTimestamps}
                 semanticMatches={semanticMatches}
@@ -605,7 +605,8 @@ export function MediaWorkspace({
               />
             </div>
             {fastNavigation && <MediaFastNavigation identity={identity} revision={ws.navigationRevision}
-              currentKey={visibleKey} busy={ws.navigationBusy} onJump={jumpTo} onAuthError={invalidateAuth} />}
+              currentKey={visibleKey} busy={ws.navigationBusy} selectionActive={selection.isSelectionActive}
+              onJump={jumpTo} onAuthError={invalidateAuth} />}
           </div>
         )}
 
@@ -630,7 +631,7 @@ export function MediaWorkspace({
         <MediaViewer
           items={viewerItems}
           index={viewer.index}
-          onClose={viewer.close}
+          onClose={() => { play.stop(); viewer.close(); }}
           onIndexChange={viewer.setIndex}
           onNearEnd={() => loadMoreRef.current()}
           playback={play.active || play.finished
@@ -669,6 +670,7 @@ export function MediaWorkspace({
       )}
 
       <MediaWorkspaceSelectionBar
+        active={selection.isSelectionActive}
         count={selection.count}
         busy={busy}
         actions={actionModel}

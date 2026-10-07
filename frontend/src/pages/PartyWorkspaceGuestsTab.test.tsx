@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { AuthedWrapper, installFetchMock, jsonResponse } from '../test-utils';
@@ -86,6 +86,7 @@ it('asks the guest list for NUMBERS, and for names only when the host opens it',
   // The summary needs the counts, and asks for exactly those: `take: 0` is the
   // totals alone. No card, no person, no name reaches a page that is not the
   // console — which is what keeps the guest list out of every other surface.
+  await waitFor(() => expect(directoryQueries(mock).length).toBeGreaterThan(0));
   const beforeOpening = directoryQueries(mock);
   expect(beforeOpening.length).toBeGreaterThan(0);
   expect(beforeOpening.every((q) => q.take === 0)).toBe(true);

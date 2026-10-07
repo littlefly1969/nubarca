@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { AlbumDetailPage } from './AlbumDetailPage';
@@ -69,6 +69,46 @@ function wrapper(albumId = 'album-1') {
 }
 
 describe('AlbumDetailPage', () => {
+  it('keeps Share first-class and exposes distinct secondary commands through overflow', async () => {
+    installFetchMock(baseHandlers({ 'GET /api/albums/album-1': () => jsonResponse({ ...album, name: 'Un titolo molto lungo per un album di fotografie e ricordi' }) }));
+    render(wrapper());
+    await screen.findByRole('heading', { name: /Un titolo molto lungo/ });
+    expect(screen.getByTestId('album-open-share')).toHaveTextContent('Condividi');
+    expect(screen.queryByTestId('album-open-copy')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('album-more-actions'));
+    const menu = within(screen.getByRole('menu', { name: 'Altre azioni album' }));
+    for (const id of ['content', 'copy', 'print', 'settings']) expect(menu.getByTestId(`album-open-${id}`)).toBeVisible();
+    expect(menu.queryByTestId('album-open-share')).not.toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.getByTestId('album-more-actions')).toHaveFocus();
+  });
+
+  it('offers presentation only for physical photos, using the current filtered results', async () => {
+    const filtered = { ...mediaItem, id: 'filtered', name: 'filtered.jpg', displayName: 'filtered.jpg' };
+    const mock = installFetchMock(baseHandlers({
+      'GET /api/albums/album-1/media': (request) => {
+        const query = new URL((request as { url: string }).url, 'http://localhost').searchParams;
+        return jsonResponse({ ...mediaPage, items: [query.get('q') === 'filtered' ? filtered : mediaItem] });
+      },
+      'GET /api/files/filtered/metadata': () => jsonResponse({}, 404),
+    }));
+    render(wrapper());
+    await screen.findByText('photo.jpg');
+    expect(screen.queryByTestId('album-presentation')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('media-kind-tab-video'));
+    expect(screen.queryByTestId('album-presentation')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('media-kind-tab-image'));
+    await userEvent.type(screen.getByTestId('ws-search-input'), 'filtered{Enter}');
+    await screen.findByText('filtered.jpg');
+    const before = mock.calls.filter((request) => request.url.includes('/media?')).map((request) => request.url);
+    await userEvent.click(screen.getByTestId('album-presentation'));
+    expect(await screen.findByTestId('media-viewer-image')).toHaveAttribute('src', '/api/files/filtered/preview');
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('media-viewer')).not.toBeInTheDocument());
+    expect(screen.getByTestId('ws-search-input')).toHaveValue('filtered');
+    expect(screen.getByTestId('media-kind-tab-image')).toHaveAttribute('aria-selected', 'true');
+    expect(mock.calls.filter((request) => request.url.includes('/media?')).map((request) => request.url)).toEqual(before);
+  });
   it('renders the album header and the workspace grid (mixed via /media)', async () => {
     installFetchMock(baseHandlers());
     render(wrapper());
@@ -82,12 +122,14 @@ describe('AlbumDetailPage', () => {
   // Album Play: the SAME control a recipient gets on a shared album, because it
   // is a viewer operation and mutates nothing. Deliberately not Party and not
   // Show-on-TV — those are publication decisions and stay in Settings.
-  it('offers Play, and playing opens the common viewer on the first item', async () => {
+  it('offers photo presentation only in Foto and opens the current result in the common viewer', async () => {
     installFetchMock(baseHandlers());
     render(wrapper());
 
     await screen.findByText('photo.jpg');
-    await userEvent.click(screen.getByTestId('album-play'));
+    expect(screen.queryByTestId('album-presentation')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('media-kind-tab-image'));
+    await userEvent.click(await screen.findByTestId('album-presentation'));
 
     expect(await screen.findByTestId('media-viewer')).toBeInTheDocument();
     expect(screen.getByTestId('media-viewer-image'))
@@ -102,6 +144,7 @@ describe('AlbumDetailPage', () => {
     installFetchMock(baseHandlers());
     render(wrapper());
     await screen.findByRole('heading', { name: 'My Album' });
+    await userEvent.click(screen.getByTestId('album-more-actions'));
     await userEvent.click(screen.getByTestId('album-open-settings'));
     const panel = await screen.findByTestId('album-settings-panel');
     expect(panel).toBeInTheDocument();
@@ -115,6 +158,7 @@ describe('AlbumDetailPage', () => {
     }));
     render(wrapper());
     await screen.findByRole('heading', { name: 'My Album' });
+    await userEvent.click(screen.getByTestId('album-more-actions'));
     await userEvent.click(screen.getByTestId('album-open-settings'));
     const tv = await screen.findByTestId('album-tv-toggle');
     expect(tv).not.toBeChecked();
@@ -129,6 +173,7 @@ describe('AlbumDetailPage', () => {
     }));
     render(wrapper());
     await screen.findByRole('heading', { name: 'My Album' });
+    await userEvent.click(screen.getByTestId('album-more-actions'));
     await userEvent.click(screen.getByTestId('album-open-settings'));
     await userEvent.click(await screen.findByTestId('album-delete'));
     expect(await screen.findByText('albums list')).toBeInTheDocument();
@@ -160,6 +205,7 @@ describe('AlbumDetailPage — the content panel is not a sharing feature', () =>
     render(wrapper());
 
     await screen.findByRole('heading', { name: 'My Album' });
+    await userEvent.click(screen.getByTestId('album-more-actions'));
     expect(screen.getByTestId('album-open-content')).toBeInTheDocument();
   });
 
@@ -171,6 +217,7 @@ describe('AlbumDetailPage — the content panel is not a sharing feature', () =>
     render(wrapper());
 
     await screen.findByRole('heading', { name: 'My Album' });
+    await userEvent.click(screen.getByTestId('album-more-actions'));
     await userEvent.click(screen.getByTestId('album-open-content'));
 
     expect(await screen.findByRole('heading', { name: 'Contenuto dell’album' }))
@@ -207,6 +254,7 @@ describe('AlbumDetailPage — one heavy media surface at a time', () => {
     expect(await screen.findByText('photo.jpg')).toBeInTheDocument();
     expect(screen.getByTestId('ws-sticky-chrome')).toBeInTheDocument();
 
+    await userEvent.click(screen.getByTestId('album-more-actions'));
     await userEvent.click(screen.getByTestId('album-open-content'));
     await screen.findByTestId('album-content-panel');
 

@@ -18,6 +18,7 @@ import { MEDIA_WALL_GAP_PX } from '../layout/mediaWallGeometry';
 import { useWallNavigation } from './useWallNavigation';
 import { useJustifiedWall } from '../layout/useJustifiedWall';
 import type { MediaSelection } from '../../gallery/useMediaSelection';
+import { useMediaLongPress } from './useMediaLongPress';
 
 // The full-width justified media wall. Photos and videos flow into justified
 // rows (each row spans the container, tiles keep their REAL aspect ratio — a
@@ -70,6 +71,7 @@ export type SemanticMatches = ReadonlyMap<string, SemanticTileMatches>;
 export type MediaTileBadges = ReadonlyMap<string, string>;
 
 interface GridProps {
+  interactionMode?: 'browse' | 'select';
   scrollTarget?: { id: string; revision: number } | null;
   onVisibleItem?(item: MediaItem): void;
   items: MediaItem[];
@@ -184,7 +186,7 @@ function DocumentScrolledWall(props: GridProps) {
 }
 
 function Wall({
-  items, orderedIds, selection, onOpen, semanticTimestamps, semanticMatches, badges,
+  items, orderedIds, selection, onOpen, semanticTimestamps, semanticMatches, badges, interactionMode,
   wallRef, measured, rows, virtualizer,
 }: GridProps & {
   wallRef: (node: HTMLDivElement | null) => void;
@@ -244,6 +246,7 @@ function Wall({
                 height={tile.height}
                 orderedIds={orderedIds}
                 selection={selection}
+                interactionMode={interactionMode}
                 onOpen={(atMs) => (atMs === undefined
                   // Ordinary opens must be indistinguishable from before —
                   // passing an explicit `undefined` would change the observed
@@ -263,6 +266,7 @@ function Wall({
 }
 
 interface TileProps {
+  interactionMode?: 'browse' | 'select';
   item: MediaItem;
   index: number;
   width: number;
@@ -281,12 +285,14 @@ interface TileProps {
 export function MediaTile({
   item, index, width, height, orderedIds, selection, onOpen, semanticMs = null,
   semanticMatches = null, badge = null,
+  interactionMode,
 }: TileProps) {
   const { t } = useI18n();
   const [thumbFailed, setThumbFailed] = useState(false);
   const [hovered, setHovered] = useState(false);
   const selected = selection.isSelected(item.id);
   const isVideo = item.kind === 'video';
+  const hold = useMediaLongPress(() => selection.enterSelection(item.id), interactionMode === 'browse');
   // Chronological, de-duplicated. Empty for photos and for any tile the caller
   // passed no semantic evidence for, which is what keeps ordinary walls clean.
   const markers = useMemo(
@@ -297,6 +303,7 @@ export function MediaTile({
   );
 
   function onOpenClick(e: ReactMouseEvent<HTMLButtonElement>) {
+    if (hold.consumeClick()) { e.preventDefault(); e.stopPropagation(); return; }
     const result = selection.handleTileClick(item.id, index, orderedIds, {
       ctrlOrMeta: e.ctrlKey || e.metaKey,
       shift: e.shiftKey,
@@ -326,6 +333,7 @@ export function MediaTile({
       role="listitem"
       data-selected={selected}
       data-kind={item.kind}
+      data-interaction-mode={interactionMode}
       style={{ width: `${width}px`, height: `${height}px` }}
     >
       <button
@@ -333,11 +341,20 @@ export function MediaTile({
         className="media-tile__open"
         data-testid="media-open"
         onClick={onOpenClick}
+        onPointerDown={hold.onPointerDown}
+        onPointerMove={hold.onPointerMove}
+        onPointerUp={hold.onPointerUp}
+        onPointerCancel={hold.onPointerCancel}
+        onLostPointerCapture={hold.onLostPointerCapture}
+        onContextMenu={(e) => { if (hold.blocksContextMenu()) e.preventDefault(); }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         onFocus={() => setHovered(true)}
         onBlur={() => setHovered(false)}
-        aria-label={t('mediaWs.previewAria', { name: item.displayName })}
+        aria-pressed={interactionMode === 'select' ? selected : undefined}
+        aria-label={t(interactionMode === 'select'
+          ? selected ? 'mediaWs.deselectAria' : 'mediaWs.selectAria'
+          : 'mediaWs.previewAria', { name: item.displayName })}
       >
         {isVideo ? (
           // The tile is already the video's real aspect ratio, so 'cover' fills
@@ -387,7 +404,7 @@ export function MediaTile({
                 shows a TIME, never a score or any model detail. */}
             {/* SEARCH-SEM-01: every matching moment, not just the badge's
                 best one. Videos returned by a semantic search only. */}
-            {isVideo && markers.length > 0 && (
+            {isVideo && markers.length > 0 && interactionMode !== 'select' && (
               <SemanticMarkerStrip
                 markers={markers}
                 durationSeconds={item.durationSeconds}
@@ -430,7 +447,9 @@ export function MediaTile({
         </span>
       </button>
 
-      <button
+      {interactionMode === 'select' ? <span className="media-tile__selection-mark" aria-hidden="true">
+        {selected ? '✓' : ''}
+      </span> : interactionMode === undefined && <button
         type="button"
         className="media-tile__select"
         data-testid="media-select-control"
@@ -439,7 +458,7 @@ export function MediaTile({
         onClick={onSelectClick}
       >
         <span aria-hidden="true">{selected ? '✓' : ''}</span>
-      </button>
+      </button>}
     </div>
   );
 }

@@ -8718,3 +8718,68 @@ video.lightbox-image {
 .print-share-form input[type="number"] { width: 9rem; }
 .print-shared { margin-top: 1.5rem; }
 .print-shared > h3 { margin: 0 0 .75rem; }
+
+/* Library and owner albums: the photographs keep the full surface. Context
+   scrolls away; only the compact media tools stay at the viewport's top. */
+.ws-page-outer, .media-workspace, .media-workspace .ws-sticky-chrome { min-width: 0; }
+.media-workspace .ws-sticky-chrome { position: sticky; top: 0; z-index: 20; background: var(--surface-canvas); padding-block: .5rem; border-bottom: 1px solid var(--border-default); }
+.media-workspace .ws-kind-row { flex-wrap: nowrap; gap: .35rem; min-width: 0; }
+.media-workspace .media-kind-tabs { min-width: 0; flex-wrap: nowrap; }
+.media-workspace .media-kind-tab { flex: 1 1 0; justify-content: center; white-space: nowrap; min-width: 0; }
+.media-workspace .ws-toolbar { flex-wrap: nowrap; min-width: 0; width: 100%; gap: .4rem; }
+.media-workspace .ws-search { flex: 1 1 0; min-width: 0; }
+.media-workspace .ws-search input { min-width: 0; min-height: 2.75rem; }
+.ws-toolbar__actions { flex-wrap: nowrap; flex: 0 0 auto; width: auto; gap: .35rem; }
+.media-workspace .ws-tool-button { min-height: 2.75rem; }
+.workspace-overflow { position: relative; flex: 0 0 auto; }
+.workspace-overflow__trigger { min-height: 2.75rem; display: grid; place-items: center; width: 2.75rem; padding: 0; }
+.workspace-overflow__menu { position: absolute; z-index: 40; top: calc(100% + .4rem); right: 0; width: max-content; max-width: min(22rem, calc(100vw - 2rem)); min-width: 12rem; padding: .35rem; border: 1px solid var(--border-strong); border-radius: var(--radius-card); background: var(--surface-overlay); box-shadow: var(--shadow-lg); }
+.workspace-overflow__item { display: flex; align-items: center; gap: .6rem; width: 100%; min-height: 2.75rem; padding: .5rem .65rem; font: inherit; text-align: start; color: var(--text-primary); background: transparent; border: none; border-radius: var(--radius-button); text-decoration: none; cursor: pointer; }
+.workspace-overflow__item span { flex: 1; }
+.workspace-overflow__item:hover { background: var(--surface-subtle); }
+.workspace-overflow__item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.album-owner-context .album-detail-title-row { display: grid; grid-template-columns: 2.75rem minmax(0, 1fr) auto; gap: .35rem; align-items: center; }
+.album-owner-context .album-detail-title-row h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.2rem; }
+.album-context-back { display: grid; place-items: center; width: 2.75rem; height: 2.75rem; color: var(--text-primary); border-radius: var(--radius-button); }
+.album-context-back:focus-visible { outline: 2px solid var(--focus-ring); }
+.album-owner-context .album-detail-header-actions { flex-wrap: nowrap; align-items: center; gap: .35rem; }
+.album-owner-context .album-detail-header-actions > .row-action { min-height: 2.75rem; padding-inline: .65rem; white-space: nowrap; }
+.album-owner-context .album-description { margin: .25rem 0 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.media-workspace .media-filter-chips { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; padding-block: .15rem; scrollbar-width: thin; }
+.media-workspace .media-filter-chip, .media-workspace .media-filter-clear-all { flex: 0 0 auto; white-space: nowrap; }
+.media-workspace .media-filter-chip { max-width: 85vw; }
+.media-filter-chip-remove { flex: 0 0 auto; min-width: 1.75rem; min-height: 1.75rem; }
+.media-tile[data-interaction-mode] .media-tile__open { touch-action: pan-y pinch-zoom; user-select: none; -webkit-touch-callout: none; }
+.media-tile__selection-mark { position: absolute; top: .4rem; left: .4rem; z-index: 4; display: grid; place-items: center; width: 1.6rem; height: 1.6rem; border: 2px solid #fff; border-radius: 50%; background: rgb(0 0 0 / 55%); color: #fff; font-weight: 600; pointer-events: none; }
+.media-tile[data-selected='true'] .media-tile__selection-mark { background: var(--accent-strong); color: var(--accent-contrast); }
+.media-tile[data-interaction-mode='select'][data-selected='true']::after { content: ''; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 3px var(--accent-strong); }
+.ws-dock-count-number { display: none; }
+.ws-mobile-tools { display: block; }
+.ws-desktop-selection { display: none; }
+.media-workspace .ws-toolbar .media-scope-tabs, .media-workspace .ws-toolbar .ws-chip-toggle { display: none; }
+@media (max-width: 900px) {
+  .media-workspace .ws-toolbar .ws-sort, .media-workspace .ws-tool-button__label { display: none; }
+  .media-workspace .ws-toolbar__actions > .ws-tool-button { width: 2.75rem; padding: 0; justify-content: center; }
+  .media-workspace .ws-filter-badge { position: absolute; top: -.2rem; right: -.2rem; }
+  .media-workspace .media-kind-tab { padding: .4rem .5rem; gap: .25rem; }
+  .media-workspace .media-kind-tab .nc-icon { display: none; }
+  .media-workspace .media-kind-tab-count { display: none; }
+  .media-workspace .media-kind-tab.is-active .media-kind-tab-count { display: inline; min-width: 0; font-size: .7rem; }
+  .media-workspace .album-play-button { flex: 0 0 auto; padding-inline: .6rem; min-height: 2.75rem; font-size: .8rem; }
+  .ws-dock { left: 0; right: 0; bottom: 0; transform: none; max-width: none; border-radius: var(--radius-card) var(--radius-card) 0 0; padding: .5rem .55rem calc(.5rem + env(safe-area-inset-bottom)); gap: .25rem; }
+  .ws-dock-count { gap: .2rem; padding-right: .3rem; }
+  .ws-dock-count-text { display: none; }
+  .ws-dock-count-number { display: inline; font-variant-numeric: tabular-nums; }
+  .ws-dock-commands { flex: 1 1 auto; justify-content: flex-end; gap: .1rem; }
+  .ws-dock-button { min-height: 2.75rem; height: auto; padding-inline: .4rem; font-size: .75rem; }
+  .ws-dock-button > .nc-icon:last-child { display: none; }
+  .ws-dock-button.is-contextual .ws-dock-label { display: none; }
+  .ws-dock-close { width: 2.75rem; height: 2.75rem; }
+  .media-workspace.has-bulk-bar { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+}
+@media (min-width: 1200px) {
+  .media-workspace .ws-toolbar .media-scope-tabs { display: flex; }
+  .media-workspace .ws-toolbar .ws-chip-toggle { display: inline-flex; }
+  .ws-mobile-tools { display: none; }
+  .ws-desktop-selection { display: inline-flex; }
+}

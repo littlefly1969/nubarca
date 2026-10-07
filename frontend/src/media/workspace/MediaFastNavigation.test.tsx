@@ -7,6 +7,11 @@ import { MediaFastNavigation } from './MediaFastNavigation';
 import { emptyIdentity } from './mediaWorkspaceQuery';
 import { mediaNavigationKey, navigationIndexAt, navigationLabel } from './mediaNavigation';
 
+async function openRail() {
+  fireEvent.click(await screen.findByTestId('media-navigation-handle'));
+  return screen.findByRole('slider');
+}
+
 const identity = { ...emptyIdentity({ kind: 'library' }), sort: 'datetaken' as const };
 const buckets = [{ key: '2025-02', count: 10 }, { key: '2023-06', count: 7 }, { key: '2022-01', count: 4 }];
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
@@ -21,7 +26,7 @@ function setup(over: Partial<React.ComponentProps<typeof MediaFastNavigation>> =
 
 it('shows an accessible timeline from the whole server index and tracks the visible month', async () => {
   const { rerender, props } = setup();
-  const slider = await screen.findByRole('slider');
+  const slider = await openRail();
   expect(slider).toHaveAttribute('aria-orientation', 'vertical');
   expect(slider).toHaveAttribute('aria-valuemax', '2');
   rerender(<I18nProvider><MediaFastNavigation {...props} currentKey="2023-06" /></I18nProvider>);
@@ -31,7 +36,7 @@ it('shows an accessible timeline from the whole server index and tracks the visi
 
 it('supports keyboard jumps and a precise year/month chooser', async () => {
   const { onJump } = setup();
-  fireEvent.keyDown(await screen.findByRole('slider'), { key: 'End' });
+  fireEvent.keyDown(await openRail(), { key: 'End' });
   await waitFor(() => expect(onJump).toHaveBeenCalledWith('2022-01'));
   await userEvent.click(screen.getByRole('button', { name: 'Vai a…' }));
   const dialog = await screen.findByRole('dialog');
@@ -43,13 +48,21 @@ it('supports keyboard jumps and a precise year/month chooser', async () => {
 });
 
 it('keeps loading feedback and offers manual retry after a failed destination', async () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: true }));
   let resolve: (ok: boolean) => void = () => {};
   const onJump = vi.fn(() => new Promise<boolean>((done) => { resolve = done; }));
   setup({ onJump });
-  fireEvent.keyDown(await screen.findByRole('slider'), { key: 'ArrowDown' });
+  fireEvent.keyDown(await openRail(), { key: 'ArrowDown' });
   expect(screen.getByRole('status')).toHaveTextContent('Caricamento…');
+  const rail = screen.getByTestId('media-navigation-handle').closest('aside')!;
+  fireEvent.mouseLeave(rail);
+  fireEvent.blur(rail, { relatedTarget: document.body });
+  expect(screen.getByRole('status')).toBeVisible();
   await act(async () => resolve(false));
   expect(screen.getByRole('status')).toHaveTextContent('Impossibile raggiungere');
+  fireEvent.mouseLeave(rail);
+  fireEvent.blur(rail, { relatedTarget: document.body });
+  expect(screen.getByRole('button', { name: 'Riprova' })).toBeVisible();
   await userEvent.click(screen.getByRole('button', { name: 'Riprova' }));
   expect(onJump).toHaveBeenCalledTimes(2);
 });
@@ -57,7 +70,7 @@ it('keeps loading feedback and offers manual retry after a failed destination', 
 it('only lets the newest destination settle feedback', async () => {
   const resolvers: Array<(ok: boolean) => void> = [];
   setup({ onJump: () => new Promise<boolean>((resolve) => resolvers.push(resolve)) });
-  const slider = await screen.findByRole('slider');
+  const slider = await openRail();
   fireEvent.keyDown(slider, { key: 'ArrowDown' });
   fireEvent.keyDown(slider, { key: 'End' });
   await act(async () => resolvers[1](true));
@@ -69,7 +82,7 @@ it('uses the alphabet and only the letters returned by the server', async () => 
   installFetchMock({ 'GET /api/media/navigation': () => jsonResponse({ buckets: [{ key: 'n:a', count: 9 }, { key: 'n:m', count: 12 }] }) });
   render(<I18nProvider><MediaFastNavigation identity={{ ...identity, sort: 'name' }} revision={0}
     currentKey="n:a" busy={false} onJump={vi.fn()} onAuthError={vi.fn()} /></I18nProvider>);
-  expect(await screen.findByRole('slider')).toHaveAccessibleName('Scorrimento rapido per nome');
+  expect(await openRail()).toHaveAccessibleName('Scorrimento rapido per nome');
   await userEvent.click(screen.getByRole('button', { name: 'Vai a…' }));
   expect(screen.queryByLabelText('Anno')).not.toBeInTheDocument();
   expect(screen.getByLabelText('Lettera').querySelectorAll('option')).toHaveLength(2);
@@ -88,7 +101,7 @@ it('does not request navigation for relevance, similarity or size ordering', () 
 
 it('aborts an outdated index and forwards the exact active filters for its replacement', async () => {
   const { calls, props, rerender } = setup();
-  await screen.findByRole('slider');
+  await openRail();
   rerender(<I18nProvider><MediaFastNavigation {...props} identity={{ ...identity, mediaKind: 'video',
     filters: { ...identity.filters, common: { ...identity.filters.common, favorite: true } } }} /></I18nProvider>);
   await waitFor(() => expect(calls).toHaveLength(2));
@@ -107,6 +120,60 @@ it('bounds drag positions and keeps calendar components independent of the devic
   expect(mediaNavigationKey({ displayName: '🌄.jpg' } as never, 'name')).toBe('n:🌄');
 });
 
+it('opens from its localized handle without a jump, then collapses after inactivity', async () => {
+  const { onJump } = setup();
+  const handle = await screen.findByTestId('media-navigation-handle');
+  expect(handle).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByRole('slider')).not.toBeInTheDocument();
+  vi.useFakeTimers();
+  fireEvent.click(handle);
+  expect(screen.getByRole('slider')).toBeVisible();
+  expect(onJump).not.toHaveBeenCalled();
+  act(() => vi.advanceTimersByTime(2400));
+  expect(handle).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByRole('slider')).not.toBeInTheDocument();
+});
+
+it('fits the expanded track above a dock on a short mobile screen', async () => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const top = this.classList.contains('media-fast-nav__track') ? 300 : this.classList.contains('ws-dock') ? 500 : 190;
+    return { top, bottom: top + 48, height: 48 } as DOMRect;
+  });
+  installFetchMock({ 'GET /api/media/navigation': () => jsonResponse({ buckets }) });
+  const props = { identity, revision: 0, currentKey: '2025-02', busy: false, onJump: vi.fn(async () => true), onAuthError: vi.fn() };
+  const { rerender } = render(<div className="ws-page"><I18nProvider><MediaFastNavigation {...props} /></I18nProvider></div>);
+  const slider = await openRail();
+  rerender(<div className="ws-page"><I18nProvider><MediaFastNavigation {...props} selectionActive /></I18nProvider><div className="ws-dock" /></div>);
+  expect(slider.closest('aside')!.style.getPropertyValue('--media-navigation-track-height')).toBe('192px');
+});
+
+it('keeps the rail open during a pending jump and closes after it settles', async () => {
+  let settle: (value: boolean) => void = () => {};
+  setup({ onJump: () => new Promise<boolean>((resolve) => { settle = resolve; }) });
+  const slider = await openRail();
+  vi.useFakeTimers();
+  fireEvent.keyDown(slider, { key: 'End' });
+  act(() => vi.advanceTimersByTime(3000));
+  expect(slider).toBeVisible();
+  await act(async () => settle(true));
+  act(() => vi.advanceTimersByTime(2400));
+  expect(slider).not.toBeVisible();
+});
+
+it('expands on desktop hover/focus and supports keyboard jumps from the compact handle', async () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: true }));
+  const { onJump } = setup();
+  const handle = await screen.findByTestId('media-navigation-handle');
+  const rail = handle.closest('aside')!;
+  fireEvent.mouseEnter(rail);
+  expect(screen.getByRole('slider')).toBeVisible();
+  fireEvent.mouseLeave(rail);
+  expect(screen.queryByRole('slider')).not.toBeInTheDocument();
+  fireEvent.keyDown(handle, { key: 'End' });
+  await waitFor(() => expect(onJump).toHaveBeenCalledWith('2022-01'));
+  expect(screen.getByRole('slider')).toBeVisible();
+});
+
 it('previews a captured drag immediately, coalesces movement and commits once on release', async () => {
   class TestPointerEvent extends MouseEvent {
     pointerId: number; isPrimary: boolean;
@@ -116,7 +183,7 @@ it('previews a captured drag immediately, coalesces movement and commits once on
   }
   vi.stubGlobal('PointerEvent', TestPointerEvent);
   const { onJump } = setup();
-  const slider = await screen.findByRole('slider');
+  const slider = await openRail();
   const capture = vi.fn(), release = vi.fn();
   Object.assign(slider, { setPointerCapture: capture, releasePointerCapture: release });
   vi.spyOn(slider, 'getBoundingClientRect').mockReturnValue({ top: 100, height: 332 } as DOMRect);
@@ -141,7 +208,7 @@ it('cancels a pending drag without initiating a jump', async () => {
   }
   vi.stubGlobal('PointerEvent', TestPointerEvent);
   const { onJump } = setup();
-  const slider = await screen.findByRole('slider');
+  const slider = await openRail();
   Object.assign(slider, { setPointerCapture: vi.fn() });
   vi.spyOn(slider, 'getBoundingClientRect').mockReturnValue({ top: 0, height: 332 } as DOMRect);
   vi.useFakeTimers();

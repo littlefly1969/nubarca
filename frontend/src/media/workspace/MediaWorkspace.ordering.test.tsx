@@ -23,6 +23,34 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+it('offers photo presentation only after leaving semantic relevance in an owner album', async () => {
+  const source = { kind: 'album', albumId: 'album-1' } as const;
+  installFetchMock({
+    'GET /api/people': () => jsonResponse([]),
+    'GET /api/images': () => jsonResponse({ items: [old, recent], nextCursor: null, total: 2, semanticStatus: 'ok' }),
+    'GET /api/albums/album-1/media': () => jsonResponse({ items: [recent, old], nextCursor: null, total: 2, photoCount: 2, videoCount: 0 }),
+    'GET /api/albums/album-1/media/navigation': () => jsonResponse({ buckets: [{ key: '2026-06', count: 1 }, { key: '2020-06', count: 1 }] }),
+  });
+  function PhotoAlbum() {
+    const [identity, setIdentity] = useState<MediaWorkspaceIdentity>(() => {
+      const initial = { ...emptyIdentity(source), mediaKind: 'image' as const };
+      initial.filters.photo.visualQuery = 'mare';
+      return initial;
+    });
+    return <MediaWorkspace source={source} identity={identity} onIdentityChange={setIdentity}
+      searchPlaceholder="Cerca" showPhotoPresentation />;
+  }
+  render(<MemoryRouter><AuthedWrapper><PhotoAlbum /></AuthedWrapper></MemoryRouter>);
+  await waitFor(() => expect(screen.getAllByTestId('media-open')).toHaveLength(2));
+  expect(screen.getAllByTestId('media-open')[0]).toHaveTextContent(old.id);
+  expect(screen.queryByTestId('album-presentation')).not.toBeInTheDocument();
+  expect(screen.queryByTestId('media-navigation-handle')).not.toBeInTheDocument();
+  await userEvent.click(screen.getByTestId('media-chip-remove-visual'));
+  await screen.findByTestId('media-navigation-handle');
+  expect(screen.getByTestId('album-presentation')).toBeEnabled();
+  expect(screen.getAllByTestId('media-open')[0]).toHaveTextContent(recent.id);
+});
+
 it.each([{ kind: 'library' }, { kind: 'album', albumId: 'album-1' }] as MediaWorkspaceSource[])(
   'keeps relevance order and returns to DateTaken DESC with temporal navigation (%j)', async (source) => {
     const path = source.kind === 'album' ? `/api/albums/${source.albumId}/media` : '/api/media';
@@ -54,7 +82,7 @@ it.each([{ kind: 'library' }, { kind: 'album', albumId: 'album-1' }] as MediaWor
     expect(semanticCalls[0].url).not.toContain('sort=');
     if (source.kind === 'album') expect(semanticCalls[0].url).toContain('albumId=album-1');
     await userEvent.click(screen.getByTestId('media-chip-remove-visual'));
-    await screen.findByRole('slider');
+    await screen.findByTestId('media-navigation-handle');
     expect(screen.getByTestId('ws-sort').querySelector('select')).toHaveValue('datetaken:desc');
     expect(screen.getAllByTestId('media-open').map((tile) => tile.textContent)).toEqual([
       expect.stringContaining(recent.id), expect.stringContaining(old.id),

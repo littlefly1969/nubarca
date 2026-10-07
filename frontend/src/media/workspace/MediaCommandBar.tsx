@@ -4,6 +4,7 @@ import { useI18n } from '../../i18n';
 import { Icon } from '../../components/icons/Icon';
 import { MediaLibraryScopeTabs } from './MediaLibraryScopeTabs';
 import type { MediaLibraryScope } from './mediaWorkspaceQuery';
+import { WorkspaceMenu, type WorkspaceMenuAction } from './WorkspaceMenu';
 
 // One toolbar for every workspace command: search, filters, sort and the
 // library-scope selector.
@@ -17,6 +18,9 @@ import type { MediaLibraryScope } from './mediaWorkspaceQuery';
 const SORT_FIELDS: ImageSortField[] = ['created', 'datetaken', 'name', 'size'];
 
 interface Props {
+  selectionMode?: boolean;
+  onEnterSelection?(): void;
+  onClearSelection?(): void;
   searchPlaceholder: string;
   searchText: string;
   onSearchText(value: string): void;
@@ -59,8 +63,17 @@ export function MediaCommandBar({
   onChangeScope,
   unassignedOnly,
   onToggleUnassignedOnly,
+  selectionMode, onEnterSelection, onClearSelection,
 }: Props) {
   const { t } = useI18n();
+  const secondary: WorkspaceMenuAction[] = [
+    ...(onEnterSelection ? [{ id: 'selection', label: t(selectionMode ? 'gallerySel.clear' : 'mediaWs.enterSelection'), icon: 'check' as const,
+      onSelect: selectionMode ? onClearSelection : onEnterSelection, testId: 'ws-selection-mode' }] : []),
+    { id: 'active', label: t('mediaScope.library'), checkRole: 'radio', checked: scope === 'active', onSelect: () => onChangeScope('active') },
+    { id: 'excluded', label: t('mediaScope.excluded'), checkRole: 'radio', checked: scope === 'excluded', onSelect: () => onChangeScope('excluded') },
+    ...(onToggleUnassignedOnly ? [{ id: 'unassigned', label: t('mediaWs.unassignedOnly'), icon: 'albums' as const,
+      checked: !!unassignedOnly, onSelect: () => onToggleUnassignedOnly(!unassignedOnly), testId: 'ws-mobile-unassigned-only' }] : []),
+  ];
 
   return (
     <div className="ws-toolbar" data-testid="ws-command-bar">
@@ -130,6 +143,10 @@ export function MediaCommandBar({
         {/* Library scope: compact and subordinate to the kind switcher, not a
             second competing tab row. */}
         <MediaLibraryScopeTabs value={scope} onChange={onChangeScope} />
+        <WorkspaceMenu label={t('mediaWs.actions')} actions={secondary} testId="ws-more-tools" className="ws-mobile-tools" />
+        {onEnterSelection && <button type="button" className="ws-tool-button ws-desktop-selection"
+          aria-label={t(selectionMode ? 'gallerySel.clear' : 'mediaWs.enterSelection')}
+          onClick={selectionMode ? onClearSelection : onEnterSelection}><Icon name="check" /></button>}
 
         {/* "Solo da organizzare" — sits beside the scope tabs rather than in a
             new row, because it answers the same question ("which slice of the
