@@ -739,6 +739,7 @@ public static class GalleryMediaEndpoints
             return MapMediaCollectionResult(result, query.Limit);
         }).WithName("ListAlbumMedia").RequireAuthorization();
 
+        app.MapMediaNavigationEndpoints();
         return app;
     }
 

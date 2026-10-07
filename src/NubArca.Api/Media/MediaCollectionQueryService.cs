@@ -18,13 +18,16 @@ namespace NubArca.Api.Media;
 // media-library scope, cursor seek and ordering as the legacy galleries.
 public interface IMediaCollectionQueryService
 {
+    Task<MediaNavigationResult> NavigationAsync(Guid ownerUserId, MediaCollectionQuery query, CancellationToken cancellationToken);
+    Task<MediaNavigationResult> WindowAsync(Guid ownerUserId, MediaCollectionQuery query, string? target, bool before, CancellationToken cancellationToken);
+
     Task<MediaCollectionResult> QueryAsync(
         Guid ownerUserId,
         MediaCollectionQuery query,
         CancellationToken cancellationToken);
 }
 
-public sealed class MediaCollectionQueryService : IMediaCollectionQueryService
+public sealed partial class MediaCollectionQueryService : IMediaCollectionQueryService
 {
     public const int MinLimit = 1;
     public const int MaxLimit = 100;
@@ -42,6 +45,43 @@ public sealed class MediaCollectionQueryService : IMediaCollectionQueryService
         Guid ownerUserId,
         MediaCollectionQuery query,
         CancellationToken cancellationToken)
+    {
+        var error = await ValidateAsync(ownerUserId, query, cancellationToken);
+        if (error is not null) return error;
+        var albumId = (query.Source as MediaCollectionSource.Album)?.AlbumId;
+
+        var filters = BuildFilters(query, albumId);
+
+        ImageCursor? cursor = null;
+        if (!string.IsNullOrWhiteSpace(query.Cursor))
+        {
+            if (!ImageCursor.TryParse(query.Cursor, out var parsed))
+            {
+                return MediaCollectionResult.Failure(
+                    MediaCollectionStatus.BadCursor, "'cursor' is malformed.");
+            }
+            if (!parsed.MatchesSort(query.Sort, query.Direction))
+            {
+                return MediaCollectionResult.Failure(
+                    MediaCollectionStatus.BadCursor, "'cursor' was issued for a different sort/direction.");
+            }
+            if (!parsed.MatchesFilter(query.MediaKind.MediaCursorFingerprint(filters)))
+            {
+                return MediaCollectionResult.Failure(
+                    MediaCollectionStatus.BadCursor, "'cursor' was issued for a different filter / query set.");
+            }
+            cursor = parsed;
+        }
+
+        var page = await _files.ListMediaPageAsync(
+            ownerUserId, query.Limit, cursor, filters, query.MediaKind,
+            query.Sort, query.Direction, cancellationToken);
+
+        return MediaCollectionResult.Success(page);
+    }
+
+    private async Task<MediaCollectionResult?> ValidateAsync(
+        Guid ownerUserId, MediaCollectionQuery query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
 
@@ -78,7 +118,6 @@ public sealed class MediaCollectionQueryService : IMediaCollectionQueryService
 
         // Album source: owner-validate up front so a foreign/missing album is a
         // clean 404 (no existence leak) rather than a silently-empty page.
-        Guid? albumId = null;
         if (query.Source is MediaCollectionSource.Album album)
         {
             var detail = await _albums.GetByIdAsync(album.AlbumId, ownerUserId, cancellationToken);
@@ -87,37 +126,9 @@ public sealed class MediaCollectionQueryService : IMediaCollectionQueryService
                 return MediaCollectionResult.Failure(
                     MediaCollectionStatus.AlbumNotFound, "Album not found.");
             }
-            albumId = album.AlbumId;
         }
 
-        var filters = BuildFilters(query, albumId);
-
-        ImageCursor? cursor = null;
-        if (!string.IsNullOrWhiteSpace(query.Cursor))
-        {
-            if (!ImageCursor.TryParse(query.Cursor, out var parsed))
-            {
-                return MediaCollectionResult.Failure(
-                    MediaCollectionStatus.BadCursor, "'cursor' is malformed.");
-            }
-            if (!parsed.MatchesSort(query.Sort, query.Direction))
-            {
-                return MediaCollectionResult.Failure(
-                    MediaCollectionStatus.BadCursor, "'cursor' was issued for a different sort/direction.");
-            }
-            if (!parsed.MatchesFilter(query.MediaKind.MediaCursorFingerprint(filters)))
-            {
-                return MediaCollectionResult.Failure(
-                    MediaCollectionStatus.BadCursor, "'cursor' was issued for a different filter / query set.");
-            }
-            cursor = parsed;
-        }
-
-        var page = await _files.ListMediaPageAsync(
-            ownerUserId, query.Limit, cursor, filters, query.MediaKind,
-            query.Sort, query.Direction, cancellationToken);
-
-        return MediaCollectionResult.Success(page);
+        return null;
     }
 
     // Compose ImageFilters from the typed query. Kind-specific groups are folded

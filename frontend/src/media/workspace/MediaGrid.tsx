@@ -1,5 +1,5 @@
 import {
-  useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -15,6 +15,7 @@ import { VideoPreview } from '../../video/VideoPreview';
 import { getMediaAspectRatio } from './mediaAspectRatio';
 import { computeJustifiedRows, type JustifiedLayoutItem } from '../layout/computeJustifiedRows';
 import { MEDIA_WALL_GAP_PX } from '../layout/mediaWallGeometry';
+import { useWallNavigation } from './useWallNavigation';
 import { useJustifiedWall } from '../layout/useJustifiedWall';
 import type { MediaSelection } from '../../gallery/useMediaSelection';
 
@@ -69,6 +70,8 @@ export type SemanticMatches = ReadonlyMap<string, SemanticTileMatches>;
 export type MediaTileBadges = ReadonlyMap<string, string>;
 
 interface GridProps {
+  scrollTarget?: { id: string; revision: number } | null;
+  onVisibleItem?(item: MediaItem): void;
   items: MediaItem[];
   orderedIds: string[];
   selection: MediaSelection;
@@ -145,6 +148,8 @@ function ViewportScrolledWall({
     overscan: MEDIA_WALL_OVERSCAN_ROWS,
     scrollMargin,
   });
+  useWallNavigation({ items: props.items, rows, measured, containerRef, viewportRef,
+    target: props.scrollTarget, onVisibleItem: props.onVisibleItem });
   return (
     <Wall
       {...props}
@@ -165,6 +170,8 @@ function DocumentScrolledWall(props: GridProps) {
     overscan: MEDIA_WALL_OVERSCAN_ROWS,
     scrollMargin: containerRef.current?.offsetTop ?? 0,
   });
+  useWallNavigation({ items: props.items, rows, measured, containerRef, viewportRef: null,
+    target: props.scrollTarget, onVisibleItem: props.onVisibleItem });
   return (
     <Wall
       {...props}
@@ -189,7 +196,7 @@ function Wall({
 
   // Row geometry changes on resize / new pages without changing the count, so
   // the virtualizer's cached sizes must be recomputed explicitly.
-  useEffect(() => {
+  useLayoutEffect(() => {
     virtualizer.measure();
   }, [rows, virtualizer]);
 

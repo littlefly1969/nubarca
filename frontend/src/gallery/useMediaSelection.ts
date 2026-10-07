@@ -35,8 +35,8 @@ export interface MediaSelection {
 
 export function useMediaSelection(): MediaSelection {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
-  // Index of the last individually-toggled tile, used as the shift-range anchor.
-  const anchorRef = useRef<number | null>(null);
+  // Identity of the last individually-toggled tile: paging and jumps change indexes.
+  const anchorRef = useRef<string | null>(null);
 
   const clear = useCallback(() => {
     anchorRef.current = null;
@@ -45,21 +45,22 @@ export function useMediaSelection(): MediaSelection {
 
   const selectAll = useCallback((ids: string[]) => {
     setSelected(new Set(ids));
-    anchorRef.current = ids.length > 0 ? 0 : null;
+    anchorRef.current = ids[0] ?? null;
   }, []);
 
-  const toggleOne = useCallback((id: string, index: number) => {
+  const toggleOne = useCallback((id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-    anchorRef.current = index;
+    anchorRef.current = id;
   }, []);
 
   const selectRange = useCallback((index: number, orderedIds: readonly string[]) => {
-    const anchor = anchorRef.current ?? index;
+    const held = anchorRef.current === null ? -1 : orderedIds.indexOf(anchorRef.current);
+    const anchor = held >= 0 ? held : index;
     const from = Math.min(anchor, index);
     const to = Math.max(anchor, index);
     setSelected((prev) => {
@@ -83,7 +84,7 @@ export function useMediaSelection(): MediaSelection {
         return 'selected';
       }
       if (modifiers.ctrlOrMeta) {
-        toggleOne(id, index);
+        toggleOne(id);
         return 'selected';
       }
       return 'open';
@@ -97,7 +98,7 @@ export function useMediaSelection(): MediaSelection {
         selectRange(index, orderedIds);
         return;
       }
-      toggleOne(id, index);
+      toggleOne(id);
     },
     [selectRange, toggleOne],
   );

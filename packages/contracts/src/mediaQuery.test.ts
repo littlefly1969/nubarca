@@ -12,6 +12,7 @@ import {
   MEDIA_SEMANTIC_PATH,
   albumMediaPath,
   mediaQueryToParams,
+  mediaWindowQueryToParams,
   semanticMediaQueryToParams,
   type ListMediaQuery,
 } from './index.ts';
@@ -153,4 +154,13 @@ test('semantic search keeps its own separate query', () => {
     toQueryString(semanticMediaQueryToParams({ q: 'x', kind: 'all', albumMembership: 'any' })),
     'q=x&kind=all',
   );
+});
+
+test('navigation windows reuse all physical filters and safely encode the target', () => {
+  const query = { kind: 'image' as const, sort: 'name' as const, direction: 'desc' as const,
+    favorite: true, includePeople: ['person-a'], limit: 50 };
+  assert.equal(toQueryString(mediaWindowQueryToParams({ ...query, target: 'n:é' })),
+    toQueryString(mediaQueryToParams(query)) + '&target=n%3A%C3%A9');
+  assert.equal(toQueryString(mediaWindowQueryToParams({ ...query, cursor: 'opaque', before: true })),
+    toQueryString(mediaQueryToParams({ ...query, cursor: 'opaque' })) + '&before=true');
 });
