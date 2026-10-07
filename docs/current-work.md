@@ -1183,6 +1183,8 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   upload and prevents late reads or refresh warnings from reaching the new page.
   Resume metadata is only a cross-selection heuristic; distinct files in the
   same batch are all uploaded even when their name, size and timestamp match.
+  Explicit retries use the exact unconfirmed files, so matching metadata of
+  another accepted file cannot remove a missing file from the retry queue.
   Accepted files are remembered in memory and best-effort IndexedDB; wake lock
   and beforeunload are best effort, never background upload. A lost response is
   ambiguous: retry is manual and asks the visitor to check the album, because

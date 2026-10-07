@@ -371,6 +371,11 @@ describe('upload feedback and recovery', () => {
   async function finish(index = 0, report?: unknown, status?: number) {
     await act(async () => { MockUploadXhr.sent[index].finish(report, status); });
   }
+  const contents = (file: FormDataEntryValue | null | undefined) => new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsText(file as Blob);
+  });
 
   it('offers a named custom picker and the album cover above the gallery', async () => {
     serve({ coverUrl: '/cover-preview' });
@@ -403,11 +408,6 @@ describe('upload feedback and recovery', () => {
   });
 
   it('uploads both distinct files with identical resume metadata', async () => {
-    const contents = (file: FormDataEntryValue | null | undefined) => new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.readAsText(file as Blob);
-    });
     const first = new File(['one'], 'same.jpg', { type: 'image/jpeg', lastModified: 123 });
     const second = new File(['two'], 'same.jpg', { type: 'image/jpeg', lastModified: 123 });
     expect(first).not.toBe(second);
@@ -422,6 +422,24 @@ describe('upload feedback and recovery', () => {
     expect(screen.getByTestId('album-share-progress')).toHaveTextContent('2 di 2 file salvati');
     expect(screen.queryByText(/saltat/i)).toBeNull();
     expect(MockUploadXhr.sent.map(request => request.method)).toEqual(['POST', 'POST']);
+    expect(markDone).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries an unconfirmed file even when another accepted file shares its resume metadata', async () => {
+    const files = ['one', 'two'].map(bytes => new File([bytes], 'same.jpg', { type: 'image/jpeg', lastModified: 123 }));
+    expect(fileKey(files[0])).toBe(fileKey(files[1]));
+    serve(); mount(); await pick(files); await finish();
+    await waitFor(() => expect(MockUploadXhr.sent).toHaveLength(2));
+    await act(async () => { MockUploadXhr.sent[1].onerror?.(); });
+    expect(await screen.findByText('Caricamento da completare')).toBeInTheDocument();
+    expect(screen.getByTestId('album-share-progress')).toHaveTextContent('1 di 2 file salvati');
+    await userEvent.click(screen.getByRole('button', { name: 'Riprova i file mancanti' }));
+    await waitFor(() => expect(MockUploadXhr.sent).toHaveLength(3));
+    expect(await contents(MockUploadXhr.sent[2].body?.get('file'))).toBe('two');
+    await finish(2);
+    expect(await screen.findByText('Caricamento completato')).toBeInTheDocument();
+    expect(screen.getByTestId('album-share-progress')).toHaveTextContent('1 di 1 file salvati');
+    expect(screen.queryByText(/saltat/i)).toBeNull();
     expect(markDone).toHaveBeenCalledTimes(2);
   });
 

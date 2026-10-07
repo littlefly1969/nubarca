@@ -303,7 +303,7 @@ function AlbumShareUpload({
     return () => window.removeEventListener('beforeunload', beforeUnload);
   }, [busy]);
 
-  async function send(files: readonly File[]) {
+  async function send(files: readonly File[], retrying = false) {
     if (files.length === 0 || activeRef.current || !album.canUpload) return;
     const controller = new AbortController();
     activeRef.current = controller;
@@ -315,7 +315,11 @@ function AlbumShareUpload({
       const stored = await loadDone(token).catch(() => rememberedRef.current);
       if (controller.signal.aborted) return;
       const done = new Set([...stored, ...rememberedRef.current]);
-      const { pending, skipped } = partition(files, done);
+      // A retry already contains the exact unconfirmed File objects. Another
+      // accepted file may share their resume metadata, so do not skip them.
+      const { pending, skipped } = retrying
+        ? { pending: [...files], skipped: [] }
+        : partition(files, done);
       // The resume key is only a cross-selection heuristic: distinct files in
       // this batch can share name, size and timestamp and must all be sent.
       const progress: Run = {
@@ -482,7 +486,7 @@ function AlbumShareUpload({
         </div>
       )}
       {!busy && retryFiles.length > 0 && album.canUpload && run?.stopped !== 'access' && (
-        <button className="party-contribution-secondary album-share-retry" onClick={() => void send(retryFiles)}>
+        <button className="party-contribution-secondary album-share-retry" onClick={() => void send(retryFiles, true)}>
           <Icon name="restore" size={24} />{t('albumLink.retryMissing')}
         </button>
       )}
