@@ -55,7 +55,10 @@ public sealed class NetworkManagerCli : INetworkManager
                 apAddress = (await AddressingAsync(device, cancellationToken)).Address;
                 continue;
             }
-            if (uplink is not null || type is not ("ethernet" or "wifi")) continue;
+            if (type is not ("ethernet" or "wifi")) continue;
+            // Ethernet first when both carry traffic: the cable is the steadier
+            // way out, and a Wi-Fi set up over it must not take its place.
+            if (uplink is not null && !(uplink.Type == "wifi" && type == "ethernet")) continue;
             var addressing = await AddressingAsync(device, cancellationToken);
             if (addressing.Address is not null && addressing.HasDefaultRoute)
             {
@@ -67,6 +70,15 @@ public sealed class NetworkManagerCli : INetworkManager
             }
         }
         return new NetworkSnapshot(true, wifi, uplink, apActive, apAddress);
+    }
+
+    public async Task<WifiClientState> GetWifiClientStateAsync(string wifiInterface,
+        CancellationToken cancellationToken)
+    {
+        var show = await RunAsync(
+            ["-t", "-f", "GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS,IP4.GATEWAY", "device", "show", wifiInterface],
+            QueryTimeout, cancellationToken);
+        return show.Succeeded ? NmcliTerse.WifiClient(show.StdOut) : WifiClientState.Disconnected;
     }
 
     public async Task<IReadOnlyList<WifiNetwork>> ScanAsync(string wifiInterface, CancellationToken cancellationToken)
@@ -179,6 +191,50 @@ public static class NmcliTerse
             .OrderByDescending(n => n.Signal)
             .ThenBy(n => n.Ssid, StringComparer.Ordinal)
             .ToList();
+
+    /// <summary>
+    /// One device as a Wi-Fi client, from <c>device show</c>: connected only in
+    /// NetworkManager's state 100, under the profile it names, with the first
+    /// IPv4 address and whether an IPv4 gateway came with it.
+    /// </summary>
+    public static WifiClientState WifiClient(string output)
+    {
+        var connected = false;
+        string? connection = null;
+        string? address = null;
+        var gateway = false;
+        foreach (var raw in output.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            var colon = line.IndexOf(':');
+            if (colon <= 0) continue;
+            var key = line[..colon];
+            var value = Unescape(line[(colon + 1)..].Trim());
+            if (value is "" or "--") continue;
+            if (key == "GENERAL.STATE")
+                connected = value.StartsWith("100", StringComparison.Ordinal);
+            else if (key == "GENERAL.CONNECTION")
+                connection = value;
+            else if (key.StartsWith("IP4.ADDRESS", StringComparison.Ordinal))
+                address ??= value.Split('/')[0];
+            else if (key == "IP4.GATEWAY")
+                gateway = true;
+        }
+        return new WifiClientState(connected, connection, address, gateway);
+    }
+
+    /// <summary>A terse value with its backslash escapes undone: <c>\:</c> is ':' and <c>\\</c> is one backslash.</summary>
+    private static string Unescape(string value)
+    {
+        if (!value.Contains('\\')) return value;
+        var plain = new StringBuilder(value.Length);
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (value[i] == '\\' && i + 1 < value.Length) { plain.Append(value[++i]); continue; }
+            plain.Append(value[i]);
+        }
+        return plain.ToString();
+    }
 
     /// <summary>The first IPv4 address (without prefix length), and whether any default gateway exists.</summary>
     public static (string? Address, bool HasDefaultRoute) Addressing(string output)

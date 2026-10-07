@@ -87,6 +87,79 @@ public sealed class SetupEndpointsTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, (await _http.GetAsync("/setup.css")).StatusCode);
     }
 
+    /// <summary>A client that reports a redirect instead of following it, as the phone's probe sees it.</summary>
+    private HttpClient NotFollowing() =>
+        new(new HttpClientHandler { AllowAutoRedirect = false }) { BaseAddress = _http.BaseAddress };
+
+    [Theory]
+    [InlineData("/generate_204")]              // Android
+    [InlineData("/gen_204")]
+    [InlineData("/hotspot-detect.html")]       // Apple
+    [InlineData("/library/test/success.html")]
+    [InlineData("/connecttest.txt")]           // Windows
+    [InlineData("/ncsi.txt")]
+    [InlineData("/redirect")]
+    public async Task A_Connectivity_Probe_Is_Sent_To_The_Page(string probe)
+    {
+        using var client = NotFollowing();
+        var response = await client.GetAsync(probe);
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal("/", response.Headers.Location?.OriginalString);
+    }
+
+    [Fact]
+    public async Task A_Stray_Address_Lands_On_The_Page_And_The_Real_Ones_Still_Answer()
+    {
+        using var client = NotFollowing();
+        var stray = await client.GetAsync("/some/where/else");
+        Assert.Equal(HttpStatusCode.Redirect, stray.StatusCode);
+        Assert.Equal("/", stray.Headers.Location?.OriginalString);
+
+        // The fallback never shadows the page, its assets or the API.
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/setup.js")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/setup/status")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Over_Ethernet_The_Page_Configures_The_Wifi_Without_Leaving_The_Cable()
+    {
+        var ethernet = new NetworkUplink("eth0", "ethernet", "Wired connection 1", "192.0.2.9");
+        var network = new FakeNetworkManager { Uplink = ethernet };
+        var service = new NetworkProvisioningService(network,
+            new NetworkProvisioningOptions { Enabled = true, AccessPointPassword = "setup-pass" },
+            _logs.Factory.CreateLogger<NetworkProvisioningService>(),
+            new ProvisioningTimings(TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(20),
+                TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(10),
+                TimeSpan.FromHours(1), TimeSpan.FromHours(1), TimeSpan.Zero),
+            boxSuffix: "A7F3");
+        await service.BootAsync(default);
+        var status = new PrintBoxStatusService(service,
+            new FakePrinterAdapter(_fakeOutput, TimeSpan.Zero, remainingPrints: 187),
+            new AgentConnectionState(), new PrintAgentOptions());
+        await using var app = SetupEndpoints.Build(service, status, _logs.Factory, IPAddress.Loopback, 0);
+        await app.StartAsync();
+        using var http = new HttpClient { BaseAddress = new Uri(app.Urls.First()) };
+
+        var before = JsonDocument.Parse(await http.GetStringAsync("/setup/status")).RootElement;
+        Assert.Equal("connected", before.GetProperty("network").GetString());
+        Assert.Equal("ethernet", before.GetProperty("connectionType").GetString());
+        Assert.True(before.GetProperty("wifiConfigurationAvailable").GetBoolean());
+
+        var response = await http.PostAsync("/setup/wifi/connect", new StringContent(
+            $$"""{"ssid":"Studio","password":"{{Secret}}"}""", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        await service.PendingConnect;
+
+        var after = JsonDocument.Parse(await http.GetStringAsync("/setup/status")).RootElement;
+        Assert.Equal("connected", after.GetProperty("lastAttempt").GetProperty("outcome").GetString());
+        Assert.Equal("ethernet", after.GetProperty("connectionType").GetString());
+        Assert.Equal(0, network.AccessPointStarts);
+        Assert.Equal(0, network.AccessPointStops);
+        Assert.DoesNotContain(Secret, _logs.Provider.All);
+        await app.StopAsync();
+    }
+
     [Fact]
     public async Task Status_Says_How_The_Box_Is_Doing_And_Nothing_Secret()
     {
@@ -101,6 +174,8 @@ public sealed class SetupEndpointsTests : IAsyncLifetime
         // The printer's own count of the prints left on its media.
         Assert.Equal(187, status.GetProperty("printer").GetProperty("remainingPrints").GetInt32());
         Assert.Equal("disconnected", status.GetProperty("nubarca").GetString());
+        // In setup mode the page can configure the Wi-Fi.
+        Assert.True(status.GetProperty("wifiConfigurationAvailable").GetBoolean());
         Assert.DoesNotContain("setup-pass", body);
     }
 
@@ -176,8 +251,13 @@ public sealed class SetupEndpointsTests : IAsyncLifetime
         Assert.Equal(ProvisioningMode.Connected, _service.State.Mode);
         Assert.False(_network.AccessPointActive);
 
+        // Now on Wi-Fi: changing network would cut the box off, so it is refused.
         var again = await Connect("""{"ssid":"Studio","password":"another-pass"}""");
         Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+        Assert.Equal("unavailable", JsonDocument.Parse(await again.Content.ReadAsStringAsync())
+            .RootElement.GetProperty("error").GetString());
+        var status = JsonDocument.Parse(await _http.GetStringAsync("/setup/status")).RootElement;
+        Assert.False(status.GetProperty("wifiConfigurationAvailable").GetBoolean());
         Assert.DoesNotContain(Secret, _logs.Provider.All);
     }
 }

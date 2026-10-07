@@ -112,6 +112,7 @@ public sealed class NetworkProvisioningTests
         Assert.True(network.AccessPointActive);
         Assert.Equal(2, network.AccessPointStarts);
         Assert.Equal(1, network.Forgets); // not retried with the wrong password at every boot
+        Assert.Equal("Location-WiFi", network.LastForgotten);
         Assert.Equal(ConnectOutcome.Failed, service.State.LastAttempt?.Outcome);
         Assert.Contains("Setup network restored", logs.All);
         Assert.DoesNotContain("wrong-password-123", logs.All);
@@ -136,11 +137,146 @@ public sealed class NetworkProvisioningTests
     }
 
     [Fact]
+    public async Task From_Setup_Mode_Success_Means_The_Requested_Wifi_Profile_Itself()
+    {
+        // T8: nmcli reports the join, but the radio ends up on ANOTHER of the
+        // box's profiles — and meanwhile a cable is plugged in. Neither is the
+        // network the person chose.
+        var network = new FakeNetworkManager
+        {
+            WifiAfterJoin = _ => new WifiClientState(true, "nubarca-wifi-Home", "192.0.2.30", true),
+        };
+        var service = Service(network);
+        await service.BootAsync(default);
+        network.Uplink = Ethernet;
+
+        Assert.Equal(ConnectRequest.Accepted, service.RequestConnect("Studio", "correct-horse"));
+        await service.PendingConnect;
+
+        Assert.Equal(ConnectOutcome.Failed, service.State.LastAttempt?.Outcome);
+        Assert.Equal("Studio", network.LastForgotten);
+    }
+
+    [Fact]
+    public async Task From_Setup_Mode_A_Wifi_Without_A_Gateway_Is_Not_Joined()
+    {
+        var network = new FakeNetworkManager
+        {
+            WifiAfterJoin = ssid => new WifiClientState(true, NetworkManagerCli.ClientConnectionPrefix + ssid, "192.0.2.20", false),
+        };
+        var service = Service(network);
+        await service.BootAsync(default);
+
+        Assert.Equal(ConnectRequest.Accepted, service.RequestConnect("Studio", "correct-horse"));
+        await service.PendingConnect;
+
+        Assert.Equal(ConnectOutcome.Failed, service.State.LastAttempt?.Outcome);
+        Assert.Equal(ProvisioningMode.AccessPoint, service.State.Mode);
+        Assert.True(network.AccessPointActive);
+    }
+
+    // --- Over Ethernet ---------------------------------------------------------
+
+    private static async Task<(FakeNetworkManager Network, NetworkProvisioningService Service)> OnEthernetAsync(
+        Action<FakeNetworkManager>? configure = null)
+    {
+        var network = new FakeNetworkManager { Uplink = Ethernet };
+        configure?.Invoke(network);
+        var service = Service(network);
+        await service.BootAsync(default);
+        Assert.Equal(ProvisioningMode.Connected, service.State.Mode);
+        return (network, service);
+    }
+
+    [Fact]
+    public async Task Over_Ethernet_The_Wifi_Is_Scanned()
+    {
+        // T1
+        var (network, service) = await OnEthernetAsync();
+        Assert.True(service.CanConfigureWifi);
+        var scans = network.Scans;
+        var found = await service.RefreshNetworksAsync(default);
+        Assert.Equal(scans + 1, network.Scans);
+        Assert.Equal(["Location-WiFi", "Studio", "Phone Hotspot"], found.Select(n => n.Ssid));
+    }
+
+    [Fact]
+    public async Task Over_Ethernet_A_Connection_Request_Is_Accepted()
+    {
+        // T2
+        var (_, service) = await OnEthernetAsync();
+        Assert.Equal(ConnectRequest.Accepted, service.RequestConnect("Studio", "correct-horse"));
+        await service.PendingConnect;
+    }
+
+    [Fact]
+    public async Task On_Wifi_The_Wifi_Cannot_Be_Reconfigured()
+    {
+        // T3: one radio — changing network would cut the uplink the page is on.
+        var network = new FakeNetworkManager { Uplink = HomeWifi };
+        var service = Service(network);
+        await service.BootAsync(default);
+        Assert.False(service.CanConfigureWifi);
+        Assert.Equal(ConnectRequest.Unavailable, service.RequestConnect("Studio", "correct-horse"));
+        var scans = network.Scans;
+        await service.RefreshNetworksAsync(default);
+        Assert.Equal(scans, network.Scans);
+        Assert.Equal(0, network.Connects);
+    }
+
+    [Fact]
+    public async Task Over_Ethernet_The_Cable_Never_Makes_A_Failed_Wifi_Look_Joined()
+    {
+        // T4, the regression: nmcli calls the join done, the Wi-Fi never gets
+        // there — and Ethernet is up the whole time.
+        var (network, service) = await OnEthernetAsync(n => n.AddressAfterJoin = false);
+        Assert.Equal(ConnectRequest.Accepted, service.RequestConnect("Studio", "correct-horse"));
+        await service.PendingConnect;
+
+        Assert.Equal(ConnectOutcome.Failed, service.State.LastAttempt?.Outcome);
+        Assert.Equal("Studio", network.LastForgotten);
+        Assert.Equal(Ethernet, network.Uplink);
+    }
+
+    [Fact]
+    public async Task Over_Ethernet_A_Joined_Wifi_Leaves_The_Cable_Alone()
+    {
+        // T5
+        var (network, service) = await OnEthernetAsync();
+        Assert.Equal(ConnectRequest.Accepted, service.RequestConnect("Studio", "correct-horse"));
+        await service.PendingConnect;
+
+        Assert.Equal(ConnectOutcome.Connected, service.State.LastAttempt?.Outcome);
+        Assert.Equal("nubarca-wifi-Studio", network.WifiClient.ConnectionName);
+        Assert.Equal(ProvisioningMode.Connected, service.State.Mode);
+        Assert.Equal(Ethernet, service.State.Uplink);
+        Assert.Equal(Ethernet, network.Uplink);
+        Assert.Equal(0, network.AccessPointStops);
+        Assert.Equal(0, network.AccessPointStarts);
+    }
+
+    [Fact]
+    public async Task Over_Ethernet_A_Failed_Wifi_Opens_No_Setup_Network()
+    {
+        // T6
+        var (network, service) = await OnEthernetAsync(n => n.Joins = (_, _) => false);
+        Assert.Equal(ConnectRequest.Accepted, service.RequestConnect("Studio", "wrong-password-1"));
+        await service.PendingConnect;
+
+        Assert.Equal(ConnectOutcome.Failed, service.State.LastAttempt?.Outcome);
+        Assert.Equal("Studio", network.LastForgotten);
+        Assert.Equal(0, network.AccessPointStarts);
+        Assert.False(network.AccessPointActive);
+        Assert.Equal(ProvisioningMode.Connected, service.State.Mode);
+        Assert.True(service.CanConfigureWifi, "the page can try again at once");
+    }
+
+    [Fact]
     public async Task Only_One_Attempt_At_A_Time_And_Only_In_Setup_Mode()
     {
         var connected = Service(new FakeNetworkManager { Uplink = HomeWifi });
         await connected.BootAsync(default);
-        Assert.Equal(ConnectRequest.NotInSetupMode, connected.RequestConnect("Location-WiFi", "correct-horse"));
+        Assert.Equal(ConnectRequest.Unavailable, connected.RequestConnect("Location-WiFi", "correct-horse"));
 
         var service = Service(new FakeNetworkManager(), Fast() with { HandOff = TimeSpan.FromMilliseconds(200) });
         await service.BootAsync(default);

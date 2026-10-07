@@ -68,6 +68,18 @@ public sealed class FakeNetworkManager : INetworkManager
     /// <summary>A known network NetworkManager reconnects to by itself once the radio is free.</summary>
     public NetworkUplink? KnownNetwork { get; set; }
 
+    /// <summary>The Wi-Fi interface as a client, on its own — what an attempt is verified against.</summary>
+    public WifiClientState WifiClient { get; set; } = WifiClientState.Disconnected;
+
+    /// <summary>
+    /// Overrides what the Wi-Fi interface reports after a join nmcli called
+    /// successful: another profile, no gateway, nothing at all.
+    /// </summary>
+    public Func<string, WifiClientState>? WifiAfterJoin { get; set; }
+
+    /// <summary>What happened, in order — shared with a <see cref="FakeCaptivePortalRedirect"/> when given.</summary>
+    public ConcurrentQueue<string> Events { get; set; } = new();
+
     public int AccessPointStarts;
     public int AccessPointStops;
     public int Scans;
@@ -87,6 +99,11 @@ public sealed class FakeNetworkManager : INetworkManager
         }
     }
 
+    public Task<WifiClientState> GetWifiClientStateAsync(string wifiInterface, CancellationToken cancellationToken)
+    {
+        lock (_lock) return Task.FromResult(wifiInterface == WifiInterface ? WifiClient : WifiClientState.Disconnected);
+    }
+
     public Task<IReadOnlyList<WifiNetwork>> ScanAsync(string wifiInterface, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref Scans);
@@ -96,6 +113,7 @@ public sealed class FakeNetworkManager : INetworkManager
     public Task<bool> StartAccessPointAsync(string wifiInterface, string ssid, string? password,
         CancellationToken cancellationToken)
     {
+        Events.Enqueue("ap-start");
         lock (_lock)
         {
             AccessPointStarts++;
@@ -103,12 +121,14 @@ public sealed class FakeNetworkManager : INetworkManager
             LastAccessPointSsid = ssid;
             LastAccessPointPassword = password;
             if (Uplink?.Type == "wifi") Uplink = null; // one radio
+            WifiClient = WifiClientState.Disconnected;
         }
         return Task.FromResult(true);
     }
 
     public Task StopAccessPointAsync(CancellationToken cancellationToken)
     {
+        Events.Enqueue("ap-stop");
         lock (_lock)
         {
             AccessPointStops++;
@@ -125,7 +145,17 @@ public sealed class FakeNetworkManager : INetworkManager
         var ok = Joins(ssid, password);
         lock (_lock)
         {
-            if (ok && AddressAfterJoin) Uplink = new NetworkUplink(wifiInterface, "wifi", ssid, "192.0.2.20");
+            if (ok && WifiAfterJoin is not null)
+            {
+                WifiClient = WifiAfterJoin(ssid);
+            }
+            else if (ok && AddressAfterJoin)
+            {
+                WifiClient = new WifiClientState(true, NetworkManagerCli.ClientConnectionPrefix + ssid, "192.0.2.20", true);
+                // Ethernet stays the uplink it was; Wi-Fi becomes it only when nothing else is.
+                if (Uplink is null || Uplink.Type == "wifi")
+                    Uplink = new NetworkUplink(wifiInterface, "wifi", ssid, "192.0.2.20");
+            }
         }
         return Task.FromResult(ok);
     }
@@ -133,6 +163,30 @@ public sealed class FakeNetworkManager : INetworkManager
     public Task ForgetAsync(string ssid, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref Forgets);
+        lock (_lock) LastForgotten = ssid;
+        return Task.CompletedTask;
+    }
+
+    public string? LastForgotten;
+}
+
+/// <summary>The port-80 redirect, as a record of what was asked of it.</summary>
+public sealed class FakeCaptivePortalRedirect(ConcurrentQueue<string> events) : ICaptivePortalRedirect
+{
+    public bool Works { get; set; } = true;
+    public bool Active { get; private set; }
+
+    public Task<bool> EnableAsync(string wifiInterface, int targetPort, CancellationToken cancellationToken)
+    {
+        events.Enqueue($"redirect-on {wifiInterface}:{targetPort}");
+        if (Works) Active = true;
+        return Task.FromResult(Works);
+    }
+
+    public Task DisableAsync(CancellationToken cancellationToken)
+    {
+        events.Enqueue("redirect-off");
+        Active = false;
         return Task.CompletedTask;
     }
 }
