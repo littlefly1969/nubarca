@@ -157,6 +157,10 @@ function identityToImagesQuery(
     semanticQuery: photo.visualQuery.trim().length > 0 ? photo.visualQuery.trim() : undefined,
     semanticTopK: photo.semanticTopK > 0 ? photo.semanticTopK : undefined,
     albumId: source.kind === 'album' ? source.albumId : undefined,
+    // Similarity alone is a physical restrict-set, so it keeps the workspace
+    // timeline sort. A visual search instead retains server relevance order.
+    sort: isSemanticActive(identity) ? undefined : identity.sort,
+    direction: isSemanticActive(identity) ? undefined : identity.direction,
     cursor: cursor ?? undefined,
   };
 }
