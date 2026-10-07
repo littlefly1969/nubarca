@@ -605,7 +605,8 @@ export function MediaWorkspace({
               />
             </div>
             {fastNavigation && <MediaFastNavigation identity={identity} revision={ws.navigationRevision}
-              currentKey={visibleKey} busy={ws.navigationBusy} onJump={jumpTo} onAuthError={invalidateAuth} />}
+              currentKey={visibleKey} busy={ws.navigationBusy} selectionActive={selection.isSelectionActive}
+              onJump={jumpTo} onAuthError={invalidateAuth} />}
           </div>
         )}
 

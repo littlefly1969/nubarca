@@ -17,11 +17,12 @@ interface Props {
   revision: number;
   currentKey: string | null;
   busy: boolean;
+  selectionActive?: boolean;
   onJump(key: string): Promise<boolean>;
   onAuthError(): void;
 }
 
-export function MediaFastNavigation({ identity, revision, currentKey, busy, onJump, onAuthError }: Props) {
+export function MediaFastNavigation({ identity, revision, currentKey, busy, onJump, onAuthError, selectionActive = false }: Props) {
   const { t, tn, lang, formatNumber } = useI18n();
   const [buckets, setBuckets] = useState<MediaNavigationBucket[]>([]);
   const [indexError, setIndexError] = useState(false);
@@ -76,10 +77,12 @@ export function MediaFastNavigation({ identity, revision, currentKey, busy, onJu
     const measure = () => {
       frame = null;
       if (drag.current !== null) return;
-      const rect = node.getBoundingClientRect();
       const bottom = viewport ? viewport.getBoundingClientRect().bottom : window.innerHeight;
-      const header = node.querySelector('button')?.getBoundingClientRect().height ?? 48;
-      node.style.setProperty('--media-navigation-track-height', `${Math.max(80, bottom - rect.top - header - 24)}px`);
+      const track = node.querySelector<HTMLElement>('.media-fast-nav__track');
+      const top = track && !track.hidden ? track.getBoundingClientRect().top : node.getBoundingClientRect().bottom;
+      const dock = node.closest('.ws-page')?.querySelector<HTMLElement>('.ws-dock');
+      const availableBottom = Math.min(bottom, dock?.getBoundingClientRect().top ?? bottom) - 8;
+      node.style.setProperty('--media-navigation-track-height', `${Math.max(80, availableBottom - top)}px`);
     };
     const schedule = () => { if (frame === null) frame = requestAnimationFrame(measure); };
     measure();
@@ -94,7 +97,7 @@ export function MediaFastNavigation({ identity, revision, currentKey, busy, onJu
       observer?.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [viewportRef, buckets.length, dragging, expanded]);
+  }, [viewportRef, buckets.length, dragging, expanded, selectionActive]);
 
   useEffect(() => {
     request.current += 1;

@@ -134,6 +134,19 @@ it('opens from its localized handle without a jump, then collapses after inactiv
   expect(screen.queryByRole('slider')).not.toBeInTheDocument();
 });
 
+it('fits the expanded track above a dock on a short mobile screen', async () => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const top = this.classList.contains('media-fast-nav__track') ? 300 : this.classList.contains('ws-dock') ? 500 : 190;
+    return { top, bottom: top + 48, height: 48 } as DOMRect;
+  });
+  installFetchMock({ 'GET /api/media/navigation': () => jsonResponse({ buckets }) });
+  const props = { identity, revision: 0, currentKey: '2025-02', busy: false, onJump: vi.fn(async () => true), onAuthError: vi.fn() };
+  const { rerender } = render(<div className="ws-page"><I18nProvider><MediaFastNavigation {...props} /></I18nProvider></div>);
+  const slider = await openRail();
+  rerender(<div className="ws-page"><I18nProvider><MediaFastNavigation {...props} selectionActive /></I18nProvider><div className="ws-dock" /></div>);
+  expect(slider.closest('aside')!.style.getPropertyValue('--media-navigation-track-height')).toBe('192px');
+});
+
 it('keeps the rail open during a pending jump and closes after it settles', async () => {
   let settle: (value: boolean) => void = () => {};
   setup({ onJump: () => new Promise<boolean>((resolve) => { settle = resolve; }) });
