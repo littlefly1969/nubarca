@@ -8,72 +8,174 @@
  * Phone first, because a link arrives in a message and a message is read on a
  * phone. Every target is at least 44px, and nothing needs a precise tap. */
 
-/* "Installa album" beside the language, as on a party's page. */
+/* This public page has an invariant dark surface, including when the owner's
+   app preference is light. Consume the public palette, not theme-dependent ink. */
+.album-share {
+  --text-primary: var(--contribution-text);
+  --text-secondary: var(--contribution-muted);
+  --surface-raised: var(--brand-deep-blue);
+  --surface-subtle: var(--brand-midnight-navy);
+  --border-default: var(--contribution-border);
+  color-scheme: dark;
+}
+.album-share .party-contribution-shell { width: min(100%, 48rem); }
+.album-share .party-contribution-topbar {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+.album-share .party-contribution-logo { width: 7.5rem; }
+.album-share .party-home-button { padding-inline: 0.65rem; }
 .album-share-topbar-actions {
   display: flex;
   flex: none;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
+  margin-left: auto;
 }
-
 .album-share-head {
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  margin-bottom: 1.25rem;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.album-share-cover {
+  flex: none;
+  width: 5rem;
+  height: 5rem;
+  border-radius: var(--radius-card);
+  object-fit: cover;
+}
+.album-share-heading { min-width: 0; }
+.album-share-eyebrow {
+  margin: 0 0 0.4rem;
+  color: var(--contribution-muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
 }
 .album-share-title {
   margin: 0;
   font-family: var(--font-heading);
-  font-size: clamp(1.6rem, 6vw, 2.4rem);
+  font-size: clamp(1.5rem, 6vw, 2rem);
+  font-weight: 600;
   line-height: 1.15;
   text-wrap: balance;
+  overflow-wrap: anywhere;
 }
 .album-share-count {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.9375rem;
+  margin: 0.5rem 0 0;
+  color: var(--contribution-muted);
+  font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
 }
 .album-share-subtitle {
-  margin: 0 0 0.35rem;
+  margin: 0;
   font-family: var(--font-heading);
+  font-weight: 600;
   font-size: 1.125rem;
+  line-height: 1.35;
 }
 
-/* ---- The gallery -------------------------------------------------------
-   The party's own mosaic and viewer (src/publicMedia), so an album shared by
-   link looks and behaves exactly as a party's photographs do. */
+/* Media stays the strongest part of the page, in the shared public mosaic. */
 .album-share-gallery { margin: 1.5rem 0 0; }
 
-/* ---- Adding ------------------------------------------------------------- */
+/* One clear action, with a full-width 48px target on a phone. */
 .album-share-upload {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.75rem;
   padding: 1rem;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--contribution-border);
   border-radius: var(--radius-card);
-  background: var(--surface-raised);
+  background: var(--contribution-surface);
 }
-.album-share-input {
-  width: 100%;
-  min-height: 2.75rem;
-  color: inherit;
+.album-share-upload-top {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.album-share-upload-copy { min-width: 0; }
+.album-share-upload-copy .album-share-meta { margin-top: 0.35rem; }
+.album-share-picker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 3rem;
+  padding: 0.75rem 1rem;
+  border: 0;
+  border-radius: var(--radius-button);
+  background: var(--brand-electric-blue);
+  color: var(--accent-contrast);
   font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
 }
+.album-share-picker:hover:not(:disabled) { filter: brightness(1.08); }
+.album-share-picker:disabled {
+  background: var(--brand-deep-blue);
+  color: var(--contribution-muted);
+  box-shadow: inset 0 0 0 1px var(--contribution-border);
+  cursor: not-allowed;
+}
+.album-share-meta {
+  margin: 0;
+  color: var(--contribution-muted);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+.album-share-caveat { text-wrap: pretty; }
 .album-share-progress {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.5rem;
+  min-width: 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--contribution-border);
+  font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
 }
 .album-share-progress p { margin: 0; }
-/* The ceiling is a fact the owner has to act on, not a failure the visitor
-   caused — warned, not alarmed. */
-.album-share-stopped { color: var(--warn, #d08700); }
-/* The browser limit, said quietly and always. */
-.album-share-caveat { opacity: 0.8; }
+.album-share-progress-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.album-share-progress-title .nc-icon { flex: none; }
+.album-share-progress-complete .nc-icon { color: var(--success); }
+.album-share-progress-complete .album-share-progress-title { color: var(--contribution-text); }
+.album-share-current {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--contribution-muted);
+}
+.album-share-stopped { color: var(--contribution-danger); }
+.album-share-wait { color: var(--contribution-text); line-height: 1.45; }
+.album-share-activity {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin: 0 0.5rem;
+  border-radius: 50%;
+  background: var(--brand-cyan-glow);
+  animation: album-share-pulse 1.4s ease-in-out infinite;
+}
+.album-share .party-contribution-progressbar-fill { background: var(--brand-electric-blue); }
+.album-share-retry { min-height: 3rem; padding: 0.65rem 1rem; font-size: 0.9375rem; }
+.album-share-refresh { margin-top: 1rem; color: var(--contribution-muted); }
+@keyframes album-share-pulse { 50% { opacity: 0.4; } }
+@media (prefers-reduced-motion: reduce) { .album-share-activity { animation: none; } }
+@media (min-width: 40rem) {
+  .album-share-head { gap: 1.5rem; }
+  .album-share-cover { width: 6rem; height: 6rem; }
+  .album-share-upload-top { flex-direction: row; align-items: center; justify-content: space-between; }
+  .album-share-picker { flex: none; }
+}
 
 /* ---- The gate ----------------------------------------------------------- */
 .album-share-gate {

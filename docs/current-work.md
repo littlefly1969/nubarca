@@ -1184,6 +1184,28 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   `downloadUrl` is null when there is nothing safe to hand over. Originals are
   off by default because an original carries the GPS the camera wrote and a
   link is a public share.
+- **The shared album opens with its own cover and one mobile upload action.**
+  The public dark palette, approved wordmark, Space Grotesk / Exo 2 and canonical
+  radii remain the brand contract. The native file input sits behind a named
+  48px button; a short open-page reminder replaces the long standing explanation.
+  Upload feedback separates byte transfer from server confirmation: 100% sent
+  still says saving, and only a validated report counts a file as saved. The
+  sequential queue stops on transport/access/throttling failures, retains missing
+  files for an explicit retry, and keeps the final result even when refreshing
+  closes uploads or fails. Inactivity is bounded at two minutes while sending,
+  five while awaiting confirmation, rather than timing out a progressing video.
+  All page state is scoped to the link token through a keyed page boundary:
+  switching links immediately replaces the old album with loading, aborts its
+  upload and prevents late reads or refresh warnings from reaching the new page.
+  Resume metadata is only a cross-selection heuristic; distinct files in the
+  same batch are all uploaded even when their name, size and timestamp match.
+  Explicit retries use the exact unconfirmed files, so matching metadata of
+  another accepted file cannot remove a missing file from the retry queue.
+  Accepted files are remembered in memory and best-effort IndexedDB; wake lock
+  and beforeunload are best effort, never background upload. A lost response is
+  ambiguous: retry is manual and asks the visitor to check the album, because
+  this public endpoint has no server-side idempotency contract. The separate
+  [upload idempotency slice](album-share-upload-idempotency.md) defines that contract.
 - **A one-time code has exactly one observable end.** Delivered, or counted
   under `DroppedCapacity`, `UndeliveredSend` or `DroppedShutdown` — kept apart
   because they ask an operator for different things. `BoundedChannelFullMode.

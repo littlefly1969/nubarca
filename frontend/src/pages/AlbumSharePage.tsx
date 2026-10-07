@@ -14,6 +14,7 @@ import {
 import { useI18n } from '../i18n';
 import { PRODUCT_NAME } from '../brand/brand';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
+import { Icon } from '../components/icons/Icon';
 import { HomeScreenButton } from '../homeScreen/HomeScreenButton';
 import { PublicGallery } from '../publicMedia/PublicGallery';
 import { PublicMediaViewer } from '../publicMedia/PublicMediaViewer';
@@ -52,29 +53,44 @@ type Status =
   | { kind: 'loading' }
   | { kind: 'locked' }
   | { kind: 'ready'; album: AlbumSharePublic; items: AlbumShareItem[] }
+  | { kind: 'error' }
   | { kind: 'gone' };
 
 export function AlbumSharePage() {
   const { token = '' } = useParams<{ token: string }>();
+  // The complete page state belongs to ONE link, including refresh failures,
+  // quota, second-factor inputs and uploads. A route change starts from loading
+  // synchronously, before effects run; old responses cannot update the new page.
+  return <AlbumShareContent key={token} token={token} />;
+}
+
+function AlbumShareContent({ token }: { token: string }) {
   const { t } = useI18n();
   // An album's app whose key is not this token's album: a made-up address,
   // shown as unavailable rather than as another album inside this one's app.
   const mismatch = useHomeScreenAppMismatch();
   const [status, setStatus] = useState<Status>(mismatch ? { kind: 'gone' } : { kind: 'loading' });
+  const [refreshFailed, setRefreshFailed] = useState(false);
   useHomeScreenTitle(status.kind === 'ready' ? status.album.albumName : null);
 
-  const load = useCallback(async (signal?: AbortSignal) => {
+  const load = useCallback(async (signal?: AbortSignal, refresh = false) => {
     try {
       const album = await getAlbumShare(token, signal);
       const items = await getAlbumShareItems(token, signal);
-      if (!signal?.aborted) setStatus({ kind: 'ready', album, items: items.items });
+      if (!signal?.aborted) {
+        setStatus({ kind: 'ready', album, items: items.items });
+        setRefreshFailed(false);
+      }
     } catch (error) {
       if (signal?.aborted) return;
+      // A refresh must not unmount the upload's confirmation or retry queue.
+      if (refresh) { setRefreshFailed(true); return; }
       // 401 is the ONE answer that is not "nothing here": the link is live and
       // the visitor is expected — they simply have not proved who they are.
       setStatus(error instanceof ApiError && error.status === 401
         ? { kind: 'locked' }
-        : { kind: 'gone' });
+        : error instanceof ApiError && error.status === 404
+          ? { kind: 'gone' } : { kind: 'error' });
     }
   }, [token]);
 
@@ -113,6 +129,15 @@ export function AlbumSharePage() {
           </div>
         )}
 
+        {status.kind === 'error' && (
+          <div className="party-contribution-state" role="alert">
+            <p>{t('albumLink.loadFailed')}</p>
+            <button className="party-contribution-secondary" onClick={() => void load()}>
+              {t('common.retry')}
+            </button>
+          </div>
+        )}
+
         {status.kind === 'locked' && (
           // Verified: an album page starts again WITH the grant, so it moves
           // under its app (or its app checks its key) — elsewhere, it reloads.
@@ -121,11 +146,20 @@ export function AlbumSharePage() {
 
         {status.kind === 'ready' && (
           <AlbumShareBody
+            key={token}
             token={token}
             album={status.album}
             items={status.items}
-            onChanged={() => void load()}
+            onChanged={() => void load(undefined, true)}
           />
+        )}
+        {refreshFailed && (
+          <div className="album-share-refresh" role="alert">
+            <p>{t('albumLink.refreshFailed')}</p>
+            <button className="party-contribution-secondary" onClick={() => void load(undefined, true)}>
+              {t('common.retry')}
+            </button>
+          </div>
         )}
       </div>
     </main>
@@ -143,6 +177,7 @@ function AlbumShareBody({
   onChanged(): void;
 }) {
   const { t, tn } = useI18n();
+  const [coverFailed, setCoverFailed] = useState(false);
   // The open picture, by position, so ‹ › and a swipe walk the album; and the
   // tile it was opened from, so focus goes back there.
   const [openIndex, setOpenIndex] = useState<number | null>(null);
@@ -160,15 +195,19 @@ function AlbumShareBody({
   return (
     <>
       <header className="album-share-head">
-        <h1 className="album-share-title">{album.albumName}</h1>
-        <p className="album-share-count">
-          {tn(album.itemCount, 'albumLink.itemCount')}
-        </p>
+        {album.coverUrl && !coverFailed && (
+          <img className="album-share-cover" src={album.coverUrl} alt="" onError={() => setCoverFailed(true)} />
+        )}
+        <div className="album-share-heading">
+          <p className="album-share-eyebrow">{t('albumLink.sharedAlbum')}</p>
+          <h1 className="album-share-title">{album.albumName}</h1>
+          <p className="album-share-count">
+            {tn(album.itemCount, 'albumLink.itemCount')}
+          </p>
+        </div>
       </header>
 
-      {album.canUpload && (
-        <AlbumShareUpload token={token} album={album} onDone={onChanged} />
-      )}
+      <AlbumShareUpload token={token} album={album} onDone={onChanged} />
 
       {items.length === 0 ? (
         <p className="party-contribution-intro" data-testid="album-share-empty">
@@ -219,8 +258,11 @@ type Run = {
   sent: number;
   failed: number;
   skipped: number;
-  /** A stable code when the link's ceiling stopped the run. */
   stopped: string | null;
+  uncertain: boolean;
+  current: number;
+  name: string;
+  fraction: number;
 };
 
 function AlbumShareUpload({
@@ -232,123 +274,223 @@ function AlbumShareUpload({
 }) {
   const { t, tn } = useI18n();
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const activeRef = useRef<AbortController | null>(null);
+  const rememberedRef = useRef(new Set<string>());
   const [run, setRun] = useState<Run | null>(null);
   const [busy, setBusy] = useState(false);
+  const [retryFiles, setRetryFiles] = useState<File[]>([]);
   const [alreadySent, setAlreadySent] = useState(0);
   const wakeLock = useUploadWakeLock();
 
-  // What this token has already accepted from this phone. Read once, so the
-  // page can say "7 già caricate" before anybody picks anything.
   useEffect(() => {
     let live = true;
-    void loadDone(token).then((done) => { if (live) setAlreadySent(done.size); });
-    return () => { live = false; };
+    void loadDone(token).catch(() => rememberedRef.current).then((done) => {
+      if (live) {
+        for (const key of done) rememberedRef.current.add(key);
+        setAlreadySent(rememberedRef.current.size);
+      }
+    });
+    return () => { live = false; activeRef.current?.abort(); };
   }, [token]);
 
-  async function send(files: FileList | null) {
-    if (!files || files.length === 0) return;
+  useEffect(() => {
+    if (!busy) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, [busy]);
+
+  async function send(files: readonly File[], retrying = false) {
+    if (files.length === 0 || activeRef.current || !album.canUpload) return;
+    const controller = new AbortController();
+    activeRef.current = controller;
     setBusy(true);
+    setRetryFiles([]);
+    setRun(null);
     wakeLock.start();
     try {
-      const done = await loadDone(token);
-      // THE RESUME. Anything this phone already sent under this link is
-      // recognised and skipped, so an interrupted run of forty does not start
-      // again at one.
-      const { pending, skipped } = partition(Array.from(files), done);
+      const stored = await loadDone(token).catch(() => rememberedRef.current);
+      if (controller.signal.aborted) return;
+      const done = new Set([...stored, ...rememberedRef.current]);
+      // A retry already contains the exact unconfirmed File objects. Another
+      // accepted file may share their resume metadata, so do not skip them.
+      const { pending, skipped } = retrying
+        ? { pending: [...files], skipped: [] }
+        : partition(files, done);
+      // The resume key is only a cross-selection heuristic: distinct files in
+      // this batch can share name, size and timestamp and must all be sent.
       const progress: Run = {
-        total: pending.length, sent: 0, failed: 0, skipped: skipped.length, stopped: null,
+        total: pending.length, sent: 0, failed: 0, skipped: skipped.length,
+        stopped: null, uncertain: false, current: 0, name: '', fraction: 0,
       };
+      const retry: File[] = [];
       setRun({ ...progress });
 
-      for (const file of pending) {
+      for (const [index, file] of pending.entries()) {
+        if (controller.signal.aborted) return;
+        progress.current = index + 1;
+        progress.name = file.name;
+        progress.fraction = 0;
+        setRun({ ...progress });
         try {
-          const report = await uploadToAlbumShareWithProgress(token, file);
+          const report = await uploadToAlbumShareWithProgress(token, file, (fraction) => {
+            if (controller.signal.aborted) return;
+            progress.fraction = fraction;
+            setRun({ ...progress });
+          }, controller.signal);
+          if (controller.signal.aborted) return;
           if (report.accepted > 0) {
             progress.sent += 1;
-            await markDone(token, fileKey(file));
-          } else {
+            rememberedRef.current.add(fileKey(file));
+            // Storage is best effort; an accepted file stays accepted if it fails.
+            await markDone(token, fileKey(file)).catch(() => {});
+          } else if (report.rejected > 0) {
             progress.failed += 1;
+            retry.push(file);
           }
           if (report.stopped) {
-            // The link's ceiling. Stopping here rather than sending the rest
-            // into a wall is the difference between one clear message and
-            // thirty identical failures.
             progress.stopped = report.stopped;
-            setRun({ ...progress });
+            retry.push(...pending.slice(index + (report.accepted + report.rejected > 0 ? 1 : 0)));
             break;
           }
         } catch (error) {
-          progress.failed += 1;
-          const code = (error as { code?: string }).code ?? null;
+          if (controller.signal.aborted) return;
+          const { code, status } = error as { code?: string; status?: number };
           if (code === ALBUM_SHARE_ERRORS.uploadLimitReached
             || code === ALBUM_SHARE_ERRORS.uploadsDisabled) {
             progress.stopped = code;
-            setRun({ ...progress });
+            retry.push(...pending.slice(index));
+            break;
+          }
+          progress.failed += 1;
+          retry.push(file);
+          // A broken connection, lost grant or throttled server will not improve
+          // by immediately sending every remaining file into the same failure.
+          if (!status || status >= 500 || status === 429 || status === 401 || status === 404) {
+            progress.uncertain = !status || status >= 500;
+            progress.stopped = status === 429 ? 'rate_limited'
+              : status === 401 || status === 404 ? 'access' : 'connection';
+            retry.push(...pending.slice(index + 1));
             break;
           }
         }
         setRun({ ...progress });
       }
-      setAlreadySent((await loadDone(token)).size);
+      if (controller.signal.aborted) return;
+      setRun({ ...progress });
+      setRetryFiles(retry);
+      setAlreadySent(rememberedRef.current.size);
       onDone();
     } finally {
-      wakeLock.stop();
-      setBusy(false);
-      if (inputRef.current) inputRef.current.value = '';
+      if (activeRef.current === controller) {
+        activeRef.current = null;
+        wakeLock.stop();
+        if (!controller.signal.aborted) setBusy(false);
+        if (inputRef.current) inputRef.current.value = '';
+      }
     }
   }
 
+  if (!album.canUpload && !run) return null;
+  const complete = run !== null && !busy && run.failed === 0 && !run.stopped;
+  const waiting = run ? Math.max(0, run.total - run.sent - run.failed) : 0;
+  const saving = busy && run !== null && run.fraction === 1;
+
   return (
-    <section className="album-share-upload" data-testid="album-share-upload">
-      <h2 className="album-share-subtitle">{t('albumLink.addTitle')}</h2>
+    <section className="album-share-upload" data-testid="album-share-upload" aria-label={t('albumLink.addTitle')}>
+      <div className="album-share-upload-top">
+        <div className="album-share-upload-copy">
+          <h2 className="album-share-subtitle">{t('albumLink.addTitle')}</h2>
+          {album.uploadsRemaining !== null && (
+            <p className="album-share-meta" data-testid="album-share-remaining">
+              {tn(album.uploadsRemaining, 'albumLink.remaining')}
+            </p>
+          )}
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          accept="image/*,video/*"
+          className="party-contribution-file-input"
+          aria-label={t('albumLink.choose')}
+          tabIndex={-1}
+          data-testid="album-share-input"
+          disabled={busy || !album.canUpload}
+          onChange={(e) => void send(Array.from(e.target.files ?? []))}
+        />
+        <button
+          type="button"
+          className="album-share-picker"
+          disabled={busy || !album.canUpload}
+          onClick={() => inputRef.current?.click()}
+        >
+          <Icon name={busy ? 'upload' : 'plus'} size={24} />
+          {t(busy ? 'albumLink.uploading' : 'albumLink.choose')}
+        </button>
+      </div>
 
-      {album.uploadsRemaining !== null && (
-        <p className="party-contribution-intro" data-testid="album-share-remaining">
-          {tn(album.uploadsRemaining, 'albumLink.remaining')}
-        </p>
-      )}
-
-      <input
-        ref={inputRef}
-        type="file"
-        multiple
-        accept="image/*,video/*"
-        className="album-share-input"
-        data-testid="album-share-input"
-        disabled={busy}
-        onChange={(e) => void send(e.target.files)}
-      />
-
-      {/* The text says what the control DOES. This one opens the gallery, so
-          it does not offer to take a photograph. */}
-      <p className="party-contribution-hint">{t('albumLink.pickHint')}</p>
-
-      {alreadySent > 0 && !run && (
-        <p className="party-contribution-hint" data-testid="album-share-resume">
+      {alreadySent > 0 && !run && !busy && (
+        <p className="album-share-meta" data-testid="album-share-resume">
           {tn(alreadySent, 'albumLink.alreadySent')}
         </p>
       )}
 
-      {run && (
-        <div className="album-share-progress" role="status" data-testid="album-share-progress">
-          <p>{t('albumLink.progress', { sent: run.sent, total: run.total })}</p>
-          {run.skipped > 0 && <p>{tn(run.skipped, 'albumLink.skipped')}</p>}
-          {run.failed > 0 && <p>{tn(run.failed, 'albumLink.failed')}</p>}
-          {run.stopped === ALBUM_SHARE_ERRORS.uploadLimitReached && (
-            <p className="album-share-stopped" data-testid="album-share-limit">
-              {t('albumLink.limitReached')}
-            </p>
+      {(run || busy) && (
+        <div className={`album-share-progress${complete ? ' album-share-progress-complete' : ''}`}
+          role="status" aria-live="polite" data-testid="album-share-progress">
+          <p className="album-share-progress-title">
+            {busy ? <span className="album-share-activity" aria-hidden="true" />
+              : <Icon name={complete ? 'check' : 'info'} size={24} />}
+            {t(busy ? saving ? 'albumLink.saving' : 'albumLink.uploading'
+              : complete ? run?.total === 0 ? 'albumLink.allSkipped' : 'albumLink.complete'
+                : 'albumLink.incomplete')}
+          </p>
+          {run && <p>{t('albumLink.progress', { sent: run.sent, total: run.total })}</p>}
+          {busy && run && run.current > 0 && (
+            <>
+              <p className="album-share-current" title={run.name}>{run.name}</p>
+              <div className="party-contribution-progressbar" role="progressbar"
+                aria-label={t('albumLink.fileProgress')}
+                aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.floor(run.fraction * 100)}>
+                <div className="party-contribution-progressbar-fill" style={{ width: `${run.fraction * 100}%` }} />
+              </div>
+              <p className="album-share-meta">
+                {t(saving ? 'albumLink.fileSaving' : 'albumLink.fileSending', {
+                  current: run.current, total: run.total, percent: Math.floor(run.fraction * 100),
+                })}
+              </p>
+            </>
           )}
-          {run.stopped === ALBUM_SHARE_ERRORS.uploadsDisabled && (
-            <p className="album-share-stopped">{t('albumLink.uploadsClosed')}</p>
+          {busy && <p className="album-share-wait">{t('albumLink.wait')}</p>}
+          {run && !busy && (
+            <>
+              {run.skipped > 0 && <p className="album-share-meta">{tn(run.skipped, 'albumLink.skipped')}</p>}
+              {run.failed > 0 && <p className="album-share-stopped">{tn(run.failed, 'albumLink.failed')}</p>}
+              {waiting > 0 && <p className="album-share-meta">{tn(waiting, 'albumLink.waiting')}</p>}
+              {run.stopped === ALBUM_SHARE_ERRORS.uploadLimitReached && (
+                <p className="album-share-stopped" data-testid="album-share-limit">{t('albumLink.limitReached')}</p>
+              )}
+              {run.stopped === ALBUM_SHARE_ERRORS.uploadsDisabled && (
+                <p className="album-share-stopped">{t('albumLink.uploadsClosed')}</p>
+              )}
+              {run.stopped === 'rate_limited' && <p>{t('albumLink.rateLimited')}</p>}
+              {run.stopped === 'access' && <p>{t('albumLink.accessStopped')}</p>}
+              {run.stopped === 'connection' && <p>{t('albumLink.connectionStopped')}</p>}
+              {run.uncertain && <p className="album-share-meta">{t('albumLink.checkBeforeRetry')}</p>}
+            </>
           )}
         </div>
       )}
-
-      {/* SAID OUT LOUD, because the browser cannot do what people assume. A
-          visitor who walks away from a half-finished upload believing it will
-          continue is a visitor who loses photographs. */}
-      <p className="party-contribution-hint album-share-caveat">{t('albumLink.keepOpen')}</p>
+      {!busy && retryFiles.length > 0 && album.canUpload && run?.stopped !== 'access' && (
+        <button className="party-contribution-secondary album-share-retry" onClick={() => void send(retryFiles, true)}>
+          <Icon name="restore" size={24} />{t('albumLink.retryMissing')}
+        </button>
+      )}
+      {(!run || busy) && <p className="album-share-meta album-share-caveat">{t('albumLink.keepOpen')}</p>}
     </section>
   );
 }
