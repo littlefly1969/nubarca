@@ -283,3 +283,14 @@ it('persists explicit insertion-date sorting and defaults invalid sorting to the
   expect(identityFromUrlParams(library, filtersToUrlParams(identity))).toMatchObject({ sort: 'created', direction: 'asc' });
   expect(identityFromUrlParams(library, new URLSearchParams('sort=invalid'))).toMatchObject({ sort: 'datetaken', direction: 'desc' });
 });
+
+it.each(['name', 'created', 'datetaken'] as const)('a semantic URL reopens canonical physical chronology instead of the hidden %s ascending sort', (sort) => {
+  const semantic = { ...base(), sort, direction: 'asc' as const };
+  semantic.filters.photo.visualQuery = 'mare';
+  const url = filtersToUrlParams(semantic);
+  expect(url.has('sort')).toBe(false);
+  expect(url.has('direction')).toBe(false);
+  expect(identityFromUrlParams(library, url)).toMatchObject({ sort: 'datetaken', direction: 'desc' });
+  expect(semantic.sort).toBe(sort);
+  expect(semantic.direction).toBe('asc');
+});

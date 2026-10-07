@@ -11,7 +11,6 @@ import { MediaWorkspace, type MediaPhotoDestination } from '../media/workspace/M
 import {
   filtersToUrlParams,
   identityFromUrlParams,
-  normalizeMediaWorkspaceTransition,
   type MediaWorkspaceIdentity,
   type MediaWorkspaceSource,
 } from '../media/workspace/mediaWorkspaceQuery';
@@ -54,10 +53,7 @@ export function MediaLibraryPage({ scope = 'active' }: { scope?: MediaGallerySco
   const onIdentityChange = useCallback((next: MediaWorkspaceIdentity) => {
     // A scope switch is a route change (distinct key → clean remount + reset).
     if (next.libraryScope !== effectiveScope) {
-      // The route remount drops session-only filters, including visual search.
-      // Normalize that actual semantic exit before persisting its physical sort.
-      const persisted = identityFromUrlParams(LIBRARY_SOURCE, filtersToUrlParams(next));
-      const sp = filtersToUrlParams(normalizeMediaWorkspaceTransition(next, persisted));
+      const sp = filtersToUrlParams(next);
       sp.delete('scope');
       const path = next.libraryScope === 'excluded' ? '/media/excluded' : '/media';
       const qs = sp.toString();
