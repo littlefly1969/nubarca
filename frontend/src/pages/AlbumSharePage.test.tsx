@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from 'react-router';
 import { I18nProvider } from '../i18n';
 import { installFetchMock, jsonResponse } from '../test-utils';
 import { AlbumSharePage } from './AlbumSharePage';
@@ -63,27 +63,27 @@ function album(over: Record<string, unknown> = {}) {
   };
 }
 
-function items() {
+function items(token = TOKEN) {
   return {
     items: [
       {
         id: 'i1',
-        thumbnailUrl: `/api/album-share/${TOKEN}/media/i1/thumbnail`,
-        previewUrl: `/api/album-share/${TOKEN}/media/i1/preview`,
-        downloadUrl: `/api/album-share/${TOKEN}/media/i1/download`,
+        thumbnailUrl: `/api/album-share/${token}/media/i1/thumbnail`,
+        previewUrl: `/api/album-share/${token}/media/i1/preview`,
+        downloadUrl: `/api/album-share/${token}/media/i1/download`,
         playbackUrl: null,
         isVideo: false,
       },
       {
         id: 'i2',
-        thumbnailUrl: `/api/album-share/${TOKEN}/media/i2/thumbnail`,
-        previewUrl: `/api/album-share/${TOKEN}/media/i2/preview`,
+        thumbnailUrl: `/api/album-share/${token}/media/i2/thumbnail`,
+        previewUrl: `/api/album-share/${token}/media/i2/preview`,
         // A video on a link whose owner has not allowed originals: there is no
         // safe rendition to hand over, so the server sends no URL at all.
         downloadUrl: null,
         // Playback is offered even with originals off: HLS is a transcoded
         // ladder, never the camera's file.
-        playbackUrl: `/api/album-share/${TOKEN}/media/i2/video`,
+        playbackUrl: `/api/album-share/${token}/media/i2/video`,
         isVideo: true,
       },
     ],
@@ -402,6 +402,29 @@ describe('upload feedback and recovery', () => {
     expect(screen.getByRole('button', { name: 'Scegli foto e video' })).toBeEnabled();
   });
 
+  it('uploads both distinct files with identical resume metadata', async () => {
+    const contents = (file: FormDataEntryValue | null | undefined) => new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsText(file as Blob);
+    });
+    const first = new File(['one'], 'same.jpg', { type: 'image/jpeg', lastModified: 123 });
+    const second = new File(['two'], 'same.jpg', { type: 'image/jpeg', lastModified: 123 });
+    expect(first).not.toBe(second);
+    expect(fileKey(first)).toBe(fileKey(second));
+    serve(); mount(); await pick([first, second]);
+    expect(await contents(MockUploadXhr.sent[0].body?.get('file'))).toBe('one');
+    await finish();
+    await waitFor(() => expect(MockUploadXhr.sent).toHaveLength(2));
+    expect(await contents(MockUploadXhr.sent[1].body?.get('file'))).toBe('two');
+    await finish(1);
+    expect(await screen.findByText('Caricamento completato')).toBeInTheDocument();
+    expect(screen.getByTestId('album-share-progress')).toHaveTextContent('2 di 2 file salvati');
+    expect(screen.queryByText(/saltat/i)).toBeNull();
+    expect(MockUploadXhr.sent.map(request => request.method)).toEqual(['POST', 'POST']);
+    expect(markDone).toHaveBeenCalledTimes(2);
+  });
+
   it('warns before closing only while an upload is active', async () => {
     serve(); mount(); await pick([photos()[0]]);
     const active = new Event('beforeunload', { cancelable: true });
@@ -537,5 +560,118 @@ describe('upload feedback and recovery', () => {
     broken = false;
     await userEvent.click(screen.getByRole('button', { name: 'Riprova' }));
     expect(await screen.findByTestId('album-share-grid')).toBeInTheDocument();
+  });
+});
+
+describe('moving between shared album links', () => {
+  const OTHER = 'another-share-token';
+  const otherAlbum = () => album({ albumName: 'Montagna', coverUrl: '/mountain-cover', uploadsRemaining: 2, itemCount: 1 });
+  const otherItems = () => ({ items: [{ ...items(OTHER).items[0], id: 'mountain-photo' }], nextCursor: null });
+  function deferredResponse() {
+    let resolve!: (response: Response) => void;
+    const promise = new Promise<Response>((complete) => { resolve = complete; });
+    return { promise, resolve };
+  }
+  function mountRoutes() {
+    const router = createMemoryRouter([{ path: '/album/:token', element: <AlbumSharePage /> }], {
+      initialEntries: [`/album/${TOKEN}`],
+    });
+    render(<I18nProvider><RouterProvider router={router} /></I18nProvider>);
+    return router;
+  }
+  function serveRoutes(
+    first: () => Response | Promise<Response> = () => jsonResponse(album()),
+    second: () => Response | Promise<Response> = () => jsonResponse(otherAlbum()),
+  ) {
+    return installFetchMock({
+      [`GET /api/album-share/${TOKEN}`]: first,
+      [`GET /api/album-share/${TOKEN}/items`]: () => jsonResponse(items()),
+      [`GET /api/album-share/${OTHER}`]: second,
+      [`GET /api/album-share/${OTHER}/items`]: () => jsonResponse(otherItems()),
+    });
+  }
+
+  it('hides the old album and aborts its upload while the next link is pending', async () => {
+    const next = deferredResponse();
+    serveRoutes(undefined, () => next.promise);
+    const router = mountRoutes();
+    await screen.findByText('Vacanze');
+    await userEvent.upload(screen.getByTestId('album-share-input'), new File(['one'], 'one.jpg', { type: 'image/jpeg' }));
+    await waitFor(() => expect(MockUploadXhr.sent).toHaveLength(1));
+    await act(async () => { await router.navigate(`/album/${OTHER}`); });
+    expect(screen.queryByText('Vacanze')).toBeNull();
+    expect(screen.queryByTestId('album-share-grid')).toBeNull();
+    expect(screen.queryByTestId('album-share-input')).toBeNull();
+    expect(screen.queryByTestId('album-share-remaining')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Scegli foto e video' })).toBeNull();
+    expect(MockUploadXhr.sent[0].aborted).toBe(true);
+  });
+
+  it('ignores a late initial response from the previous link after the new album is ready', async () => {
+    const old = deferredResponse();
+    const { calls } = serveRoutes(() => old.promise);
+    const router = mountRoutes();
+    await waitFor(() => expect(calls.some(call => call.url === `/api/album-share/${TOKEN}`)).toBe(true));
+    await act(async () => { await router.navigate(`/album/${OTHER}`); });
+    await screen.findByText('Montagna');
+    // The stub deliberately delivers despite the old request's aborted signal.
+    await act(async () => { old.resolve(jsonResponse(album())); });
+    expect(screen.getByText('Montagna')).toBeInTheDocument();
+    expect(screen.queryByText('Vacanze')).toBeNull();
+    expect(screen.getByTestId('album-share-item-mountain-photo')).toBeInTheDocument();
+  });
+
+  it('shows the new title, cover, quota and items and uploads only to the displayed link', async () => {
+    const next = deferredResponse();
+    serveRoutes(undefined, () => next.promise);
+    const router = mountRoutes();
+    await screen.findByText('Vacanze');
+    await act(async () => { await router.navigate(`/album/${OTHER}`); });
+    await act(async () => { next.resolve(jsonResponse(otherAlbum())); });
+    expect(await screen.findByText('Montagna')).toBeInTheDocument();
+    expect(document.querySelector('.album-share-cover')).toHaveAttribute('src', '/mountain-cover');
+    expect(screen.getByTestId('album-share-remaining')).toHaveTextContent('2');
+    expect(screen.getByTestId('album-share-item-mountain-photo')).toBeInTheDocument();
+    expect(screen.queryByTestId('album-share-item-i1')).toBeNull();
+    await userEvent.upload(screen.getByTestId('album-share-input'), new File(['new'], 'new.jpg', { type: 'image/jpeg' }));
+    await waitFor(() => expect(MockUploadXhr.sent).toHaveLength(1));
+    expect(MockUploadXhr.sent[0].url).toBe(`/api/album-share/${OTHER}/upload`);
+  });
+
+  it('drops the old refresh failure while opening another link', async () => {
+    let broken = false;
+    const next = deferredResponse();
+    serveRoutes(() => broken ? new Response(null, { status: 503 }) : jsonResponse(album()), () => next.promise);
+    const router = mountRoutes();
+    await screen.findByText('Vacanze');
+    await userEvent.upload(screen.getByTestId('album-share-input'), new File(['one'], 'one.jpg', { type: 'image/jpeg' }));
+    await waitFor(() => expect(MockUploadXhr.sent).toHaveLength(1));
+    broken = true;
+    await act(async () => { MockUploadXhr.sent[0].finish(); });
+    await screen.findByText(/Non riesco ad aggiornare le foto/);
+    await act(async () => { await router.navigate(`/album/${OTHER}`); });
+    expect(screen.queryByText(/Non riesco ad aggiornare le foto/)).toBeNull();
+    await act(async () => { next.resolve(jsonResponse(otherAlbum())); });
+    await screen.findByText('Montagna');
+    expect(screen.queryByText(/Non riesco ad aggiornare le foto/)).toBeNull();
+  });
+
+  it.each([200, 503])('ignores a late refresh response from the old link (HTTP %s)', async (status) => {
+    const old = deferredResponse();
+    let refreshing = false;
+    const { calls } = serveRoutes(() => refreshing ? old.promise : jsonResponse(album()));
+    const router = mountRoutes();
+    await screen.findByText('Vacanze');
+    await userEvent.upload(screen.getByTestId('album-share-input'), new File(['one'], 'one.jpg', { type: 'image/jpeg' }));
+    await waitFor(() => expect(MockUploadXhr.sent).toHaveLength(1));
+    refreshing = true;
+    await act(async () => { MockUploadXhr.sent[0].finish(); });
+    await waitFor(() => expect(calls.filter(call => call.url === `/api/album-share/${TOKEN}`)).toHaveLength(2));
+    await act(async () => { await router.navigate(`/album/${OTHER}`); });
+    await screen.findByText('Montagna');
+    await act(async () => { old.resolve(jsonResponse(album(), status)); });
+    expect(screen.getByText('Montagna')).toBeInTheDocument();
+    expect(screen.queryByText('Vacanze')).toBeNull();
+    expect(screen.queryByText(/Non riesco ad aggiornare le foto/)).toBeNull();
   });
 });

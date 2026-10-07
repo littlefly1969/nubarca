@@ -1178,10 +1178,16 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   files for an explicit retry, and keeps the final result even when refreshing
   closes uploads or fails. Inactivity is bounded at two minutes while sending,
   five while awaiting confirmation, rather than timing out a progressing video.
+  All page state is scoped to the link token through a keyed page boundary:
+  switching links immediately replaces the old album with loading, aborts its
+  upload and prevents late reads or refresh warnings from reaching the new page.
+  Resume metadata is only a cross-selection heuristic; distinct files in the
+  same batch are all uploaded even when their name, size and timestamp match.
   Accepted files are remembered in memory and best-effort IndexedDB; wake lock
   and beforeunload are best effort, never background upload. A lost response is
   ambiguous: retry is manual and asks the visitor to check the album, because
-  this public endpoint has no server-side idempotency contract.
+  this public endpoint has no server-side idempotency contract. The separate
+  [upload idempotency slice](album-share-upload-idempotency.md) defines that contract.
 - **A one-time code has exactly one observable end.** Delivered, or counted
   under `DroppedCapacity`, `UndeliveredSend` or `DroppedShutdown` — kept apart
   because they ask an operator for different things. `BoundedChannelFullMode.

@@ -58,6 +58,13 @@ type Status =
 
 export function AlbumSharePage() {
   const { token = '' } = useParams<{ token: string }>();
+  // The complete page state belongs to ONE link, including refresh failures,
+  // quota, second-factor inputs and uploads. A route change starts from loading
+  // synchronously, before effects run; old responses cannot update the new page.
+  return <AlbumShareContent key={token} token={token} />;
+}
+
+function AlbumShareContent({ token }: { token: string }) {
   const { t } = useI18n();
   // An album's app whose key is not this token's album: a made-up address,
   // shown as unavailable rather than as another album inside this one's app.
@@ -309,21 +316,16 @@ function AlbumShareUpload({
       if (controller.signal.aborted) return;
       const done = new Set([...stored, ...rememberedRef.current]);
       const { pending, skipped } = partition(files, done);
-      // A duplicate in the same selection must not consume a second slot.
-      const seen = new Set<string>();
-      const unique = pending.filter((file) => {
-        const key = fileKey(file);
-        if (seen.has(key)) { skipped.push(file); return false; }
-        seen.add(key); return true;
-      });
+      // The resume key is only a cross-selection heuristic: distinct files in
+      // this batch can share name, size and timestamp and must all be sent.
       const progress: Run = {
-        total: unique.length, sent: 0, failed: 0, skipped: skipped.length,
+        total: pending.length, sent: 0, failed: 0, skipped: skipped.length,
         stopped: null, uncertain: false, current: 0, name: '', fraction: 0,
       };
       const retry: File[] = [];
       setRun({ ...progress });
 
-      for (const [index, file] of unique.entries()) {
+      for (const [index, file] of pending.entries()) {
         if (controller.signal.aborted) return;
         progress.current = index + 1;
         progress.name = file.name;
@@ -347,7 +349,7 @@ function AlbumShareUpload({
           }
           if (report.stopped) {
             progress.stopped = report.stopped;
-            retry.push(...unique.slice(index + (report.accepted + report.rejected > 0 ? 1 : 0)));
+            retry.push(...pending.slice(index + (report.accepted + report.rejected > 0 ? 1 : 0)));
             break;
           }
         } catch (error) {
@@ -356,7 +358,7 @@ function AlbumShareUpload({
           if (code === ALBUM_SHARE_ERRORS.uploadLimitReached
             || code === ALBUM_SHARE_ERRORS.uploadsDisabled) {
             progress.stopped = code;
-            retry.push(...unique.slice(index));
+            retry.push(...pending.slice(index));
             break;
           }
           progress.failed += 1;
@@ -367,7 +369,7 @@ function AlbumShareUpload({
             progress.uncertain = !status || status >= 500;
             progress.stopped = status === 429 ? 'rate_limited'
               : status === 401 || status === 404 ? 'access' : 'connection';
-            retry.push(...unique.slice(index + 1));
+            retry.push(...pending.slice(index + 1));
             break;
           }
         }
