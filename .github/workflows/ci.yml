@@ -124,6 +124,9 @@ jobs:
     name: Backend concurrency (PostgreSQL)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      NUBARCA_NAVIGATION_BENCHMARK: '1'
+      NUBARCA_NAVIGATION_BENCHMARK_OUTPUT: ${{ github.workspace }}/TestResults/media-navigation-performance
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -157,13 +160,14 @@ jobs:
       # Share's, and the party guest book's against the game (one holder of the
       # television) and against the end of the party (never on after it), and an
       # owner's direct print (one key, one sheet; a loan's last sheet taken once).
-      - name: Run concurrency tests
+      # Navigation also needs the real provider's collation, grouping and seeks.
+      - name: Run concurrency and media navigation tests
         run: >-
           dotnet test tests/NubArca.Api.Tests/NubArca.Api.Tests.csproj
           --configuration Release
           --no-restore
           --no-build
-          --filter "FullyQualifiedName~AlbumShareConcurrencyPostgresTests|FullyQualifiedName~PartyGuestbookGameRacePostgresTests|FullyQualifiedName~PartyGuestbookEndLiveRacePostgresTests|FullyQualifiedName~OwnerPhotoPrintRacePostgresTests"
+          --filter "FullyQualifiedName~AlbumShareConcurrencyPostgresTests|FullyQualifiedName~PartyGuestbookGameRacePostgresTests|FullyQualifiedName~PartyGuestbookEndLiveRacePostgresTests|FullyQualifiedName~OwnerPhotoPrintRacePostgresTests|FullyQualifiedName~MediaNavigationPostgresTests|FullyQualifiedName~MediaNavigationPerformanceTests"
           --logger "console;verbosity=normal"
           --logger trx
           --results-directory "$GITHUB_WORKSPACE/TestResults/backend-concurrency"
@@ -184,6 +188,15 @@ jobs:
           path: TestResults/backend-concurrency/**/*.trx
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Upload media navigation timings and query plans
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-navigation-performance
+          path: TestResults/media-navigation-performance/
+          if-no-files-found: error
+          retention-days: 14
 
   print_agent:
     name: Print Agent build and tests

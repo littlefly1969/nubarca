@@ -109,6 +109,22 @@ is built is described by `ARCHITECTURE.md`.
   Piena stays the owner renderer's. Owner job kinds `owner-photo` /
   `owner-grid4` / `owner-strip4`. `PartyPrintGeometry` keeps only the party's
   decoration (words, mark, QR card).
+- Owner library/album media walls have a mobile-first fast-navigation rail for
+  acquisition/insertion date (present months) or display name (present initials).
+  The owner-private `/api/media/navigation` and `/api/albums/{id}/media/navigation`
+  aggregate the exact physical filter set in SQL; corresponding `/window` reads
+  jump directly to a bucket and page backwards with query-bound keyset cursors.
+  Size, semantic relevance and similarity results offer no misleading timeline.
+  The rail supports captured touch/mouse dragging, keyboard navigation and a
+  precise year/month/initial picker, with bounded reads and explicit retry.
+  Earlier pages preserve the visible row through subpixel scroll rounding and
+  resizing; earlier-page failures and late responses are bound to their own
+  destination, so another jump resumes automatic backfill. File selections
+  persist across jumps by identity. Physical cursor type/sort validation lives
+  in `ImageCursor.MatchesSort`, shared by ordinary pages and navigation windows.
+  Public/member album projections keep their curated order and expose no new
+  names or capture dates. PostgreSQL CI measures 50k/100k synthetic collections
+  and retains full query plans; see [performance acceptance](media-navigation-performance.md).
 - Viewers: ONE engine (`src/mediaView`: zoomable photograph — pinch, double
   tap, pan — the stage filling the viewer so a picture stays whole in
   landscape, chrome that steps aside after 2.6 s, keys with keyboard ownership,

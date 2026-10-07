@@ -22,6 +22,7 @@ import {
   MEDIA_SEMANTIC_PATH,
   albumMediaPath,
   mediaQueryToParams,
+  mediaWindowQueryToParams,
   semanticMediaQueryToParams,
   withQuery,
 } from '@nubarca/contracts';
@@ -79,4 +80,20 @@ export function searchSemanticMedia(
     withQuery(MEDIA_SEMANTIC_PATH, semanticMediaQueryToParams(query)),
     { signal },
   );
+}
+
+export type { MediaNavigationBucket, MediaNavigationIndex, MediaNavigationWindow, MediaWindowQuery } from '@nubarca/contracts';
+
+export function getMediaNavigation(
+  albumId: string | null, query: ListMediaQuery, signal?: AbortSignal,
+): Promise<import('@nubarca/contracts').MediaNavigationIndex> {
+  const path = albumId ? albumMediaPath(albumId) : MEDIA_LIST_PATH;
+  return api(withQuery(path + '/navigation', mediaQueryToParams(query)), { signal });
+}
+
+export function getMediaWindow(
+  albumId: string | null, query: import('@nubarca/contracts').MediaWindowQuery, signal?: AbortSignal,
+): Promise<import('@nubarca/contracts').MediaNavigationWindow> {
+  const path = albumId ? albumMediaPath(albumId) : MEDIA_LIST_PATH;
+  return api(withQuery(path + '/window', mediaWindowQueryToParams(query)), { signal });
 }
