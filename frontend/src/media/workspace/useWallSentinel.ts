@@ -26,14 +26,21 @@ export interface WallSentinelInput {
   hasMore: boolean;
   loadMore(): void;
   preloadMargin?: string;
+  // For prepend/jump: require a fresh observation after this geometry changes.
+  // Unlike bottom paging, the old intersection cannot authorize another read.
+  reobserveKey?: unknown;
 }
 
 /** Attach the returned setter to the sentinel element below the wall. */
-export function useWallSentinel({ ready, hasMore, loadMore, preloadMargin = PRELOAD_MARGIN }: WallSentinelInput) {
+export function useWallSentinel({ ready, hasMore, loadMore, preloadMargin = PRELOAD_MARGIN, reobserveKey }: WallSentinelInput) {
   const viewportRef = useAppScrollViewport();
   const visibleRef = useRef(false);
   const loadMoreRef = useRef(loadMore);
   loadMoreRef.current = loadMore;
+  const freshIntersection = reobserveKey !== undefined;
+  const observeReady = freshIntersection ? ready && hasMore : true;
+  const currentObservation = useRef({ ready, hasMore, reobserveKey });
+  currentObservation.current = { ready, hasMore, reobserveKey };
 
   // The sentinel node as state, not a callback ref: the observer is then created
   // from an effect, which runs after every ref in the commit is attached, so the
@@ -41,9 +48,15 @@ export function useWallSentinel({ ready, hasMore, loadMore, preloadMargin = PREL
   const [node, setNode] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!node || typeof IntersectionObserver === 'undefined') return;
+    if (!node || !observeReady || typeof IntersectionObserver === 'undefined') return;
+    let active = true;
     const observer = new IntersectionObserver(
       (entries) => {
+        if (!active) return;
+        // A callback can already be queued when React commits new geometry,
+        // before passive cleanup disconnects the old observer.
+        const current = currentObservation.current;
+        if (freshIntersection && (!current.ready || !current.hasMore || current.reobserveKey !== reobserveKey)) return;
         visibleRef.current = entries.some((e) => e.isIntersecting);
         if (visibleRef.current) loadMoreRef.current();
       },
@@ -51,17 +64,21 @@ export function useWallSentinel({ ready, hasMore, loadMore, preloadMargin = PREL
     );
     observer.observe(node);
     return () => {
+      active = false;
       observer.disconnect();
       // The sentinel is gone (a new query, or the end of the set): its last
       // known visibility must not seed the chaining effect for a different
       // result.
       visibleRef.current = false;
     };
-  }, [node, viewportRef, preloadMargin]);
+    // A new observer reports its initial intersection even if it remains
+    // inside the margin. Effects run after the wall's scroll-anchor layout
+    // effect, so this evaluation includes the compensated scroll position.
+  }, [node, viewportRef, preloadMargin, reobserveKey, observeReady]);
 
   useEffect(() => {
-    if (ready && hasMore && visibleRef.current) loadMoreRef.current();
-  }, [ready, hasMore]);
+    if (!freshIntersection && ready && hasMore && visibleRef.current) loadMoreRef.current();
+  }, [ready, hasMore, freshIntersection]);
 
   return setNode;
 }

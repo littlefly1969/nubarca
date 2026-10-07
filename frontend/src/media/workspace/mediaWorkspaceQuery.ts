@@ -30,7 +30,7 @@ export function filtersToUrlParams(identity: MediaWorkspaceIdentity): URLSearchP
   if (identity.mediaKind !== 'all') sp.set('kind', identity.mediaKind);
   if (identity.libraryScope !== 'active') sp.set('scope', identity.libraryScope);
   if (common.metadataQuery.length > 0) sp.set('q', common.metadataQuery);
-  if (identity.sort !== 'created') sp.set('sort', identity.sort);
+  if (identity.sort !== 'datetaken') sp.set('sort', identity.sort);
   if (identity.direction !== 'desc') sp.set('direction', identity.direction);
   if (identity.source.kind === 'library' && common.albumMembership !== 'any') {
     sp.set('albumMembership', common.albumMembership);
@@ -55,7 +55,7 @@ export function parseLibraryScope(value: string | null): MediaLibraryScope {
 }
 
 function normalizeSort(sort: string | null): MediaSortField {
-  return sort === 'name' || sort === 'size' || sort === 'datetaken' ? sort : 'created';
+  return sort === 'name' || sort === 'size' || sort === 'created' ? sort : 'datetaken';
 }
 
 // Rebuild an identity from a source + URL params. Only the persisted fields are
@@ -90,4 +90,3 @@ export function identityFromUrlParams(
     direction: sp.get('direction') === 'asc' ? 'asc' : 'desc',
   };
 }
-

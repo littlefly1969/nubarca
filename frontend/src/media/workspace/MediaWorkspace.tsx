@@ -55,6 +55,7 @@ import {
   clearChip,
   isSemanticActive,
   queryFingerprint,
+  normalizeMediaWorkspaceTransition,
   type FilterChipKind,
   type MediaKindScope,
   type MediaLibraryScope,
@@ -166,7 +167,8 @@ export function MediaWorkspace({
   useEffect(() => { setSearchText(identity.filters.common.metadataQuery); }, [identity.filters.common.metadataQuery]);
 
   // ---- identity mutations (all flow to the URL via onIdentityChange) --------
-  const mutate = useCallback((next: MediaWorkspaceIdentity) => onIdentityChange(next), [onIdentityChange]);
+  const mutate = useCallback((next: MediaWorkspaceIdentity) =>
+    onIdentityChange(normalizeMediaWorkspaceTransition(identity, next)), [identity, onIdentityChange]);
   const changeKind = (mediaKind: MediaKindScope) => mutate({ ...identity, mediaKind });
   const changeScope = (libraryScope: MediaLibraryScope) => mutate({ ...identity, libraryScope });
   const applyFilters = (filters: MediaWorkspaceFilters) => { mutate({ ...identity, filters }); setSheetOpen(false); };
@@ -299,9 +301,8 @@ export function MediaWorkspace({
   }, [anyOverlayOpen, selection, ws.orderedIds]);
 
   // ---- infinite scroll sentinel --------------------------------------------
-  // Rooted in the application scroll viewport and self-chaining while the
-  // sentinel stays inside the preload margin — see useWallSentinel, which the
-  // shared album wall uses too so both walls page identically.
+  // Previous paging must re-evaluate the intersection after each prepend and
+  // scroll compensation. Only bottom paging can reuse its prior visibility.
   const previousLoader = useRef(ws.loadPrevious);
   previousLoader.current = ws.loadPrevious;
   const loadPrevious = () => {
@@ -314,6 +315,7 @@ export function MediaWorkspace({
     ready: !ws.navigationBusy && (ws.phase.kind === 'ready' || ws.phase.kind === 'end'),
     hasMore: ws.previousCursor !== null,
     preloadMargin: '240px 0px',
+    reobserveKey: ws.items,
     loadMore: () => {
       if (!previousFailed && !ws.navigationBusy && !ws.loadingMore)
         loadPrevious();

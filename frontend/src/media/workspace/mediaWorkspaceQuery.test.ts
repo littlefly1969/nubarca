@@ -95,7 +95,7 @@ describe('queryToWire — kind gating', () => {
     // Visual search routes through the dedicated semantic API, so the unified
     // wire carries no semantic residual — but manual sort is still present.
     expect(isSemanticActive(id)).toBe(true);
-    expect(wire.sort).toBe('created');
+    expect(wire.sort).toBe('datetaken');
     expect('semanticQuery' in wire).toBe(false);
   });
 
@@ -262,4 +262,24 @@ describe('emptyMediaFilters', () => {
     a.photo.includePeople.push('x');
     expect(b.photo.includePeople).toEqual([]);
   });
+});
+
+it.each([library, album])('defaults physical deep links and filtered queries to acquisition date descending (%j)', (source) => {
+  const identity = identityFromUrlParams(source, new URLSearchParams('q=mare'));
+  expect(identity).toMatchObject({ sort: 'datetaken', direction: 'desc' });
+  expect(filtersToUrlParams(identity).has('sort')).toBe(false);
+  identity.mediaKind = 'image';
+  identity.libraryScope = 'excluded';
+  identity.filters.common.favorite = true;
+  identity.filters.common.minRating = 4;
+  identity.filters.photo.hasGps = true;
+  identity.filters.photo.includePeople = ['p1'];
+  expect(queryToWire(identity, null)).toMatchObject({ sort: 'datetaken', direction: 'desc', q: 'mare',
+    favorite: true, minRating: 4, hasGps: true, includePeople: ['p1'], scope: 'excluded' });
+});
+
+it('persists explicit insertion-date sorting and defaults invalid sorting to the canonical timeline', () => {
+  const identity = { ...base(), sort: 'created' as const, direction: 'asc' as const };
+  expect(identityFromUrlParams(library, filtersToUrlParams(identity))).toMatchObject({ sort: 'created', direction: 'asc' });
+  expect(identityFromUrlParams(library, new URLSearchParams('sort=invalid'))).toMatchObject({ sort: 'datetaken', direction: 'desc' });
 });

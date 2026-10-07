@@ -36,7 +36,7 @@ const wire = (i: MediaWorkspaceIdentity, cursor: string | null = null) =>
 // ── defaults ────────────────────────────────────────────────────────────────
 
 test('the default state sends no filter at all', () => {
-  assert.equal(wire(identity()), 'kind=all&sort=created&direction=desc&limit=50');
+  assert.equal(wire(identity()), 'kind=all&sort=datetaken&direction=desc&limit=50');
   assert.equal(hasActiveFilters(identity()), false);
   assert.deepEqual(buildFilterChips(identity()), []);
 });
@@ -416,4 +416,20 @@ test('video filters are inert under a visual search as well', () => {
 test('the visual chip itself is never reported as inert', () => {
   const i = identity((x) => { x.filters.photo.visualQuery = 'mare'; });
   assert.ok(!inertUnderSemantic(i).includes('visual'));
+});
+
+test('semantic exit resets every previous sort and direction while physical transitions keep explicit choices', async () => {
+  const { normalizeMediaWorkspaceTransition } = await import('./mediaWorkspace.ts');
+  for (const source of [LIBRARY, ALBUM]) {
+    for (const sort of ['created', 'name', 'size', 'datetaken'] as const) {
+      for (const direction of ['asc', 'desc'] as const) {
+        const previous = { ...emptyIdentity(source), sort, direction };
+        previous.filters.photo.visualQuery = 'mare';
+        const next = { ...previous, filters: clearChip(previous.filters, 'visual') };
+        assert.deepEqual(normalizeMediaWorkspaceTransition(previous, next), { ...next, sort: 'datetaken', direction: 'desc' });
+        assert.equal(normalizeMediaWorkspaceTransition(next, previous), previous);
+        assert.equal(normalizeMediaWorkspaceTransition(next, next), next);
+      }
+    }
+  }
 });

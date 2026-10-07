@@ -18,7 +18,7 @@ import type {
   MediaWorkspaceIdentity,
   MediaWorkspaceSource,
 } from '@nubarca/contracts';
-import { inertUnderSemantic, isSemanticActive } from '@nubarca/contracts';
+import { inertUnderSemantic, isSemanticActive, normalizeMediaWorkspaceTransition } from '@nubarca/contracts';
 import {
   chipsFor,
   generationOf,
@@ -145,7 +145,8 @@ export function useMediaFilters(
     people,
     fetchPage,
     apply: useCallback((filters, sort, direction) => {
-      setIdentity((current) => ({ ...withFilters(current, filters), sort, direction }));
+      setIdentity((current) => normalizeMediaWorkspaceTransition(current,
+        { ...withFilters(current, filters), sort, direction }));
     }, []),
     removeChip: useCallback((chipKind: FilterChipKind) => {
       setIdentity((current) => withChipCleared(current, chipKind));

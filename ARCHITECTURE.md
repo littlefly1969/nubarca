@@ -925,6 +925,21 @@ The contract supports media kind, scope, search/filter state, ordering, cursor p
 
 ### 13.4 Pagination and ranking
 
+Physical media workspaces default to acquisition date descending (`datetaken`,
+`desc`), including owner albums, excluded media and metadata/physical filters.
+URL links without a sort use that default; explicit alternative sorts remain
+available. Acquisition chronology uses the backend's `EffectiveDateTaken`:
+user override, then embedded metadata, then insertion time. Collection paging
+and navigation buckets use this same persisted value and a stable ID tie-breaker;
+clients do not compute a different fallback or re-sort pages.
+
+Semantic results retain server relevance order, with physical sort and fast
+navigation hidden. Removing semantic search restores `datetaken desc`, regardless
+of the earlier physical sort. After a previous-page prepend, scroll anchoring
+preserves the visible media and row offset, and the upper sentinel requires a
+fresh intersection in the compensated geometry before requesting another page.
+Bottom pagination can continue chaining on its existing intersection.
+
 Large lists use opaque seek cursors bound to the requested sort, direction, scope, and relevant filters. The primary sort value plus stable ID tie-breaker form the boundary. A malformed or foreign cursor is rejected rather than interpreted loosely.
 
 Semantic retrieval is not allowed to widen physical access. Date, person, favorite, media type, album, library scope, owner, active state, and Vault exclusion are applied before semantic ranking. The text embedding ranks only the already-authorized candidate set.

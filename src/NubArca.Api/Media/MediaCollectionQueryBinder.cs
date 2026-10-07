@@ -58,7 +58,9 @@ public static class MediaCollectionQueryBinder
             error = scopeError;
             return false;
         }
-        if (!ImageSort.TryParseField(sort, out var sortField))
+        // Unified physical workspaces default to acquisition chronology.
+        // Keep explicit insertion-date sorting and legacy endpoint defaults.
+        if (!ImageSort.TryParseField(string.IsNullOrWhiteSpace(sort) ? "datetaken" : sort, out var sortField))
         {
             error = "'sort' must be one of: created, name, size, datetaken.";
             return false;

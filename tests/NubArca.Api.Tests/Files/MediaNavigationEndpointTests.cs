@@ -7,6 +7,7 @@ using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Files;
 using NubArca.Api.Media;
+using NubArca.Api.Metadata;
 using NubArca.Api.Tests.Endpoints;
 using NubArca.Api.Tests.Metadata;
 
@@ -46,6 +47,64 @@ public sealed class MediaNavigationEndpointTests : IDisposable
         var album = await albums.CreateAsync(owner, "Timeline", null);
         await albums.AddItemsAsync(album.Id, owner, ids, default);
         return album.Id;
+    }
+
+    [Theory]
+    [InlineData(false, false, "")]
+    [InlineData(true, false, "")]
+    [InlineData(false, true, "")]
+    [InlineData(true, true, "")]
+    [InlineData(false, false, "&q=photo&favorite=true&minRating=4&dateTakenFrom=2019-01-01T00:00:00Z")]
+    [InlineData(true, false, "&q=photo&favorite=true&minRating=4&dateTakenFrom=2019-01-01T00:00:00Z")]
+    public async Task DefaultChronologyUsesCaptureFallbackAndStableBidirectionalCursors(
+        bool inAlbum, bool excluded, string filters)
+    {
+        var (owner, client) = await _factory.CreateAuthenticatedClientAsync();
+        var ids = new List<Guid>();
+        for (var i = 0; i < 7; i++)
+        {
+            var id = await SeedAsync(owner, $"photo-{i}.jpg", "2020-01", favorite: true, excluded: excluded);
+            ids.Add(id);
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var file = await db.FileItems.SingleAsync(f => f.Id == id);
+            // Three source tiers and ties; insertion order intentionally differs
+            // from capture order. Existing write-path tests verify these sources.
+            file.CreatedAt = new DateTime(2025 - i, 1, 15, 0, 0, 0, DateTimeKind.Utc);
+            DateTime? userDate = i % 3 == 0 ? new DateTime(2023, 6, 15, 0, 0, 0, DateTimeKind.Utc) : null;
+            DateTime? embeddedDate = i % 3 == 1 ? new DateTime(2020, 6, 15, 0, 0, 0, DateTimeKind.Utc) : null;
+            (file.EffectiveDateTaken, file.EffectiveDateTakenSource) =
+                EffectiveDateTakenSources.Compute(userDate, embeddedDate, file.CreatedAt);
+            var metadata = await db.FileItemUserMetadata.SingleAsync(m => m.FileItemId == id);
+            metadata.Rating = 4;
+            await db.SaveChangesAsync();
+        }
+        var path = inAlbum ? $"/api/albums/{await AlbumAsync(owner, ids.ToArray())}/media" : "/api/media";
+        var query = "?scope=" + (excluded ? "excluded" : "active") + filters;
+        var expected = await client.GetFromJsonAsync<MediaListResponse>(path + query + "&sort=datetaken&direction=desc&limit=100");
+        var insertion = await client.GetFromJsonAsync<MediaListResponse>(path + query + "&sort=created&limit=100");
+        Assert.Equal(7, expected!.Items.Count);
+        Assert.False(expected.Items.Select(i => i.Id).SequenceEqual(insertion!.Items.Select(i => i.Id)));
+        var paged = new List<Guid>();
+        string? cursor = null;
+        do
+        {
+            var page = await client.GetFromJsonAsync<MediaListResponse>(path + query + "&limit=2"
+                + (cursor is null ? "" : "&cursor=" + Uri.EscapeDataString(cursor)));
+            paged.AddRange(page!.Items.Select(item => item.Id));
+            cursor = page.NextCursor;
+            Assert.True(paged.Count <= 7, "Cursor pagination must not repeat a page.");
+        } while (cursor is not null);
+        Assert.Equal(expected.Items.Select(i => i.Id), paged);
+        Assert.Equal(7, paged.Distinct().Count());
+        var index = await client.GetFromJsonAsync<MediaNavigationIndex>(path + "/navigation" + query);
+        Assert.Equal(new[] { "2023-06", "2023-01", "2020-06", "2020-01" }, index!.Buckets.Select(b => b.Key));
+        var window = await client.GetFromJsonAsync<MediaNavigationWindow>(path + "/window" + query + "&limit=2&target=2020-06");
+        Assert.NotNull(window!.PreviousCursor);
+        var previous = await client.GetFromJsonAsync<MediaNavigationWindow>(path + "/window" + query
+            + "&limit=2&before=true&cursor=" + Uri.EscapeDataString(window.PreviousCursor!));
+        var back = await client.GetFromJsonAsync<MediaListResponse>(path + query + "&limit=2&cursor=" + Uri.EscapeDataString(previous!.NextCursor!));
+        Assert.Equal(window.Items.Select(i => i.Id), back!.Items.Select(i => i.Id));
     }
 
     [Theory]
