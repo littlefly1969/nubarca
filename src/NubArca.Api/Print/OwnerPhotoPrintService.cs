@@ -12,9 +12,13 @@ namespace NubArca.Api.Print;
 
 public interface IOwnerPhotoPrintService
 {
+    /// <param name="origin">
+    /// Set when the print was not asked for by the owner in person but through
+    /// one of their album's shares; recorded on the job, never trusted for authority.
+    /// </param>
     Task<OwnerPhotoPrintResult> SubmitAsync(
         Guid ownerUserId, OwnerPhotoPrintSubmitRequest request, string? idempotencyKey,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken, OwnerPrintOrigin? origin = null);
 
     /// <summary>The date a print of this photograph would carry, or null for a photograph that is not the caller's.</summary>
     Task<OwnerPhotoPrintDate?> ResolveDateAsync(
@@ -69,7 +73,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
 
     public async Task<OwnerPhotoPrintResult> SubmitAsync(
         Guid ownerUserId, OwnerPhotoPrintSubmitRequest request, string? idempotencyKey,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, OwnerPrintOrigin? origin = null)
     {
         // 1. The request's shape, before anything is read.
         if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 200
@@ -340,6 +344,10 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                         dateSource,
                         dateLocale = request.IncludeDate ? request.DateLocale : null,
                         background = "white",
+                        // Where the request came from, when it was not the owner
+                        // in person: the album a verified share visitor printed.
+                        source = origin is null ? "owner" : OwnerPrintOrigin.AlbumShareSource,
+                        albumId = origin?.AlbumId,
                     }),
                     ArtifactStorageKey = stored.StorageKey,
                     ArtifactContentType = "image/jpeg",

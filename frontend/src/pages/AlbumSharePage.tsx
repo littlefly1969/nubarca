@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import {
   ALBUM_SHARE_ERRORS,
   ApiError,
@@ -204,6 +204,18 @@ function AlbumShareBody({
           <p className="album-share-count">
             {tn(album.itemCount, 'albumLink.itemCount')}
           </p>
+          {/* Only when the server says this visitor may print — and every print
+              route asks it again, so hiding the button is UX, not the guard. */}
+          {album.canPrint && (
+            <Link
+              className="album-share-print"
+              to="print"
+              relative="path"
+              data-testid="album-share-print"
+            >
+              {t('albumLink.print')}
+            </Link>
+          )}
         </div>
       </header>
 

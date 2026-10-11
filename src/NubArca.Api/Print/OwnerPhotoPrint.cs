@@ -43,6 +43,17 @@ public sealed record OwnerPhotoPrintSubmitRequest(
     /// <summary>The NubArca wordmark in a framed sheet's band. Off unless asked for.</summary>
     bool Brand = false);
 
+/// <summary>
+/// A print the owner did not ask for in person: one sent through a verified,
+/// print-enabled share of one of their albums (AlbumSharePrintService). It is
+/// the same print, on the owner's printer, as the owner's own; this only says
+/// on the job which album it came from.
+/// </summary>
+public sealed record OwnerPrintOrigin(Guid AlbumId)
+{
+    public const string AlbumShareSource = "album-share";
+}
+
 /// <summary>One photograph of a print and how it is framed in its slot.</summary>
 public sealed record OwnerPrintPhotoRequest(Guid? FileItemId, PartyPrintPlacementRequest? Placement);
 

@@ -150,6 +150,9 @@ public sealed class AlbumShareService : IAlbumShareService
         link.UploadEnabled = request.UploadEnabled ?? link.UploadEnabled;
         link.AllowOriginalDownload = request.AllowOriginalDownload ?? link.AllowOriginalDownload;
         link.RequireSecondFactor = request.RequireSecondFactor ?? link.RequireSecondFactor;
+        // Stored as asked even on a public link: the switch is the owner's
+        // intent, and CanPrint is what refuses it there.
+        link.AllowPrint = request.AllowPrint ?? link.AllowPrint;
         link.MaxUploads = request.MaxUploads ?? link.MaxUploads;
         if (request.Label is not null)
         {
@@ -331,7 +334,7 @@ public sealed class AlbumShareService : IAlbumShareService
             .Select(x => new
             {
                 x.Id, x.AlbumId, x.OwnerUserId, x.Enabled, x.UploadEnabled,
-                x.AllowOriginalDownload, x.RequireSecondFactor,
+                x.AllowOriginalDownload, x.RequireSecondFactor, x.AllowPrint,
                 x.MaxUploads, x.UploadCount, x.RevokedAt, x.ExpiresAt,
             })
             .FirstOrDefaultAsync(cancellationToken);
@@ -360,7 +363,7 @@ public sealed class AlbumShareService : IAlbumShareService
 
         return AlbumShareResolved.Granted(new AlbumShareAccess(
             row.Id, row.AlbumId, row.OwnerUserId, row.UploadEnabled, row.AllowOriginalDownload,
-            row.MaxUploads, row.UploadCount, row.RequireSecondFactor, guestId));
+            row.MaxUploads, row.UploadCount, row.RequireSecondFactor, guestId, row.AllowPrint));
     }
 
     public async Task<AlbumShareUploadResult> TryClaimUploadSlotAsync(
@@ -471,6 +474,7 @@ public sealed class AlbumShareService : IAlbumShareService
             UploadEnabled = carrySettingsFrom?.UploadEnabled ?? true,
             AllowOriginalDownload = carrySettingsFrom?.AllowOriginalDownload ?? false,
             RequireSecondFactor = carrySettingsFrom?.RequireSecondFactor ?? false,
+            AllowPrint = carrySettingsFrom?.AllowPrint ?? false,
             Label = carrySettingsFrom?.Label,
             MaxUploads = carrySettingsFrom?.MaxUploads ?? AlbumShareLimits.DefaultMaxUploads,
             // A rotation is a new address, not a new allowance: what the old
@@ -523,6 +527,7 @@ public sealed class AlbumShareService : IAlbumShareService
             AlbumShareTokens.SharePath(_tokens.DeriveToken(link.Id)),
             link.Enabled, link.UploadEnabled, link.AllowOriginalDownload,
             link.RequireSecondFactor, link.Label,
-            link.MaxUploads, link.UploadCount, link.CreatedAt, link.ExpiresAt, guests);
+            link.MaxUploads, link.UploadCount, link.CreatedAt, link.ExpiresAt, guests,
+            link.AllowPrint);
     }
 }

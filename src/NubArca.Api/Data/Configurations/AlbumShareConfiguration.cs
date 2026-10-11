@@ -27,6 +27,8 @@ public sealed class AlbumShareLinkConfiguration : IEntityTypeConfiguration<Album
         // The SAFE default, written into the schema and not only into the
         // constructor: an original carries GPS, and a public share must not.
         b.Property(x => x.AllowOriginalDownload).HasDefaultValue(false);
+        // Printing spends the owner's paper: off unless the owner says so.
+        b.Property(x => x.AllowPrint).HasDefaultValue(false);
         b.Property(x => x.MaxUploads).HasDefaultValue(AlbumShareLimits.DefaultMaxUploads);
         b.Property(x => x.UploadCount).HasDefaultValue(0);
         b.Property(x => x.CreatedAt).HasColumnType("timestamp with time zone");

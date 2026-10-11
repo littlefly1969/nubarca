@@ -32,6 +32,18 @@ is built is described by `ARCHITECTURE.md`.
   (`POST /api/print/photo-jobs`, `owner-photo` jobs), `IPrinterAccess`,
   idempotent through `owner_photo_print_requests`, optional date
   (override → EXIF → today in the client's zone), white bands, calibration
+- Share print: an album link may lend printing with ONE switch,
+  `AlbumShareLink.AllowPrint` (default off, shown only on an email + second
+  factor link). The one rule is `AlbumShareAccess.CanPrint` =
+  `RequireSecondFactor && verified device && AllowPrint`, asked by every
+  `/api/album-share/{token}/print…` route (403 otherwise, 404 for a dead
+  link). There is no second pipeline: `AlbumSharePrintService` checks the
+  photographs are the album's and calls the owner print
+  (`IOwnerPhotoPrintService`) as the owner, on the owner's own printer chosen
+  by the server (online first, oldest station) — never an owner, station or
+  printer from the browser. The job records `source: "album-share"` and the
+  `albumId` in its render specification. The web studio is the owner's
+  (`SharePrintPage` in `OwnerPrintPage.tsx`) without the printer choice
 - Party printing: the operator sets the printer's loaded paper (10x15, 13x18,
   20x15) and guests compose what that paper can make — a photo or four photos
   two by two on any of them, the twin strip (two strips of four different

@@ -234,7 +234,8 @@ public static class AlbumShareLinkEndpoints
                 header.ItemCount,
                 access.UploadEnabled && access.HasUploadRoom,
                 access.AllowOriginalDownload,
-                access.MaxUploads == 0 ? null : Math.Max(0, access.MaxUploads - access.UploadCount)));
+                access.MaxUploads == 0 ? null : Math.Max(0, access.MaxUploads - access.UploadCount),
+                access.CanPrint));
         }).WithName("GetAlbumShare").RequireRateLimiting(PublicRateLimitPolicy);
 
         // THE ALBUM ON A VISITOR'S HOME SCREEN (AlbumShareHomeScreenApp). The
@@ -575,7 +576,111 @@ public static class AlbumShareLinkEndpoints
         }).WithName("UploadToAlbumShare").RequireRateLimiting(UploadRateLimitPolicy);
 
         MapSecondFactor(app);
+        MapPrint(app);
     }
+
+    // ── Print ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// PRINTING FROM A SHARE. The owner's own album print, reached through the
+    /// grant: share → album → owner → printer (IAlbumSharePrintService).
+    ///
+    /// <para>Every route asks <see cref="AlbumShareAccess.CanPrint"/> again, so
+    /// the button the page shows or hides is UX and nothing else. Anything short
+    /// of it — a public link with the switch on, a protected link whose visitor
+    /// has not verified, a verified visitor without the switch — is the same
+    /// 403. An unknown link stays the surface's ordinary 404.</para>
+    /// </summary>
+    private static void MapPrint(IEndpointRouteBuilder app)
+    {
+        app.MapGet("/api/album-share/{token}/print", async (
+            string token,
+            HttpContext httpContext,
+            [FromServices] IAlbumShareService shares,
+            [FromServices] IAlbumSharePrintService prints,
+            CancellationToken cancellationToken) =>
+        {
+            NoStore(httpContext);
+            var (access, refusal) = await PrintGrantAsync(shares, token, httpContext, cancellationToken);
+            if (access is null) return refusal!;
+            var printer = await prints.GetAsync(access, cancellationToken);
+            return printer is null ? Forbidden() : Results.Ok(printer);
+        }).WithName("GetAlbumSharePrint").RequireRateLimiting(PublicRateLimitPolicy);
+
+        // The date the print would carry, resolved as the print resolves it.
+        app.MapGet("/api/album-share/{token}/print/date", async (
+            string token,
+            [FromQuery] Guid? fileItemId,
+            [FromQuery] string? timeZone,
+            HttpContext httpContext,
+            [FromServices] IAlbumShareService shares,
+            [FromServices] IAlbumSharePrintService prints,
+            CancellationToken cancellationToken) =>
+        {
+            NoStore(httpContext);
+            var (access, refusal) = await PrintGrantAsync(shares, token, httpContext, cancellationToken);
+            if (access is null) return refusal!;
+            if (fileItemId is not Guid id)
+                return Results.BadRequest(new { error = NubArca.Api.Print.OwnerPhotoPrintErrors.InvalidRequest });
+            var zone = NubArca.Api.Print.OwnerPhotoPrintDates.Zone(timeZone);
+            if (zone is null)
+                return Results.BadRequest(new { error = NubArca.Api.Print.OwnerPhotoPrintErrors.InvalidTimezone });
+            var date = await prints.ResolveDateAsync(access, id, zone, cancellationToken);
+            return date is null
+                ? Results.NotFound(new { error = NubArca.Api.Print.OwnerPhotoPrintErrors.NotFound })
+                : Results.Ok(date);
+        }).WithName("ResolveAlbumSharePrintDate").RequireRateLimiting(PublicRateLimitPolicy);
+
+        app.MapPost("/api/album-share/{token}/print/jobs", async (
+            string token,
+            [FromBody] AlbumSharePrintSubmitRequest? request,
+            [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+            HttpContext httpContext,
+            [FromServices] IAlbumShareService shares,
+            [FromServices] IAlbumSharePrintService prints,
+            [FromServices] IAuditLogger audit,
+            CancellationToken cancellationToken) =>
+        {
+            NoStore(httpContext);
+            var (access, refusal) = await PrintGrantAsync(shares, token, httpContext, cancellationToken);
+            if (access is null) return refusal!;
+            if (request is null)
+                return Results.BadRequest(new { error = NubArca.Api.Print.OwnerPhotoPrintErrors.InvalidRequest });
+
+            var result = await prints.SubmitAsync(access, request, idempotencyKey, cancellationToken);
+            if (result.Error == AlbumSharePrintErrors.NotAllowed) return Forbidden();
+            if (result.Accepted is not { } accepted)
+                return PrintEndpoints.OwnerPhotoPrintRefusal(result.Error!);
+
+            // The album and the job, never a token or an address.
+            await audit.LogAsync(
+                AuditActor.Anonymous, AuditActions.AlbumShareLinkPrint,
+                AuditEntityTypes.Album, access.AlbumId, Ip(httpContext),
+                new { jobId = accepted.JobId }, cancellationToken);
+            return Results.Json(
+                new AlbumSharePrintAccepted(accepted.ShortCode, accepted.State, accepted.QueueAhead),
+                statusCode: StatusCodes.Status202Accepted);
+        }).WithName("CreateAlbumSharePrintJob").RequireRateLimiting(UploadRateLimitPolicy);
+    }
+
+    /// <summary>
+    /// The grant, when it may print; otherwise the refusal to answer with: 404
+    /// for a link that opens nothing, 403 for every other reason.
+    /// </summary>
+    private static async Task<(AlbumShareAccess? Access, IResult? Refusal)> PrintGrantAsync(
+        IAlbumShareService shares, string token, HttpContext httpContext, CancellationToken ct)
+    {
+        var resolved = await shares.ResolveAsync(token, Device(httpContext, token), ct);
+        return resolved.Kind switch
+        {
+            AlbumShareResolution.NotFound => (null, Results.NotFound()),
+            _ when resolved.Access is { CanPrint: true } access => (access, null),
+            _ => (null, Forbidden()),
+        };
+    }
+
+    private static IResult Forbidden() =>
+        Results.Json(new { error = AlbumSharePrintErrors.NotAllowed }, statusCode: StatusCodes.Status403Forbidden);
 
     private static void MapSecondFactor(IEndpointRouteBuilder app)
     {
