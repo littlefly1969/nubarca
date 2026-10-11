@@ -243,6 +243,8 @@ public sealed class AlbumShareLinkTests : IDisposable
         [
             "albumName", "coverUrl", "itemCount",
             "canUpload", "canDownloadOriginal", "uploadsRemaining",
+            // Whether to offer "Stampa" — a boolean, decided by the server (CanPrint).
+            "canPrint",
         ];
         Assert.Equal(
             allowed.Order(),
