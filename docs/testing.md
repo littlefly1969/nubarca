@@ -37,8 +37,10 @@ does not consume capacity while a newer commit is waiting.
 
 `.github/workflows/backend-full.yml` runs every night at 02:17 UTC and can also
 be started manually. It executes `scripts/test-backend-full.sh`, including the
-external lane backed by the Docker, PostgreSQL/Testcontainers and FFmpeg
-capabilities available on the standard Ubuntu runner. Test result artifacts are
+external lane backed by Docker and PostgreSQL/Testcontainers on the standard
+Ubuntu runner. Like the fast lane in CI, it first installs the production media
+tools (the FFmpeg the API Dockerfile pins), because the HEIC and HDR tests
+require them and fail rather than skip when the runner's own FFmpeg is found. Test result artifacts are
 uploaded even when a test command fails; fast results are retained for 7 days
 and full-suite results for 14 days.
 
