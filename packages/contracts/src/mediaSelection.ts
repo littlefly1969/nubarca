@@ -16,13 +16,19 @@
 //   * Remove from THIS album — album source only.
 //   * Photo-only destinations (Beauty Lab, Plates, ...) — only when the
 //     selection is ENTIRELY images; never for a mixed or all-video selection.
-//   * Print — exactly ONE photograph, in the library or an own album, Active
-//     scope only: a direct print is one sheet of one photograph.
+//   * Print — at least one photograph, in the library or an own album, Active
+//     scope only. Videos in the selection are left out of the print, never a
+//     reason to refuse it; the studio offers only the formats the photographs
+//     fill. More than PRINT_SELECTION_MAX photographs is refused with a notice
+//     where the action runs, not by hiding it.
 //
 // Only currently-existing destinations appear here. A future one is added when
 // it exists, not in anticipation of it.
 
 import type { MediaItem, MediaGalleryScope } from './media.ts';
+
+/** The most photographs one print session takes (their ids travel in the studio's URL). */
+export const PRINT_SELECTION_MAX = 100;
 
 export type MediaWorkspaceSourceKind = 'library' | 'album';
 
@@ -66,7 +72,7 @@ export function getMediaSelectionCapabilities(
     canTrash: hasAny,
     canRemoveFromCurrentAlbum: hasAny && source === 'album',
     canUsePhotoOnlyDestinations: allImages,
-    // One to eight photographs: as many as the largest print format takes (the twin strip's eight).
-    canPrintPhoto: count >= 1 && count <= 8 && allImages && scope === 'active',
+    // At least one photograph; the studio composes its sheets from them.
+    canPrintPhoto: items.some((it) => it.kind === 'image') && scope === 'active',
   };
 }

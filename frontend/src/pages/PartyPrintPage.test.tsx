@@ -162,6 +162,15 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(strip).toBeDisabled();
   });
 
+  it('counts every photograph of the party, and will not start a strip three cannot fill', async () => {
+    mount(manifest({ photos: ['f1', 'f2', 'f3'].map(photo) }));
+    render(wrapper());
+    const strip = await screen.findByTestId('party-print-format-twinStrip4');
+    expect(strip).toBeDisabled();
+    expect(strip).toHaveTextContent('Servono 8 foto, ne hai 3');
+    expect(screen.getByTestId('party-print-format-photo')).toBeEnabled();
+  });
+
   it('says printing is finished when every product is spent', async () => {
     mount(manifest({
       formats: [

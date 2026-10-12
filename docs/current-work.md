@@ -116,7 +116,12 @@ is built is described by `ARCHITECTURE.md`.
   budgets, looks, the party's words, the number) and an owner
   (`/print?album=…&files=…`, `OwnerPrintPage`: printer, Piena / Cornice, one free
   line ≤ 40 chars, date in the band — the first photo's — NubArca mark off by
-  default; from the album's "Stampa" or a 1–8 photo selection). ONE composer for
+  default; from the album's "Stampa" — every photo of the album — or from any
+  selection with a photo, up to `PRINT_SELECTION_MAX` = 100, composing from the
+  selected photos only, its videos left out and counted). A format the
+  studio's photos cannot fill is shown disabled with how many it needs,
+  counted on all of them (a party's whole set, never "only mine"); a format
+  taking exactly as many as there are starts with all of them chosen. ONE composer for
   framed sheets: band words are data (`PrintSheetWords`), null = the party's own;
   Piena stays the owner renderer's. Owner job kinds `owner-photo` /
   `owner-grid4` / `owner-strip4`. A single photo's orientation is selectable
