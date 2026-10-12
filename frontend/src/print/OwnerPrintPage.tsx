@@ -233,7 +233,7 @@ export function OwnerPrintPage() {
         style: framed ? 'framed' : 'fullBleed',
         photos: composition.slots.map((slot) => ({ fileItemId: slot.itemId, placement: slot.placement })),
         ...(composition.layout === 'photo'
-          ? { orientation: composition.orientation ?? 'portrait' }
+          ? { orientation: composition.orientation }
           : {}),
         ...(framed && line ? { caption: line } : {}),
         ...(framed && brand ? { brand: true } : {}),
