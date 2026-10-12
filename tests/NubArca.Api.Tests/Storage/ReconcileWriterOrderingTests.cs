@@ -78,6 +78,19 @@ public sealed class ReconcileWriterOrderingTests : IAsyncLifetime
 
     // Age policy deliberately ZERO: if anything survives below, the exclusive
     // lock is the only thing that can have saved it.
+    private async Task WaitForAdvisoryLockWaiterAsync()
+    {
+        await using var probe = NewDb();
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (await probe.Database
+            .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM pg_locks WHERE locktype = 'advisory' AND NOT granted")
+            .SingleAsync() == 0)
+        {
+            Assert.True(DateTime.UtcNow < deadline, "the reconcile never queued behind the writer's lock");
+            await Task.Delay(20);
+        }
+    }
+
     private static StorageReconciliationOptions Destructive() => new()
     {
         DryRun = false,
@@ -136,6 +149,10 @@ public sealed class ReconcileWriterOrderingTests : IAsyncLifetime
 
             writerHoldsLock.SetResult();
             await reconcileStarted.Task;
+            // "Started" is not "waiting": commit only once the reconcile is
+            // actually queued behind our lock, or it can scan after our commit,
+            // find the content already owned, and never reach revalidation.
+            await WaitForAdvisoryLockWaiterAsync();
 
             db.BlobObjects.Add(new BlobObject
             {
