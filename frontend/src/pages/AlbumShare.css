@@ -69,6 +69,24 @@
   font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
 }
+/* "Stampa": the album's own action, under its name — shown only to a verified
+   visitor the owner let print. Secondary to looking: outlined, not filled. */
+.album-share-print {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-button);
+  box-shadow: inset 0 0 0 1px var(--contribution-border);
+  color: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+.album-share-print:hover { background: var(--brand-deep-blue); }
+.album-share-print:focus-visible { outline: 2px solid var(--brand-electric-blue); outline-offset: 2px; }
 .album-share-subtitle {
   margin: 0;
   font-family: var(--font-heading);

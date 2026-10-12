@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { OwnerPhotoPrintDate, OwnerPhotoPrintRequest, PrintPaperSize } from './printStations';
 
 // SHARE BY LINK — one album, one address, whoever is holding it.
 //
@@ -33,6 +34,12 @@ export interface AlbumShareLink {
   createdAt: string;
   expiresAt: string | null;
   guests: AlbumShareGuest[];
+  /**
+   * The owner's print switch. It lets a visitor print only on an email +
+   * second-factor link, once they have verified: on a public link it prints
+   * nothing, whatever it says.
+   */
+  allowPrint: boolean;
 }
 
 /** Every field optional: omitted means UNCHANGED, one switch at a time. */
@@ -52,6 +59,7 @@ export interface AlbumShareUpdate {
    * though the server had gained the ability.
    */
   clearExpiry?: boolean;
+  allowPrint?: boolean;
 }
 
 /** The album as somebody holding the link sees it. Names nothing else. */
@@ -63,6 +71,27 @@ export interface AlbumSharePublic {
   canDownloadOriginal: boolean;
   /** Null when the link has no ceiling. */
   uploadsRemaining: number | null;
+  /** Whether to offer "Stampa". UX only: every print route asks the server's rule again. */
+  canPrint: boolean;
+}
+
+/** The owner's printer, as a visitor's studio sees it: no name, no id. */
+export interface AlbumSharePrinter {
+  available: boolean;
+  paper: PrintPaperSize;
+  cutsStrips: boolean;
+}
+
+/**
+ * A visitor's print: the owner's print request WITHOUT its authority. No
+ * owner, no station, no printer — the server takes them from the share.
+ */
+export type AlbumSharePrintRequest = Omit<OwnerPhotoPrintRequest, 'printStationId' | 'printerDeviceId'>;
+
+export interface AlbumSharePrintAccepted {
+  shortCode: string;
+  state: string;
+  queueAhead: number;
 }
 
 export interface AlbumShareItem {
@@ -108,6 +137,7 @@ export const ALBUM_SHARE_ERRORS = {
   uploadsDisabled: 'uploads_disabled',
   uploadLimitReached: 'upload_limit_reached',
   invalidCode: 'invalid_code',
+  printNotAllowed: 'print_not_allowed',
 } as const;
 
 // ── Owner ─────────────────────────────────────────────────────────────────
@@ -274,5 +304,32 @@ export function uploadToAlbumShareWithProgress(
     signal?.addEventListener('abort', abort, { once: true });
     armDeadline(120_000);
     try { xhr.send(form); } catch (error) { finish(null, error as Error); }
+  });
+}
+
+// ── Print ─────────────────────────────────────────────────────────────────
+//
+// The owner's own album print, reached through the share. The cookie the
+// verification set is pathed to this link, so it rides along with these.
+
+export function getAlbumSharePrinter(
+  token: string, signal?: AbortSignal,
+): Promise<AlbumSharePrinter> {
+  return api<AlbumSharePrinter>(`/api/album-share/${encodeURIComponent(token)}/print`, { signal });
+}
+
+export function getAlbumSharePrintDate(
+  token: string, fileItemId: string, timeZone: string, signal?: AbortSignal,
+): Promise<OwnerPhotoPrintDate> {
+  const query = new URLSearchParams({ fileItemId, timeZone });
+  return api<OwnerPhotoPrintDate>(
+    `/api/album-share/${encodeURIComponent(token)}/print/date?${query}`, { signal });
+}
+
+export function submitAlbumSharePrint(
+  token: string, request: AlbumSharePrintRequest, idempotencyKey: string, signal?: AbortSignal,
+): Promise<AlbumSharePrintAccepted> {
+  return api<AlbumSharePrintAccepted>(`/api/album-share/${encodeURIComponent(token)}/print/jobs`, {
+    method: 'POST', json: request, headers: { 'Idempotency-Key': idempotencyKey }, signal,
   });
 }

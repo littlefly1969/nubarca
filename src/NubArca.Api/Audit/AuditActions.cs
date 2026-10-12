@@ -67,6 +67,8 @@ public static class AuditActions
     public const string AlbumShareLinkRevoke = "album.share_link_revoke";
     public const string AlbumShareLinkUpload = "album.share_link_upload";
     public const string AlbumShareLinkDownload = "album.share_link_download";
+    /// A verified visitor sent a print of the album to the owner's printer.
+    public const string AlbumShareLinkPrint = "album.share_link_print";
 
     // SHARE-ALBUM-02: linked, revocable contributions. Three actors are
     // genuinely distinct here and the trail must keep them apart — the ACTOR

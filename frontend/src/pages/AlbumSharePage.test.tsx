@@ -191,6 +191,20 @@ it('says when the owner allowed the real file', async () => {
   expect(screen.getByTestId('public-viewer-download')).toHaveTextContent(/originale/i);
 });
 
+it('offers "Stampa" only when the server says this visitor may print', async () => {
+  serve({ canPrint: true });
+  mount();
+  const print = await screen.findByTestId('album-share-print');
+  expect(print).toHaveTextContent('Stampa');
+  expect(print).toHaveAttribute('href', `/album/${TOKEN}/print`);
+  cleanup();
+
+  serve({ canPrint: false });
+  mount();
+  expect(await screen.findByText('Vacanze')).toBeInTheDocument();
+  expect(screen.queryByTestId('album-share-print')).toBeNull();
+});
+
 it('still opens when the owner closed contribution', async () => {
   serve({ canUpload: false });
   mount();

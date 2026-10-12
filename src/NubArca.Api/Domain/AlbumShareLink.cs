@@ -71,6 +71,18 @@ public sealed class AlbumShareLink
     public bool AllowOriginalDownload { get; set; }
 
     /// <summary>
+    /// Whether a verified visitor may print the album on the OWNER's printer.
+    ///
+    /// <para>Off by default, and only ever meaningful together with
+    /// <see cref="RequireSecondFactor"/>: a print spends the owner's paper,
+    /// so it is lent to a listed address that proved itself, never to whoever
+    /// holds a public link. A public link with this switch on still prints
+    /// nothing — <see cref="NubArca.Api.Albums.Sharing.AlbumShareAccess.CanPrint"/>
+    /// is the one rule, and it asks for both.</para>
+    /// </summary>
+    public bool AllowPrint { get; set; }
+
+    /// <summary>
     /// Whether opening the link additionally requires a one-time code sent to
     /// an address the owner listed. Off is the ordinary case: a link somebody
     /// forwards to a cousin should work for the cousin.

@@ -6,6 +6,19 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Album links: let the people you invited print
+
+- **A protected album link can now let its visitors print.** On a link that
+  asks for an emailed code, the owner turns on *Allow printing*; a visitor who
+  has verified their address then sees *Print* on the album and gets the same
+  print studio and options as the owner — formats, orientation, framing,
+  style, date — on the owner's printer. The job is the owner's, in the owner's
+  queue.
+- **A public link never prints.** The switch is not offered there, and the
+  server refuses a print from a public link, from a visitor who has not
+  verified, or once the owner turns the switch off, even if the page is
+  bypassed.
+
 ### Party prints: a number you can read, the logo beside the name
 
 - **The number on a party print is half again as large** — under a photo, under
