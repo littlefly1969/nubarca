@@ -124,7 +124,12 @@ is built is described by `ARCHITECTURE.md`.
   taking exactly as many as there are starts with all of them chosen. ONE composer for
   framed sheets: band words are data (`PrintSheetWords`), null = the party's own;
   Piena stays the owner renderer's. Owner job kinds `owner-photo` /
-  `owner-grid4` / `owner-strip4`. `PartyPrintGeometry` keeps only the party's
+  `owner-grid4` / `owner-strip4`. A single photo's orientation is selectable
+  before framing and again in the preview; turning it recomputes the frame
+  while preserving focal point and displayed zoom within the new frame's
+  limits. Both owner and party submissions send the displayed orientation
+  explicitly, including the automatic default, and freeze it with the slots
+  and idempotency key for retries. `PartyPrintGeometry` keeps only the party's
   decoration (words, mark, QR card).
 - Owner library/album media walls have a mobile-first fast-navigation rail for
   acquisition/insertion date (present months) or display name (present initials).

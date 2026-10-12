@@ -18,7 +18,8 @@ import '../../pages/PartyPrintPage.css';
 
 /* THE PRINT STUDIO — one path to a printed sheet, for a party's guest and for
    an owner printing from their album: choose the format, choose the
-   photographs, put them in order, frame each one, look at the sheet, send it.
+   photographs, put them in order, choose the sheet's orientation, frame each
+   one, look at the sheet, send it.
 
    The steps, the framing and the preview are this component's, and the sheet
    it previews is laid out by the shared catalogue (@nubarca/contracts
@@ -59,14 +60,15 @@ export interface StudioBand {
 
 export interface StudioSlot { itemId: string; placement: PhotoPlacement }
 
-export interface StudioSubmission {
-  layout: PrintLayout;
+export type StudioSubmission = {
   slots: StudioSlot[];
-  /** A single photograph's sheet: null follows the photograph. */
-  orientation: 'portrait' | 'landscape' | null;
   /** One key per composition: a retry of the same sheet keeps it, any change earns a new one. */
   key: string;
-}
+} & (
+  /** A single photograph always sends the orientation shown by the studio. */
+  | { layout: 'photo'; orientation: 'portrait' | 'landscape' }
+  | { layout: Exclude<PrintLayout, 'photo'>; orientation: null }
+);
 
 /** What a full-bleed sheet looks like to the words drawn over it. */
 export interface FullBleedSheet {
@@ -514,13 +516,10 @@ export function PrintStudio(props: PrintStudioProps) {
     }
   }, [step, cropIndex]);
 
-  // The sheet as it was first sent: its idempotency key AND the exact slots
-  // that key stands for, frozen together at the first attempt. Changing the
-  // composition discards the pair and earns a new key.
-  const pendingRef = useRef<{ key: string; slots: StudioSlot[] } | null>(null);
-  useEffect(() => {
-    pendingRef.current = null;
-  }, [chosenFormat, chosen, views, orientation, props.compositionKey]);
+  // The sheet as it was first sent: its idempotency key, orientation and exact
+  // slots, frozen together at the first attempt. A retry keeps all three even
+  // if an image loads late; a deliberate composition change earns a new key.
+  const pendingRef = useRef<StudioSubmission | null>(null);
 
   const { onChosenChange } = props;
   useEffect(() => { onChosenChange?.(chosen); }, [chosen, onChosenChange]);
@@ -548,6 +547,47 @@ export function PrintStudio(props: PrintStudioProps) {
           : photoSlotAspect(portraitFor(id), paper)
   ), [layout, paper, photoStyle, portraitFor]);
 
+  const shownOrientation = portraitFor(chosen[0]) ? 'portrait' : 'landscape';
+
+  useEffect(() => {
+    pendingRef.current = null;
+  }, [chosenFormat, chosen, views, orientation, props.compositionKey]);
+
+  const turnPhoto = (next: 'portrait' | 'landscape') => {
+    const id = chosen[0];
+    const aspect = aspectOf(id);
+    const view = views[id] ?? DEFAULT_CROP_VIEW;
+    // Use the NEW frame directly, not the previous React orientation. Keep the
+    // focal point and the displayed zoom, clamped to what the new frame allows.
+    const nextAspect = photoStyle === 'fullBleed'
+      ? overlaySlotAspect(next === 'portrait', paper)
+      : photoSlotAspect(next === 'portrait', paper);
+    const zoom = effectiveZoom(aspect, nextAspect,
+      effectiveZoom(aspect, slotAspectFor(id), view.zoom));
+    setViews((prev) => ({ ...prev, [id]: { ...view, zoom } }));
+    setOrientation(next);
+  };
+
+  // Choose the sheet before framing it; the same control on the preview lets
+  // a person turn it later and return to refine the recalculated framing.
+  const orientationControls = layout === 'photo' && (
+    <fieldset className="party-print-themes" disabled={props.submitting}>
+      <legend>{t('partyPrint.orientation')}</legend>
+      {(['portrait', 'landscape'] as const).map((option) => (
+        <label key={option} className="party-print-theme">
+          <input
+            type="radio"
+            name="party-print-orientation"
+            value={option}
+            checked={shownOrientation === option}
+            onChange={() => turnPhoto(option)}
+          />
+          <span>{t(`partyPrint.orientation.${option}`)}</span>
+        </label>
+      ))}
+    </fieldset>
+  );
+
   const toggle = (id: string) => {
     setChosen((prev) => {
       if (prev.includes(id)) return prev.filter((other) => other !== id);
@@ -574,6 +614,9 @@ export function PrintStudio(props: PrintStudioProps) {
     if (!layout) return;
     pendingRef.current ??= {
       key: newIdempotencyKey(),
+      ...(layout === 'photo'
+        ? { layout, orientation: shownOrientation }
+        : { layout, orientation: null }),
       slots: chosen.map((id) => {
         const view = views[id] ?? DEFAULT_CROP_VIEW;
         // The zoom as drawn: a framing held below a shape learned later is
@@ -582,12 +625,7 @@ export function PrintStudio(props: PrintStudioProps) {
         return { itemId: id, placement: { centerX: view.centerX, centerY: view.centerY, zoom } };
       }),
     };
-    onSubmit({
-      layout,
-      slots: pendingRef.current.slots,
-      orientation: layout === 'photo' ? orientation : null,
-      key: pendingRef.current.key,
-    });
+    onSubmit(pendingRef.current);
   };
 
   const known = useMemo(() => new Set(photoById.keys()), [photoById]);
@@ -834,6 +872,7 @@ export function PrintStudio(props: PrintStudioProps) {
                 {t('partyPrint.cropOf', { n: cropIndex + 1, total: chosen.length })}
               </p>
             )}
+            {orientationControls}
             {photo && (
               /* Sized to the screen as well as the column: see the CSS. */
               <div
@@ -910,7 +949,7 @@ export function PrintStudio(props: PrintStudioProps) {
             aspectOf={aspectOf}
             views={views}
             onAspect={noteAspect}
-            orientation={orientation}
+            orientation={layout === 'photo' ? shownOrientation : null}
             paper={paper}
           />
           <p className="party-print-hint">{t('partyPrint.previewHelp', { paper: PAPER_LABEL[paper] })}</p>
@@ -920,24 +959,7 @@ export function PrintStudio(props: PrintStudioProps) {
           {/* Only for a single photograph: the strips are two strips side by
               side on a portrait sheet, and turning that sheet would not turn a
               picture, it would destroy the format. */}
-          {layout === 'photo' && (
-            <fieldset className="party-print-themes">
-              <legend>{t('partyPrint.orientation')}</legend>
-              {(['portrait', 'landscape'] as const).map((option) => (
-                <label key={option} className="party-print-theme">
-                  <input
-                    type="radio"
-                    name="party-print-orientation"
-                    value={option}
-                    checked={(orientation ?? (aspectOf(chosen[0]) <= 1 ? 'portrait' : 'landscape'))
-                      === option}
-                    onChange={() => setOrientation(option)}
-                  />
-                  <span>{t(`partyPrint.orientation.${option}`)}</span>
-                </label>
-              ))}
-            </fieldset>
-          )}
+          {orientationControls}
           {props.options(layout)}
           {props.submitError && (
             <p className="party-print-error" role="alert">{props.submitError}</p>

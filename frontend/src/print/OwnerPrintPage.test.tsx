@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { AuthedWrapper, installFetchMock, jsonResponse } from '../test-utils';
@@ -63,6 +63,91 @@ function lastPost(calls: { url: string; method: string; body: string | null }[])
 }
 
 describe('OwnerPrintPage', () => {
+  it.each([
+    { path: `/print?album=${ALBUM}&files=f1`, width: 4000, height: 3000, orientation: 'landscape' },
+    { path: `/print?album=${ALBUM}&files=f1`, width: 3000, height: 4000, orientation: 'portrait' },
+    { path: '/print?files=f1', width: 4000, height: 3000, orientation: 'landscape' },
+    { path: '/print?files=f1', width: 3000, height: 4000, orientation: 'portrait' },
+  ])('sends the automatic $orientation shown in the preview without requiring a toggle', async ({ path, width, height, orientation }) => {
+    const user = userEvent.setup();
+    const mock = mount(path);
+    await user.click(await screen.findByTestId('party-print-format-photo'));
+    await user.click(next());
+    const img = screen.getByTestId('party-print-crop').querySelector('img')!;
+    Object.defineProperties(img, {
+      naturalWidth: { value: width }, naturalHeight: { value: height },
+    });
+    fireEvent.load(img);
+    await user.click(next());
+    expect(screen.getByTestId('party-print-sheet')).toHaveAttribute('data-orientation', orientation);
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)?.orientation).toBe(orientation));
+  });
+
+  it('holds an adapted photograph to the new frame minimum when the sheet is turned', async () => {
+    const user = userEvent.setup();
+    const mock = mount(`/print?album=${ALBUM}&files=f1`);
+    await user.click(await screen.findByTestId('party-print-format-photo'));
+    await user.click(next());
+    const img = screen.getByTestId('party-print-crop').querySelector('img')!;
+    Object.defineProperties(img, {
+      naturalWidth: { value: 4000 }, naturalHeight: { value: 3000 },
+    });
+    fireEvent.load(img);
+    await user.click(screen.getByRole('radio', { name: 'Verticale' }));
+    await user.click(screen.getByTestId('party-print-framing-fit'));
+    expect(screen.getByTestId('party-print-framing-zoom')).toHaveAttribute('aria-valuetext', '0.50×');
+    await user.click(screen.getByRole('radio', { name: 'Orizzontale' }));
+    expect(screen.getByTestId('party-print-framing-zoom')).toHaveAttribute('aria-valuetext', '0.89×');
+    await user.click(next());
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)?.orientation).toBe('landscape'));
+    expect(lastPost(mock.calls).photos[0].placement.zoom).toBeCloseTo(8 / 9);
+  });
+
+  it.each([
+    { width: 4000, height: 3000, to: 'Verticale', orientation: 'portrait', framed: false },
+    { width: 3000, height: 4000, to: 'Orizzontale', orientation: 'landscape', framed: false },
+    { width: 4000, height: 3000, to: 'Verticale', orientation: 'portrait', framed: true },
+    { width: 3000, height: 4000, to: 'Orizzontale', orientation: 'landscape', framed: true },
+  ])('reframes on one click to $orientation, keeping zoom and focal point (framed: $framed)', async ({ width, height, to, orientation, framed }) => {
+    const user = userEvent.setup();
+    const mock = mount(`/print?album=${ALBUM}&files=f1`);
+    await user.click(await screen.findByTestId('party-print-format-photo'));
+    await user.click(next());
+    const img = screen.getByTestId('party-print-crop').querySelector('img')!;
+    Object.defineProperties(img, {
+      naturalWidth: { value: width }, naturalHeight: { value: height },
+    });
+    fireEvent.load(img);
+    if (framed) {
+      await user.click(next());
+      await user.click(screen.getByRole('radio', { name: 'Cornice' }));
+      await user.click(screen.getByRole('button', { name: 'Indietro' }));
+    }
+    const frame = screen.getByTestId('party-print-crop');
+    const radio = screen.getByRole('radio', { name: to });
+    // Orientation is available before touching the framing editor.
+    expect(radio.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const oldAspect = Number.parseFloat(frame.style.aspectRatio);
+    fireEvent.change(screen.getByTestId('party-print-framing-zoom'), { target: { value: '2' } });
+    fireEvent.keyDown(frame, { key: 'ArrowRight' });
+    await user.click(radio);
+    expect(radio).toBeChecked();
+    const newAspect = Number.parseFloat(frame.style.aspectRatio);
+    expect(newAspect).not.toBe(oldAspect);
+    expect(orientation === 'portrait' ? newAspect < 1 : newAspect > 1).toBe(true);
+    expect(screen.getByTestId('party-print-framing-zoom')).toHaveValue('2');
+    const cropStyle = frame.querySelector('img')!.getAttribute('style');
+    await user.click(next());
+    const sheet = screen.getByTestId('party-print-sheet');
+    expect(sheet).toHaveAttribute('data-orientation', orientation);
+    expect(sheet.querySelector('img.party-print-framed')!.getAttribute('style')).toBe(cropStyle);
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)?.orientation).toBe(orientation));
+    expect(lastPost(mock.calls).photos[0].placement).toEqual({ centerX: 0.52, centerY: 0.5, zoom: 2 });
+  });
+
   it('opens on the album, with the printer, and offers what its paper can make — the strip only from a printer that cuts', async () => {
     mount(`/print?album=${ALBUM}`);
     expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Vacanze 2026');
