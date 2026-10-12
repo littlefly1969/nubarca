@@ -146,11 +146,12 @@ interface PrintSource {
 }
 
 export function OwnerPrintPage() {
-  const { t } = useI18n();
+  const { t, tn } = useI18n();
   const perms = usePermissions();
   const [params] = useSearchParams();
   const albumId = params.get('album');
   const files = params.get('files') ?? '';
+  const videos = Number(params.get('videos') ?? 0);
   const source = useMemo<PrintSource>(() => {
     const preselected = files.split(',').map((id) => id.trim()).filter(Boolean);
     const photo = (id: string): StudioPhoto => ({
@@ -167,10 +168,16 @@ export function OwnerPrintPage() {
         // From the library: the photographs that were selected, and only those.
         if (!albumId) return { title: null, photos: preselected.map(photo) };
         const [album, items] = await Promise.all([getAlbum(albumId, signal), listAlbumItems(albumId, signal)]);
+        const images = new Set(items.filter((item) => item.mimeType.toLowerCase().startsWith('image/'))
+          .map((item) => item.fileItemId));
         return {
           title: album.name,
-          photos: items.filter((item) => item.mimeType.toLowerCase().startsWith('image/'))
-            .map((item) => photo(item.fileItemId)),
+          // From an album's selection: the selected photographs still in it,
+          // in the order selected. With none selected (the album's own
+          // "Stampa"), every photograph of the album, as a party offers all of its own.
+          photos: preselected.length > 0
+            ? preselected.filter((id) => images.has(id)).map(photo)
+            : items.filter((item) => images.has(item.fileItemId)).map((item) => photo(item.fileItemId)),
         };
       },
       resolveDate: (fileItemId, timeZone, signal) => getOwnerPhotoPrintDate(fileItemId, timeZone, signal),
@@ -182,6 +189,11 @@ export function OwnerPrintPage() {
   return (
     <PrintPage
       source={source}
+      note={Number.isInteger(videos) && videos > 0 ? (
+        <p className="party-print-hint" data-testid="owner-print-videos-skipped">
+          {tn(videos, 'ownerPrint.videosSkipped')}
+        </p>
+      ) : null}
       back={albumId
         ? <Link to={`/albums/${albumId}`}>{t('ownerPrint.backToAlbum')}</Link>
         : <Link to="/media">{t('ownerPrint.backToLibrary')}</Link>}
@@ -236,9 +248,11 @@ export function SharePrintPage() {
   return <PrintPage source={source} back={<Link to=".." relative="path">{t('sharePrint.backToAlbum')}</Link>} />;
 }
 
-function PrintPage({ source: from, back, noPrinters }: {
+function PrintPage({ source: from, back, noPrinters, note }: {
   source: PrintSource;
   back: ReactNode;
+  /** Said at the top of the format step (videos left out of the selection). */
+  note?: ReactNode;
   /** Shown under "no printers" when there is none at all. */
   noPrinters?: ReactNode;
 }) {
@@ -437,7 +451,7 @@ function PrintPage({ source: from, back, noPrinters }: {
         gallery={photos}
         photoById={photoById}
         preselected={preselected}
-        formatHeader={!from.choosesPrinter ? (
+        formatHeader={<>{note}{!from.choosesPrinter ? (
           // A share prints on the owner's printer, which the server chooses:
           // nothing to pick, only whether it can print now.
           targets[0]?.unavailable ? (
@@ -476,7 +490,7 @@ function PrintPage({ source: from, back, noPrinters }: {
               </label>
             ))}
           </fieldset>
-        )}
+        )}</>}
         formatFooter={<p className="party-print-back">{back}</p>}
         formatNotice={notice}
         photoStyle={style}

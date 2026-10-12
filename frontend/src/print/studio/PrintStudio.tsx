@@ -439,7 +439,7 @@ export interface PrintStudioProps {
   formatHeader?: ReactNode;
   /** Shown under the formats (a way back). */
   formatFooter?: ReactNode;
-  /** Already chosen when the studio opens, in this order: taken, up to what a format takes. */
+  /** The order the photographs were selected in: already chosen when a format takes exactly that many. */
   preselected?: string[];
   /** A single photograph's style with the look chosen now; four and the strips are always framed. */
   photoStyle: PrintStyle;
@@ -606,19 +606,31 @@ export function PrintStudio(props: PrintStudioProps) {
             <p className="party-print-error" role="alert">{t(props.formatNotice)}</p>
           )}
           <ul className="party-print-formats">
-            {formats.map((option) => (
+            {formats.map((option) => {
+              // A format the photographs cannot fill is said, not hidden:
+              // counted on every photograph the studio has, never on a
+              // filtered view of them (a party's "only mine").
+              const short = option.count > known.size;
+              const left = short
+                ? t('partyPrint.format.needs', { count: option.count, have: known.size })
+                : option.left;
+              return (
               <li key={`${option.layout}-${option.count}`}>
                 <button
                   type="button"
                   className="party-print-format"
                   data-testid={option.testId}
                   data-exhausted={option.exhausted ? 'true' : undefined}
-                  disabled={option.exhausted}
+                  data-short={short ? 'true' : undefined}
+                  disabled={option.exhausted || short}
                   onClick={() => {
                     setChosenFormat({ layout: option.layout, count: option.count });
-                    // What was already chosen — from an album's selection —
-                    // stays chosen, as far as the format takes.
-                    setChosen((preselected ?? []).filter((id) => known.has(id)).slice(0, option.count));
+                    // Exactly as many photographs as the format takes: they
+                    // are all of it, already chosen, in the order selected.
+                    // More than it takes: the person chooses which.
+                    const ordered = (preselected ?? []).filter((id) => known.has(id));
+                    setChosen(known.size !== option.count ? []
+                      : ordered.length === option.count ? ordered : [...known]);
                     setStep('select');
                   }}
                 >
@@ -631,10 +643,11 @@ export function PrintStudio(props: PrintStudioProps) {
                     <strong>{option.label}</strong>
                     <span className="party-print-format-help">{option.help}</span>
                   </span>
-                  {option.left !== null && <span className="party-print-format-left">{option.left}</span>}
+                  {left !== null && <span className="party-print-format-left">{left}</span>}
                 </button>
               </li>
-            ))}
+              );
+            })}
           </ul>
           {props.formatFooter}
         </section>

@@ -173,6 +173,31 @@ describe('OwnerPrintPage', () => {
     expect(screen.getByText('Torna alla libreria')).toBeInTheDocument();
   });
 
+  it('composes from an album\'s selection only, and offers no format it cannot fill', async () => {
+    const user = userEvent.setup();
+    mount(`/print?album=${ALBUM}&files=f4,f2,f5&videos=2`);
+    expect(await screen.findByTestId('owner-print-videos-skipped')).toHaveTextContent('2 video della selezione non vengono stampati');
+    expect(screen.getByTestId('party-print-format-grid4')).toBeDisabled();
+    expect(screen.getByTestId('party-print-format-grid4')).toHaveTextContent('Servono 4 foto, ne hai 3');
+    await user.click(screen.getByTestId('party-print-format-photo'));
+    // Three to choose one from: nothing is chosen for the person.
+    expect(screen.getAllByRole('button', { name: /Scegli questa foto/ })).toHaveLength(3);
+    expect(screen.queryByRole('button', { name: /Togli dalla selezione/ })).toBeNull();
+  });
+
+  it('stays on the same photographs to print another', async () => {
+    const user = userEvent.setup();
+    mount(`/print?album=${ALBUM}&files=f4,f2,f5`);
+    await user.click(await screen.findByTestId('party-print-format-photo'));
+    await user.click(screen.getAllByRole('button', { name: /Scegli questa foto/ })[1]);
+    await user.click(next());
+    await user.click(next());
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await user.click(await screen.findByRole('button', { name: /Stampa un/ }));
+    await user.click(await screen.findByTestId('party-print-format-photo'));
+    expect(screen.getAllByRole('button', { name: /Scegli questa foto/ })).toHaveLength(3);
+  });
+
   it('says there is no printer to use rather than offering a studio that cannot print', async () => {
     mount(`/print?album=${ALBUM}`, { stations: [] });
     expect(await screen.findByTestId('owner-print-empty')).toHaveTextContent('Nessuna stampante disponibile');

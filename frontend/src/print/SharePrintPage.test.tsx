@@ -58,8 +58,12 @@ describe('SharePrintPage', () => {
       expect(back.closest('a')).toHaveAttribute('href', `/album/${TOKEN}`);
     }
 
+    // Two photographs cannot fill four slots: said, not hidden.
+    expect(screen.getByTestId('party-print-format-grid4')).toBeDisabled();
+    expect(screen.getByTestId('party-print-format-grid4')).toHaveTextContent('Servono 4 foto, ne hai 2');
+
     // The album's photographs only — not its video.
-    await userEvent.setup().click(screen.getByTestId('party-print-format-grid4'));
+    await userEvent.setup().click(screen.getByTestId('party-print-format-photo'));
     expect(screen.getAllByRole('button', { name: /Scegli questa foto/ })).toHaveLength(2);
   });
 

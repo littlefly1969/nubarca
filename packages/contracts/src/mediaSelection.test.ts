@@ -73,15 +73,18 @@ test('being inside an album does not take the library actions away', () => {
   assert.equal(c.canAddToAlbum, true);
 });
 
-test('print is one photograph, from the library or an own album, never excluded', () => {
+test('print is at least one photograph, from the library or an own album, never excluded', () => {
   assert.equal(caps([]).canPrintPhoto, false);
   assert.equal(caps([image]).canPrintPhoto, true);
   assert.equal(caps([image], 'album').canPrintPhoto, true);
   assert.equal(caps([image, image]).canPrintPhoto, true);
   assert.equal(caps(Array(8).fill(image)).canPrintPhoto, true);
-  assert.equal(caps(Array(9).fill(image)).canPrintPhoto, false);
-  assert.equal(caps([image, video]).canPrintPhoto, false);
+  // No ceiling here: past PRINT_SELECTION_MAX the action says why where it runs.
+  assert.equal(caps(Array(9).fill(image)).canPrintPhoto, true);
+  assert.equal(caps(Array(500).fill(image)).canPrintPhoto, true);
+  // Videos are left out of the print, never a reason to refuse it.
+  assert.equal(caps([image, video]).canPrintPhoto, true);
   assert.equal(caps([video]).canPrintPhoto, false);
-  assert.equal(caps([image, video]).canPrintPhoto, false);
+  assert.equal(caps([video, video]).canPrintPhoto, false);
   assert.equal(caps([image], 'library', 'excluded').canPrintPhoto, false);
 });
