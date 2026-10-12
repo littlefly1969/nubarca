@@ -944,6 +944,13 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // idempotency state survives restarts; scoped to share the request context.
     builder.Services.AddScoped<NubArca.Api.Uploads.IUploadIdempotencyService,
         NubArca.Api.Uploads.UploadIdempotencyService>();
+    // One ingest for every owner upload (multipart and resumable).
+    builder.Services.AddScoped<NubArca.Api.Uploads.IOwnerUploadIngestion,
+        NubArca.Api.Uploads.OwnerUploadIngestion>();
+    builder.Services.AddScoped<NubArca.Api.Uploads.IResumableUploadService,
+        NubArca.Api.Uploads.ResumableUploadService>();
+    builder.Services.AddScoped<NubArca.Api.Uploads.IAlbumUploadIngestion,
+        NubArca.Api.Uploads.AlbumUploadIngestion>();
     // /api/albums/{albumId}/media (library + album sources, one contract).
     builder.Services.AddScoped<
         NubArca.Api.Media.IMediaCollectionQueryService,
@@ -1236,6 +1243,11 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddSingleton<StagingCleanupService>();
     builder.Services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<StagingCleanupService>());
 
+    // Resumable owner uploads: reclaims abandoned partial transfers.
+    builder.Services.AddSingleton<NubArca.Api.Uploads.ResumableUploadSweeper>();
+    builder.Services.AddSingleton<IHostedService>(sp =>
+        sp.GetRequiredService<NubArca.Api.Uploads.ResumableUploadSweeper>());
+
     // TV "Beauty Lab" QR upload-session sweeper — reclaims expired/revoked rows
     // (self-disables unless HumanAesExpert:UploadSessionCleanupEnabled = true).
     builder.Services.AddSingleton<NubArca.Api.Aesthetics.AestheticUploadSessionCleanupService>();
@@ -1282,6 +1294,9 @@ builder.Services.Configure<AdminImportOptions>(
 // Slice 93: web remote-staging upload config (opt-in; OFF by default).
 builder.Services.Configure<StagingOptions>(
     builder.Configuration.GetSection(StagingOptions.SectionName));
+// Resumable owner uploads (chunked, interactive). ON by default.
+builder.Services.Configure<NubArca.Api.Uploads.ResumableUploadOptions>(
+    builder.Configuration.GetSection(NubArca.Api.Uploads.ResumableUploadOptions.SectionName));
 // deleted-content-import-skip: fingerprint pepper for the deleted-content
 // ledger. Bound unconditionally so the fingerprint is stable everywhere.
 builder.Services.Configure<DeletedContentOptions>(
@@ -1672,6 +1687,8 @@ app.MapAdminImportEndpoints();
 // modular-monolith cleanup. Same routes, same behavior; see that file for
 // the implementation.
 app.MapStagingUploadEndpoints();
+app.MapResumableUploadEndpoints();
+app.MapAlbumUploadEndpoints();
 
 // Admin background-jobs dashboard endpoints live in
 // Endpoints/AdminJobsEndpoints.cs — extracted as part of the

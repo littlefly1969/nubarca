@@ -6,6 +6,20 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Uploads: one engine for Files and albums, resumable and never doubled
+
+- **Uploads keep going while you move around the app.** A tray in the bottom
+  right shows every file, speed and time left; pause, resume, cancel and retry
+  per file or for all. Losing the connection waits instead of failing.
+- **A retry never stores a file twice,** and a big file (64 MB and more) goes
+  up in pieces: after a dropped connection or a reload it continues where it
+  stopped instead of starting over.
+- **A name already taken is renamed** (`IMG_0001 (2).jpg`) instead of refused.
+- **Drag files or whole folders anywhere on a folder page, or paste them.**
+- **Albums have their own "Carica".** Photos and videos land in the album and
+  in your folder `Album/<album name>`; one you already have is added to the
+  album without a second copy. Contributors can upload into shared albums too.
+
 ### Party prints: a number you can read, the logo beside the name
 
 - **The number on a party print is half again as large** — under a photo, under

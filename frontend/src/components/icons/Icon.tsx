@@ -60,7 +60,10 @@ export type IconName =
   | 'eye-off'
   | 'skip'
   | 'next-photo'
-  | 'print';
+  | 'print'
+  // The upload tray's queue controls.
+  | 'pause'
+  | 'play';
 
 const PATHS: Record<IconName, string> = {
   files: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
@@ -89,6 +92,8 @@ const PATHS: Record<IconName, string> = {
   filter: 'M4 6h16l-6 7v6l-4-2v-4z',
   sort: 'M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3',
   upload: 'M12 16V4M8 8l4-4 4 4M4 20h16',
+  pause: 'M8 5v14M16 5v14',
+  play: 'M7 5l12 7-12 7z',
   tv: 'M4 6h16v10H4zM9 20h6M12 16v4',
   calendar: 'M4 6h16v14H4zM4 10h16M9 4v3M15 4v3',
   archive: 'M3 6h18v4H3zM5 10v10h14V10M10 14h4',

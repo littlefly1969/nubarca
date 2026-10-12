@@ -11,6 +11,7 @@ import { sharedAlbumAddContext } from '../albums/sharedAlbumAddContext';
 import { AlbumDetailsEditor } from '../albums/AlbumDetailsEditor';
 import { AlbumSharedContentPanel } from '../albums/AlbumSharedContentPanel';
 import { SharedAlbumBrowser } from '../albums/SharedAlbumBrowser';
+import { AlbumUploadButton } from '../albums/AlbumUploadButton';
 import { getAlbumExperienceCapabilities } from '../albums/albumCapabilities';
 
 // The recipient's view of ONE live shared album.
@@ -55,6 +56,10 @@ export function SharedAlbumDetailPage() {
   const [curateOpen, setCurateOpen] = useState(false);
   const editButtonRef = useRef<HTMLButtonElement>(null);
   const curateButtonRef = useRef<HTMLButtonElement>(null);
+  // A new key re-reads the wall once an upload batch into this album arrived,
+  // without the whole page going back to "loading".
+  const [wallKey, setWallKey] = useState(0);
+  const onUploadsLanded = useCallback(() => setWallKey((n) => n + 1), []);
 
   const load = useCallback(() => {
     if (!albumId) return;
@@ -169,6 +174,14 @@ export function SharedAlbumDetailPage() {
                 filling this album" context and goes there, because there is
                 exactly one place in NubArca where media is chosen. */}
             {capabilities.contribute && (
+              <AlbumUploadButton
+                albumId={albumId}
+                albumName={current.name}
+                onLanded={onUploadsLanded}
+                dropEnabled={!editOpen && !curateOpen}
+              />
+            )}
+            {capabilities.contribute && (
               <button
                 type="button"
                 className="row-action"
@@ -191,6 +204,7 @@ export function SharedAlbumDetailPage() {
           underneath the dialog; closing it re-reads the album. */}
       {!curateOpen && (
         <SharedAlbumBrowser
+          key={wallKey}
           albumId={albumId}
           albumName={current.name}
           capabilities={capabilities}

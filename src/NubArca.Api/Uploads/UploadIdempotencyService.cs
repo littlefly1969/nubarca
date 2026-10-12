@@ -35,6 +35,14 @@ public interface IUploadIdempotencyService
     // claim so the next attempt starts clean. Never touches a completed row and
     // never another caller's token.
     Task ReleaseAsync(Guid claimToken, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Completes a claim with a file that already existed, for an upload that
+    /// stored nothing (the caller owned the bytes already). Throws
+    /// <see cref="UploadOperationClaimLostException"/> when the claim is no
+    /// longer this caller's, exactly as a storing upload would.
+    /// </summary>
+    Task CompleteWithExistingAsync(Guid claimToken, Guid fileItemId, CancellationToken cancellationToken = default);
 }
 
 // Backed by the same database as everything else so replay state survives
@@ -179,6 +187,21 @@ public sealed class UploadIdempotencyService : IUploadIdempotencyService
             // re-attempt OUR insert during a later Save.
             _db.Entry(row).State = EntityState.Detached;
             return null;
+        }
+    }
+
+    public async Task CompleteWithExistingAsync(
+        Guid claimToken, Guid fileItemId, CancellationToken cancellationToken = default)
+    {
+        var completed = await _db.UploadOperations
+            .Where(o => o.Id == claimToken && o.Status == UploadOperationStatus.Pending)
+            .ExecuteUpdateAsync(setter => setter
+                .SetProperty(o => o.Status, UploadOperationStatus.Completed)
+                .SetProperty(o => o.FileItemId, fileItemId),
+                cancellationToken);
+        if (completed == 0)
+        {
+            throw new UploadOperationClaimLostException(claimToken);
         }
     }
 

@@ -71,6 +71,8 @@ public class AppDbContext : DbContext
     public DbSet<RemoteUploadSession> RemoteUploadSessions => Set<RemoteUploadSession>();
     public DbSet<RemoteUploadItem> RemoteUploadItems => Set<RemoteUploadItem>();
     public DbSet<RemoteUploadChunk> RemoteUploadChunks => Set<RemoteUploadChunk>();
+    public DbSet<ResumableUpload> ResumableUploads => Set<ResumableUpload>();
+    public DbSet<ResumableUploadChunk> ResumableUploadChunks => Set<ResumableUploadChunk>();
     public DbSet<MediaLibraryRule> MediaLibraryRules => Set<MediaLibraryRule>();
     public DbSet<FileItemLocation> FileItemLocations => Set<FileItemLocation>();
     public DbSet<PhotoOrganizerRun> PhotoOrganizerRuns => Set<PhotoOrganizerRun>();
