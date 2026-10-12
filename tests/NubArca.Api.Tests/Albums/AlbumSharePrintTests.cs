@@ -128,6 +128,39 @@ public sealed class AlbumSharePrintTests : IDisposable
         Assert.Equal(1, await Db(db => db.OwnerPhotoPrintRequests.CountAsync(r => r.OwnerUserId == shared.OwnerId)));
     }
 
+    [Fact]
+    public async Task A_retry_after_a_lost_response_gets_its_job_even_when_the_chosen_printer_changed()
+    {
+        var shared = await SharedAlbumAsync(secondFactor: true, allowPrint: true);
+        var visitor = await VerifiedVisitorAsync(shared.Token);
+        var key = Guid.NewGuid().ToString("N");
+
+        var first = await SubmitAsync(visitor, shared.Token, PrintBody(shared.Photo), key);
+        Assert.Equal(HttpStatusCode.Accepted, first.StatusCode);
+        var code = (await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("shortCode").GetString();
+
+        // The response is lost, and meanwhile the server would choose another
+        // printer: the first goes offline and a second one comes online.
+        (await HeartbeatAsync(shared.Printer.Credential, "offline")).EnsureSuccessStatusCode();
+        var second = await PrinterAsync(shared.Owner);
+        var manifest = await visitor.GetFromJsonAsync<JsonElement>($"/api/album-share/{shared.Token}/print");
+        Assert.True(manifest.GetProperty("available").GetBoolean());
+
+        // The retry is the same request under the same key: it is answered with
+        // the job that already exists, on the printer it went to.
+        var retry = await SubmitAsync(visitor, shared.Token, PrintBody(shared.Photo), key);
+        Assert.Equal(HttpStatusCode.Accepted, retry.StatusCode);
+        Assert.Equal(code, (await retry.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("shortCode").GetString());
+        var job = await Db(db => db.PrintJobs.SingleAsync());
+        Assert.Equal(shared.Printer.DeviceId, job.PrinterDeviceId);
+        Assert.NotEqual(second.DeviceId, job.PrinterDeviceId);
+
+        // A NEW print, under a new key, goes to the printer that can print now.
+        Assert.Equal(HttpStatusCode.Accepted,
+            (await SubmitAsync(visitor, shared.Token, PrintBody(shared.Photo))).StatusCode);
+        Assert.Equal(1, await Db(db => db.PrintJobs.CountAsync(j => j.PrinterDeviceId == second.DeviceId)));
+    }
+
     // --- what else the rule implies ----------------------------------------
 
     [Fact]
@@ -220,13 +253,13 @@ public sealed class AlbumSharePrintTests : IDisposable
         return body;
     }
 
-    private static Task<HttpResponseMessage> SubmitAsync(HttpClient client, string token, object body)
+    private static Task<HttpResponseMessage> SubmitAsync(HttpClient client, string token, object body, string? key = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, $"/api/album-share/{token}/print/jobs")
         {
             Content = JsonContent.Create(body),
         };
-        request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
+        request.Headers.Add("Idempotency-Key", key ?? Guid.NewGuid().ToString("N"));
         return client.SendAsync(request);
     }
 
@@ -283,6 +316,14 @@ public sealed class AlbumSharePrintTests : IDisposable
         });
         enrolled.EnsureSuccessStatusCode();
         var credential = (await enrolled.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("stationCredential").GetString()!;
+        (await HeartbeatAsync(credential, "ready")).EnsureSuccessStatusCode();
+        var deviceId = await Db(db => db.PrinterDevices.Where(d => d.PrintStationId == stationId)
+            .Select(d => d.Id).SingleAsync());
+        return new Printer(stationId, deviceId, credential);
+    }
+
+    private Task<HttpResponseMessage> HeartbeatAsync(string credential, string state)
+    {
         var heartbeat = new HttpRequestMessage(HttpMethod.Post, "/api/print-agent/heartbeat")
         {
             Content = JsonContent.Create(new
@@ -295,16 +336,13 @@ public sealed class AlbumSharePrintTests : IDisposable
                         deviceKey = "dnp", displayName = "DNP DS-RX1HS", manufacturer = "DNP", model = "DS-RX1HS",
                         adapterKind = "cups",
                         capabilities = new { formats = new[] { "10x15", "13x18", "20x15" }, color = true },
-                        observedState = "ready",
+                        observedState = state,
                     },
                 },
             }),
         };
         heartbeat.Headers.Add("X-NubArca-Print-Credential", credential);
-        (await _factory.CreateClient().SendAsync(heartbeat)).EnsureSuccessStatusCode();
-        var deviceId = await Db(db => db.PrinterDevices.Where(d => d.PrintStationId == stationId)
-            .Select(d => d.Id).SingleAsync());
-        return new Printer(stationId, deviceId, credential);
+        return _factory.CreateClient().SendAsync(heartbeat);
     }
 
     /// <summary>A photograph in the owner's library with the metadata a real one carries.</summary>

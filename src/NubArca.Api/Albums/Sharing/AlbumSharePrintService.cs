@@ -130,8 +130,13 @@ public sealed class AlbumSharePrintService : IAlbumSharePrintService
             if (kind != PartyMediaKind.Image) return OwnerPhotoPrintResult.Refuse(OwnerPhotoPrintErrors.NotImage);
         }
 
-        // share → album → owner → printer.
-        var printer = await ResolvePrinterAsync(access.OwnerUserId, cancellationToken);
+        // share → album → owner → printer. A RETRY keeps its first printer: the
+        // choice below can change between two requests (one goes offline,
+        // another comes online), and a key whose job already exists must be
+        // answered with that job — re-choosing would make the owner print's
+        // fingerprint differ and turn a lost response into idempotency_conflict.
+        var printer = await PrinterOfKeyAsync(access.OwnerUserId, idempotencyKey, cancellationToken)
+            ?? await ResolvePrinterAsync(access.OwnerUserId, cancellationToken);
         if (printer is null) return OwnerPhotoPrintResult.Refuse(OwnerPhotoPrintErrors.PrinterUnavailable);
 
         return await _prints.SubmitAsync(
@@ -152,6 +157,25 @@ public sealed class AlbumSharePrintService : IAlbumSharePrintService
                 Caption: request.Caption,
                 Brand: request.Brand),
             idempotencyKey, cancellationToken, new OwnerPrintOrigin(access.AlbumId));
+    }
+
+    /// <summary>
+    /// The printer the job already made under this key went to, or null when
+    /// the key has made none. Read from the owner print's own idempotency
+    /// record, so the destination is kept exactly as long as the key is.
+    /// </summary>
+    private async Task<AlbumSharePrinter?> PrinterOfKeyAsync(
+        Guid ownerUserId, string? idempotencyKey, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 200) return null;
+        var keyHash = OwnerPrintRecords.Hash(idempotencyKey);
+        var job = await _db.OwnerPhotoPrintRequests.AsNoTracking()
+            .Where(r => r.OwnerUserId == ownerUserId && r.IdempotencyKeyHash == keyHash)
+            .Join(_db.PrintJobs, r => r.PrintJobId, j => j.Id, (_, j) => new { j.PrintStationId, j.PrinterDeviceId })
+            .FirstOrDefaultAsync(cancellationToken);
+        // Only the destination matters here: the owner print answers the repeat
+        // from its record (or refuses a different composition under the key).
+        return job is null ? null : new AlbumSharePrinter(job.PrintStationId, job.PrinterDeviceId, string.Empty, false, true);
     }
 
     /// <summary>
