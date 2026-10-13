@@ -307,6 +307,14 @@ function PrintPage({ source: from, back, noPrinters, note }: {
   const [first, setFirst] = useState<string | null>(null);
   const [date, setDate] = useState<{ id: string; value: OwnerPhotoPrintDate } | 'loading' | 'error' | null>(null);
   const onChosenChange = useCallback((chosen: string[]) => setFirst(chosen[0] ?? null), []);
+  // Another format, or a print sent: the next sheet starts from the defaults.
+  // Going back without changing the format keeps every choice.
+  const resetChoices = useCallback(() => {
+    setStyle('fullBleed');
+    setCaption('');
+    setBrand(false);
+    setIncludeDate(false);
+  }, []);
 
   // The date is the first photograph's, read only once someone asks for it.
   useEffect(() => {
@@ -358,6 +366,7 @@ function PrintPage({ source: from, back, noPrinters, note }: {
         ...(includeDate ? { dateLocale: lang, timeZone: browserTimeZone() } : {}),
       }, composition.key);
       setSent(accepted);
+      resetChoices();
     } catch (err) {
       const code = refusalOf(err);
       if (code === 'paper_changed') {
@@ -505,6 +514,7 @@ function PrintPage({ source: from, back, noPrinters, note }: {
         canSubmit={target !== null && target.unavailable === null && !captionInvalid
           && (!includeDate || dateText !== null)}
         onChosenChange={onChosenChange}
+        onFormatChange={resetChoices}
         resetSignal={resetSignal}
         onSubmit={(composition) => { void submit(composition); }}
         options={(layout) => (

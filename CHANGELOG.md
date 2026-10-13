@@ -6,6 +6,14 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Printing: one place to turn the sheet, and a fresh start for each print
+
+- **The sheet is turned where the photo is framed,** and only there: the
+  preview shows the orientation chosen, and going back is how to change it.
+- **Another format, or a print sent, starts the sheet's choices again** —
+  Piena or Cornice, the line, the mark and the date for your own prints, the
+  look for a party's. Going back to fix a photo or the order keeps them.
+
 ### Print Box: Wi-Fi from the cable, and a setup page without a port
 
 - **On its setup network the Print Box's page is at `http://10.42.0.1/`,** no

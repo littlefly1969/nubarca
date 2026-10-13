@@ -283,6 +283,76 @@ describe('OwnerPrintPage', () => {
     expect(screen.getAllByRole('button', { name: /Scegli questa foto/ })).toHaveLength(3);
   });
 
+  it('turns the sheet only where it is framed: the preview shows the choice', async () => {
+    const user = userEvent.setup();
+    mount(`/print?album=${ALBUM}&files=f1`);
+    await user.click(await screen.findByTestId('party-print-format-photo'));
+    await user.click(next());
+    await user.click(screen.getByRole('radio', { name: 'Verticale' }));
+    await user.click(next());
+    expect(screen.getByTestId('party-print-sheet')).toHaveAttribute('data-orientation', 'portrait');
+    expect(screen.queryByRole('radio', { name: 'Verticale' })).toBeNull();
+    expect(screen.queryByRole('radio', { name: 'Orizzontale' })).toBeNull();
+    // Back to the framing, the choice is there to change.
+    await user.click(screen.getByRole('button', { name: 'Indietro' }));
+    expect(screen.getByRole('radio', { name: 'Verticale' })).toBeChecked();
+  });
+
+  it('keeps the sheet\'s choices on the way back, and starts them again for another format', async () => {
+    const user = userEvent.setup();
+    mount(`/print?album=${ALBUM}&files=f1,f2,f3,f4`);
+    const toPreview = async () => {
+      await user.click(screen.getAllByRole('button', { name: /Scegli questa foto/ })[0]);
+      await user.click(next());
+      await user.click(next());
+    };
+    const backToFormats = async () => {
+      for (let i = 0; i < 3; i += 1) await user.click(screen.getByRole('button', { name: 'Indietro' }));
+    };
+    await user.click(await screen.findByTestId('party-print-format-photo'));
+    await toPreview();
+    await user.click(screen.getByRole('radio', { name: 'Cornice' }));
+    await user.type(screen.getByTestId('owner-print-caption'), 'Estate al lago');
+    await user.click(screen.getByTestId('owner-print-brand'));
+
+    // Same format again: everything is as it was left.
+    await backToFormats();
+    await user.click(screen.getByTestId('party-print-format-photo'));
+    await toPreview();
+    expect(screen.getByRole('radio', { name: 'Cornice' })).toBeChecked();
+    expect(screen.getByTestId('owner-print-caption')).toHaveValue('Estate al lago');
+    expect(screen.getByTestId('owner-print-brand')).toBeChecked();
+
+    // Another format: the sheet's choices start again.
+    await backToFormats();
+    await user.click(screen.getByTestId('party-print-format-grid4'));
+    await user.click(next());
+    await user.click(next());
+    for (let i = 0; i < 4; i += 1) await user.click(next());
+    expect(screen.getByTestId('owner-print-caption')).toHaveValue('');
+    expect(screen.getByTestId('owner-print-brand')).not.toBeChecked();
+  });
+
+  it('starts the next print from the defaults', async () => {
+    const user = userEvent.setup();
+    mount(`/print?album=${ALBUM}&files=f1`);
+    await user.click(await screen.findByTestId('party-print-format-photo'));
+    await user.click(next());
+    await user.click(next());
+    await user.click(screen.getByRole('radio', { name: 'Cornice' }));
+    await user.type(screen.getByTestId('owner-print-caption'), 'Estate al lago');
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await user.click(await screen.findByRole('button', { name: /Stampa un/ }));
+
+    await user.click(await screen.findByTestId('party-print-format-photo'));
+    await user.click(next());
+    await user.click(next());
+    expect(screen.getByRole('radio', { name: 'Piena' })).toBeChecked();
+    expect(screen.queryByTestId('owner-print-caption')).toBeNull();
+    await user.click(screen.getByRole('radio', { name: 'Cornice' }));
+    expect(screen.getByTestId('owner-print-caption')).toHaveValue('');
+  });
+
   it('says there is no printer to use rather than offering a studio that cannot print', async () => {
     mount(`/print?album=${ALBUM}`, { stations: [] });
     expect(await screen.findByTestId('owner-print-empty')).toHaveTextContent('Nessuna stampante disponibile');

@@ -578,10 +578,15 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(support.contains(within(sheet).getByText('Beach Party'))).toBe(true);
     expect(support.contains(within(sheet).getByText('Grazie di essere qui'))).toBe(true);
 
-    // Turned landscape, the same padding is a smaller share of the wider sheet.
+    // Turned landscape where it is framed, the same padding is a smaller
+    // share of the wider sheet — and the look chosen stays on the way back.
+    await user.click(screen.getByRole('button', { name: 'Indietro' }));
     await user.click(screen.getByRole('radio', { name: 'Orizzontale' }));
-    expect(sheet).toHaveAttribute('data-orientation', 'landscape');
-    expect(Number.parseFloat(support.style.paddingTop)).toBeCloseTo((2.5 * 1200) / 1800, 3);
+    await user.click(next());
+    expect(screen.getByRole('radio', { name: 'Sulla foto' })).toBeChecked();
+    expect(screen.getByTestId('party-print-sheet')).toHaveAttribute('data-orientation', 'landscape');
+    expect(Number.parseFloat(screen.getByTestId('party-print-overlay-support').style.paddingTop))
+      .toBeCloseTo((2.5 * 1200) / 1800, 3);
   });
 
   it('prints the name as the paper will, and keeps the number its room', async () => {
@@ -1280,18 +1285,19 @@ describe('PartyPrintPage (public print studio)', () => {
     setNatural(within(picks[0]).getByRole('presentation', { hidden: true }), 4000, 3000);
     await user.click(picks[0]);
     await user.click(next());
-    await user.click(next());
 
     // A wide photograph starts on a landscape sheet, chosen for the guest.
     expect(screen.getByRole('radio', { name: 'Orizzontale' })).toBeChecked();
-    expect(screen.getByTestId('party-print-sheet'))
-      .toHaveAttribute('data-orientation', 'landscape');
 
-    // And they can turn it: a portrait subject in a landscape frame is a choice
-    // somebody may want, and the crop editor is what makes it work.
+    // And they can turn it while framing: a portrait subject in a landscape
+    // frame is a choice somebody may want, and the crop editor makes it work.
     await user.click(screen.getByRole('radio', { name: 'Verticale' }));
+    await user.click(next());
     expect(screen.getByTestId('party-print-sheet'))
       .toHaveAttribute('data-orientation', 'portrait');
+    // The preview shows the choice; turning it again means going back.
+    expect(screen.queryByRole('radio', { name: 'Orizzontale' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Verticale' })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Stampa' }));
     await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
@@ -1316,6 +1322,37 @@ describe('PartyPrintPage (public print studio)', () => {
     await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
     // The renderer receives the same choice as the owner print path.
     expect(lastPost(mock.calls).orientation).toBe('landscape');
+  });
+
+  it('starts the look again for another format and after a print, and keeps it on the way back', async () => {
+    const user = setup();
+    mount(manifest(), {
+      [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
+    });
+    render(wrapper());
+    await compose(user, 'photo');
+    await user.click(screen.getByRole('radio', { name: 'Notte' }));
+
+    // Back to the formats and the same one again: the look stays.
+    await user.click(screen.getByRole('button', { name: 'Indietro' }));
+    await user.click(screen.getByRole('button', { name: 'Indietro' }));
+    await user.click(screen.getByRole('button', { name: 'Indietro' }));
+    await compose(user, 'photo');
+    expect(screen.getByRole('radio', { name: 'Notte' })).toBeChecked();
+
+    // Another format is another sheet: the look starts again.
+    await user.click(screen.getByRole('button', { name: 'Indietro' }));
+    await user.click(screen.getByRole('button', { name: 'Indietro' }));
+    await user.click(screen.getByRole('button', { name: 'Indietro' }));
+    await compose(user, 'twinStrip4');
+    expect(screen.getByRole('radio', { name: 'Chiaro' })).toBeChecked();
+    await user.click(screen.getByRole('radio', { name: 'Notte' }));
+
+    // A print sent: the next sheet starts from the defaults too.
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await user.click(await screen.findByRole('button', { name: /Stampa un/ }));
+    await compose(user, 'twinStrip4');
+    expect(screen.getByRole('radio', { name: 'Chiaro' })).toBeChecked();
   });
 
   it('does not offer to turn a strip, because that is not a sheet it can turn', async () => {

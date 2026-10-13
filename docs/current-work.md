@@ -114,7 +114,10 @@ is built is described by `ARCHITECTURE.md`.
   `fullBleed` (single photo only), sheets, slots, bands, papers, photo counts —
   the twin strip takes 4 (the same strip twice) or 8, and only a printer that
   cuts (`2x6x2`) makes it. ONE studio (`src/print/studio/PrintStudio`): format →
-  photos → order → framing → preview, for a party's guest (`PartyPrintPage`:
+  photos → order → framing → preview — a single photo's sheet is turned while
+  framing, never on the preview; the page's own choices (style, line, date,
+  mark, look) start again on another format or after a print, and stay on a
+  way back to the same format — for a party's guest (`PartyPrintPage`:
   budgets, looks, the party's words, the number) and an owner
   (`/print?album=…&files=…`, `OwnerPrintPage`: printer, Piena / Cornice, one free
   line ≤ 40 chars, date in the band — the first photo's — NubArca mark off by
