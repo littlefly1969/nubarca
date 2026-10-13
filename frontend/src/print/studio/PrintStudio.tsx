@@ -467,6 +467,12 @@ export interface PrintStudioProps {
   onSubmit: (submission: StudioSubmission) => void;
   /** Told the photographs chosen, in order, whenever they change (an owner's date is the first one's). */
   onChosenChange?: (chosen: string[]) => void;
+  /**
+   * Told when a format is chosen that is not the one chosen before: the
+   * page's own choices for the sheet (style, words, date, look) start again.
+   * Going back and taking the same format keeps them.
+   */
+  onFormatChange?: () => void;
   /** Changed by the page to start over from the format step. */
   resetSignal?: number;
 }
@@ -491,6 +497,10 @@ export function PrintStudio(props: PrintStudioProps) {
   const required = chosenFormat?.count ?? 1;
   // Four photographs on a twin strip: one strip, printed twice.
   const sameStrip = layout === 'twinStrip4' && required === SLOTS_PER_STRIP;
+
+  // The format chosen last, kept across a way back to the formats: only
+  // another one is a new sheet.
+  const previousFormat = useRef<{ layout: PrintLayout; count: number } | null>(null);
 
   // Start over when the page says so — another paper is in, a print was sent.
   const firstReset = useRef(true);
@@ -568,8 +578,8 @@ export function PrintStudio(props: PrintStudioProps) {
     setOrientation(next);
   };
 
-  // Choose the sheet before framing it; the same control on the preview lets
-  // a person turn it later and return to refine the recalculated framing.
+  // The sheet is turned where it is framed, and only there: the preview shows
+  // the choice, and turning it again means going back to the framing it moves.
   const orientationControls = layout === 'photo' && (
     <fieldset className="party-print-themes" disabled={props.submitting}>
       <legend>{t('partyPrint.orientation')}</legend>
@@ -662,6 +672,11 @@ export function PrintStudio(props: PrintStudioProps) {
                   data-short={short ? 'true' : undefined}
                   disabled={option.exhausted || short}
                   onClick={() => {
+                    const previous = previousFormat.current;
+                    if (previous && (previous.layout !== option.layout || previous.count !== option.count)) {
+                      props.onFormatChange?.();
+                    }
+                    previousFormat.current = { layout: option.layout, count: option.count };
                     setChosenFormat({ layout: option.layout, count: option.count });
                     // Exactly as many photographs as the format takes: they
                     // are all of it, already chosen, in the order selected.
@@ -956,10 +971,6 @@ export function PrintStudio(props: PrintStudioProps) {
           {layout === 'twinStrip4' && (
             <p className="party-print-hint">{t('partyPrint.twinStrips')}</p>
           )}
-          {/* Only for a single photograph: the strips are two strips side by
-              side on a portrait sheet, and turning that sheet would not turn a
-              picture, it would destroy the format. */}
-          {orientationControls}
           {props.options(layout)}
           {props.submitError && (
             <p className="party-print-error" role="alert">{props.submitError}</p>

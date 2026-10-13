@@ -270,6 +270,13 @@ export function PartyPrintPage() {
   const [look, setLook] = useState<Look>('pure');
   const [overlayText, setOverlayText] = useState<PartyPrintOverlayText>('white');
   const [overlayLogo, setOverlayLogo] = useState<PartyPrintOverlayLogo>('light');
+  // Another format, or a print sent: the next sheet starts from the defaults.
+  // Going back without changing the format keeps every choice.
+  const resetLook = useCallback(() => {
+    setLook('pure');
+    setOverlayText('white');
+    setOverlayLogo('light');
+  }, []);
   // The theme the server is sent: the overlay exists only for a single photograph.
   const themeFor = useCallback((layout: PrintLayout): PartyPrintTheme => (look === 'overlay'
     ? (layout === 'photo' ? 'overlay' : 'pure')
@@ -425,6 +432,7 @@ export function PartyPrintPage() {
         },
         composition.key);
       setSent({ accepted, state: 'preparing' });
+      resetLook();
     } catch (err: unknown) {
       const refusal = refusalKey(err);
       if (refusal === 'partyPrint.error.paperChanged') {
@@ -551,6 +559,7 @@ export function PartyPrintPage() {
         submitError={submitError ? t(submitError) : null}
         submitting={submitting}
         resetSignal={resetSignal}
+        onFormatChange={resetLook}
         onSubmit={(composition) => { setFormatNotice(null); void submit(composition); }}
         options={(layout) => (
           <>
