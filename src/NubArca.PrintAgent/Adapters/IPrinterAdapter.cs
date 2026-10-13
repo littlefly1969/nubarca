@@ -12,8 +12,15 @@ public sealed record PrinterCapabilities(IReadOnlyList<string> Formats, bool Col
 public sealed record DiscoveredPrinter(
     string DeviceKey, string DisplayName, string? Manufacturer, string? Model, string AdapterKind);
 public sealed record PrinterObservedStatus(string State, string? Detail = null);
+/// <summary><c>Simulated</c>: the job goes to the printer's simulated twin — never to paper.</summary>
 public sealed record PrintSubmission(
-    Guid JobId, string DeviceKey, string ArtifactPath, string ContentType, string Format);
+    Guid JobId, string DeviceKey, string ArtifactPath, string ContentType, string Format, bool Simulated = false);
+
+/// <summary>Whether a printer has a simulated twin, and whether that is all it has.</summary>
+public sealed record PrinterSimulation(bool Available, bool Only)
+{
+    public static readonly PrinterSimulation None = new(false, false);
+}
 public sealed record PrintSubmissionResult(bool Accepted, string? SpoolReference, string? FailureCode);
 
 /// <summary>
@@ -48,4 +55,16 @@ public interface IPrinterAdapter
     /// whose driver reports no count is a valid answer, not an offline one.
     /// </summary>
     Task<PrinterMediaStatus> GetMediaStatusAsync(DiscoveredPrinter printer, CancellationToken cancellationToken);
+
+    /// <summary>Whether this adapter sends a simulated job to a twin. One that cannot is never given one.</summary>
+    bool SupportsSimulation => false;
+
+    /// <summary>The simulated twin behind <paramref name="printer"/>, if any.</summary>
+    Task<PrinterSimulation> GetSimulationAsync(DiscoveredPrinter printer, CancellationToken cancellationToken) =>
+        Task.FromResult(PrinterSimulation.None);
+
+    /// <summary>The printers the owner has switched to their twin: their status and media come from it.</summary>
+    void UseSimulation(IReadOnlySet<string> deviceKeys)
+    {
+    }
 }

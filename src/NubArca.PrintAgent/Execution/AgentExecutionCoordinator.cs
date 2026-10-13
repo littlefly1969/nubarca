@@ -56,7 +56,7 @@ public sealed class AgentExecutionCoordinator
         if (File.Exists(path)) File.Delete(path);
         await _api.DownloadAsync(claim, path, _options.MaxArtifactBytes, cancellationToken);
         var entry = new JournalEntry(claim.JobId, claim.ClaimToken, path, claim.DeviceKey,
-            claim.ContentType, claim.Format, LocalExecutionStates.Claimed, null, null);
+            claim.ContentType, claim.Format, LocalExecutionStates.Claimed, null, null, claim.Simulated);
         await _journal.UpsertClaimedAsync(entry, cancellationToken);
         await SubmitAsync(entry, cancellationToken);
     }
@@ -69,7 +69,7 @@ public sealed class AgentExecutionCoordinator
         try
         {
             var result = await _adapter.SubmitAsync(new PrintSubmission(entry.JobId,
-                entry.DeviceKey, entry.ArtifactPath, entry.ContentType, entry.Format), cancellationToken);
+                entry.DeviceKey, entry.ArtifactPath, entry.ContentType, entry.Format, entry.Simulated), cancellationToken);
             resultEntry = result.Accepted
                 ? entry with { State = LocalExecutionStates.Completed, SpoolReference = result.SpoolReference }
                 : entry with { State = LocalExecutionStates.Failed,

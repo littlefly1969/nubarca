@@ -50,7 +50,9 @@
     show('connection', connection);
     show('address', s.address || '—');
     if (s.printer) {
-      show('printer', s.printer.name + ' · ' + (PRINTER[s.printer.state] || s.printer.state),
+      // A simulated printer says so on its own line: its sheets are files.
+      show('printer', s.printer.name + ' · ' + (PRINTER[s.printer.state] || s.printer.state)
+        + (s.printer.simulated ? ' · Simulated: prints go to a file, not to paper' : ''),
         s.printer.state === 'ready' || s.printer.state === 'printing' ? 'ok' : 'bad');
     } else {
       show('printer', 'Not found', 'bad');

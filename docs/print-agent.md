@@ -683,6 +683,57 @@ Record the Windows version, DNP driver version, agent artifact version/source
 commit, printer firmware, media and result for each row. The automated fake
 adapter proves protocol semantics only; it is not evidence for these rows.
 
+## Simulated printer (a DS-RX1HS twin)
+
+From agent 0.8 a CUPS printer can be **simulated as deeply as the real path
+goes**. `install-print-box.sh` installs the `nubarca-sim` CUPS backend
+(`/usr/lib/cups/backend/nubarca-sim`) and, beside the two real queues, their
+twins `NubArca-RX1HS-SIM` and `NubArca-RX1HS-STRIP-SIM`
+(`setup-cups --simulation`). They are made exactly like the real ones — the
+same Gutenprint DS-RX1 driver, page sizes and 2-inch cut — on the backend
+instead of the printer. The backend receives what the driver would send the
+DNP, writes it to `/var/spool/nubarca-sim/<queue>/` (the last 20 jobs, each
+with a `.txt` of its options), and reports the media to CUPS with the DNP
+driver's own message: `100 native prints remaining`. The agent reads it with
+the same IPP query as a real DNP, and reports 100 before the twin's first job.
+
+- **The switch** is the owner's, per printer, on the printers page
+  (**Simulation**). It is offered only while the agent reports a twin, and is
+  audited (`print.printer.simulation.set`). While it is on, the printer is
+  reported through its twin — ready, with its media — and every new job goes
+  there. The printer stays the same printer: paper, papers, cut, queue,
+  loans, calibration.
+- **Jobs remember.** A job records at creation whether its printer was
+  simulated: switching later moves no queued job. A simulated job goes only to
+  an agent that says it can simulate (older agents are never given one), the
+  agent's journal keeps the flag across a restart, and an agent whose twin is
+  missing refuses the job (`simulation_unavailable`) instead of printing it.
+- **The simulated prints** are listed on the printer's page with the sheet
+  the server rendered (the same bytes the agent sent to the twin), to look at
+  or download; **Clear** deletes the finished ones and, at the next heartbeat,
+  the box deletes its output older than that.
+- **"Simulated"** is shown wherever the printer is chosen — the owner's print,
+  a party's printer setting, a printer lent to someone — and on the box's own
+  setup page.
+
+**A simulated-only printer** — no DNP at all, e.g. on the server — is the
+same software: from `/opt/nubarca-print-agent/linux`,
+
+```bash
+sudo bash install-simulated-printer.sh --instance <name> \
+  --server https://your-nubarca-origin.example --station <station id>
+```
+
+installs CUPS, Gutenprint and the backend, creates `NubArca-<name>-SIM` and
+`NubArca-<name>-STRIP-SIM`, and runs `nubarca-print-agent@<name>` with
+`Simulation.Only`: a DS-RX1HS that is always simulated. It touches neither the
+network nor the host name. `uninstall-instance.sh --instance <name>
+[--purge-state]` removes it and its queues.
+
+Not proven by tests: the twin under a real cupsd (Ubuntu's AppArmor profile
+for CUPS backends) and Gutenprint's real filter chain into the backend — the
+first smoke on a box or host is that acceptance.
+
 ## Erasing a revoked station
 
 Revoking a station stops it at once and keeps its history. After revocation

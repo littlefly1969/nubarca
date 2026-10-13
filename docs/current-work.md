@@ -13,7 +13,7 @@ is built is described by `ARCHITECTURE.md`.
 - Frontend: React, TypeScript, Vite
 - Runtime: Docker Compose with separate API, worker and frontend services
 - Print foundation: server-owned stations/devices/jobs plus a separately
-  packaged headless Print Agent `0.7.0`: a Windows service (spooler), a Linux
+  packaged headless Print Agent `0.8.0`: a Windows service (spooler), a Linux
   fake simulator (systemd instances, protocol acceptance) and a headless Linux
   Print Box on Ubuntu Server 24.04+ or Debian 12+ (`cups` adapter over
   CUPS/Gutenprint with queues created by the installer, NetworkManager Wi-Fi
@@ -29,7 +29,13 @@ is built is described by `ARCHITECTURE.md`.
   be erased with everything it left (`DELETE /api/print/stations/{id}/erase`);
   the erase and its `print.station.erase` audit record commit in one
   transaction, earlier audit entries are kept, and party budgets and numbering
-  are counters on the party and survive it. The Print Box reports the prints left
+  are counters on the party and survive it. A CUPS printer has a simulated twin
+  (same Gutenprint queues on the `nubarca-sim` backend, writing files, 100
+  prints): the owner switches it per printer, each job records
+  `Simulated` at creation and only an agent that can simulate gets one; the
+  printers page lists, downloads and clears the simulated sheets.
+  `install-simulated-printer.sh` makes a simulated-only DS-RX1HS on a host
+  without a printer. The Print Box reports the prints left
   on the media from Gutenprint's CUPS marker (IPP query shipped with the
   agent, `ipptool`); it is telemetry (`PrinterDevice.MediaRemainingPrints`),
   never a gate. DNP printers still require hardware acceptance on each path,

@@ -227,6 +227,7 @@ public sealed class PartyQrCardPrintService : IPartyQrCardPrintService
             await using var stream = new MemoryStream(artifact, writable: false);
             var staged = await _artifacts.StageAsync(stream, cancellationToken);
             await using var stagedScope = staged.ConfigureAwait(false);
+            var simulated = await PrintSimulation.IsActiveAsync(_db, deviceId, cancellationToken);
             await StoragePublish.PublishOwnedAsync(_db, _artifacts, staged, async (stored, ct) =>
             {
                 var now = Now;
@@ -236,6 +237,7 @@ public sealed class PartyQrCardPrintService : IPartyQrCardPrintService
                     OwnerUserId = ownerUserId,
                     PrintStationId = stationId,
                     PrinterDeviceId = deviceId,
+                    Simulated = simulated,
                     FileItemId = fileItemId,
                     Kind = PrintJobKinds.PartyQrCard,
                     Format = PrintFormats.Strip2x6Pair,

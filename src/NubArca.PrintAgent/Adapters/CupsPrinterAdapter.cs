@@ -78,14 +78,45 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
     };
 
     public CupsPrinterAdapter(string? configuredPrinter, string? stripPrinter,
-        IProcessRunner runner, ILogger<CupsPrinterAdapter> logger, string? mediaQueryPath = null)
+        IProcessRunner runner, ILogger<CupsPrinterAdapter> logger, string? mediaQueryPath = null,
+        PrintSimulationOptions? simulation = null)
     {
         _configuredPrinter = string.IsNullOrWhiteSpace(configuredPrinter) ? null : configuredPrinter;
         _stripPrinter = string.IsNullOrWhiteSpace(stripPrinter) ? null : stripPrinter;
         _runner = runner;
         _logger = logger;
         _mediaQueryPath = mediaQueryPath ?? DefaultMediaQueryPath;
+        _simulationOnly = simulation?.Only == true;
+        _simulationSuffix = string.IsNullOrWhiteSpace(simulation?.QueueSuffix) ? null : simulation!.QueueSuffix;
     }
+
+    // --- The simulated twin ------------------------------------------------------------
+
+    private readonly bool _simulationOnly;
+    private readonly string? _simulationSuffix;
+    private volatile IReadOnlySet<string> _simulated = new HashSet<string>();
+
+    public bool SupportsSimulation => _simulationOnly || _simulationSuffix is not null;
+
+    /// <summary>The twin of <paramref name="queue"/>: itself on a box that has only twins.</summary>
+    public string? Twin(string queue) => _simulationOnly ? queue
+        : _simulationSuffix is null ? null : queue + _simulationSuffix;
+
+    /// <summary>Whether <paramref name="deviceKey"/>'s jobs, status and media are the twin's now.</summary>
+    public bool IsSimulated(string deviceKey) => _simulationOnly || _simulated.Contains(deviceKey);
+
+    public void UseSimulation(IReadOnlySet<string> deviceKeys) => _simulated = deviceKeys;
+
+    public async Task<PrinterSimulation> GetSimulationAsync(DiscoveredPrinter printer, CancellationToken cancellationToken)
+    {
+        if (Twin(printer.DeviceKey) is not { } twin) return PrinterSimulation.None;
+        var queues = await QueuesAsync(cancellationToken);
+        return queues?.ContainsKey(twin) == true ? new PrinterSimulation(true, _simulationOnly) : PrinterSimulation.None;
+    }
+
+    /// <summary>The queue to ask about <paramref name="deviceKey"/>: its twin while it is simulated.</summary>
+    private string Observed(string deviceKey) =>
+        IsSimulated(deviceKey) && Twin(deviceKey) is { } twin ? twin : deviceKey;
 
     /// <summary>The IPP query shipped with the agent, beside its own binary.</summary>
     public static string DefaultMediaQueryPath =>
@@ -130,9 +161,12 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
         CancellationToken cancellationToken)
     {
         var queues = await QueuesAsync(cancellationToken);
-        var present = queues?.ContainsKey(printer.DeviceKey) == true;
-        var stripReady = _stripPrinter is not null && queues?.ContainsKey(_stripPrinter) == true;
-        var papers = present ? await PapersAsync(printer.DeviceKey, cancellationToken) : [];
+        var observed = Observed(printer.DeviceKey);
+        var present = queues?.ContainsKey(observed) == true;
+        var strip = _stripPrinter is null ? null
+            : IsSimulated(printer.DeviceKey) ? Twin(_stripPrinter) : _stripPrinter;
+        var stripReady = strip is not null && queues?.ContainsKey(strip) == true;
+        var papers = present ? await PapersAsync(observed, cancellationToken) : [];
         var formats = SpoolerQueueRouting.Formats(printer.DeviceKey, papers,
             _configuredPrinter, _stripPrinter, stripReady);
         return new PrinterCapabilities(formats, Color: true);
@@ -169,7 +203,7 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
     {
         var queues = await QueuesAsync(cancellationToken);
         if (queues is null) return new PrinterObservedStatus("offline", "CUPS unavailable");
-        return queues.TryGetValue(printer.DeviceKey, out var queue)
+        return queues.TryGetValue(Observed(printer.DeviceKey), out var queue)
             ? CupsOutput.StatusOf(queue)
             : new PrinterObservedStatus("offline", "Queue missing in CUPS");
     }
@@ -180,6 +214,15 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
         var queue = SpoolerQueueRouting.TargetQueue(submission.Format, submission.DeviceKey,
             _configuredPrinter, _stripPrinter);
         if (queue is null) return new PrintSubmissionResult(false, null, "format_unsupported");
+        if (submission.Simulated)
+        {
+            // To the twin, or nowhere: a simulated sheet never falls back to paper.
+            var twin = Twin(queue);
+            var queues = await QueuesAsync(cancellationToken);
+            if (twin is null || queues?.ContainsKey(twin) != true)
+                return new PrintSubmissionResult(false, null, "simulation_unavailable");
+            queue = twin;
+        }
         if (!File.Exists(submission.ArtifactPath))
             return new PrintSubmissionResult(false, null, "artifact_missing");
 
@@ -221,6 +264,16 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
             && string.Equals(printer.DeviceKey, _stripPrinter, StringComparison.OrdinalIgnoreCase)
             ? _configuredPrinter
             : printer.DeviceKey;
+        if (IsSimulated(printer.DeviceKey))
+        {
+            // The twin's backend reports its media as the DNP's driver does,
+            // through the same IPP query; until its first job has told CUPS,
+            // the simulated media holds what it always holds.
+            var simulated = Twin(queue) is { } twin ? await QueryMediaAsync(twin, cancellationToken) : PrinterMediaStatus.Unavailable;
+            return simulated.RemainingPrints is null
+                ? new PrinterMediaStatus(PrintSimulationOptions.RemainingPrints, 0)
+                : simulated;
+        }
 
         await _mediaGate.WaitAsync(cancellationToken);
         try

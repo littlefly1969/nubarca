@@ -80,6 +80,38 @@ public static class PrintEndpoints
             }
             return Results.NoContent();
         }).WithName("RevokePrintStation");
+        owner.MapPut("/stations/{stationId:guid}/devices/{deviceId:guid}/simulation", async (Guid stationId,
+            Guid deviceId, [FromBody] SetPrinterSimulationRequest request, HttpContext context,
+            [FromServices] PrintStationService service, [FromServices] IAuditLogger audit, CancellationToken ct) =>
+        {
+            var userId = context.GetCurrentUserId()!.Value;
+            var (device, error) = await service.SetSimulationAsync(userId, stationId, deviceId, request.Enabled, ct);
+            if (error is not null) return Results.Conflict(new { error });
+            if (device is null) return Results.NotFound();
+            // Where a printer's sheets go is a decision worth a line: paper, or a file.
+            await audit.LogAsync(AuditActor.User(userId), AuditActions.PrinterSimulationSet,
+                AuditEntityTypes.PrinterDevice, deviceId, Ip(context), new { enabled = request.Enabled }, ct);
+            return Results.Ok(device);
+        }).WithName("SetPrinterSimulation");
+        owner.MapGet("/stations/{stationId:guid}/devices/{deviceId:guid}/simulated-jobs", async (Guid stationId,
+            Guid deviceId, HttpContext context, [FromServices] PrintStationService service, CancellationToken ct) =>
+        {
+            var jobs = await service.ListSimulatedAsync(context.GetCurrentUserId()!.Value, stationId, deviceId, ct);
+            return jobs is null ? Results.NotFound() : Results.Ok(jobs);
+        }).WithName("ListSimulatedPrints");
+        owner.MapDelete("/stations/{stationId:guid}/devices/{deviceId:guid}/simulated-jobs", async (Guid stationId,
+            Guid deviceId, HttpContext context, [FromServices] PrintStationService service, CancellationToken ct) =>
+        {
+            var cleared = await service.ClearSimulatedAsync(context.GetCurrentUserId()!.Value, stationId, deviceId, ct);
+            return cleared is null ? Results.NotFound() : Results.Ok(new { cleared });
+        }).WithName("ClearSimulatedPrints");
+        owner.MapGet("/jobs/{jobId:guid}/simulated-sheet", async (Guid jobId, HttpContext context,
+            [FromServices] PrintStationService service, CancellationToken ct) =>
+        {
+            var sheet = await service.OpenSimulatedSheetAsync(context.GetCurrentUserId()!.Value, jobId, ct);
+            return sheet is null ? Results.NotFound()
+                : Results.Stream(sheet.Content, sheet.ContentType, $"nubarca-{jobId.ToString("N")[..8]}.png");
+        }).WithName("DownloadSimulatedSheet");
         owner.MapGet("/stations/{stationId:guid}/erase", async (Guid stationId, HttpContext context,
             [FromServices] PrintStationService service, CancellationToken ct) =>
         {
@@ -279,7 +311,8 @@ public static class PrintEndpoints
         station.MapPost("/jobs/claim", async ([FromBody] PrintClaimRequest request,
             HttpContext context, [FromServices] PrintStationService service, CancellationToken ct) =>
         {
-            var result = await service.ClaimAsync(StationId(context), request.AdapterKind, ct);
+            var result = await service.ClaimAsync(StationId(context), request.AdapterKind, ct,
+                request.SupportsSimulation);
             return result is null ? Results.NoContent() : Results.Ok(result);
         }).WithName("ClaimPrintJob");
         station.MapGet("/jobs/{jobId:guid}/artifact", async (Guid jobId,

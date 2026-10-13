@@ -70,6 +70,9 @@ public sealed class WindowsSpoolerPrinterAdapter : IPrinterAdapter
     public Task<PrintSubmissionResult> SubmitAsync(PrintSubmission submission,
         CancellationToken cancellationToken)
     {
+        // No twin here: a simulated job is refused, never put on paper.
+        if (submission.Simulated)
+            return Task.FromResult(new PrintSubmissionResult(false, null, "simulation_unavailable"));
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         cancellationToken.ThrowIfCancellationRequested();
         // The strip is the same 10x15 artifact; only the queue differs, and the

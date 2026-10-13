@@ -295,6 +295,8 @@ public static class AuditActions
     // A revoked station erased with everything it left. The one line that
     // remains of it: who erased which station id, and when — no name, no counts.
     public const string PrintStationErase = "print.station.erase";
+    // A printer switched to its simulated twin (sheets to a file) or back to paper.
+    public const string PrinterSimulationSet = "print.printer.simulation.set";
     public const string PartyGameStart = "party.game.start";
     public const string PartyGameFinish = "party.game.finish";
     // Playing the same party again. Recorded beside start and finish because it

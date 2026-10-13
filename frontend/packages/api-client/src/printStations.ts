@@ -34,6 +34,12 @@ export interface PrintDevice {
    */
   mediaRemainingPrints?: number | null;
   mediaRemainingObservedAt?: string | null;
+  /** Its jobs go to the simulated twin: files, not paper. */
+  simulated?: boolean;
+  /** The agent offers a simulated twin, so the owner may switch it on. */
+  simulationAvailable?: boolean;
+  /** Nothing but the twin: always simulated. */
+  simulationOnly?: boolean;
 }
 
 /** A live loan of a printer, as its owner sees it. */
@@ -83,6 +89,8 @@ export interface SharedPrinter {
   /** The printer's own count of prints left on its media — not the loan. */
   mediaRemainingPrints?: number | null;
   mediaRemainingObservedAt?: string | null;
+  /** Its prints go to a file, not to paper. */
+  simulated?: boolean;
 }
 
 /** Share refusals the server names. */
@@ -116,6 +124,20 @@ export interface PrintJobSummary {
   waitingForPaper?: PrintPaperSize | null;
   /** Who sent it, when that is not the printer's owner — a job from a loan. */
   ownerName?: string | null;
+  /** Goes to the simulated twin, not to paper. */
+  simulated?: boolean;
+}
+
+/** A simulated print as its printer's owner sees it; the sheet is downloaded apart. */
+export interface SimulatedPrint {
+  id: string;
+  shortCode: string;
+  kind: string;
+  format: string;
+  state: string;
+  createdAt: string;
+  /** Who sent it, when not the printer's owner. */
+  ownerName: string | null;
 }
 
 export interface PrintStation {
@@ -211,6 +233,25 @@ export function previewPrintStationErase(id: string): Promise<PrintStationEraseP
 /** A revoked station, erased with everything it left; one audit line remains. */
 export function erasePrintStation(id: string): Promise<void> {
   return api(`/api/print/stations/${encodeURIComponent(id)}/erase`, { method: 'DELETE' });
+}
+/** The owner sends a printer's jobs to its simulated twin, or back to paper. */
+export function setPrinterSimulation(stationId: string, deviceId: string, enabled: boolean): Promise<PrintDevice> {
+  return api(`/api/print/stations/${encodeURIComponent(stationId)}/devices/${encodeURIComponent(deviceId)}/simulation`, {
+    method: 'PUT', json: { enabled },
+  });
+}
+export function listSimulatedPrints(stationId: string, deviceId: string, signal?: AbortSignal): Promise<SimulatedPrint[]> {
+  return api(`/api/print/stations/${encodeURIComponent(stationId)}/devices/${encodeURIComponent(deviceId)}/simulated-jobs`, { signal });
+}
+/** Clears the finished simulated prints, here and — at its next heartbeat — on the box. */
+export function clearSimulatedPrints(stationId: string, deviceId: string): Promise<{ cleared: number }> {
+  return api(`/api/print/stations/${encodeURIComponent(stationId)}/devices/${encodeURIComponent(deviceId)}/simulated-jobs`, {
+    method: 'DELETE',
+  });
+}
+/** The sheet of a simulated print, as an image the owner's browser can show or save. */
+export function simulatedSheetUrl(jobId: string): string {
+  return `/api/print/jobs/${encodeURIComponent(jobId)}/simulated-sheet`;
 }
 export function revokePrintStation(id: string): Promise<void> {
   return api(`/api/print/stations/${encodeURIComponent(id)}`, { method: 'DELETE' });

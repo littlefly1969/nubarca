@@ -216,6 +216,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Purely additive. It adds one NULLABLE column AgentBuild to print_stations (no default, no backfill, no index, no constraint: a metadata-only ALTER TABLE ... ADD COLUMN) and creates one new table print_agent_distribution with its own integer primary key and no foreign key. Nothing existing is altered, constrained or dropped. The previously pinned application neither reads nor writes either: its station queries do not select the new column and its inserts omit it, so new rows take NULL, and it never touches the new table. Rolling the image back is therefore safe; a bundle sharing switch set by the new application simply has no effect under the previous one, which has no download route."
+    },
+    "20261013221312_AddPrinterSimulation": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Purely additive. It adds three NOT NULL boolean columns with a constant DEFAULT FALSE to printer_devices (Simulated, SimulationAvailable, SimulationOnly), one NOT NULL boolean DEFAULT FALSE to print_jobs (Simulated) and one NULLABLE timestamp to print_stations (SimulatedOutputPurgeRequestedAt). Each is a metadata-only ALTER TABLE ... ADD COLUMN on PostgreSQL 11+; no row is rewritten, nothing is backfilled, and no existing column, index or constraint is touched. The previous application neither reads nor writes these columns and its inserts omit them, so new rows take FALSE/NULL. Rolled back, it simply knows no simulation: every job it creates is an ordinary one, as before this release."
     }
   }
 }
