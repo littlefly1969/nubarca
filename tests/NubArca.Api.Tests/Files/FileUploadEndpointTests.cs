@@ -144,6 +144,39 @@ public sealed class FileUploadEndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task Post_With_Rename_Policy_Gives_A_Taken_Name_The_Next_Counter()
+    {
+        var (_, client) = await _factory.CreateAuthenticatedClientAsync();
+
+        static MultipartFormDataContent Renaming(string body)
+        {
+            var multipart = MultipartWithFile(Encoding.UTF8.GetBytes(body), "report.txt", "text/plain");
+            multipart.Add(new StringContent("rename"), "conflict");
+            return multipart;
+        }
+
+        var first = await client.PostAsync("/api/files", Renaming("v1"));
+        var second = await client.PostAsync("/api/files", Renaming("v2"));
+        var third = await client.PostAsync("/api/files", Renaming("v3"));
+
+        Assert.Equal("report.txt", (await first.Content.ReadFromJsonAsync<FileSummary>())!.Name);
+        Assert.Equal("report (2).txt", (await second.Content.ReadFromJsonAsync<FileSummary>())!.Name);
+        Assert.Equal("report (3).txt", (await third.Content.ReadFromJsonAsync<FileSummary>())!.Name);
+    }
+
+    [Fact]
+    public async Task Post_With_Unknown_Conflict_Policy_Returns_400()
+    {
+        var (_, client) = await _factory.CreateAuthenticatedClientAsync();
+        var multipart = MultipartWithFile("x"u8.ToArray(), "x.txt", "text/plain");
+        multipart.Add(new StringContent("overwrite"), "conflict");
+
+        var response = await client.PostAsync("/api/files", multipart);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Post_Same_Content_Different_Names_Reuses_Single_BlobObject()
     {
         var (_, client) = await _factory.CreateAuthenticatedClientAsync();

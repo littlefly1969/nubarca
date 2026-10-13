@@ -12,6 +12,7 @@ import { Icon } from './icons/Icon';
 import { AppScrollProvider } from './appScroll';
 import { CastProvider } from '../cast/CastProvider';
 import { CastMiniController } from '../cast/CastMiniController';
+import { UploadProvider } from '../uploads/UploadProvider';
 
 // Authenticated app shell: a collapsible left navigation, a compact top utility
 // bar and a full-width content region.
@@ -90,6 +91,7 @@ export function Layout() {
     // — or navigating to another page entirely — leaves the television playing,
     // and the mini controller below stays the way back to it.
     <CastProvider>
+    <UploadProvider>
     <AppScrollProvider viewportRef={mainRef}>
     <div className={`app-shell${collapsed ? ' app-shell--rail' : ''}`}>
       <header className="app-topbar" data-testid="app-topbar">
@@ -156,6 +158,7 @@ export function Layout() {
       <CastMiniController />
     </div>
     </AppScrollProvider>
+    </UploadProvider>
     </CastProvider>
   );
 }

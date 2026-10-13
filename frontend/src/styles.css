@@ -1921,6 +1921,19 @@ button.logout {
   font-size: 0.875rem;
 }
 
+.upload-zone-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.upload-zone-note {
+  max-width: 36rem;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
 .upload-button {
   padding: 0.375rem 0.875rem;
   border: 1px solid var(--accent);
@@ -2070,6 +2083,15 @@ button.logout {
   align-items: center;
   gap: 0.375rem;
   flex-wrap: wrap;
+}
+
+/* An album's "Carica": an icon beside its label, like a primary row action. */
+.album-upload-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .row-action,

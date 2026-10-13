@@ -82,6 +82,10 @@ interface Props {
   // preselects: the Library stays the ordinary Library, and every other
   // destination is still offered.
   preselectedAlbumId?: string;
+  // Bumped by the page when new media arrived (an upload into this album
+  // finished). The wall re-reads its first page, but only once nobody is
+  // looking at a photo or holding a selection, which a refresh would drop.
+  refreshToken?: number;
 }
 
 export function MediaWorkspace({
@@ -93,6 +97,7 @@ export function MediaWorkspace({
   onAlbumMembershipChanged,
   showPhotoPresentation = false,
   preselectedAlbumId,
+  refreshToken,
 }: Props) {
   const { t, tn } = useI18n();
   const { invalidateAuth } = useAuth();
@@ -113,6 +118,14 @@ export function MediaWorkspace({
     },
   });
   const { selection, viewer } = ws;
+  const seenRefreshToken = useRef(refreshToken);
+  const refreshNow = ws.refresh;
+  useEffect(() => {
+    if (refreshToken === seenRefreshToken.current) return;
+    if (viewer.index !== null || selection.count > 0) return;
+    seenRefreshToken.current = refreshToken;
+    refreshNow();
+  }, [refreshToken, viewer.index, selection.count, refreshNow]);
   const [visibleKey, setVisibleKey] = useState<string | null>(null);
   const [previousFailed, setPreviousFailed] = useState(false);
   const previousWindowEpoch = useRef(0);

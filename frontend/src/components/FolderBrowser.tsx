@@ -15,6 +15,9 @@ import { useAppScrollViewport } from './appScroll';
 import { formatSize } from './format';
 import { CreateFolderForm } from './CreateFolderForm';
 import { UploadPanel } from './UploadPanel';
+import { UploadDropTarget } from '../uploads/UploadDropTarget';
+import { useUploadLanded } from '../uploads/UploadProvider';
+import { useFolderUploadTarget } from '../uploads/useFolderUploadTarget';
 import { MediaViewer, OWNER_FILE_SOURCES, type MediaViewerItem } from './MediaViewer';
 import { FilesToolbar } from './files/FilesToolbar';
 import { FileItemCard } from './files/FileItemCard';
@@ -154,6 +157,14 @@ export function FolderBrowser() {
     listing.reload();
     setStorageReloadToken((t) => t + 1);
   }, [listing]);
+
+  // Every file the shared upload engine lands HERE reloads the listing (and
+  // the storage figure), coalesced, wherever the upload was started from.
+  const uploadTarget = useFolderUploadTarget(current.id, current.name);
+  useUploadLanded(
+    (target) => target.kind === 'folder' && target.folderId === current.id,
+    refresh,
+  );
 
   function openFolder(folder: FolderSummary) {
     setBanner(null);
@@ -392,6 +403,8 @@ export function FolderBrowser() {
 
       <StorageUsage reloadToken={storageReloadToken} />
 
+      <UploadDropTarget target={uploadTarget} enabled={viewerIndex === null} />
+
       {newFolderOpen && (
         <CreateFolderForm
           key={current.id ?? 'root'}
@@ -402,11 +415,7 @@ export function FolderBrowser() {
       )}
 
       {uploadOpen && (
-        <UploadPanel
-          parentFolderId={current.id}
-          disabled={busy}
-          onUploadsComplete={refresh}
-        />
+        <UploadPanel key={current.id ?? 'root'} target={uploadTarget} />
       )}
 
       {banner !== null && (

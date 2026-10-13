@@ -48,7 +48,9 @@ jobs:
   backend:
     name: Backend build and fast tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # The fast suite alone runs about 40 minutes on a hosted runner; 45 left
+    # no margin and cancelled green runs mid-suite.
+    timeout-minutes: 60
     steps:
       - name: Check out source
         uses: actions/checkout@v6

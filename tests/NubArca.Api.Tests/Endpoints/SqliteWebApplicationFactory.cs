@@ -210,6 +210,12 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             // mobile-sync-v1: mirrors Program.cs's Postgres-block registration.
             services.AddScoped<NubArca.Api.Uploads.IUploadIdempotencyService,
                 NubArca.Api.Uploads.UploadIdempotencyService>();
+            services.AddScoped<NubArca.Api.Uploads.IOwnerUploadIngestion,
+                NubArca.Api.Uploads.OwnerUploadIngestion>();
+            services.AddScoped<NubArca.Api.Uploads.IResumableUploadService,
+                NubArca.Api.Uploads.ResumableUploadService>();
+            services.AddScoped<NubArca.Api.Uploads.IAlbumUploadIngestion,
+                NubArca.Api.Uploads.AlbumUploadIngestion>();
             // deleted-content-import-skip: ledger + import skip evaluator
             // (Program.cs registers these inside the Postgres-only block).
             services.AddScoped<IDeletedContentTombstoneService, DeletedContentTombstoneService>();

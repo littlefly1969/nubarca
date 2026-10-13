@@ -15,6 +15,7 @@ import { AlbumSettingsPanel } from '../albums/AlbumSettingsPanel';
 import { AlbumSharePanel } from '../albums/AlbumSharePanel';
 import { AlbumSharedContentPanel } from '../albums/AlbumSharedContentPanel';
 import { AlbumCopyPanel } from '../albums/AlbumCopyPanel';
+import { AlbumUploadButton } from '../albums/AlbumUploadButton';
 import { MediaWorkspace } from '../media/workspace/MediaWorkspace';
 import { WorkspaceMenu } from '../media/workspace/WorkspaceMenu';
 import { Icon } from '../components/icons/Icon';
@@ -66,6 +67,9 @@ export function AlbumDetailPage() {
   // SharedAlbumDetailPage instead — so the button is owner-only by construction,
   // and the backend answers any other caller with a 404 regardless.
   const [copyOpen, setCopyOpen] = useState(false);
+  // Bumped when an upload batch into this album has arrived: the wall re-reads.
+  const [uploadedToken, setUploadedToken] = useState(0);
+  const onUploadsLanded = useCallback(() => setUploadedToken((n) => n + 1), []);
   const abortRef = useRef<AbortController | null>(null);
 
   const source = useMemo<MediaWorkspaceSource>(
@@ -133,6 +137,12 @@ export function AlbumDetailPage() {
           </Link>
           <h1 title={album.name}>{album.name}</h1>
           <div className="album-detail-header-actions">
+            <AlbumUploadButton
+              albumId={album.id}
+              albumName={album.name}
+              onLanded={onUploadsLanded}
+              dropEnabled={!shareOpen && !copyOpen && !contentOpen && !settingsOpen}
+            />
             <button
               type="button"
               ref={shareButtonRef}
@@ -167,6 +177,7 @@ export function AlbumDetailPage() {
           onIdentityChange={onIdentityChange}
           searchPlaceholder={t('mediaWs.searchAlbum')}
           showPhotoPresentation
+          refreshToken={uploadedToken}
         />
       )}
 

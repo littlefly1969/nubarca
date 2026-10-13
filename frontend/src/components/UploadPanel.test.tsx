@@ -1,147 +1,57 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { UploadPanel } from './UploadPanel';
-import { AuthedWrapper, installFetchMock, jsonResponse, errorResponse } from '../test-utils';
+import { EngineWrapper, fileName, testEngine } from '../uploads/testEngine';
+import type { FolderUploadTarget } from '../uploads/engine/targets';
 
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-});
+afterEach(cleanup);
 
-function fileFromString(name: string, body = 'hello'): File {
+const TRIPS: FolderUploadTarget = { kind: 'folder', folderId: 'f-1', label: 'Viaggi' };
+const ROOT: FolderUploadTarget = { kind: 'folder', folderId: null, label: 'File' };
+
+function textFile(name: string, body = 'hello'): File {
   return new File([body], name, { type: 'text/plain' });
 }
 
 describe('UploadPanel', () => {
-  it('POSTs a selected file as multipart to /api/files at root', async () => {
-    const onComplete = vi.fn();
-    const mock = installFetchMock({
-      'POST /api/files': () =>
-        jsonResponse(
-          {
-            id: 'file-1',
-            name: 'note.txt',
-            mimeType: 'text/plain',
-            sizeBytes: 5,
-            createdAt: '2026-05-24T10:00:00Z',
-          },
-          201,
-        ),
-    });
+  it('names its destination and hands picked files to the engine', async () => {
+    const { manager, calls } = testEngine();
+    render(<EngineWrapper manager={manager}><UploadPanel target={TRIPS} /></EngineWrapper>);
 
-    render(
-      <AuthedWrapper>
-        <UploadPanel parentFolderId={null} onUploadsComplete={onComplete} />
-      </AuthedWrapper>,
-    );
+    expect(screen.getByText('Carica in «Viaggi»')).toBeInTheDocument();
+    await userEvent.setup().upload(screen.getByLabelText('Seleziona i file da caricare'), [textFile('a.txt'), textFile('b.txt')]);
 
-    const input = screen.getByLabelText('Seleziona i file da caricare') as HTMLInputElement;
-    const user = userEvent.setup();
-    await user.upload(input, fileFromString('note.txt'));
-
-    await waitFor(() => {
-      expect(onComplete).toHaveBeenCalled();
-    });
-
-    const post = mock.calls.find((c) => c.url === '/api/files');
-    expect(post).toBeDefined();
-    expect(post!.method).toBe('POST');
-    // FormData was used (multipart) — the api client never sets content-type.
-    expect(post!.body).toBe('[FormData]');
-
-    // The "uploaded" pill should be visible after the batch finishes.
-    expect(await screen.findByText('caricato')).toBeInTheDocument();
+    const tray = await screen.findByTestId('upload-tray');
+    await waitFor(() => expect(within(tray).getAllByTestId('upload-row').every((r) => r.dataset.phase === 'done')).toBe(true));
+    expect(within(tray).getByText('2 file caricati')).toBeInTheDocument();
+    const posts = calls.filter((c) => c.method === 'POST');
+    expect(posts.map((c) => c.url)).toEqual(['/api/folders/f-1/files', '/api/folders/f-1/files']);
+    expect(posts.map(fileName).sort()).toEqual(['a.txt', 'b.txt']);
+    expect((posts[0].body as FormData).get('conflict')).toBe('rename');
   });
 
-  it('surfaces the backend quota message on 413', async () => {
-    installFetchMock({
-      'POST /api/files': () =>
-        errorResponse(413, { error: 'Upload would exceed your storage quota.' }),
-    });
-
-    render(
-      <AuthedWrapper>
-        <UploadPanel parentFolderId={null} onUploadsComplete={() => {}} />
-      </AuthedWrapper>,
-    );
-
-    const input = screen.getByLabelText('Seleziona i file da caricare') as HTMLInputElement;
-    const user = userEvent.setup();
-    await user.upload(input, fileFromString('big.txt'));
-
-    // The failed pill + the backend's friendly message both render.
-    expect(await screen.findByText('non riuscito')).toBeInTheDocument();
-    expect(
-      await screen.findByText('Upload would exceed your storage quota.'),
-    ).toBeInTheDocument();
+  it('sends a root upload to /api/files', async () => {
+    const { manager, calls } = testEngine();
+    render(<EngineWrapper manager={manager}><UploadPanel target={ROOT} /></EngineWrapper>);
+    await userEvent.setup().upload(screen.getByLabelText('Seleziona i file da caricare'), textFile('note.txt'));
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/files')).toBe(true));
   });
 
-  it('renders the duplicate pill on 409', async () => {
-    installFetchMock({
-      'POST /api/files': () =>
-        errorResponse(409, { error: 'A file with this name already exists.' }),
-    });
-
-    render(
-      <AuthedWrapper>
-        <UploadPanel parentFolderId={null} onUploadsComplete={() => {}} />
-      </AuthedWrapper>,
-    );
-
-    const input = screen.getByLabelText('Seleziona i file da caricare') as HTMLInputElement;
-    const user = userEvent.setup();
-    await user.upload(input, fileFromString('note.txt'));
-
-    expect(await screen.findByText('nome duplicato')).toBeInTheDocument();
+  it('keeps the folder structure of a folder pick', async () => {
+    const { manager, calls } = testEngine();
+    render(<EngineWrapper manager={manager}><UploadPanel target={TRIPS} /></EngineWrapper>);
+    const picked = textFile('IMG_1.jpg');
+    Object.defineProperty(picked, 'webkitRelativePath', { value: 'Estate/2026/IMG_1.jpg' });
+    await userEvent.setup().upload(screen.getByLabelText('Seleziona una cartella da caricare'), picked);
+    await waitFor(() => expect(calls.length).toBe(1));
+    expect((calls[0].body as FormData).get('relativePath')).toBe('Estate/2026/IMG_1.jpg');
   });
 
-  // Slice 76: a folder upload where ONE file's logical path already exists
-  // must 409 that file but keep uploading the rest of the batch.
-  it('continues the batch when one file conflicts (409) and uploads the others', async () => {
-    let call = 0;
-    const mock = installFetchMock({
-      // First file conflicts; the second succeeds. The component issues one
-      // POST per file sequentially, so a per-request counter models the
-      // "one occurrence already exists" case.
-      'POST /api/files': () => {
-        call += 1;
-        return call === 1
-          ? errorResponse(409, { error: 'A file with this name already exists.' })
-          : jsonResponse(
-              {
-                id: 'file-2',
-                name: 'altra.jpg',
-                mimeType: 'image/jpeg',
-                sizeBytes: 5,
-                createdAt: '2026-05-31T10:00:00Z',
-              },
-              201,
-            );
-      },
-    });
-
-    const onComplete = vi.fn();
-    render(
-      <AuthedWrapper>
-        <UploadPanel parentFolderId={null} onUploadsComplete={onComplete} />
-      </AuthedWrapper>,
-    );
-
-    // Two files from the same uploaded directory ("Vacanze/").
-    const conflicting = fileFromString('foto.jpg');
-    const fresh = fileFromString('altra.jpg');
-    const input = screen.getByLabelText('Seleziona i file da caricare') as HTMLInputElement;
-    const user = userEvent.setup();
-    await user.upload(input, [conflicting, fresh]);
-
-    await waitFor(() => expect(onComplete).toHaveBeenCalled());
-
-    // The conflicting file shows the duplicate pill, the other still uploaded —
-    // proving the batch did not abort on the 409.
-    expect(await screen.findByText('nome duplicato')).toBeInTheDocument();
-    expect(await screen.findByText('caricato')).toBeInTheDocument();
-    // Both files were actually POSTed (the second was not skipped).
-    expect(mock.calls.filter((c) => c.url === '/api/files')).toHaveLength(2);
+  it('disables the pickers while the destination is not ready', () => {
+    const { manager } = testEngine();
+    render(<EngineWrapper manager={manager}><UploadPanel target={TRIPS} disabled /></EngineWrapper>);
+    expect(screen.getByRole('button', { name: 'Scegli file…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Scegli cartella…' })).toBeDisabled();
   });
 });

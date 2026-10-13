@@ -206,6 +206,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Adds one NOT NULL boolean column AllowPrint DEFAULT FALSE to album_share_links. The generated SQL is a single metadata-only ALTER TABLE ... ADD COLUMN with a constant default (PostgreSQL 11+ rewrites no rows); it alters no existing column, index or constraint and backfills nothing. The default is exactly what every existing share means: nobody may print through it. The previous application neither reads nor writes the column and its inserts omit it, so new rows take the default; a share on which the new application set AllowPrint simply prints nothing under the previous one, which has no share print route. Rolling the image back is therefore safe."
+    },
+    "20261012160442_AddResumableUploads": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Purely additive. It creates two new tables, resumable_uploads (its own primary key, two plain indexes, and a foreign key FROM it TO users that cascades in that direction only) and resumable_upload_chunks (a composite primary key and a foreign key to resumable_uploads that cascades). Nothing existing is altered, constrained, backfilled or dropped, and no delete path on an existing table gains a restriction: deleting a user simply also deletes that user's unfinished upload bookkeeping. The previously pinned application neither reads nor writes either table, so rolling the image back leaves uploads working exactly as before against the upgraded schema; any rows left behind are temporary transfers the new application's sweeper reclaims after their expiry."
     }
   }
 }

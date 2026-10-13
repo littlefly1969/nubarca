@@ -217,6 +217,24 @@ is built is described by `ARCHITECTURE.md`.
   `deploy/update-production.sh check|apply` path can back up and apply explicitly
   confirmed, policy-approved additive migrations and never builds on the server
 - Storage: local content-addressed blobs with database-owned logical paths
+- Interactive uploads: ONE engine (`frontend/src/uploads/engine`,
+  `UploadManager`) mounted with the shell (`UploadProvider` in `Layout`), so
+  uploads outlive the page and show in one tray. Each file carries one
+  `Idempotency-Key` (kept in IndexedDB, so a retry or a reload never makes a
+  second copy); transient failures back off and retry, offline waits, 401
+  stops the queue. Files ≥ 64 MiB go through the resumable chunk path
+  (`/api/uploads/resumable`, 8 MiB chunks on the storage volume, 24 h sliding
+  TTL, `ResumableUploadSweeper`), resumable after a reload; smaller files are
+  one multipart request. The web sends `conflict=rename` (`IMG_1 (2).jpg`);
+  the default stays `fail` for the mobile sync client. Both paths ingest
+  through `IOwnerUploadIngestion`. Cloud Functions staging stays separate.
+- Upload into an album: `POST /api/albums/{id}/uploads` (or resumable
+  completion with `{ albumId }`), for the owner and for contributors/editors.
+  The file becomes the uploader's own in `Album/<album name>` (renamed on a
+  clash), then joins the album through the owner or contribution path. Bytes
+  the uploader already owns (same SHA-256, active photo/video) are linked, not
+  stored again. Only photos and videos (declared type, else by extension);
+  anything else is 415 `not_media` before storing.
 - Installation locations are operator configuration, never source constants:
   `NUBARCA_PRODUCTION_SSH`, `NUBARCA_PRODUCTION_CHECKOUT`,
   `NUBARCA_PUBLIC_ORIGIN`, `NUBARCA_STORAGE_ROOT`, `NUBARCA_SERVICE_ROOT`,

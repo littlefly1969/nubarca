@@ -3,7 +3,6 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { FolderBrowser } from './FolderBrowser';
 import {
-  AuthedWrapper,
   installFetchMock,
   jsonResponse,
   emptyResponse,
@@ -13,6 +12,9 @@ import {
   type MockHandler,
 } from '../test-utils';
 import { AuthContext } from '../auth/AuthContext';
+import { UploadProvider } from '../uploads/UploadProvider';
+import { I18nProvider } from '../i18n';
+import { EngineWrapper, testEngine } from '../uploads/testEngine';
 
 afterEach(() => {
   cleanup();
@@ -83,14 +85,16 @@ function renderBrowser(value?: Parameters<typeof makeAuthValue>[1]) {
     );
     return render(
       <AuthContext.Provider value={auth}>
-        <FolderBrowser />
+        <I18nProvider>
+          <UploadProvider manager={testEngine().manager}><FolderBrowser /></UploadProvider>
+        </I18nProvider>
       </AuthContext.Provider>,
     );
   }
   return render(
-    <AuthedWrapper>
+    <EngineWrapper manager={testEngine().manager}>
       <FolderBrowser />
-    </AuthedWrapper>,
+    </EngineWrapper>,
   );
 }
 

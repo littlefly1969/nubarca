@@ -13,11 +13,15 @@
 //     test can render a component in isolation against a known auth state.
 import { PERMISSIONS, ROLES } from '@nubarca/api-client';
 import type { ReactNode } from 'react';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { vi } from 'vitest';
 import type { FileMetadata } from '@nubarca/api-client';
 import { AuthContext, type AuthContextValue, type AuthState } from './auth/AuthContext';
 import { I18nProvider } from './i18n';
+import { UploadProvider } from './uploads/UploadProvider';
+import { UploadManager } from './uploads/engine/uploadManager';
+import { inMemoryUploadMemory } from './uploads/engine/uploadMemory';
+import { TransportError } from './uploads/engine/transport';
 
 // Slice 80: fire every active (mocked) IntersectionObserver as if its observed
 // element scrolled into view. Wrapped in act() because it drives React state
@@ -301,9 +305,24 @@ export function AuthedWrapper({
   );
   return (
     <I18nProvider>
-      <AuthContext.Provider value={auth}>{children}</AuthContext.Provider>
+      <AuthContext.Provider value={auth}>
+        <TestUploads>{children}</TestUploads>
+      </AuthContext.Provider>
     </I18nProvider>
   );
+}
+
+// The shell's upload engine, as every authenticated page expects one. It sends
+// nothing: a test that uploads wraps its own scripted engine around the page
+// (uploads/testEngine.tsx), which takes precedence over this one.
+function TestUploads({ children }: { children: ReactNode }) {
+  const [manager] = useState(() => new UploadManager({
+    transport: () => Promise.reject(new TransportError('network')),
+    memory: inMemoryUploadMemory(),
+    maxAttempts: 1,
+    isOnline: () => true,
+  }));
+  return <UploadProvider manager={manager}>{children}</UploadProvider>;
 }
 
 export function AnonWrapper({

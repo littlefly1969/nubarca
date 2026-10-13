@@ -7261,6 +7261,85 @@ namespace NubArca.Api.Data.Migrations
                     b.ToTable("remote_upload_sessions", (string)null);
                 });
 
+            modelBuilder.Entity("NubArca.Api.Domain.ResumableUpload", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ChunkSizeBytes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("ExpectedChunkCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("FileItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ReceivedChunkCount")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("ix_resumable_uploads_expires");
+
+                    b.HasIndex("OwnerUserId", "Status")
+                        .HasDatabaseName("ix_resumable_uploads_owner_status");
+
+                    b.ToTable("resumable_uploads", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.ResumableUploadChunk", b =>
+                {
+                    b.Property<Guid>("UploadId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ChunkIndex")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("SizeBytes")
+                        .HasColumnType("integer");
+
+                    b.HasKey("UploadId", "ChunkIndex");
+
+                    b.ToTable("resumable_upload_chunks", (string)null);
+                });
+
             modelBuilder.Entity("NubArca.Api.Domain.RolePermission", b =>
                 {
                     b.Property<string>("RoleKey")
@@ -9305,6 +9384,24 @@ namespace NubArca.Api.Data.Migrations
                         .WithMany()
                         .HasForeignKey("SessionId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.ResumableUpload", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.ResumableUploadChunk", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.ResumableUpload", null)
+                        .WithMany()
+                        .HasForeignKey("UploadId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 
