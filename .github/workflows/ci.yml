@@ -128,6 +128,39 @@ jobs:
     needs: backend_shard
     if: always()
     steps:
+      # Fresh per-class timings from this run's slices, as an artifact
+      # (backend-test-timings) to copy over tests/backend-test-timings.json
+      # when the slices drift apart. Informational: never affects the gate.
+      - name: Check out source
+        continue-on-error: true
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Download slice results
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: backend-fast-test-results-*
+          path: TestResults/backend-fast
+
+      - name: Measure class timings
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          shopt -s globstar
+          scripts/backend-test-shards.py timings TestResults/backend-fast/**/*.trx
+          cat tests/backend-test-timings.json
+
+      - name: Upload class timings
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-timings
+          path: tests/backend-test-timings.json
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Every slice passed
         run: |
           echo "slices: ${{ needs.backend_shard.result }}"
