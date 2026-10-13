@@ -13,11 +13,13 @@ is built is described by `ARCHITECTURE.md`.
 - Frontend: React, TypeScript, Vite
 - Runtime: Docker Compose with separate API, worker and frontend services
 - Print foundation: server-owned stations/devices/jobs plus a separately
-  packaged headless Print Agent `0.5.0`: a Windows service (spooler), a Linux
+  packaged headless Print Agent `0.6.0`: a Windows service (spooler), a Linux
   fake simulator (systemd instances, protocol acceptance) and a headless Linux
   Print Box on Ubuntu Server 24.04+ or Debian 12+ (`cups` adapter over
   CUPS/Gutenprint with queues created by the installer, NetworkManager Wi-Fi
-  setup network and local setup page). The Print Box reports the prints left
+  setup network and local setup page — at `http://10.42.0.1/` through a
+  port-80 redirect while the setup network is up, and over Ethernet able to
+  configure a free Wi-Fi without touching the cable). The Print Box reports the prints left
   on the media from Gutenprint's CUPS marker (IPP query shipped with the
   agent, `ipptool`); it is telemetry (`PrinterDevice.MediaRemainingPrints`),
   never a gate. DNP printers still require hardware acceptance on each path,

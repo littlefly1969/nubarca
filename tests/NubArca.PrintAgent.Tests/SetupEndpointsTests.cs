@@ -176,6 +176,7 @@ public sealed class SetupEndpointsTests : IAsyncLifetime
         Assert.Equal("disconnected", status.GetProperty("nubarca").GetString());
         // In setup mode the page can configure the Wi-Fi.
         Assert.True(status.GetProperty("wifiConfigurationAvailable").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, status.GetProperty("wifiConfigurationUnavailable").ValueKind);
         Assert.DoesNotContain("setup-pass", body);
     }
 
@@ -210,6 +211,37 @@ public sealed class SetupEndpointsTests : IAsyncLifetime
             .RootElement.GetProperty("error").GetString());
         Assert.Equal(0, _network.Connects);
     }
+
+    [Theory]
+    [InlineData("attacker.example")]
+    [InlineData("nubarca-print.attacker.example")]
+    public async Task A_Write_Addressed_To_Another_Name_Is_Refused(string host)
+    {
+        // DNS rebinding: a page whose name now points at the box sends its own name.
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/setup/wifi/connect")
+        {
+            Content = new StringContent("""{"ssid":"Location-WiFi","password":"correct-horse"}""", Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Host = host;
+        var response = await _http.SendAsync(request);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("invalid_host", JsonDocument.Parse(await response.Content.ReadAsStringAsync())
+            .RootElement.GetProperty("error").GetString());
+        Assert.Equal(0, _network.Connects);
+    }
+
+    [Theory]
+    [InlineData("10.42.0.1", true)]
+    [InlineData("10.42.0.1:8080", true)]
+    [InlineData("[fe80::1]:8080", true)]
+    [InlineData("localhost:8080", true)]
+    [InlineData("nubarca-print", true)]
+    [InlineData("NUBARCA-PRINT.local:8080", true)]
+    [InlineData("nubarca-print.lan", false)]
+    [InlineData("attacker.example", false)]
+    [InlineData("", false)]
+    public void Only_The_Boxs_Own_Address_Or_Name_Is_Its_Host(string host, bool own) =>
+        Assert.Equal(own, SetupValidation.IsOwnHost(new Microsoft.AspNetCore.Http.HostString(host), "nubarca-print"));
 
     [Fact]
     public async Task Only_Json_Is_Accepted()

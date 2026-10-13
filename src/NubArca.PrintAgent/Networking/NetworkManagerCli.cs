@@ -41,6 +41,7 @@ public sealed class NetworkManagerCli : INetworkManager
         string? wifi = null;
         NetworkUplink? uplink = null;
         var apActive = false;
+        var wifiInUse = false;
         string? apAddress = null;
         foreach (var fields in NmcliTerse.Lines(devices.StdOut))
         {
@@ -56,6 +57,7 @@ public sealed class NetworkManagerCli : INetworkManager
                 continue;
             }
             if (type is not ("ethernet" or "wifi")) continue;
+            if (type == "wifi") wifiInUse = true;
             // Ethernet first when both carry traffic: the cable is the steadier
             // way out, and a Wi-Fi set up over it must not take its place.
             if (uplink is not null && !(uplink.Type == "wifi" && type == "ethernet")) continue;
@@ -69,7 +71,7 @@ public sealed class NetworkManagerCli : INetworkManager
                     addressing.Address);
             }
         }
-        return new NetworkSnapshot(true, wifi, uplink, apActive, apAddress);
+        return new NetworkSnapshot(true, wifi, uplink, apActive, apAddress, wifiInUse);
     }
 
     public async Task<WifiClientState> GetWifiClientStateAsync(string wifiInterface,
@@ -195,7 +197,10 @@ public static class NmcliTerse
     /// <summary>
     /// One device as a Wi-Fi client, from <c>device show</c>: connected only in
     /// NetworkManager's state 100, under the profile it names, with the first
-    /// IPv4 address and whether an IPv4 gateway came with it.
+    /// IPv4 address and whether an IPv4 gateway came with it. Multiline terse
+    /// output is NOT escaped (nmcli escapes only its tabular form): everything
+    /// after the first ':' is the value, as it is — a profile name keeps its
+    /// colons, backslashes and spaces.
     /// </summary>
     public static WifiClientState WifiClient(string output)
     {
@@ -209,7 +214,7 @@ public static class NmcliTerse
             var colon = line.IndexOf(':');
             if (colon <= 0) continue;
             var key = line[..colon];
-            var value = Unescape(line[(colon + 1)..].Trim());
+            var value = line[(colon + 1)..];
             if (value is "" or "--") continue;
             if (key == "GENERAL.STATE")
                 connected = value.StartsWith("100", StringComparison.Ordinal);
@@ -221,19 +226,6 @@ public static class NmcliTerse
                 gateway = true;
         }
         return new WifiClientState(connected, connection, address, gateway);
-    }
-
-    /// <summary>A terse value with its backslash escapes undone: <c>\:</c> is ':' and <c>\\</c> is one backslash.</summary>
-    private static string Unescape(string value)
-    {
-        if (!value.Contains('\\')) return value;
-        var plain = new StringBuilder(value.Length);
-        for (var i = 0; i < value.Length; i++)
-        {
-            if (value[i] == '\\' && i + 1 < value.Length) { plain.Append(value[++i]); continue; }
-            plain.Append(value[i]);
-        }
-        return plain.ToString();
     }
 
     /// <summary>The first IPv4 address (without prefix length), and whether any default gateway exists.</summary>

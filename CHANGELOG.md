@@ -6,6 +6,18 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Print Box: Wi-Fi from the cable, and a setup page without a port
+
+- **On its setup network the Print Box's page is at `http://10.42.0.1/`,** no
+  port to type; the connectivity checks phones and laptops make are sent to it.
+- **Plugged into the cable, the page can set up the Wi-Fi** while the Wi-Fi is
+  free. A wrong password changes nothing else: the cable stays up and no setup
+  network opens. A Wi-Fi counts as joined only with a gateway, so it really can
+  take over when the cable goes. A Wi-Fi already in use is never changed from
+  the page, and the page says why when it cannot offer the form.
+- **Print Agent 0.6.0.** Re-run `install-print-box.sh`: it adds `nftables` and
+  gives the box instance alone the capability the port-80 redirect needs.
+
 ### Uploads: one engine for Files and albums, resumable and never doubled
 
 - **Uploads keep going while you move around the app.** A tray in the bottom

@@ -155,6 +155,11 @@ public sealed class NetworkProvisioningTests
 
         Assert.Equal(ConnectOutcome.Failed, service.State.LastAttempt?.Outcome);
         Assert.Equal("Studio", network.LastForgotten);
+        // The cable came up meanwhile: reachable, so the setup network stays closed.
+        Assert.Equal(ProvisioningMode.Connected, service.State.Mode);
+        Assert.Equal(Ethernet, service.State.Uplink);
+        Assert.Equal(1, network.AccessPointStarts);
+        Assert.False(network.AccessPointActive);
     }
 
     [Fact]
@@ -253,6 +258,70 @@ public sealed class NetworkProvisioningTests
         Assert.Equal(Ethernet, network.Uplink);
         Assert.Equal(0, network.AccessPointStops);
         Assert.Equal(0, network.AccessPointStarts);
+        // The Wi-Fi is now in use: the page does not offer to change it.
+        Assert.False(service.CanConfigureWifi);
+        Assert.Equal("wifi-in-use", NetworkProvisioningService.WifiConfigurationBlock(service.State));
+    }
+
+    [Fact]
+    public async Task Over_Ethernet_A_Wifi_In_Use_Is_Never_Changed()
+    {
+        // The box is on the cable AND on its saved Wi-Fi. A wrong password for
+        // that Wi-Fi must not delete the working profile, and a page reached
+        // over the Wi-Fi must not cut itself off.
+        var (network, service) = await OnEthernetAsync(n =>
+            n.WifiClient = new WifiClientState(true, "nubarca-wifi-Venue", "192.0.2.20", true));
+        Assert.False(service.CanConfigureWifi);
+        Assert.Equal("wifi-in-use", NetworkProvisioningService.WifiConfigurationBlock(service.State));
+        Assert.Equal(ConnectRequest.Unavailable, service.RequestConnect("Venue", "wrong-password-1"));
+        Assert.Equal(0, network.Connects);
+        Assert.Equal(0, network.Forgets);
+
+        // Once the Wi-Fi is free again, the next look offers it.
+        network.WifiClient = WifiClientState.Disconnected;
+        await service.TickAsync(default);
+        Assert.True(service.CanConfigureWifi);
+    }
+
+    [Fact]
+    public async Task Over_Ethernet_A_Box_Without_Wifi_Offers_No_Wifi()
+    {
+        var (network, service) = await OnEthernetAsync(n => n.WifiInterface = null);
+        Assert.Equal("no-wifi", NetworkProvisioningService.WifiConfigurationBlock(service.State));
+        Assert.Equal(ConnectRequest.Unavailable, service.RequestConnect("Studio", "correct-horse"));
+        Assert.Equal(0, network.Connects);
+    }
+
+    [Fact]
+    public async Task Over_Ethernet_A_Wifi_Without_A_Gateway_Is_Not_Joined()
+    {
+        // It could never be the box's way out when the cable goes.
+        var (network, service) = await OnEthernetAsync(n => n.WifiAfterJoin =
+            ssid => new WifiClientState(true, NetworkManagerCli.ClientConnectionPrefix + ssid, "192.0.2.20", false));
+        Assert.Equal(ConnectRequest.Accepted, service.RequestConnect("Studio", "correct-horse"));
+        await service.PendingConnect;
+
+        Assert.Equal(ConnectOutcome.Failed, service.State.LastAttempt?.Outcome);
+        Assert.Equal("Studio", network.LastForgotten);
+        Assert.Equal(0, network.AccessPointStarts);
+    }
+
+    [Fact]
+    public void Why_The_Wifi_Cannot_Be_Configured_Is_Said_For_Every_Mode()
+    {
+        var setup = new ProvisioningState(ProvisioningMode.AccessPoint, true, null, "NubArca-Print-A7F3", "10.42.0.1", null);
+        Assert.Null(NetworkProvisioningService.WifiConfigurationBlock(setup));
+        Assert.Equal("not-ready", NetworkProvisioningService.WifiConfigurationBlock(setup with { Mode = ProvisioningMode.Starting }));
+        Assert.Equal("not-ready", NetworkProvisioningService.WifiConfigurationBlock(setup with { Mode = ProvisioningMode.Disconnected }));
+        Assert.Equal("network-manager", NetworkProvisioningService.WifiConfigurationBlock(
+            setup with { Mode = ProvisioningMode.Unavailable, ManagerAvailable = false }));
+        // Connected, but the uplink was just lost: still looking.
+        Assert.Equal("not-ready", NetworkProvisioningService.WifiConfigurationBlock(
+            setup with { Mode = ProvisioningMode.Connected, HasWifi = true }));
+        Assert.Equal("wifi-in-use", NetworkProvisioningService.WifiConfigurationBlock(
+            setup with { Mode = ProvisioningMode.Connected, Uplink = HomeWifi, HasWifi = true, WifiInUse = true }));
+        Assert.Null(NetworkProvisioningService.WifiConfigurationBlock(
+            setup with { Mode = ProvisioningMode.Connected, Uplink = Ethernet, HasWifi = true }));
     }
 
     [Fact]

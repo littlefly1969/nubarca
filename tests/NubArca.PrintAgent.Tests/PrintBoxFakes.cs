@@ -94,7 +94,8 @@ public sealed class FakeNetworkManager : INetworkManager
         {
             return Task.FromResult(Available
                 ? new NetworkSnapshot(true, WifiInterface, Uplink, AccessPointActive,
-                    AccessPointActive ? "10.42.0.1" : null)
+                    AccessPointActive ? "10.42.0.1" : null,
+                    WifiInterface is not null && (WifiClient.Connected || Uplink?.Type == "wifi"))
                 : NetworkSnapshot.Unavailable);
         }
     }
@@ -110,10 +111,20 @@ public sealed class FakeNetworkManager : INetworkManager
         lock (_lock) return Task.FromResult(AccessPointActive ? (IReadOnlyList<WifiNetwork>)[] : Visible);
     }
 
+    /// <summary>False: the setup network refuses to start (a busy radio, a driver without AP mode).</summary>
+    public bool AccessPointCanStart { get; set; } = true;
+
+    /// <summary>The setup network drops by itself, as NetworkManager may let it.</summary>
+    public void DropAccessPoint()
+    {
+        lock (_lock) AccessPointActive = false;
+    }
+
     public Task<bool> StartAccessPointAsync(string wifiInterface, string ssid, string? password,
         CancellationToken cancellationToken)
     {
         Events.Enqueue("ap-start");
+        if (!AccessPointCanStart) return Task.FromResult(false);
         lock (_lock)
         {
             AccessPointStarts++;
