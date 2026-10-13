@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
 import {
   ApiError,
   PERMISSIONS,
   getAlbum,
+  getAlbumShare,
+  getAlbumShareItems,
+  getAlbumSharePrintDate,
+  getAlbumSharePrinter,
   getOwnerPhotoPrintDate,
   listAlbumItems,
   listPrintStations,
   listSharedPrinters,
+  submitAlbumSharePrint,
   submitOwnerPhotoPrint,
-  type OwnerPhotoPrintAccepted,
+  type AlbumSharePrintRequest,
   type OwnerPhotoPrintDate,
 } from '@nubarca/api-client';
 import { formatOwnerPrintDate, layoutAllowed, type PrintLayout } from '@nubarca/contracts';
@@ -35,6 +40,14 @@ import './OwnerPrintPage.css';
 // party's own frame, in white); a framed sheet's band carries one line of the
 // owner's own, the date at its right, and the NubArca mark only if asked. No
 // budget, no number, no guest.
+//
+// PRINTING FROM A SHARE is this same page (SharePrintPage): a verified visitor
+// of an email + second-factor link whose owner allowed printing gets the same
+// studio and the same options, on the OWNER's printer. What differs is only
+// where things come from — the share's photographs and the share's print
+// routes — and that there is no printer to choose: the server takes the
+// owner's, and the browser never names one. Whether the visitor may print at
+// all is the server's answer on every request; this page only offers.
 
 /** The renderer's date on a full-bleed photograph: type a fraction of the short edge, inset from its corner. */
 const DATE_TYPE_FRACTION = 0.03;
@@ -75,6 +88,7 @@ const ERROR_KEYS: Record<string, MessageKey> = {
   invalid_source: 'ownerPrint.error.photo',
   invalid_caption: 'ownerPrint.error.caption',
   render_failed: 'ownerPrint.error.render',
+  print_not_allowed: 'sharePrint.error.notAllowed',
 };
 
 /** Refusals after which what the printer list says is no longer true. */
@@ -116,16 +130,135 @@ type Photos =
   | { kind: 'ready'; title: string | null; photos: StudioPhoto[] }
   | { kind: 'error' };
 
+/** A print, without the printer: the page adds it when it is the owner's to choose. */
+type PrintRequest = AlbumSharePrintRequest;
+
+/** What one kind of print page reads and sends; the studio and its options are the same for all. */
+interface PrintSource {
+  /** Whether the person chooses the printer (the owner) or the server does (a share). */
+  choosesPrinter: boolean;
+  loadPrinters(signal?: AbortSignal): Promise<PrintTarget[]>;
+  loadPhotos(signal: AbortSignal): Promise<{ title: string | null; photos: StudioPhoto[] }>;
+  resolveDate(fileItemId: string, timeZone: string, signal: AbortSignal): Promise<OwnerPhotoPrintDate>;
+  submit(target: PrintTarget, request: PrintRequest, key: string): Promise<{ shortCode: string; queueAhead: number }>;
+  /** Photographs to start from, by id. */
+  preselected: string[];
+}
+
 export function OwnerPrintPage() {
-  const i18n = useI18n();
-  const { t, tn, lang } = i18n;
+  const { t, tn } = useI18n();
   const perms = usePermissions();
   const [params] = useSearchParams();
   const albumId = params.get('album');
-  const preselected = useMemo(
-    () => (params.get('files') ?? '').split(',').map((id) => id.trim()).filter(Boolean),
-    [params],
+  const files = params.get('files') ?? '';
+  const videos = Number(params.get('videos') ?? 0);
+  const source = useMemo<PrintSource>(() => {
+    const preselected = files.split(',').map((id) => id.trim()).filter(Boolean);
+    const photo = (id: string): StudioPhoto => ({
+      id, thumbnailUrl: smallThumbnailUrl(id), previewUrl: mediumPreviewUrl(id),
+    });
+    return {
+      choosesPrinter: true,
+      preselected,
+      loadPrinters: async (signal) => {
+        const [own, lent] = await Promise.all([listPrintStations(signal), listSharedPrinters(signal)]);
+        return printTargets(own, lent);
+      },
+      loadPhotos: async (signal) => {
+        // From the library: the photographs that were selected, and only those.
+        if (!albumId) return { title: null, photos: preselected.map(photo) };
+        const [album, items] = await Promise.all([getAlbum(albumId, signal), listAlbumItems(albumId, signal)]);
+        const images = new Set(items.filter((item) => item.mimeType.toLowerCase().startsWith('image/'))
+          .map((item) => item.fileItemId));
+        return {
+          title: album.name,
+          // From an album's selection: the selected photographs still in it,
+          // in the order selected. With none selected (the album's own
+          // "Stampa"), every photograph of the album, as a party offers all of its own.
+          photos: preselected.length > 0
+            ? preselected.filter((id) => images.has(id)).map(photo)
+            : items.filter((item) => images.has(item.fileItemId)).map((item) => photo(item.fileItemId)),
+        };
+      },
+      resolveDate: (fileItemId, timeZone, signal) => getOwnerPhotoPrintDate(fileItemId, timeZone, signal),
+      submit: (target, request, key) => submitOwnerPhotoPrint({
+        ...request, printStationId: target.stationId, printerDeviceId: target.deviceId,
+      }, key),
+    };
+  }, [albumId, files]);
+  return (
+    <PrintPage
+      source={source}
+      note={Number.isInteger(videos) && videos > 0 ? (
+        <p className="party-print-hint" data-testid="owner-print-videos-skipped">
+          {tn(videos, 'ownerPrint.videosSkipped')}
+        </p>
+      ) : null}
+      back={albumId
+        ? <Link to={`/albums/${albumId}`}>{t('ownerPrint.backToAlbum')}</Link>
+        : <Link to="/media">{t('ownerPrint.backToLibrary')}</Link>}
+      noPrinters={(
+        <>
+          <p className="party-print-hint">{t('ownerPrint.noPrintersHelp')}</p>
+          {perms.has(PERMISSIONS.cloudFunctionsAccess) && (
+            <p className="party-print-back"><Link to="/cloud-functions?tool=print-stations">{t('ownerPrint.openPrintStations')}</Link></p>
+          )}
+        </>
+      )}
+    />
   );
+}
+
+/** The single target a share prints on: the owner's printer, as the server describes it, with no id of its own. */
+const SHARE_TARGET = 'share';
+
+/**
+ * A verified visitor of a print-enabled share prints the album, with the
+ * owner's studio, on the owner's printer. Reached from the share page's
+ * "Stampa", which shows only when the server says the visitor may — and the
+ * server asks again on every request.
+ */
+export function SharePrintPage() {
+  const { t } = useI18n();
+  const { token = '' } = useParams<{ token: string }>();
+  const source = useMemo<PrintSource>(() => ({
+    choosesPrinter: false,
+    preselected: [],
+    loadPrinters: async (signal) => {
+      const printer = await getAlbumSharePrinter(token, signal);
+      return [{
+        key: SHARE_TARGET, stationId: '', deviceId: '', name: '', stationName: '', ownerName: null,
+        paper: printer.paper,
+        unavailable: printer.available ? null : 'ownerPrint.unavailable.offline',
+        mediaRemaining: null, mediaObservedAt: null, offline: !printer.available,
+        cutsStrips: printer.cutsStrips,
+      }];
+    },
+    loadPhotos: async (signal) => {
+      const [album, items] = await Promise.all([getAlbumShare(token, signal), getAlbumShareItems(token, signal)]);
+      return {
+        title: album.albumName,
+        photos: items.items.filter((item) => !item.isVideo)
+          .map((item) => ({ id: item.id, thumbnailUrl: item.thumbnailUrl, previewUrl: item.previewUrl })),
+      };
+    },
+    resolveDate: (fileItemId, timeZone, signal) => getAlbumSharePrintDate(token, fileItemId, timeZone, signal),
+    submit: (_target, request, key) => submitAlbumSharePrint(token, request, key),
+  }), [token]);
+  return <PrintPage source={source} back={<Link to=".." relative="path">{t('sharePrint.backToAlbum')}</Link>} />;
+}
+
+function PrintPage({ source: from, back, noPrinters, note }: {
+  source: PrintSource;
+  back: ReactNode;
+  /** Said at the top of the format step (videos left out of the selection). */
+  note?: ReactNode;
+  /** Shown under "no printers" when there is none at all. */
+  noPrinters?: ReactNode;
+}) {
+  const i18n = useI18n();
+  const { t, tn, lang } = i18n;
+  const preselected = from.preselected;
 
   // --- the printers ---------------------------------------------------------
   const [targets, setTargets] = useState<PrintTarget[] | null>(null);
@@ -133,8 +266,7 @@ export function OwnerPrintPage() {
   const [chosenTarget, setChosenTarget] = useState<string | null>(null);
   const loadPrinters = useCallback(async (signal?: AbortSignal) => {
     try {
-      const [own, lent] = await Promise.all([listPrintStations(signal), listSharedPrinters(signal)]);
-      const next = printTargets(own, lent);
+      const next = await from.loadPrinters(signal);
       setTargets(next);
       setChosenTarget((previous) => initialTarget(next, previous) ?? next.find((x) => x.unavailable === null)?.key ?? null);
       setLoadFailed(false);
@@ -143,7 +275,7 @@ export function OwnerPrintPage() {
       setLoadFailed(true);
       setTargets((previous) => previous ?? []);
     }
-  }, []);
+  }, [from]);
   useEffect(() => {
     const controller = new AbortController();
     void loadPrinters(controller.signal);
@@ -156,27 +288,14 @@ export function OwnerPrintPage() {
   const [source, setSource] = useState<Photos>({ kind: 'loading' });
   useEffect(() => {
     const controller = new AbortController();
-    const photo = (id: string): StudioPhoto => ({
-      id, thumbnailUrl: smallThumbnailUrl(id), previewUrl: mediumPreviewUrl(id),
-    });
-    if (!albumId) {
-      // From the library: the photographs that were selected, and only those.
-      setSource({ kind: 'ready', title: null, photos: preselected.map(photo) });
-      return () => controller.abort();
-    }
-    Promise.all([getAlbum(albumId, controller.signal), listAlbumItems(albumId, controller.signal)])
-      .then(([album, items]) => setSource({
-        kind: 'ready',
-        title: album.name,
-        photos: items.filter((item) => item.mimeType.toLowerCase().startsWith('image/'))
-          .map((item) => photo(item.fileItemId)),
-      }))
+    from.loadPhotos(controller.signal)
+      .then(({ title, photos }) => setSource({ kind: 'ready', title, photos }))
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'AbortError') return;
         setSource({ kind: 'error' });
       });
     return () => controller.abort();
-  }, [albumId, preselected]);
+  }, [from]);
   const photos = source.kind === 'ready' ? source.photos : [];
   const photoById = useMemo(() => new Map(photos.map((p) => [p.id, p] as const)), [photos]);
 
@@ -195,7 +314,7 @@ export function OwnerPrintPage() {
     if (date && typeof date === 'object' && date.id === first) return undefined;
     const controller = new AbortController();
     setDate('loading');
-    getOwnerPhotoPrintDate(first, browserTimeZone(), controller.signal)
+    from.resolveDate(first, browserTimeZone(), controller.signal)
       .then((value) => setDate({ id: first, value }))
       .catch((err) => {
         if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -204,7 +323,7 @@ export function OwnerPrintPage() {
     return () => controller.abort();
   // `date` is what this effect writes: reading it here must not re-run it.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [includeDate, first]);
+  }, [includeDate, first, from]);
   const dateText = includeDate && date && typeof date === 'object' && date.id === first
     ? formatOwnerPrintDate(date.value.date, lang)
     : null;
@@ -215,7 +334,7 @@ export function OwnerPrintPage() {
   const [error, setError] = useState<MessageKey | null>(null);
   const [notice, setNotice] = useState<MessageKey | null>(null);
   const [resetSignal, setResetSignal] = useState(0);
-  const [sent, setSent] = useState<OwnerPhotoPrintAccepted | null>(null);
+  const [sent, setSent] = useState<{ shortCode: string; queueAhead: number } | null>(null);
 
   const submit = async (composition: StudioSubmission) => {
     if (!target) return;
@@ -225,15 +344,13 @@ export function OwnerPrintPage() {
     setError(null);
     setNotice(null);
     try {
-      const accepted = await submitOwnerPhotoPrint({
-        printStationId: target.stationId,
-        printerDeviceId: target.deviceId,
+      const accepted = await from.submit(target, {
         expectedPaperSize: target.paper,
         layout: composition.layout,
         style: framed ? 'framed' : 'fullBleed',
         photos: composition.slots.map((slot) => ({ fileItemId: slot.itemId, placement: slot.placement })),
         ...(composition.layout === 'photo'
-          ? { orientation: composition.orientation ?? 'portrait' }
+          ? { orientation: composition.orientation }
           : {}),
         ...(framed && line ? { caption: line } : {}),
         ...(framed && brand ? { brand: true } : {}),
@@ -288,9 +405,6 @@ export function OwnerPrintPage() {
     return offered;
   }, [paper, target, t]);
 
-  const back = albumId
-    ? <Link to={`/albums/${albumId}`}>{t('ownerPrint.backToAlbum')}</Link>
-    : <Link to="/media">{t('ownerPrint.backToLibrary')}</Link>;
   const title = source.kind === 'ready' && source.title ? source.title : t('ownerPrint.title');
 
   if (targets === null || source.kind === 'loading') {
@@ -304,10 +418,7 @@ export function OwnerPrintPage() {
       <OwnerPrintShell title={title} back={back}>
         <section className="owner-print-empty" data-testid="owner-print-empty">
           <p className="party-print-note">{t(loadFailed ? 'ownerPrint.loadError' : 'ownerPrint.noPrinters')}</p>
-          {!loadFailed && <p className="party-print-hint">{t('ownerPrint.noPrintersHelp')}</p>}
-          {!loadFailed && perms.has(PERMISSIONS.cloudFunctionsAccess) && (
-            <p className="party-print-back"><Link to="/cloud-functions?tool=print-stations">{t('ownerPrint.openPrintStations')}</Link></p>
-          )}
+          {!loadFailed && noPrinters}
         </section>
       </OwnerPrintShell>
     );
@@ -340,7 +451,13 @@ export function OwnerPrintPage() {
         gallery={photos}
         photoById={photoById}
         preselected={preselected}
-        formatHeader={(
+        formatHeader={<>{note}{!from.choosesPrinter ? (
+          // A share prints on the owner's printer, which the server chooses:
+          // nothing to pick, only whether it can print now.
+          targets[0]?.unavailable ? (
+            <p className="party-print-note" data-testid="share-print-unavailable">{t('sharePrint.unavailable')}</p>
+          ) : null
+        ) : (
           <fieldset className="party-print-themes owner-print-printers" data-testid="owner-print-printers">
             <legend>{t('ownerPrint.printer')}</legend>
             {targets.map((candidate) => (
@@ -373,7 +490,7 @@ export function OwnerPrintPage() {
               </label>
             ))}
           </fieldset>
-        )}
+        )}</>}
         formatFooter={<p className="party-print-back">{back}</p>}
         formatNotice={notice}
         photoStyle={style}

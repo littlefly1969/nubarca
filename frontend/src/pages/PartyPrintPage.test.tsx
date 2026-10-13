@@ -162,6 +162,15 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(strip).toBeDisabled();
   });
 
+  it('counts every photograph of the party, and will not start a strip three cannot fill', async () => {
+    mount(manifest({ photos: ['f1', 'f2', 'f3'].map(photo) }));
+    render(wrapper());
+    const strip = await screen.findByTestId('party-print-format-twinStrip4');
+    expect(strip).toBeDisabled();
+    expect(strip).toHaveTextContent('Servono 8 foto, ne hai 3');
+    expect(screen.getByTestId('party-print-format-photo')).toBeEnabled();
+  });
+
   it('says printing is finished when every product is spent', async () => {
     mount(manifest({
       formats: [
@@ -1025,7 +1034,10 @@ describe('PartyPrintPage (public print studio)', () => {
     await screen.findByText('La tua stampa è in coda');
 
     const posts = mock.calls.filter((c) => c.method === 'POST');
-    expect(JSON.parse(posts[1].body!).slots).toEqual(JSON.parse(posts[0].body!).slots);
+    expect(JSON.parse(posts[1].body!)).toEqual(JSON.parse(posts[0].body!));
+    const keyOf = (call: { init?: RequestInit }) =>
+      (call.init?.headers as Record<string, string>)['Idempotency-Key'];
+    expect(keyOf(posts[1])).toBe(keyOf(posts[0]));
   });
 
   it('mints a NEW key once the composition changes', async () => {
@@ -1286,18 +1298,24 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(lastPost(mock.calls).orientation).toBe('portrait');
   });
 
-  it('sends no orientation at all when the guest left the default', async () => {
+  it('sends the displayed orientation when the guest left the automatic default', async () => {
     const user = setup();
     const mock = mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
     });
     render(wrapper());
-    await compose(user, 'photo');
+    await chooseFormat(user, 'photo');
+    const pick = screen.getAllByRole('button', { name: /Scegli questa foto/ })[0];
+    setNatural(within(pick).getByRole('presentation', { hidden: true }), 4000, 3000);
+    await user.click(pick);
+    await user.click(next());
+    expect(screen.getByRole('radio', { name: 'Orizzontale' })).toBeChecked();
+    await user.click(next());
+    expect(screen.getByTestId('party-print-sheet')).toHaveAttribute('data-orientation', 'landscape');
     await user.click(screen.getByRole('button', { name: 'Stampa' }));
     await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
-    // Absent, not "portrait": the server follows the photograph exactly as it
-    // did before this choice existed.
-    expect(lastPost(mock.calls)).not.toHaveProperty('orientation');
+    // The renderer receives the same choice as the owner print path.
+    expect(lastPost(mock.calls).orientation).toBe('landscape');
   });
 
   it('does not offer to turn a strip, because that is not a sheet it can turn', async () => {

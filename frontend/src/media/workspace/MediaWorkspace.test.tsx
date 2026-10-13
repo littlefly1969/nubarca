@@ -325,7 +325,7 @@ describe('MediaWorkspace', () => {
     expect(screen.getByTestId('media-sel-trash')).toBeInTheDocument();
   });
 
-  it('offers Print for photographs, and takes them to the print studio in the order they were chosen', async () => {
+  it('offers Print for any selection with a photograph, and takes the photographs to the print studio in the order they were chosen', async () => {
     installFetchMock({
       'GET /api/media': () => jsonResponse(page([imageItem, videoItem, secondImage])),
     });
@@ -357,10 +357,9 @@ describe('MediaWorkspace', () => {
     // The photograph: Print is right on the dock, not in a menu.
     await userEvent.click(controls[0]);
     expect(await screen.findByTestId('media-sel-print')).toHaveTextContent('Stampa');
-    // With the video too, it is a mixed selection: no Print.
+    // With the video too, Print stays: the video is left out, and counted.
     await userEvent.click(controls[1]);
-    expect(screen.queryByTestId('media-sel-print')).not.toBeInTheDocument();
-    await userEvent.click(controls[1]);
+    expect(screen.getByTestId('media-sel-print')).toBeInTheDocument();
 
     // Two photographs, the second chosen first: the studio receives them in that order.
     await userEvent.click(controls[0]);
@@ -368,7 +367,7 @@ describe('MediaWorkspace', () => {
     await userEvent.click(controls[0]);
     await userEvent.click(screen.getByTestId('media-sel-print'));
     expect(await screen.findByTestId('studio-at'))
-      .toHaveTextContent(`/print?files=${secondImage.id}%2C${imageItem.id}`);
+      .toHaveTextContent(`/print?files=${secondImage.id}%2C${imageItem.id}&videos=1`);
   });
 
   it('offers the photo-only destinations only for an all-photo selection', async () => {

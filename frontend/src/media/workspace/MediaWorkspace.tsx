@@ -40,6 +40,7 @@ export interface MediaPhotoDestination {
 import { MediaFastNavigation, canFastNavigate } from './MediaFastNavigation';
 import { mediaNavigationKey } from './mediaNavigation';
 import { useMediaWorkspace } from './useMediaWorkspace';
+import { printStudioPath } from './printStudioPath';
 import { useWallSentinel } from './useWallSentinel';
 import { MediaKindTabs } from './MediaKindTabs';
 import { MediaCommandBar } from './MediaCommandBar';
@@ -47,7 +48,7 @@ import { MediaFilterChips } from './MediaFilterChips';
 import { MediaFilterSheet } from './MediaFilterSheet';
 import { MediaGrid, type SemanticTileMatches } from './MediaGrid';
 import { MediaWorkspaceSelectionBar } from './MediaWorkspaceSelectionBar';
-import { getMediaSelectionCapabilities } from './mediaSelectionCapabilities';
+import { PRINT_SELECTION_MAX, getMediaSelectionCapabilities } from './mediaSelectionCapabilities';
 import { buildMediaSelectionActions, type MediaSelectionActionId } from './mediaSelectionActions';
 import {
   buildFilterChips,
@@ -475,20 +476,17 @@ export function MediaWorkspace({
       case 'trash': setTrashOpen(true); break;
       case 'album': setPickerOpen(true); break;
       case 'print': {
-        // The print studio, with the photographs already chosen — in the order
-        // they were selected — and, in an album, the album to choose more from.
-        const files = [...selection.selected].filter((fileId) =>
-          selectedItems.some((it) => it.id === fileId && it.kind === 'image'));
-        const query = new URLSearchParams();
-        if (source.kind === 'album') query.set('album', source.albumId);
-        query.set('files', files.join(','));
-        navigate(`/print?${query.toString()}`);
+        // The print studio, composing its sheets from the selected photographs.
+        const path = printStudioPath([...selection.selected], selectedItems,
+          source.kind === 'album' ? source.albumId : null);
+        if (path) navigate(path);
+        else setNotice(t('ownerPrint.tooMany', { max: PRINT_SELECTION_MAX }));
         break;
       }
       default: runPhotoDestination(id);
     }
   }, [actionModel, restoreSelected, removeFromAlbum, moveToPersonal, moveToExcluded, selection, runPhotoDestination,
-    selectedItems, navigate, source]);
+    selectedItems, navigate, source, t]);
 
   const semantic = isSemanticActive(identity);
   // Same source as the chips rendered below the command bar, so the badge on

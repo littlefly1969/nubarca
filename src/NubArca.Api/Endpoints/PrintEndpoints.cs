@@ -12,6 +12,23 @@ public static class PrintEndpoints
     public const string ClaimHeader = "X-NubArca-Print-Claim";
     public const string EnrollmentRateLimitPolicy = "print-enrollment";
 
+    /// <summary>
+    /// An owner print's refusal as HTTP — one table for every route that asks
+    /// for that print, the owner's own and a share's.
+    /// </summary>
+    internal static IResult OwnerPhotoPrintRefusal(string error) => error switch
+    {
+        OwnerPhotoPrintErrors.InvalidRequest or OwnerPhotoPrintErrors.InvalidOrientation
+            or OwnerPhotoPrintErrors.InvalidPlacement or OwnerPhotoPrintErrors.InvalidTimezone
+            or OwnerPhotoPrintErrors.InvalidLayout or OwnerPhotoPrintErrors.InvalidCaption =>
+            Results.BadRequest(new { error }),
+        OwnerPhotoPrintErrors.NotFound or OwnerPhotoPrintErrors.PrinterNotFound =>
+            Results.NotFound(new { error }),
+        OwnerPhotoPrintErrors.RenderFailed =>
+            Results.Json(new { error }, statusCode: StatusCodes.Status500InternalServerError),
+        _ => Results.Conflict(new { error }),
+    };
+
     public static IEndpointRouteBuilder MapPrintEndpoints(this IEndpointRouteBuilder app)
     {
         var owner = app.MapGroup("/api/print").RequireAuthorization();
@@ -115,19 +132,7 @@ public static class PrintEndpoints
             if (request is null) return Results.BadRequest(new { error = OwnerPhotoPrintErrors.InvalidRequest });
             var result = await service.SubmitAsync(context.GetCurrentUserId()!.Value, request, idempotencyKey, ct);
             if (result.Accepted is { } accepted) return Results.Accepted($"/api/print/stations", accepted);
-            var error = result.Error!;
-            return error switch
-            {
-                OwnerPhotoPrintErrors.InvalidRequest or OwnerPhotoPrintErrors.InvalidOrientation
-                    or OwnerPhotoPrintErrors.InvalidPlacement or OwnerPhotoPrintErrors.InvalidTimezone
-                    or OwnerPhotoPrintErrors.InvalidLayout or OwnerPhotoPrintErrors.InvalidCaption =>
-                    Results.BadRequest(new { error }),
-                OwnerPhotoPrintErrors.NotFound or OwnerPhotoPrintErrors.PrinterNotFound =>
-                    Results.NotFound(new { error }),
-                OwnerPhotoPrintErrors.RenderFailed =>
-                    Results.Json(new { error }, statusCode: StatusCodes.Status500InternalServerError),
-                _ => Results.Conflict(new { error }),
-            };
+            return OwnerPhotoPrintRefusal(result.Error!);
         }).WithName("CreateOwnerPhotoPrintJob");
         // The date such a print would carry, resolved exactly as the print
         // resolves it, so the preview shows the characters the paper gets.

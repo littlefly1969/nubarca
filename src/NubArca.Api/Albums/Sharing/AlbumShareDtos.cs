@@ -17,10 +17,24 @@ public sealed record AlbumShareAccess(
     int UploadCount,
     bool RequireSecondFactor,
     /// <summary>Who proved themselves, when the second factor is on. Null otherwise.</summary>
-    Guid? GuestId)
+    Guid? GuestId,
+    /// <summary>The owner's print switch, as stored. Never read alone: see <see cref="CanPrint"/>.</summary>
+    bool AllowPrint = false)
 {
     /// <summary>Whether another file may be accepted right now.</summary>
     public bool HasUploadRoom => MaxUploads == 0 || UploadCount < MaxUploads;
+
+    /// <summary>
+    /// THE ONE PRINT RULE: an email + second-factor share, a visitor who has
+    /// verified on it, and the owner's switch on. All three, every request.
+    ///
+    /// <para>The switch alone is not enough on purpose. A public link is held
+    /// by whoever it was forwarded to, and a print spends the owner's paper on
+    /// the owner's printer; so <c>AllowPrint</c> left on a public link — by a
+    /// client, a bug or a later change of the link's mode — still prints
+    /// nothing.</para>
+    /// </summary>
+    public bool CanPrint => RequireSecondFactor && GuestId is not null && AllowPrint;
 }
 
 /// <summary>
@@ -70,7 +84,12 @@ public sealed record AlbumShareLinkDto(
     int UploadCount,
     DateTime CreatedAt,
     DateTime? ExpiresAt,
-    IReadOnlyList<AlbumShareGuestDto> Guests);
+    IReadOnlyList<AlbumShareGuestDto> Guests,
+    /// <summary>
+    /// The owner's print switch. Stored as set, but it lets anybody print only
+    /// while <see cref="RequireSecondFactor"/> is on too (AlbumShareAccess.CanPrint).
+    /// </summary>
+    bool AllowPrint = false);
 
 public sealed record AlbumShareGuestDto(
     Guid Id, string Email, string? DisplayName, DateTime CreatedAt);
@@ -92,7 +111,8 @@ public sealed record AlbumShareUpdateRequest(
     /// expiry" IS null, and null already means unchanged everywhere else here.
     /// Without this an owner who once set a date could never take it off.
     /// </summary>
-    bool ClearExpiry = false);
+    bool ClearExpiry = false,
+    bool? AllowPrint = null);
 
 public sealed record AlbumShareGuestRequest(string? Email, string? DisplayName);
 
@@ -114,7 +134,12 @@ public sealed record AlbumSharePublicDto(
     /// <summary>Whether a download hands over the real file or a safe rendition.</summary>
     bool CanDownloadOriginal,
     /// <summary>Null when the link has no ceiling; otherwise what is left.</summary>
-    int? UploadsRemaining);
+    int? UploadsRemaining,
+    /// <summary>
+    /// Whether this visitor may print (AlbumShareAccess.CanPrint). For the
+    /// page's button only: every print route asks the rule again.
+    /// </summary>
+    bool CanPrint = false);
 
 /// <summary>
 /// One item as a visitor sees it.

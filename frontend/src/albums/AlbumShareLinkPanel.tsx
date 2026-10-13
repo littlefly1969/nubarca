@@ -184,6 +184,20 @@ export function AlbumShareLinkPanel({ albumId }: { albumId: string }) {
           onChange={(next) => void run(async () =>
             setLink(await updateAlbumShareLink(albumId, { requireSecondFactor: next })))}
         />
+        {/* PRINTING is lent only to a verified address, so the switch exists
+            only on an email + second-factor link. The server refuses a print
+            on a public link whatever this says; hiding it is the honest UX. */}
+        {link.requireSecondFactor && (
+          <SwitchRow
+            testId="album-share-link-print"
+            label={t('albumLinkOwner.printLabel')}
+            note={t('albumLinkOwner.printNote')}
+            checked={link.allowPrint}
+            disabled={busy}
+            onChange={(next) => void run(async () =>
+              setLink(await updateAlbumShareLink(albumId, { allowPrint: next })))}
+          />
+        )}
       </div>
 
       {/* The list is what makes the second factor authorization rather than

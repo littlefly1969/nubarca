@@ -120,7 +120,7 @@ describe('contextual actions', () => {
     ['one photograph in an own album', [photo], 'album', 'active', true],
     ['two photographs', [photo, photo], 'library', 'active', true],
     ['one video', [video], 'library', 'active', false],
-    ['a mixed selection', [photo, video], 'library', 'active', false],
+    ['a mixed selection (its videos left out)', [photo, video], 'library', 'active', true],
     ['an excluded photograph', [photo], 'library', 'excluded', false],
   ] as const)('Print for %s: %s', (_, items, source, scope, offered) => {
     const actions = model([...items], NONE, { source, scope });

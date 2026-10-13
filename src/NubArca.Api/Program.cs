@@ -1023,6 +1023,9 @@ if (!string.IsNullOrWhiteSpace(connectionString))
         NubArca.Api.Albums.Sharing.IAlbumShareService,
         NubArca.Api.Albums.Sharing.AlbumShareService>();
     builder.Services.AddScoped<
+        NubArca.Api.Albums.Sharing.IAlbumSharePrintService,
+        NubArca.Api.Albums.Sharing.AlbumSharePrintService>();
+    builder.Services.AddScoped<
         NubArca.Api.Albums.Sharing.IAlbumShareAuth,
         NubArca.Api.Albums.Sharing.AlbumShareAuth>();
     // The code dispatcher is OWNED work, not fire-and-forget: a bounded channel

@@ -47,7 +47,7 @@ import { PartyPage } from './pages/PartyPage';
 import { PartyInvitationPage } from './pages/PartyInvitationPage';
 import { PartyUploadPage } from './pages/PartyUploadPage';
 import { AlbumSharePage } from './pages/AlbumSharePage';
-import { OwnerPrintPage } from './print/OwnerPrintPage';
+import { OwnerPrintPage, SharePrintPage } from './print/OwnerPrintPage';
 import { PartyChallengesPage } from './pages/PartyChallengesPage';
 import { PartyGamePage } from './pages/PartyGamePage';
 import { PartyTvStagePage } from './pages/PartyTvStagePage';
@@ -98,9 +98,14 @@ export function App() {
               this link is not that link, and a visitor following one has not
               been handed the other. */}
           <Route path="/album/:token" element={<AlbumSharePage />} />
+          {/* Printing from it, for a verified visitor the owner let print. */}
+          <Route path="/album/:token/print" element={<SharePrintPage />} />
           {/* The same page inside the album's own app: /album/app/<key>/open/<token>. */}
           {appBase?.startsWith('/album/app/') && (
-            <Route path="/open/:token" element={<AlbumSharePage />} />
+            <>
+              <Route path="/open/:token" element={<AlbumSharePage />} />
+              <Route path="/open/:token/print" element={<SharePrintPage />} />
+            </>
           )}
           {/* PUBLIC, unauthenticated GUEST BOOK, on the party's VIEW token —
               the one on the QR. Reading the book is part of looking at the
