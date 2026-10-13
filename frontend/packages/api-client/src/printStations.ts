@@ -200,6 +200,18 @@ export function getPrintAgentBundle(signal?: AbortSignal): Promise<PrintAgentBun
 export function setPrintAgentSharing(enabled: boolean): Promise<PrintAgentBundle> {
   return api('/api/print/agent/sharing', { method: 'PUT', json: { enabled } });
 }
+/** What erasing a revoked station takes with it: counts only. */
+export interface PrintStationErasePreview {
+  jobs: number;
+  parties: number;
+}
+export function previewPrintStationErase(id: string): Promise<PrintStationErasePreview> {
+  return api(`/api/print/stations/${encodeURIComponent(id)}/erase`);
+}
+/** A revoked station, erased with everything it left; one audit line remains. */
+export function erasePrintStation(id: string): Promise<void> {
+  return api(`/api/print/stations/${encodeURIComponent(id)}/erase`, { method: 'DELETE' });
+}
 export function revokePrintStation(id: string): Promise<void> {
   return api(`/api/print/stations/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }

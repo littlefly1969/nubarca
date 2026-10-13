@@ -25,7 +25,10 @@ is built is described by `ARCHITECTURE.md`.
   the server from GHCR (`deploy/pull-publish-print-agent-image.sh`, volume
   `nubarca-print-agent-data`) and handed out while an administrator has it
   switched on. Agents report version and build; from 0.2.2 up they are served,
-  an older compatible one is only told an update exists. The Print Box reports the prints left
+  an older compatible one is only told an update exists. A revoked station can
+  be erased with everything it left (`DELETE /api/print/stations/{id}/erase`),
+  leaving one `print.station.erase` audit line; party budgets and numbering are
+  counters on the party and survive it. The Print Box reports the prints left
   on the media from Gutenprint's CUPS marker (IPP query shipped with the
   agent, `ipptool`); it is telemetry (`PrinterDevice.MediaRemainingPrints`),
   never a gate. DNP printers still require hardware acceptance on each path,

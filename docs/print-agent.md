@@ -683,6 +683,21 @@ Record the Windows version, DNP driver version, agent artifact version/source
 commit, printer firmware, media and result for each row. The automated fake
 adapter proves protocol semantics only; it is not evidence for these rows.
 
+## Erasing a revoked station
+
+Revoking a station stops it at once and keeps its history. After revocation
+its page offers **Erase everything**: it says how many prints and how many
+parties' print histories go, asks once, and then deletes the station's jobs
+with their party and owner requests and sources, the rendered sheets that
+nothing else owns (under the exclusive storage lock, as the blob janitor
+does), its printers' loans, its printers, its enrollment codes and the
+station. A party that used it keeps its budgets and its numbering — they are
+counters on the party — and only loses its printer choice. One audit line
+remains, `print.station.erase`, with who erased which station id and nothing
+else. Container logs rotate on their own, and the box itself is not reached:
+remove the agent there with
+`sudo bash /opt/nubarca-print-agent/linux/uninstall-instance.sh --instance box --purge-state`.
+
 ## Recovery and diagnostics
 
 - Service state: `Get-Service NubArcaPrintAgent`.

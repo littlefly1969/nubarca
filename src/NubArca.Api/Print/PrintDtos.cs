@@ -96,6 +96,8 @@ public sealed record PrintStationDto(
     /// <summary>The agent's version and build against this server and the bundle it hands out.</summary>
     PrintAgentStatusDto? Agent = null);
 public sealed record CreateTestPrintRequest(Guid PrinterDeviceId);
+/// <summary>What erasing a revoked station takes with it: counts, never what was printed or for whom.</summary>
+public sealed record PrintStationErasePreview(int Jobs, int Parties);
 public sealed record PrintClaimRequest(string? AdapterKind = null);
 public sealed record PrintClaimResponse(
     Guid JobId, string ClaimToken, string Kind, string Format,

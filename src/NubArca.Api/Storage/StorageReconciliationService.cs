@@ -133,8 +133,10 @@ public sealed class StorageReconciliationService
         // rendered image out from under the Print Agent.
         //
         // Deliberately NOT filtered by job state: a job holds its artifact for
-        // its whole life, PrintJob rows are never deleted and the column is
-        // never cleared, so any non-null key is a live owner.
+        // its whole life and the column is never cleared, so any non-null key
+        // is a live owner. PrintJob rows are deleted only when an owner erases
+        // a revoked station, which deletes the sheets itself, under the same
+        // exclusive storage lock, once nothing else owns their bytes.
         var printArtifactKeys = await _db.PrintJobs.AsNoTracking()
             .Where(j => j.ArtifactStorageKey != null)
             .Select(j => j.ArtifactStorageKey!)
