@@ -49,6 +49,11 @@ Neither workflow deploys, publishes a release, writes to the repository, or
 receives production secrets. Production deployment remains a separate,
 operator-controlled operation governed by `deploy/FAST_DEPLOY.md`.
 
+The Android startup smoke (an APK build and an emulator cold launch, the
+slowest job) runs on a pull request only when it changes `mobile/`,
+`packages/` or `ci.yml`, and always on `main`; otherwise it reports skipped,
+which satisfies a required check.
+
 ### Backend slices
 
 In one job the fast lane takes about 40 minutes, so CI runs it as 8 parallel

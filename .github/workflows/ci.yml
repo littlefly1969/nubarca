@@ -446,10 +446,47 @@ jobs:
       - name: Production config gate
         run: node scripts/verify-production-config.mjs
 
+  # Whether this change can affect the Android app: the app itself, the shared
+  # contracts it bundles, or this workflow. Pushes to main and manual runs
+  # always count as yes.
+  changes:
+    name: Detect mobile changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mobile: ${{ steps.diff.outputs.mobile }}
+    steps:
+      - name: Check out source
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Compare with the base branch
+        id: diff
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "mobile=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}")"
+          if grep -qE '^(mobile/|packages/|\.github/workflows/ci\.yml$)' <<<"$changed"; then
+            echo "mobile=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "mobile=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # The slowest job in CI (the APK build alone is about 7 minutes), so it runs
+  # only when the change can affect the app. A skipped job satisfies a
+  # required check.
   mobile_android_startup:
     name: Mobile Android startup smoke
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -468,6 +505,10 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+
+      # Caches Gradle's dependencies and build cache between runs.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Install Android SDK and emulator image
         run: |
