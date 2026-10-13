@@ -417,11 +417,17 @@ one uncut sheet, the same on `NubArca-RX1HS-STRIP` two strips.
   by hand always works.
 - **Over Ethernet** (from agent 0.6) the page is at `http://<the box's
   address>:8080/` and can scan and configure the Wi-Fi as well, without touching
-  the cable: the box stays reachable, a failed attempt only removes its
-  profile (no setup network opens), and a successful one leaves Ethernet the
-  preferred connection. While the box's only connection is Wi-Fi the page
-  cannot change it — one radio, and the change would cut the page off; it says
-  so instead of offering the form.
+  the cable — while the Wi-Fi is free: the box stays reachable, a failed
+  attempt only removes its profile (no setup network opens), and a successful
+  one leaves Ethernet the preferred connection. A join counts only with an
+  address AND a gateway, so the Wi-Fi it reports is one the box can fall back
+  to. A Wi-Fi in use — the only connection, or alongside the cable — is never
+  changed from the page: one radio, the change could cut the page off, and a
+  wrong password would replace a working profile. The page says why instead
+  of offering the form (Wi-Fi in use, no Wi-Fi adapter, still looking for a
+  network, NetworkManager not running). Over the venue's LAN the form answers
+  only to the box's address or its own name (`<hostname>`, `<hostname>.local`),
+  never to another name pointed at it.
 - **The page** shows the network, the printer, CUPS and whether NubArca is
   reachable, lists the networks the box saw before it opened the setup network,
   and has one form: network name and password. Nothing else — no account, no

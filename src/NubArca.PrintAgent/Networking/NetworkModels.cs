@@ -6,13 +6,17 @@ public sealed record WifiNetwork(string Ssid, int Signal, bool Secure);
 /// <summary>A connection that can actually carry traffic: an address AND a default route.</summary>
 public sealed record NetworkUplink(string Device, string Type, string? Name, string? Address);
 
-/// <summary>What NetworkManager reports at one moment.</summary>
+/// <summary>
+/// What NetworkManager reports at one moment. <see cref="WifiInUse"/>: the
+/// Wi-Fi interface is connected as a client, whether or not it is the uplink.
+/// </summary>
 public sealed record NetworkSnapshot(
     bool ManagerAvailable,
     string? WifiInterface,
     NetworkUplink? Uplink,
     bool AccessPointActive,
-    string? AccessPointAddress)
+    string? AccessPointAddress,
+    bool WifiInUse = false)
 {
     public static readonly NetworkSnapshot Unavailable = new(false, null, null, false, null);
 }

@@ -70,7 +70,30 @@ public sealed class NetworkManagerCliTests
                 ["wlan0"] = "IP4.ADDRESS[1]:192.0.2.20/24\nIP4.GATEWAY:192.0.2.1\n",
                 ["eth0"] = "IP4.ADDRESS[1]:192.0.2.9/24\nIP4.GATEWAY:192.0.2.1\n",
             }));
-        Assert.Equal("ethernet", (await cli.GetSnapshotAsync(default)).Uplink?.Type);
+        var snapshot = await cli.GetSnapshotAsync(default);
+        Assert.Equal("ethernet", snapshot.Uplink?.Type);
+        // ...and the Wi-Fi is still in use, though it is not the uplink.
+        Assert.True(snapshot.WifiInUse);
+    }
+
+    [Fact]
+    public async Task A_Wifi_That_Is_Only_The_Setup_Network_Or_Idle_Is_Not_In_Use()
+    {
+        var setup = new NetworkManagerCli(Nmcli(
+            "wlan0:wifi:connected:nubarca-setup\neth0:ethernet:connected:Wired connection 1\n",
+            new()
+            {
+                ["wlan0"] = "IP4.ADDRESS[1]:10.42.0.1/24\n",
+                ["eth0"] = "IP4.ADDRESS[1]:192.0.2.9/24\nIP4.GATEWAY:192.0.2.1\n",
+            }));
+        Assert.False((await setup.GetSnapshotAsync(default)).WifiInUse);
+
+        var idle = new NetworkManagerCli(Nmcli(
+            "wlan0:wifi:disconnected:--\neth0:ethernet:connected:Wired connection 1\n",
+            new() { ["eth0"] = "IP4.ADDRESS[1]:192.0.2.9/24\nIP4.GATEWAY:192.0.2.1\n" }));
+        var snapshot = await idle.GetSnapshotAsync(default);
+        Assert.Equal("wlan0", snapshot.WifiInterface);
+        Assert.False(snapshot.WifiInUse);
     }
 
     [Fact]
@@ -105,10 +128,17 @@ public sealed class NetworkManagerCliTests
     [Fact]
     public void The_Wifi_Client_Is_Read_From_Its_Own_Device()
     {
+        // Multiline terse output is not escaped (nmcli 1.58: GENERAL.HWADDR
+        // prints its colons raw): the value is everything after the first ':'.
         var joined = NmcliTerse.WifiClient(
-            "GENERAL.STATE:100 (connected)\n" + @"GENERAL.CONNECTION:nubarca-wifi-Location\:WiFi" + "\n"
+            "GENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:nubarca-wifi-Location:WiFi\n"
             + "IP4.ADDRESS[1]:192.0.2.20/24\nIP4.GATEWAY:192.0.2.1\n");
         Assert.Equal(new WifiClientState(true, "nubarca-wifi-Location:WiFi", "192.0.2.20", true), joined);
+        // A backslash and a trailing space are part of a valid network's name.
+        Assert.Equal(@"nubarca-wifi-Bar\Cafe",
+            NmcliTerse.WifiClient("GENERAL.STATE:100 (connected)\n" + @"GENERAL.CONNECTION:nubarca-wifi-Bar\Cafe" + "\n").ConnectionName);
+        Assert.Equal("nubarca-wifi-Studio ",
+            NmcliTerse.WifiClient("GENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:nubarca-wifi-Studio \n").ConnectionName);
 
         // Still activating: not connected, whatever else is set.
         Assert.False(NmcliTerse.WifiClient("GENERAL.STATE:50 (connecting (configuring))\nGENERAL.CONNECTION:nubarca-wifi-Studio\n").Connected);

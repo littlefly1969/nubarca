@@ -178,6 +178,39 @@ public sealed class CaptivePortalTests
     }
 
     [Fact]
+    public async Task A_Setup_Network_That_Drops_And_Cannot_Restart_Takes_Its_Redirect_With_It()
+    {
+        var (network, redirect, service) = Box();
+        await service.BootAsync(default);
+        Assert.True(redirect.Active);
+
+        network.AccessPointCanStart = false;
+        network.DropAccessPoint();
+        await service.TickAsync(default);
+        Assert.Equal(ProvisioningMode.Disconnected, service.State.Mode);
+        Assert.False(redirect.Active);
+
+        // NetworkManager then finds a known Wi-Fi by itself: no rule follows it there.
+        network.Uplink = new NetworkUplink("wlan0", "wifi", "Home", "192.0.2.30");
+        await service.TickAsync(default);
+        Assert.Equal(ProvisioningMode.Connected, service.State.Mode);
+        Assert.False(redirect.Active);
+    }
+
+    [Fact]
+    public async Task An_Attempt_That_Fails_While_The_Agent_Stops_Installs_No_Redirect()
+    {
+        var (network, redirect, service) = Box(n => n.Joins = (_, _) => false);
+        await service.BootAsync(default);
+        Assert.Equal(ConnectRequest.Accepted, service.RequestConnect("Studio", "wrong-password-1"));
+        await service.StopAsync(default);
+
+        Assert.True(service.PendingConnect.IsCompleted, "the stop waited for the attempt");
+        Assert.False(redirect.Active);
+        Assert.Equal("redirect-off", network.Events.Last());
+    }
+
+    [Fact]
     public async Task Stopping_The_Agent_Removes_The_Redirect()
     {
         var (network, redirect, service) = Box();

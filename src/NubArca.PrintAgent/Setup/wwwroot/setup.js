@@ -6,10 +6,25 @@
   var attempted = null;
   var sending = false;
   // What the box last said: whether the Wi-Fi can be configured now (setup
-  // mode or Ethernet), and whether the page is served over the setup network.
+  // mode, or Ethernet with the Wi-Fi free) and if not why, and whether the
+  // page is served over the setup network.
   var wifiAvailable = true;
+  var unavailableReason = null;
   var onSetupNetwork = false;
-  var UNAVAILABLE = 'Wi-Fi configuration is unavailable while the box is using Wi-Fi.';
+  // Status requests are numbered: one sent before the box accepted an attempt
+  // may still carry the previous attempt's outcome, and must not end this one.
+  var polls = 0;
+  var answersFrom = 0;
+  var UNAVAILABLE = {
+    'wifi-in-use': 'The box is using its Wi-Fi: it cannot be changed from this page.',
+    'no-wifi': 'This box has no Wi-Fi adapter.',
+    'not-ready': 'The box is still looking for a network. Try again in a minute.',
+    'network-manager': 'The box\'s network service is not running.'
+  };
+
+  function unavailableText() {
+    return UNAVAILABLE[unavailableReason] || 'Wi-Fi configuration is unavailable right now.';
+  }
 
   var NETWORK = {
     'connected': 'Connected',
@@ -27,7 +42,7 @@
     el.className = tone || '';
   }
 
-  function render(s) {
+  function render(s, seq) {
     show('network', NETWORK[s.network] || s.network, s.network === 'connected' ? 'ok' : '');
     var connection = s.network === 'access-point'
       ? s.setupNetwork
@@ -55,14 +70,16 @@
     var available = s.wifiConfigurationAvailable === true;
     var becameAvailable = available && !wifiAvailable;
     wifiAvailable = available;
+    unavailableReason = s.wifiConfigurationUnavailable || null;
     applyAvailability();
     if (becameAvailable) refreshNetworks();
 
     var a = s.lastAttempt;
-    if (a && a.outcome === 'failed' && (attempted === null || attempted === a.ssid)) {
+    var current = !sending || seq >= answersFrom;
+    if (a && a.outcome === 'failed' && (attempted === null || attempted === a.ssid) && current) {
       message('Connection to ' + a.ssid + ' failed. Check the password and try again.', 'bad');
       busy(false);
-    } else if (a && a.outcome === 'connected' && attempted === a.ssid && sending) {
+    } else if (a && a.outcome === 'connected' && attempted === a.ssid && sending && current) {
       message('Connected to ' + a.ssid + '.', 'ok');
       busy(false);
     }
@@ -79,6 +96,7 @@
   // configure its Wi-Fi; otherwise they are disabled and say why.
   function applyAvailability() {
     $('wifi-unavailable').hidden = wifiAvailable;
+    $('wifi-unavailable').textContent = unavailableText();
     $('rescan').disabled = !wifiAvailable;
     $('ssid').disabled = !wifiAvailable;
     $('password').disabled = !wifiAvailable;
@@ -88,9 +106,10 @@
   }
 
   function refreshStatus() {
+    var seq = ++polls;
     fetch('/setup/status', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (s) { if (s) render(s); })
+      .then(function (s) { if (s) render(s, seq); })
       .catch(function () { /* the setup network may be closing */ });
   }
 
@@ -131,6 +150,7 @@
     var ssid = $('ssid').value;
     var password = $('password').value;
     attempted = ssid;
+    answersFrom = Infinity;
     busy(true);
     message('Connecting to ' + ssid + '…');
     fetch('/setup/wifi/connect', {
@@ -142,6 +162,7 @@
       .then(function (r) {
         $('password').value = '';
         if (r.status === 202) {
+          answersFrom = polls + 1;
           message(onSetupNetwork
             ? 'Connecting to ' + ssid + '… The NubArca setup network will now close. '
               + 'If it appears again, the connection failed: join it again and reopen this page.'
@@ -153,7 +174,7 @@
           invalid_ssid: 'That Wi-Fi name is not valid.',
           invalid_password: 'A Wi-Fi password has 8 to 63 characters.',
           busy: 'Already connecting. Wait a moment.',
-          unavailable: UNAVAILABLE
+          unavailable: unavailableText()
         };
         message(reasons[r.body && r.body.error] || 'The request was not accepted.', 'bad');
       })
@@ -161,7 +182,9 @@
         $('password').value = '';
         if (onSetupNetwork) {
           // The setup network closed before the answer arrived: that is the
-          // normal hand-off, not an error.
+          // normal hand-off, not an error. Its outcome comes with the setup
+          // network, if that comes back.
+          answersFrom = polls + 1;
           message('Connecting to ' + ssid + '… The NubArca setup network will now close.', 'ok');
           return;
         }

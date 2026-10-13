@@ -27,6 +27,22 @@ public static class SetupValidation
         string.IsNullOrEmpty(password)
         || (password.Length is >= 8 and <= 63 && password.All(c => c is >= ' ' and <= '~'))
         || (password.Length == 64 && password.All(Uri.IsHexDigit));
+
+    /// <summary>
+    /// Whether a request was addressed to this box: an IP address, localhost,
+    /// or the box's own name (also as <c>.local</c>). A web page whose name was
+    /// pointed at the box (DNS rebinding) carries its own name instead, so a
+    /// browser on the venue's network cannot be used to drive the Wi-Fi.
+    /// </summary>
+    public static bool IsOwnHost(HostString host, string machineName)
+    {
+        var name = host.Host.Trim('[', ']');
+        return name.Length > 0
+            && (IPAddress.TryParse(name, out _)
+                || name.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                || name.Equals(machineName, StringComparison.OrdinalIgnoreCase)
+                || name.Equals(machineName + ".local", StringComparison.OrdinalIgnoreCase));
+    }
 }
 
 /// <summary>
@@ -59,8 +75,9 @@ public static class SetupEndpoints
         + "frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
     public static WebApplication Build(NetworkProvisioningService network, PrintBoxStatusService status,
-        ILoggerFactory loggers, IPAddress address, int port)
+        ILoggerFactory loggers, IPAddress address, int port, string? machineName = null)
     {
+        var ownName = machineName ?? Environment.MachineName;
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
         {
             ContentRootPath = AppContext.BaseDirectory,
@@ -106,7 +123,9 @@ public static class SetupEndpoints
         app.MapPost("/setup/wifi/connect", async (HttpContext context, NetworkProvisioningService net) =>
         {
             // JSON only: a cross-site form cannot send it without a CORS
-            // preflight this server never answers.
+            // preflight this server never answers. And only to this box by
+            // address or name: over Ethernet this answers the whole venue LAN.
+            if (!SetupValidation.IsOwnHost(context.Request.Host, ownName)) return Refuse("invalid_host");
             if (!context.Request.HasJsonContentType()) return Refuse("invalid_request");
             SetupConnectBody? body;
             try

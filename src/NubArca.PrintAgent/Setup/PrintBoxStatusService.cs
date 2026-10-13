@@ -17,7 +17,8 @@ public sealed record PrintBoxStatus(
     [property: JsonPropertyName("nubarca")] string NubArca,
     DateTimeOffset? LastServerContact,
     PrintBoxAttempt? LastAttempt,
-    bool WifiConfigurationAvailable);
+    bool WifiConfigurationAvailable,
+    string? WifiConfigurationUnavailable);
 
 /// <summary>
 /// The box's printer. <see cref="RemainingPrints"/> is the physical media count
@@ -98,8 +99,10 @@ public sealed class PrintBoxStatusService
             LastAttempt: state.LastAttempt is { } attempt
                 ? new PrintBoxAttempt(attempt.Ssid, attempt.Outcome.ToString().ToLowerInvariant(), attempt.At)
                 : null,
-            // In setup mode or over Ethernet; never while Wi-Fi is the way out.
-            WifiConfigurationAvailable: _network.CanConfigureWifi);
+            // In setup mode, or over Ethernet with the Wi-Fi free — from the
+            // same state as every other field, so one answer never contradicts itself.
+            WifiConfigurationAvailable: NetworkProvisioningService.WifiConfigurationBlock(state) is null,
+            WifiConfigurationUnavailable: NetworkProvisioningService.WifiConfigurationBlock(state));
     }
 
     /// <summary>The server's word for a printing queue is "busy"; a person reads "printing".</summary>
