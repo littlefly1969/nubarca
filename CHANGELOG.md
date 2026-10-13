@@ -6,6 +6,22 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Printers: connect a Print Box in a few copied commands, on a page made for the phone
+
+- **The printers page is a list of compact cards** — name, state, paper,
+  prints left — and each opens its printer, section by section.
+- **Add printer** asks a name and then shows how to connect the Print Box from
+  its terminal, with every command filled in and a copy button: download,
+  check its hash, install. The activation code is typed only when the
+  installer asks for it, never into a command, and the page says when the box
+  has connected. **Update instructions** do the same for a box already
+  connected, keeping its station, credential, Wi-Fi and queues.
+- **The Print Agent is handed out by NubArca itself:** an administrator turns
+  its download on or off on the printers page.
+- **Each printer says how its agent stands:** an older agent keeps working and
+  is only told an update is available; one too old to be served is said to
+  be, and a build that is not the published one is marked as unofficial.
+- **Print Agent 0.7.0** reports the build it was made from.
 ### Printing: one place to turn the sheet, and a fresh start for each print
 
 - **The sheet is turned where the photo is framed,** and only there: the

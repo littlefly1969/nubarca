@@ -289,6 +289,9 @@ public static class AuditActions
     // The paper said to be loaded, by the owner or by the person the printer
     // is lent to — the one fact about the machine they may set.
     public const string PrinterPaperSet = "print.printer.paper.set";
+    // The installation's Print Agent bundle handed out, or no longer: who
+    // switched it and which way — never a file name or a hash.
+    public const string PrintAgentSharingSet = "print.agent.sharing.set";
     public const string PartyGameStart = "party.game.start";
     public const string PartyGameFinish = "party.game.finish";
     // Playing the same party again. Recorded beside start and finish because it
@@ -459,6 +462,7 @@ public static class AuditEntityTypes
     public const string Party = "party";
     public const string PartyAlbum = "party_album";
     public const string PrinterDevice = "printer_device";
+    public const string PrintAgentDistribution = "print_agent_distribution";
     public const string PartyMessage = "party_message";
     public const string PartyGuestbookEntry = "party_guestbook_entry";
     public const string Plate = "plate";

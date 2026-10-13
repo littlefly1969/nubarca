@@ -17,12 +17,25 @@ const station = {
     state: 'ready', createdAt: '2026-09-01T12:00:00Z', failureCode: null }, lastError: null,
 };
 
+const bundle = {
+  available: true, sharing: true, canManage: true, minimumVersion: '0.2.2', version: '0.7.0',
+  runtime: 'linux-x64', fileName: 'nubarca-print-agent-0.7.0-linux-x64.zip', sha256: 'a'.repeat(64),
+  sizeBytes: 50_000_000, sourceCommit: 'ed46ff75108e1698ca009c40b331b241ada47871',
+  downloadPath: '/api/print-agent/download/nubarca-print-agent-0.7.0-linux-x64.zip',
+};
+
 /** Every test starts with nothing lent to the reader, unless it says otherwise. */
 function mockApi(handlers: Parameters<typeof installFetchMock>[0]) {
   return installFetchMock({ 'GET /api/print/shared-printers': () => jsonResponse([]), ...handlers });
 }
 
 function view() { return <AuthedWrapper><PrintStationsPanel /></AuthedWrapper>; }
+
+/** The list shows each printer as a card; its details open on a tap. */
+async function openStation() {
+  fireEvent.click(await screen.findByTestId('print-station-row'));
+  await screen.findByTestId('print-station-detail');
+}
 
 describe('PrintStationsPanel', () => {
   it('renders the empty state', async () => {
@@ -34,6 +47,7 @@ describe('PrintStationsPanel', () => {
   it('renders online status, printer, queue and current job', async () => {
     mockApi({ 'GET /api/print/stations': () => jsonResponse([station]) });
     render(view());
+    await openStation();
     expect(await screen.findByText('Studio')).toBeInTheDocument();
     expect(screen.getByText('Online')).toBeInTheDocument();
     expect(screen.getByText('DNP DS620')).toBeInTheDocument();
@@ -51,6 +65,7 @@ describe('PrintStationsPanel', () => {
       [`PUT ${url}`]: () => jsonResponse({ ...device, calibration: { brightness: 1, contrast: 1, gamma: 1.2, saturation: 1 } }),
     });
     render(view());
+    await openStation();
     await user.click(await screen.findByRole('button', { name: 'Regola colori' }));
 
     const midtones = screen.getByLabelText('Toni medi');
@@ -73,6 +88,7 @@ describe('PrintStationsPanel', () => {
       { ...station, devices: [{ ...station.devices[0], displayName: 'DNP DS-RX1HS', cutsStrips: true }] },
     ]) });
     render(view());
+    await openStation();
     expect(await screen.findByTestId('print-strip-cut'))
       .toHaveTextContent('Tagliate dalla stampante (2×6)');
   });
@@ -82,22 +98,128 @@ describe('PrintStationsPanel', () => {
       { ...station, status: 'offline', lastError: 'printer_offline' },
     ]) });
     render(view());
+    await openStation();
     expect(await screen.findByText('Offline')).toBeInTheDocument();
     expect(screen.getByText('printer_offline')).toBeInTheDocument();
   });
 
-  it('creates a station and exposes the one-shot enrollment command', async () => {
+  it('adds a printer and guides the box to connect, with the code apart from every command', async () => {
     const user = userEvent.setup();
+    let enrolled = false;
+    const created = { ...station, id: '33333333-3333-3333-3333-333333333333', name: 'Sala', status: 'offline',
+      agentVersion: null, lastSeenAt: null, devices: [], queueCount: 0, currentJob: null, agent: null };
     const mock = mockApi({
-      'GET /api/print/stations': () => jsonResponse([]),
-      'POST /api/print/stations': () => jsonResponse({ id: station.id, name: 'Sala',
-        enrollmentToken: 'one-shot', enrollmentExpiresAt: '2026-09-01T12:10:00Z' }, 201),
+      'GET /api/print/stations': () => jsonResponse(enrolled
+        ? [{ ...created, agentVersion: '0.7.0', agent: { version: '0.7.0', build: null,
+          compatibility: 'current', unofficial: false, latestVersion: '0.7.0' } }]
+        : []),
+      'GET /api/print/agent': () => jsonResponse(bundle),
+      'POST /api/print/stations': () => jsonResponse({ id: created.id, name: 'Sala',
+        enrollmentToken: 'one-shot', enrollmentExpiresAt: new Date(Date.now() + 600_000).toISOString() }, 201),
     });
     render(view());
-    await user.type(await screen.findByLabelText('Nome stazione'), 'Sala');
-    await user.click(screen.getByRole('button', { name: 'Crea stazione' }));
-    expect(await screen.findByTestId('print-enrollment')).toHaveTextContent('one-shot');
-    expect(mock.calls.some((x) => x.method === 'POST' && x.url.includes('/api/print/stations'))).toBe(true);
+    await user.click(await screen.findByRole('button', { name: 'Aggiungi stampante' }));
+    await user.type(screen.getByLabelText('Nome della stampante'), 'Sala');
+    await user.click(screen.getByRole('button', { name: 'Crea e collega' }));
+
+    const guide = await screen.findByTestId('print-guide');
+    expect(guide).toHaveTextContent('Collega Sala');
+    const download = screen.getByTestId('print-guide-download');
+    expect(download).toHaveTextContent(`curl -fLO ${window.location.origin}/api/print-agent/download/nubarca-print-agent-0.7.0-linux-x64.zip`);
+    // Exactly two spaces between hash and name: what sha256sum -c reads.
+    expect(download.textContent).toContain(`echo "${'a'.repeat(64)}  nubarca-print-agent-0.7.0-linux-x64.zip" | sha256sum -c -`);
+    const install = screen.getByTestId('print-guide-install');
+    expect(install).toHaveTextContent(`--station ${created.id}`);
+    // The one-shot code is typed when the installer asks: never in a command.
+    expect(install).not.toHaveTextContent('one-shot');
+    expect(download).not.toHaveTextContent('one-shot');
+    expect(screen.getByTestId('print-guide-code')).toHaveTextContent('one-shot');
+    expect(screen.getByTestId('print-guide-waiting')).toBeInTheDocument();
+    expect(mock.calls.some((x) => x.method === 'POST' && x.url === '/api/print/stations')).toBe(true);
+
+    // The box connects: the next read says so, and the printer opens.
+    enrolled = true;
+    await user.click(screen.getByRole('button', { name: '‹ Stampanti' }));
+    await user.click(screen.getByRole('button', { name: 'Aggiorna' }));
+    expect(await screen.findByTestId('print-station-row')).toHaveTextContent('Sala');
+  });
+
+  it('says the download is off instead of showing a command that would fail', async () => {
+    const user = userEvent.setup();
+    mockApi({
+      'GET /api/print/stations': () => jsonResponse([]),
+      'GET /api/print/agent': () => jsonResponse({ ...bundle, sharing: false, downloadPath: null, canManage: false }),
+      'POST /api/print/stations': () => jsonResponse({ id: station.id, name: 'Sala',
+        enrollmentToken: 'one-shot', enrollmentExpiresAt: new Date(Date.now() + 600_000).toISOString() }, 201),
+    });
+    render(view());
+    await user.click(await screen.findByRole('button', { name: 'Aggiungi stampante' }));
+    await user.type(screen.getByLabelText('Nome della stampante'), 'Sala');
+    await user.click(screen.getByRole('button', { name: 'Crea e collega' }));
+    expect(await screen.findByTestId('print-guide-unavailable'))
+      .toHaveTextContent('chiedi all’amministratore di attivarne la condivisione');
+    expect(screen.queryByTestId('print-guide-download')).not.toBeInTheDocument();
+  });
+
+  it('lets an administrator switch the Print Agent download on, and nobody else see the switch', async () => {
+    const user = userEvent.setup();
+    const mock = mockApi({
+      'GET /api/print/stations': () => jsonResponse([station]),
+      'GET /api/print/agent': () => jsonResponse({ ...bundle, sharing: false, downloadPath: null }),
+      'PUT /api/print/agent/sharing': () => jsonResponse(bundle),
+    });
+    render(view());
+    const card = await screen.findByTestId('print-bundle');
+    expect(card).toHaveTextContent('Versione 0.7.0');
+    expect(card).toHaveTextContent('Condivisione spenta');
+    await user.click(within(card).getByRole('button', { name: 'Attiva condivisione' }));
+    expect(await within(card).findByText(/Condivisione attiva/)).toBeInTheDocument();
+    expect(JSON.parse(mock.calls.find((c) => c.method === 'PUT')!.body!)).toEqual({ enabled: true });
+
+    cleanup();
+    mockApi({
+      'GET /api/print/stations': () => jsonResponse([station]),
+      'GET /api/print/agent': () => jsonResponse({ ...bundle, canManage: false }),
+    });
+    render(view());
+    await screen.findByTestId('print-station-row');
+    expect(screen.queryByTestId('print-bundle')).not.toBeInTheDocument();
+  });
+
+  it('shows how the agent stands, and an update guide that keeps the box connected', async () => {
+    const user = userEvent.setup();
+    mockApi({
+      'GET /api/print/stations': () => jsonResponse([{ ...station,
+        agent: { version: '0.6.0', build: 'ed46ff75108e', compatibility: 'update-available', unofficial: false,
+          latestVersion: '0.7.0' } }]),
+      'GET /api/print/agent': () => jsonResponse({ ...bundle, canManage: false }),
+    });
+    render(view());
+    // An older, compatible agent: told, never forced.
+    expect(await screen.findByTestId('print-station-row')).toHaveTextContent('Aggiornamento disponibile: 0.7.0');
+    await openStation();
+    expect(screen.getByTestId('print-agent')).toHaveTextContent('0.6.0');
+    expect(screen.getByTestId('print-agent')).toHaveTextContent('ed46ff75108e');
+    await user.click(screen.getByRole('button', { name: 'Istruzioni di aggiornamento' }));
+    const guide = await screen.findByTestId('print-guide');
+    expect(guide).toHaveTextContent('Aggiorna il Print Agent di Studio');
+    expect(screen.getByTestId('print-guide-install')).toHaveTextContent('install-print-box.sh');
+    // No code to type: the box keeps its credential.
+    expect(screen.queryByTestId('print-guide-code')).not.toBeInTheDocument();
+  });
+
+  it('says plainly when an agent is too old or not an official build', async () => {
+    mockApi({ 'GET /api/print/stations': () => jsonResponse([{ ...station,
+      agent: { version: '0.2.1', build: null, compatibility: 'incompatible', unofficial: false, latestVersion: '0.7.0' } }]) });
+    render(view());
+    expect(await screen.findByTestId('print-station-row')).toHaveTextContent('Versione non più compatibile');
+
+    cleanup();
+    mockApi({ 'GET /api/print/stations': () => jsonResponse([{ ...station,
+      agent: { version: '0.7.0', build: null, compatibility: 'current', unofficial: true, latestVersion: '0.7.0' } }]) });
+    render(view());
+    await openStation();
+    expect(screen.getByTestId('print-agent-status')).toHaveTextContent('Aggiornato · Build non ufficiale');
   });
 
   it('pauses a running station', async () => {
@@ -107,6 +229,7 @@ describe('PrintStationsPanel', () => {
       [`PUT /api/print/stations/${station.id}/desired-state`]: () => emptyResponse(204),
     });
     render(view());
+    await openStation();
     await user.click(await screen.findByRole('button', { name: 'Pausa' }));
     await waitFor(() => expect(mock.calls.some((x) => x.method === 'PUT')).toBe(true));
   });
@@ -119,6 +242,7 @@ describe('PrintStationsPanel', () => {
       [`PUT /api/print/stations/${station.id}/desired-state`]: () => emptyResponse(204),
     });
     render(view());
+    await openStation();
     await user.click(await screen.findByRole('button', { name: 'Riprendi' }));
     await waitFor(() => expect(mock.calls.some((x) => x.method === 'PUT'
       && x.body?.includes('running'))).toBe(true));
@@ -131,6 +255,7 @@ describe('PrintStationsPanel', () => {
       [`POST /api/print/stations/${station.id}/test-jobs`]: () => jsonResponse(station.currentJob, 202),
     });
     render(view());
+    await openStation();
     await user.click(await screen.findByRole('button', { name: 'Stampa pagina test' }));
     await waitFor(() => expect(mock.calls.some((x) => x.method === 'POST'
       && x.url.includes('/test-jobs'))).toBe(true));
@@ -141,6 +266,7 @@ describe('PrintStationsPanel', () => {
       { ...station, devices: [{ ...station.devices[0], observedState: 'offline' }] },
     ]) });
     render(view());
+    await openStation();
     expect(await screen.findByRole('button', { name: 'Stampa pagina test' })).toBeDisabled();
   });
 
@@ -157,6 +283,7 @@ describe('PrintStationsPanel', () => {
       },
     });
     render(view());
+    await openStation();
     const select = await screen.findByLabelText('Carta caricata');
     expect(select).toHaveValue('10x15');
     expect(screen.queryByTestId('print-paper-unsupported')).not.toBeInTheDocument();
@@ -174,6 +301,7 @@ describe('PrintStationsPanel', () => {
       ...station.devices[0], loadedPaperSize: '20x15', papers: ['10x15', '20x15'],
       loadedPaperChangedBy: 'Mario', loadedPaperChangedAt: '2026-09-02T18:30:00Z' }] }]) });
     render(view());
+    await openStation();
     expect(await screen.findByTestId('print-paper-changed')).toHaveTextContent(/Cambiata da Mario il/);
   });
 
@@ -190,6 +318,7 @@ describe('PrintStationsPanel', () => {
       'POST /api/print/jobs/j2/cancel': () => emptyResponse(204),
     });
     render(view());
+    await openStation();
     const rows = await screen.findAllByTestId('print-queue-row');
     expect(rows).toHaveLength(2);
     // Already at the printer: nothing to take back.
@@ -214,6 +343,7 @@ describe('PrintStationsPanel', () => {
           parties: 30, album: 0, tests: 0 },
       ] }] }]) });
     render(view());
+    await openStation();
     const rows = await screen.findAllByTestId('print-usage-row');
     expect(rows[0]).toHaveTextContent('Tu Fogli: 12, stampati: 11 · 10×15: 12 · Feste: 10 · Test: 2');
     expect(rows[1]).toHaveTextContent('Mario Fogli: 30, stampati: 30 · 10×15: 20 · 20×15: 10 · Feste: 30');
@@ -235,6 +365,7 @@ describe('PrintStationsPanel', () => {
       [`POST ${sharesUrl}`]: () => { shares = [share]; return jsonResponse(share, 201); },
     });
     render(view());
+    await openStation();
     await user.click(await screen.findByRole('button', { name: 'Condivisione' }));
     await user.type(screen.getByLabelText('Email dell’account'), 'mario@example.com');
     await user.type(screen.getByLabelText('Tetto fogli (facoltativo)'), '50');
@@ -254,6 +385,7 @@ describe('PrintStationsPanel', () => {
       [`POST ${sharesUrl}`]: () => errorResponse(400, { error: 'recipient_not_found' }),
     });
     render(view());
+    await openStation();
     await user.click(await screen.findByRole('button', { name: 'Condivisione' }));
     await user.type(screen.getByLabelText('Email dell’account'), 'nessuno@example.com');
     await user.click(screen.getByRole('button', { name: 'Condividi' }));
@@ -271,6 +403,7 @@ describe('PrintStationsPanel', () => {
       'DELETE /api/print/shares/sh-1': () => emptyResponse(204),
     });
     render(view());
+    await openStation();
     await user.click(await screen.findByRole('button', { name: 'Condivisione (1)' }));
     const ceiling = screen.getByLabelText('Tetto fogli per Mario');
     await user.clear(ceiling);
@@ -361,6 +494,7 @@ describe('PrintStationsPanel', () => {
   it('shows the printer\'s own count of prints left, as the printer\'s estimate', async () => {
     mockApi({ 'GET /api/print/stations': () => jsonResponse([withMedia(187)]) });
     render(view());
+    await openStation();
     const media = await screen.findByTestId('print-media-remaining');
     expect(media).toHaveTextContent('Stampe residue');
     expect(within(media).getByTestId('print-media-remaining-value')).toHaveTextContent(/^187$/);
@@ -371,6 +505,7 @@ describe('PrintStationsPanel', () => {
   it('says plainly when the printer gives no number, and never invents one', async () => {
     mockApi({ 'GET /api/print/stations': () => jsonResponse([withMedia(null)]) });
     render(view());
+    await openStation();
     const media = await screen.findByTestId('print-media-remaining');
     expect(within(media).getByTestId('print-media-remaining-value')).toHaveTextContent(/^—$/);
     expect(media).toHaveTextContent('Numero non disponibile');
@@ -379,6 +514,7 @@ describe('PrintStationsPanel', () => {
   it('labels an offline printer\'s count as the last reading, never as current', async () => {
     mockApi({ 'GET /api/print/stations': () => jsonResponse([withMedia(187, 'offline')]) });
     render(view());
+    await openStation();
     const media = await screen.findByTestId('print-media-remaining');
     expect(media).toHaveAttribute('data-state', 'last');
     expect(within(media).getByTestId('print-media-remaining-value')).toHaveTextContent(/^Ultimo dato: 187 · \d{2}[:.]\d{2}$/);
@@ -387,6 +523,7 @@ describe('PrintStationsPanel', () => {
   it('warns when the printer reports its media used up — and still lets it print', async () => {
     mockApi({ 'GET /api/print/stations': () => jsonResponse([withMedia(0)]) });
     render(view());
+    await openStation();
     const media = await screen.findByTestId('print-media-remaining');
     expect(media).toHaveTextContent('La stampante segnala che il supporto è esaurito');
     expect(screen.getByRole('button', { name: 'Stampa pagina test' })).toBeEnabled();
@@ -422,6 +559,7 @@ describe('PrintStationsPanel', () => {
         },
       });
       const { unmount } = render(view());
+      await openStation();
       await screen.findByTestId('print-media-remaining');
       expect(reads).toBe(1);
 
@@ -457,6 +595,7 @@ describe('PrintStationsPanel', () => {
         },
       });
       render(view());
+    await openStation();
       await screen.findByTestId('print-media-remaining');
       await vi.advanceTimersByTimeAsync(PRINT_STATIONS_REFRESH_MS);
       await waitFor(() => expect(reads).toBe(2));

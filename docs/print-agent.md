@@ -16,6 +16,34 @@ artifact contains the executable, runtime, configuration defaults, install and
 uninstall scripts, the source commit and an executable SHA-256 checksum. No
 .NET runtime installation is required on the station.
 
+For `linux-x64` the workflow (with `publish`, on by default) also packages
+the Print Box bundle — `nubarca-print-agent-<version>-linux-x64.zip`, its
+`.sha256` and a `nubarca-print-agent.release.json` manifest — as the immutable
+GHCR image `ghcr.io/<owner>/nubarca-print-agent:<commit>-linux-x64`. The run
+summary prints the command that publishes it on the server, from the
+production checkout:
+
+```bash
+./deploy/pull-publish-print-agent-image.sh ghcr.io/<owner>/nubarca-print-agent@sha256:<digest>
+```
+
+It accepts only a bundle built from that checkout's `main`, checks the zip
+against its manifest, and writes it into the API's read-only volume
+`nubarca-print-agent-data` (the pointer `current-linux-x64.json` last). The API
+hashes the zip again before it offers it. An administrator then switches the
+download on or off on the printers page (**Print Agent for the Print Box**);
+while it is on, a box downloads it without an account from
+`/api/print-agent/download/<file>`, rate-limited.
+
+**Versions.** An agent reports its version and — from agent 0.7, read from the
+bundle's `source-commit.txt` — the commit it was built from. The server serves
+every agent from `PrintAgentCompatibility.MinimumVersion` (0.2.2) up: an older
+compatible one keeps working and the printers page only says an update is
+available; one below the minimum is refused at enrollment (`409
+agent_incompatible`, the token is not spent) and given no work. A station
+reporting the published version from another build, or none, is marked as an
+unofficial build.
+
 For a local package equivalent to CI:
 
 ```powershell
@@ -300,6 +328,13 @@ power on ──> Ethernet or a known Wi-Fi within 30 s? ──yes──> print
 - The DNP plugged in over USB and switched on, so its queues can be created.
 
 ### Install
+
+The printers page does this for you: **Add printer** → a name → **Create and
+connect** shows the commands below already filled in (server, station, file
+and hash), each with a copy button, the activation code apart with its
+countdown, and waits until the box connects. On a connected box,
+**Update instructions** shows the same steps without a code: the station, its
+credential, the Wi-Fi and the queues stay.
 
 Three commands and two answers; nothing else is done by hand.
 

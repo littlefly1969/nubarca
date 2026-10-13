@@ -460,6 +460,19 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true,
             }));
 
+    // The Print Agent bundle, downloaded by a box without an account: a box
+    // needs it once, a retry or two — never a loop on the installation's line.
+    options.AddPolicy(NubArca.Api.Endpoints.PrintAgentDistributionEndpoints.DownloadRateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromHours(1),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+
     options.AddPolicy(SharePublicRateLimitPolicy, httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -1179,6 +1192,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<IJobQueue, JobQueue>();
     builder.Services.AddScoped<JobProcessor>();
     builder.Services.AddScoped<NubArca.Api.Print.PrintStationService>();
+    builder.Services.AddScoped<NubArca.Api.Print.PrintAgentDistributionService>();
     builder.Services.AddSingleton<NubArca.Api.Print.PrintArtifactRenderer>();
     builder.Services.AddScoped<NubArca.Api.Print.IOwnerPhotoPrintService, NubArca.Api.Print.OwnerPhotoPrintService>();
     builder.Services.AddScoped<NubArca.Api.Print.IPartyQrCardPrintService, NubArca.Api.Print.PartyQrCardPrintService>();
@@ -1429,6 +1443,10 @@ builder.Services.Configure<ImageProcessingOptions>(
     builder.Configuration.GetSection(ImageProcessingOptions.SectionName));
 builder.Services.Configure<NubArca.Api.Print.PrintOptions>(
     builder.Configuration.GetSection(NubArca.Api.Print.PrintOptions.SectionName));
+builder.Services.Configure<NubArca.Api.Print.PrintAgentBundleOptions>(
+    builder.Configuration.GetSection(NubArca.Api.Print.PrintAgentBundleOptions.SectionName));
+// The published Print Agent bundle: read-only files, hashed once per publication.
+builder.Services.AddSingleton<NubArca.Api.Print.PrintAgentBundleStore>();
 builder.Services.AddSingleton(TimeProvider.System);
 // Password-recovery email. Bound outside the Postgres-conditional block so the
 // public status endpoint answers even on a host without a database, and so a
@@ -1616,6 +1634,7 @@ app.MapAuthEndpoints();
 // see that file for the implementation.
 app.MapTvEndpoints();
 app.MapPrintEndpoints();
+app.MapPrintAgentDistributionEndpoints();
 
 // Slice 65: the caller's own logical storage usage + quota. Owner-scoped:
 // returns ONLY the authenticated user's figures, never anyone else's. No

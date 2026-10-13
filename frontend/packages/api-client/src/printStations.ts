@@ -134,6 +134,42 @@ export interface PrintStation {
   lastError: string | null;
   /** What is waiting, oldest first, whoever sent it. */
   queue?: PrintJobSummary[] | null;
+  /** The agent against this server and the bundle it hands out; null until enrolled. */
+  agent?: PrintAgentStatus | null;
+}
+
+/**
+ * How a station's Print Agent stands. An older agent that is still compatible
+ * works normally (`update-available` is information, never an obligation);
+ * only an `incompatible` one is refused work.
+ */
+export interface PrintAgentStatus {
+  version: string | null;
+  /** The first 12 characters of the commit it was built from, when it says. */
+  build: string | null;
+  compatibility: 'current' | 'update-available' | 'incompatible' | 'unknown';
+  /** Claims the published version without being that build (a development one). */
+  unofficial: boolean;
+  latestVersion: string | null;
+}
+
+/** The Print Agent bundle this installation hands out to a Print Box. */
+export interface PrintAgentBundle {
+  /** A bundle is published and its bytes check out. */
+  available: boolean;
+  /** An administrator has the download switched on. */
+  sharing: boolean;
+  /** The reader may switch it. */
+  canManage: boolean;
+  minimumVersion: string;
+  version: string | null;
+  runtime: string | null;
+  fileName: string | null;
+  sha256: string | null;
+  sizeBytes: number | null;
+  sourceCommit: string | null;
+  /** Where a box downloads it, without an account; null while not shared. */
+  downloadPath: string | null;
 }
 
 export interface PrintStationEnrollment {
@@ -156,6 +192,13 @@ export function setPrintStationDesiredState(id: string, desiredState: PrintDesir
   return api(`/api/print/stations/${encodeURIComponent(id)}/desired-state`, {
     method: 'PUT', json: { desiredState },
   });
+}
+export function getPrintAgentBundle(signal?: AbortSignal): Promise<PrintAgentBundle> {
+  return api('/api/print/agent', { signal });
+}
+/** Administrators only: hand the bundle out, or stop. */
+export function setPrintAgentSharing(enabled: boolean): Promise<PrintAgentBundle> {
+  return api('/api/print/agent/sharing', { method: 'PUT', json: { enabled } });
 }
 export function revokePrintStation(id: string): Promise<void> {
   return api(`/api/print/stations/${encodeURIComponent(id)}`, { method: 'DELETE' });

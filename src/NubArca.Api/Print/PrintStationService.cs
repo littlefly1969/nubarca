@@ -18,11 +18,13 @@ public sealed class PrintStationService
     private readonly IPrinterAccess _printers;
 
     private readonly ILogger<PrintStationService> _logger;
+    private readonly PrintAgentBundleStore? _bundles;
 
     public PrintStationService(AppDbContext db, TimeProvider clock, IOptions<PrintOptions> options,
         IDerivedBlobStorage artifacts, PrintArtifactRenderer renderer, IPrinterAccess printers,
-        ILogger<PrintStationService>? logger = null)
+        ILogger<PrintStationService>? logger = null, PrintAgentBundleStore? bundles = null)
     {
+        _bundles = bundles;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PrintStationService>.Instance;
         _db = db;
         _clock = clock;
@@ -70,6 +72,10 @@ public sealed class PrintStationService
     public async Task<PrintEnrollmentResponse?> EnrollAsync(
         PrintEnrollmentRequest request, CancellationToken cancellationToken)
     {
+        // Before the one-shot token is spent: an agent too old to be served is
+        // told so, and the same token still enrolls the updated one.
+        if (!PrintAgentCompatibility.IsCompatible(request.AgentVersion))
+            throw new PrintAgentIncompatibleException();
         var now = Now;
         var digest = PrintSecurity.Digest(request.EnrollmentToken);
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
@@ -92,6 +98,7 @@ public sealed class PrintStationService
         var credential = $"{station.Id:N}.{secret}";
         station.CredentialHash = PrintSecurity.Digest(credential);
         station.AgentVersion = NormalizeVersion(request.AgentVersion);
+        station.AgentBuild = NormalizeBuild(request.AgentBuild);
         await _db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new(station.Id, credential, station.DesiredState);
@@ -104,6 +111,7 @@ public sealed class PrintStationService
             .Where(x => x.OwnerUserId == ownerId)
             .OrderBy(x => x.Name).ThenBy(x => x.Id)
             .ToListAsync(cancellationToken);
+        var bundle = _bundles is null || stations.Count == 0 ? null : await _bundles.CurrentAsync(cancellationToken);
         var stationIds = stations.Select(x => x.Id).ToArray();
         var devices = await _db.PrinterDevices.AsNoTracking()
             .Where(x => stationIds.Contains(x.PrintStationId))
@@ -173,7 +181,10 @@ public sealed class PrintStationService
                 current is null ? null : Job(current), lastError,
                 // The queue, oldest first: what is waiting, for which paper, and
                 // whose — so the owner can see and clear a lent printer's work.
-                stationJobs.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).Take(25).Select(Job).ToArray());
+                stationJobs.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).Take(25).Select(Job).ToArray(),
+                // Never enrolled: no agent to describe yet.
+                station.AgentVersion is null ? null
+                    : PrintAgentCompatibility.Describe(station.AgentVersion, station.AgentBuild, bundle));
         }).ToArray();
     }
 
@@ -416,6 +427,7 @@ public sealed class PrintStationService
         var now = Now;
         station.LastSeenAt = now;
         station.AgentVersion = NormalizeVersion(request.AgentVersion);
+        station.AgentBuild = NormalizeBuild(request.AgentBuild);
         var knownDevices = await _db.PrinterDevices
             .Where(x => x.PrintStationId == stationId)
             .ToDictionaryAsync(x => x.DeviceKey, StringComparer.Ordinal, cancellationToken);
@@ -532,6 +544,8 @@ public sealed class PrintStationService
             x => x.Id == stationId && x.Enabled && x.RevokedAt == null
                 && x.DesiredState == PrintDesiredStates.Running, cancellationToken);
         if (station is null) return null;
+        // An agent too old to be served gets no work: its station says why.
+        if (!PrintAgentCompatibility.IsCompatible(station.AgentVersion)) return null;
 
         for (var attempt = 0; attempt < 4; attempt++)
         {
@@ -748,6 +762,9 @@ public sealed class PrintStationService
             throw new ArgumentException("invalid_device_report");
     }
 
+    /// <summary>A 40-hex source commit, lower case; anything else is no build.</summary>
+    private static string? NormalizeBuild(string? value) =>
+        value is { Length: 40 } && value.All(Uri.IsHexDigit) ? value.ToLowerInvariant() : null;
     private static string NormalizeVersion(string value) =>
         string.IsNullOrWhiteSpace(value) ? "unknown" : value.Trim()[..Math.Min(64, value.Trim().Length)];
     private static string? TrimOrNull(string? value, int max) =>

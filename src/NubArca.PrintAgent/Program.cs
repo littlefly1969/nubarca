@@ -122,8 +122,17 @@ static async Task<int> EnrollAsync(string[] args, PrintAgentOptions options)
     }
     using var http = new HttpClient { BaseAddress = new Uri(origin.ToString().TrimEnd('/') + "/") };
     var api = new PrintAgentApiClient(http);
-    var version = typeof(PrintAgentWorker).Assembly.GetName().Version?.ToString() ?? "unknown";
-    var response = await api.EnrollAsync(stationId, token, version, CancellationToken.None);
+    AgentEnrollmentResponse response;
+    try
+    {
+        response = await api.EnrollAsync(stationId, token, AgentBuildInfo.Version, AgentBuildInfo.Build,
+            CancellationToken.None);
+    }
+    catch (AgentIncompatibleException ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        return 6;
+    }
     await PrintAgentPlatform.CreateCredentialStore(options.CredentialPath)
         .SaveAsync(response.StationCredential, CancellationToken.None);
     Console.WriteLine($"Print Station {response.StationId:D} enrolled. Credential stored in the platform credential store.");

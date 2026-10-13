@@ -426,6 +426,9 @@ services:
       - storage-data:/var/lib/nubarca/storage
       - dataprotection-keys:/var/lib/nubarca/dataprotection-keys
       - tv-updates-data:/var/lib/nubarca/tv-updates:ro
+      # The published Print Agent bundle (zip + its current-<runtime>.json
+      # pointer), written only by deploy/pull-publish-print-agent-image.sh.
+      - print-agent-data:/var/lib/nubarca/print-agent:ro
       # Slice 72: mount a separate volume for derived media ONLY if you set
       # Storage__DerivedRootPath (above) to this in-container path. Leave both
       # commented for the single-root default. The host backing for this volume
@@ -676,6 +679,11 @@ volumes:
 
   tv-updates-data:
     name: nubarca-tv-updates-data
+
+  # Docker-managed: the bundle is published into it by a throwaway container,
+  # so it needs no host path and no .env setting.
+  print-agent-data:
+    name: nubarca-print-agent-data
 
   storage-data:
     name: nubarca-storage-data

@@ -6,7 +6,9 @@ public sealed record CreatePrintStationRequest(string Name);
 public sealed record SetPrintStationStateRequest(string DesiredState);
 public sealed record CreatePrintStationResponse(
     Guid Id, string Name, string EnrollmentToken, DateTime EnrollmentExpiresAt);
-public sealed record PrintEnrollmentRequest(Guid StationId, string EnrollmentToken, string AgentVersion);
+/// <summary><c>AgentBuild</c>: the source commit the agent was built from; absent from an agent that predates it.</summary>
+public sealed record PrintEnrollmentRequest(Guid StationId, string EnrollmentToken, string AgentVersion,
+    string? AgentBuild = null);
 public sealed record PrintEnrollmentResponse(Guid StationId, string StationCredential, string DesiredState);
 public sealed record PrinterDeviceReport(
     string DeviceKey, string DisplayName, string? Manufacturer, string? Model,
@@ -23,7 +25,8 @@ public sealed record PrinterDeviceReport(
 /// is, never a timestamp of the box's own.
 /// </summary>
 public sealed record PrinterMediaRemainingReport(bool Available, int? RemainingPrints, int? AgeSeconds);
-public sealed record PrintHeartbeatRequest(string AgentVersion, IReadOnlyList<PrinterDeviceReport> Devices);
+public sealed record PrintHeartbeatRequest(string AgentVersion, IReadOnlyList<PrinterDeviceReport> Devices,
+    string? AgentBuild = null);
 public sealed record PrintHeartbeatResponse(string DesiredState, DateTime ServerTime);
 public sealed record PrintDeviceDto(
     Guid Id, string DisplayName, string? Manufacturer, string? Model,
@@ -89,7 +92,9 @@ public sealed record PrintStationDto(
     IReadOnlyList<PrintDeviceDto> Devices, int QueueCount,
     PrintJobSummaryDto? CurrentJob, string? LastError,
     /// <summary>What is waiting, oldest first, whoever sent it.</summary>
-    IReadOnlyList<PrintJobSummaryDto>? Queue = null);
+    IReadOnlyList<PrintJobSummaryDto>? Queue = null,
+    /// <summary>The agent's version and build against this server and the bundle it hands out.</summary>
+    PrintAgentStatusDto? Agent = null);
 public sealed record CreateTestPrintRequest(Guid PrinterDeviceId);
 public sealed record PrintClaimRequest(string? AdapterKind = null);
 public sealed record PrintClaimResponse(

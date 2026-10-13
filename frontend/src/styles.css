@@ -8687,7 +8687,40 @@ video.lightbox-image {
 .print-enrollment { margin: 1rem 0; padding: 1rem; border: 1px solid var(--warning-border, #f59e0b); border-radius: 10px; background: var(--surface-muted, rgba(0,0,0,.03)); }
 .print-enrollment h3 { margin-top: 0; }
 .print-enrollment code { display: block; padding: .75rem; margin: .65rem 0; overflow-wrap: anywhere; user-select: all; background: var(--surface-2, rgba(127,127,127,.12)); border-radius: 6px; }
-.print-station-list { list-style: none; padding: 0; display: grid; gap: 1rem; }
+.print-station-list { list-style: none; padding: 0; display: grid; gap: .75rem; }
+/* Phone first: the toolbar, each printer and every action are full-width
+   targets a thumb can hit; wider screens only give them room. */
+.print-stations { display: grid; gap: 1rem; max-width: 52rem; }
+.print-stations-toolbar { display: flex; gap: .5rem; flex-wrap: wrap; }
+.print-stations-toolbar .primary-button { flex: 1 1 12rem; min-height: 2.75rem; }
+.print-back { justify-self: start; min-height: 2.75rem; padding: .4rem .2rem; border: 0; background: none; color: var(--accent, inherit); font-weight: 600; }
+.print-station-row { display: grid; gap: .35rem; width: 100%; min-height: 3.5rem; padding: .85rem 1rem; text-align: start; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: inherit; cursor: pointer; }
+.print-station-row:hover, .print-station-row:focus-visible { border-color: var(--accent, currentColor); }
+.print-station-row-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.print-station-row-line { overflow-wrap: anywhere; font-size: .9rem; }
+.print-agent-badge { justify-self: start; font-size: .8rem; padding: .15rem .55rem; border-radius: 999px; background: var(--surface-2, rgba(127,127,127,.12)); }
+.print-agent-update-available { color: var(--warning, #b45309); }
+.print-agent-incompatible { color: var(--danger, #b91c1c); font-weight: 600; }
+.print-station-section { display: grid; gap: .5rem; padding-top: .75rem; border-top: 1px solid var(--border); }
+.print-station-section h4 { margin: 0; }
+.print-bundle-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; padding: .85rem 1rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-muted, rgba(0,0,0,.03)); }
+.print-bundle-card h3 { margin: 0 0 .25rem; font-size: 1rem; }
+.print-bundle-card p { margin: 0; }
+.print-bundle-card button { min-height: 2.75rem; flex: 1 1 12rem; max-width: 18rem; }
+.print-guide { display: grid; gap: .75rem; padding: 1rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.print-guide h3, .print-guide h4, .print-guide p { margin: 0; }
+.print-guide-platforms { display: flex; flex-wrap: wrap; gap: .5rem; }
+.print-guide-platform { display: inline-flex; align-items: center; gap: .4rem; min-height: 2.75rem; padding: 0 .85rem; border: 1px solid var(--border); border-radius: 999px; }
+.print-guide-command { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; align-items: start; }
+.print-guide-command pre { margin: 0; padding: .75rem; overflow-x: auto; border-radius: 8px; background: var(--surface-2, rgba(127,127,127,.12)); font-size: .82rem; line-height: 1.5; }
+.print-guide-command button { min-height: 2.75rem; }
+.print-guide-code { display: grid; gap: .5rem; padding: .75rem; border: 1px dashed var(--warning-border, #f59e0b); border-radius: 10px; }
+.print-guide-blocked { color: var(--warning, #b45309); }
+.print-guide-connected { color: var(--success, #15803d); font-weight: 600; }
+@media (max-width: 480px) {
+  .print-guide-command { grid-template-columns: 1fr; }
+  .print-station-actions > button { flex: 1 1 100%; min-height: 2.75rem; }
+}
 .print-station-card { border: 1px solid var(--border); border-radius: 12px; padding: 1rem; background: var(--surface); }
 .print-station-card > header { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
 .print-station-card h3 { display: inline; margin: 0 .6rem 0 0; }
