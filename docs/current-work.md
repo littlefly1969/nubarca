@@ -206,7 +206,9 @@ is built is described by `ARCHITECTURE.md`.
   the live queue and a per-person sheet summary aggregated in SQL over the
   printer's whole history
 - CI: GitHub Actions verifies identity, backend, frontend, TV and mobile on pull
-  requests and `main`; the external backend lane runs nightly or on demand; a
+  requests and `main`; the fast backend lane runs as 8 parallel slices balanced
+  on `tests/backend-test-timings.json`, gathered by the required
+  `Backend build and fast tests` check (`docs/testing.md`); the external backend lane runs nightly or on demand; a
   separate manual, `main`-only native TV workflow builds and validates the
   definitively signed APK and optionally publishes an immutable GHCR bundle. A
   separate manual, `main`-only OTA workflow is the sole ordinary OTA signer and

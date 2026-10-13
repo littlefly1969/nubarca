@@ -27,7 +27,8 @@ secrets.
 manual dispatch. Its independent jobs run in parallel and verify:
 
 - the NubArca product identity contract;
-- a Release build and the deterministic backend lane;
+- a Release build and the deterministic backend lane, split into 8 parallel
+  slices (see below);
 - frontend typechecking, tests, and production build;
 - TV typechecking and tests;
 - mobile typechecking.
@@ -47,6 +48,37 @@ and full-suite results for 14 days.
 Neither workflow deploys, publishes a release, writes to the repository, or
 receives production secrets. Production deployment remains a separate,
 operator-controlled operation governed by `deploy/FAST_DEPLOY.md`.
+
+The Android startup smoke (an APK build and an emulator cold launch, the
+slowest job) runs on a pull request only when it changes `mobile/`,
+`packages/` or `ci.yml`, and always on `main`; otherwise it reports skipped,
+which satisfies a required check. If the change detector itself fails, the
+smoke runs: it never skips for want of an answer.
+
+### Backend slices
+
+In one job the fast lane takes about 40 minutes, so CI runs it as 8 parallel
+jobs, `Backend fast tests (I/8)`, and a final `Backend build and fast tests`
+job that is green only when every slice passed (that name is the check to
+require). `scripts/test-backend-fast.sh --shard I/N` lists the built tests and
+asks `scripts/backend-test-shards.py` for slice I: whole test classes, the
+longest placed first, each on the least loaded slice, using the per-class
+seconds in `tests/backend-test-timings.json`. A class missing from that file
+counts as the median one, so new tests need no bookkeeping, and no class counts
+for less than 0.1 s per test, so classes recorded as 0.0 s do not all land on
+one slice. The script refuses a split in which any test would run in no slice
+or in two.
+
+When the slices drift apart, refresh the timings from the `.trx` files of one
+CI run: the artifacts `backend-fast-test-results-1` to `-8`. They measure the
+classes as they actually run, in slices; a single-process local run is slowed
+by its tests contending with each other and distorts the balance.
+
+```bash
+scripts/backend-test-shards.py timings backend-fast-test-results-*/*.trx
+dotnet test tests/NubArca.Api.Tests --no-build --list-tests > /tmp/tests.txt
+scripts/backend-test-shards.py plan --list /tmp/tests.txt --shards 8
+```
 
 Additional arguments are passed through to `dotnet test`, for example:
 
