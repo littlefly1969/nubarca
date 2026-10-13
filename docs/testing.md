@@ -27,7 +27,8 @@ secrets.
 manual dispatch. Its independent jobs run in parallel and verify:
 
 - the NubArca product identity contract;
-- a Release build and the deterministic backend lane;
+- a Release build and the deterministic backend lane, split into 8 parallel
+  slices (see below);
 - frontend typechecking, tests, and production build;
 - TV typechecking and tests;
 - mobile typechecking.
@@ -47,6 +48,27 @@ and full-suite results for 14 days.
 Neither workflow deploys, publishes a release, writes to the repository, or
 receives production secrets. Production deployment remains a separate,
 operator-controlled operation governed by `deploy/FAST_DEPLOY.md`.
+
+### Backend slices
+
+In one job the fast lane takes about 40 minutes, so CI runs it as 8 parallel
+jobs, `Backend fast tests (I/8)`, and a final `Backend build and fast tests`
+job that is green only when every slice passed (that name is the check to
+require). `scripts/test-backend-fast.sh --shard I/N` lists the built tests and
+asks `scripts/backend-test-shards.py` for slice I: whole test classes, the
+longest placed first, each on the least loaded slice, using the per-class
+seconds in `tests/backend-test-timings.json`. A class missing from that file
+counts as the median one, so new tests need no bookkeeping; the script refuses
+a split in which any test would run in no slice or in two.
+
+When the slices drift apart, refresh the timings from a full fast run:
+
+```bash
+scripts/test-backend-fast.sh --logger "trx;LogFileName=fast.trx" --results-directory TestResults
+scripts/backend-test-shards.py timings TestResults/fast.trx
+dotnet test tests/NubArca.Api.Tests --no-build --list-tests > /tmp/tests.txt
+scripts/backend-test-shards.py plan --list /tmp/tests.txt --shards 8
+```
 
 Additional arguments are passed through to `dotnet test`, for example:
 

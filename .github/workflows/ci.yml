@@ -45,12 +45,18 @@ jobs:
       - name: Verify brand asset consumer copies
         run: python3 scripts/sync-brand-assets.py --check
 
-  backend:
-    name: Backend build and fast tests
+  # The fast suite takes about 40 minutes in one job, so it runs as parallel
+  # slices balanced on recorded class durations (scripts/backend-test-shards.py,
+  # tests/backend-test-timings.json). Every slice lists the build it made and
+  # computes the same partition, so together they run every class once.
+  backend_shard:
+    name: Backend fast tests (${{ matrix.shard }}/8)
     runs-on: ubuntu-24.04
-    # The fast suite alone runs about 40 minutes on a hosted runner; 45 left
-    # no margin and cancelled green runs mid-suite.
-    timeout-minutes: 60
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -97,6 +103,7 @@ jobs:
       - name: Run fast backend tests
         run: >-
           scripts/test-backend-fast.sh
+          --shard ${{ matrix.shard }}/8
           --configuration Release
           --no-restore
           --no-build
@@ -107,10 +114,24 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-fast-test-results
+          name: backend-fast-test-results-${{ matrix.shard }}
           path: TestResults/backend-fast/**/*.trx
           if-no-files-found: ignore
           retention-days: 7
+
+  # The one check branch protection and reviewers look at: green only when
+  # every slice passed.
+  backend:
+    name: Backend build and fast tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: backend_shard
+    if: always()
+    steps:
+      - name: Every slice passed
+        run: |
+          echo "slices: ${{ needs.backend_shard.result }}"
+          test "${{ needs.backend_shard.result }}" = success
 
   backend_concurrency:
     # THE RACES ARE PART OF THE GATE.
