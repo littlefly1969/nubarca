@@ -50,6 +50,19 @@ public sealed class PrinterDevice
     /// count never touches either column.
     /// </summary>
     public DateTime? MediaRemainingObservedAt { get; set; }
+
+    /// <summary>
+    /// The owner's switch: this printer's jobs go to its simulated twin — the
+    /// same CUPS queues and driver ending in a backend that writes a file —
+    /// instead of paper. Effective only while the agent reports a twin.
+    /// </summary>
+    public bool Simulated { get; set; }
+
+    /// <summary>The agent reports a simulated twin for this printer (written by every heartbeat).</summary>
+    public bool SimulationAvailable { get; set; }
+
+    /// <summary>The agent has no real printer behind it, only the simulated twin: always simulated.</summary>
+    public bool SimulationOnly { get; set; }
 }
 
 public static class PrintDeviceStates

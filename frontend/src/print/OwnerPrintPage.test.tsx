@@ -353,6 +353,13 @@ describe('OwnerPrintPage', () => {
     expect(screen.getByTestId('owner-print-caption')).toHaveValue('');
   });
 
+  it('says a simulated printer is simulated where it is chosen', async () => {
+    const simulated = station();
+    simulated.devices[0] = { ...simulated.devices[0], simulated: true } as typeof simulated.devices[0];
+    mount(`/print?album=${ALBUM}&files=f1`, { stations: [simulated] });
+    expect(await screen.findByTestId('owner-print-printer-d1')).toHaveTextContent('Simulata');
+  });
+
   it('says there is no printer to use rather than offering a studio that cannot print', async () => {
     mount(`/print?album=${ALBUM}`, { stations: [] });
     expect(await screen.findByTestId('owner-print-empty')).toHaveTextContent('Nessuna stampante disponibile');

@@ -313,6 +313,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 PrintLayouts.TwinStrip4 => PrintJobKinds.OwnerStrip4,
                 _ => PrintJobKinds.OwnerPhoto,
             };
+            var simulated = await PrintSimulation.IsActiveAsync(_db, deviceId, cancellationToken);
             await StoragePublish.PublishOwnedAsync(_db, _artifacts, staged, async (stored, ct) =>
             {
                 var now = Now;
@@ -322,6 +323,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                     OwnerUserId = ownerUserId,
                     PrintStationId = stationId,
                     PrinterDeviceId = deviceId,
+                    Simulated = simulated,
                     FileItemId = fileIds[0],
                     Kind = kind,
                     Format = printFormat,

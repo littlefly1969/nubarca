@@ -12,9 +12,10 @@ public static class LocalExecutionStates
     public const string Acknowledged = "acknowledged";
 }
 
+/// <summary><c>Simulated</c> is kept with the job: a recovery after a restart sends it to the twin, not to paper.</summary>
 public sealed record JournalEntry(Guid JobId, string ClaimToken, string ArtifactPath,
     string DeviceKey, string ContentType, string Format, string State,
-    string? FailureCode, string? SpoolReference);
+    string? FailureCode, string? SpoolReference, bool Simulated = false);
 
 public sealed class ExecutionJournal
 {
@@ -41,10 +42,20 @@ public sealed class ExecutionJournal
               state TEXT NOT NULL,
               failure_code TEXT NULL,
               spool_reference TEXT NULL,
-              updated_at TEXT NOT NULL
+              updated_at TEXT NOT NULL,
+              simulated INTEGER NOT NULL DEFAULT 0
             );
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
+        // A journal from before simulation gains the column; its rows were never simulated.
+        var columns = connection.CreateCommand();
+        columns.CommandText = "SELECT count(*) FROM pragma_table_info('executions') WHERE name = 'simulated'";
+        if (Convert.ToInt64(await columns.ExecuteScalarAsync(cancellationToken)) == 0)
+        {
+            var alter = connection.CreateCommand();
+            alter.CommandText = "ALTER TABLE executions ADD COLUMN simulated INTEGER NOT NULL DEFAULT 0";
+            await alter.ExecuteNonQueryAsync(cancellationToken);
+        }
     }
 
     public Task UpsertClaimedAsync(JournalEntry entry, CancellationToken cancellationToken) =>
@@ -70,14 +81,15 @@ public sealed class ExecutionJournal
     {
         await using var connection = await OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT job_id, claim_token, artifact_path, device_key, content_type, format, state, failure_code, spool_reference FROM executions WHERE state <> $acked ORDER BY updated_at";
+        command.CommandText = "SELECT job_id, claim_token, artifact_path, device_key, content_type, format, state, failure_code, spool_reference, simulated FROM executions WHERE state <> $acked ORDER BY updated_at";
         command.Parameters.AddWithValue("$acked", LocalExecutionStates.Acknowledged);
         var rows = new List<JournalEntry>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
             rows.Add(new(Guid.Parse(reader.GetString(0)), reader.GetString(1), reader.GetString(2),
                 reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6),
-                reader.IsDBNull(7) ? null : reader.GetString(7), reader.IsDBNull(8) ? null : reader.GetString(8)));
+                reader.IsDBNull(7) ? null : reader.GetString(7), reader.IsDBNull(8) ? null : reader.GetString(8),
+                reader.GetInt64(9) != 0));
         return rows;
     }
 
@@ -86,11 +98,11 @@ public sealed class ExecutionJournal
         await using var connection = await OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO executions(job_id, claim_token, artifact_path, device_key, content_type, format, state, failure_code, spool_reference, updated_at)
-            VALUES($id,$claim,$path,$device,$content,$format,$state,$failure,$spool,$now)
+            INSERT INTO executions(job_id, claim_token, artifact_path, device_key, content_type, format, state, failure_code, spool_reference, updated_at, simulated)
+            VALUES($id,$claim,$path,$device,$content,$format,$state,$failure,$spool,$now,$simulated)
             ON CONFLICT(job_id) DO UPDATE SET claim_token=$claim, artifact_path=$path,
               device_key=$device, content_type=$content, format=$format, state=$state,
-              failure_code=$failure, spool_reference=$spool, updated_at=$now;
+              failure_code=$failure, spool_reference=$spool, updated_at=$now, simulated=$simulated;
             """;
         command.Parameters.AddWithValue("$id", entry.JobId.ToString("D"));
         command.Parameters.AddWithValue("$claim", entry.ClaimToken);
@@ -102,6 +114,7 @@ public sealed class ExecutionJournal
         command.Parameters.AddWithValue("$failure", (object?)entry.FailureCode ?? DBNull.Value);
         command.Parameters.AddWithValue("$spool", (object?)entry.SpoolReference ?? DBNull.Value);
         command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
+        command.Parameters.AddWithValue("$simulated", entry.Simulated ? 1 : 0);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 

@@ -94,10 +94,33 @@ static async Task<int> SetupCupsAsync(string[] args)
         Console.Error.WriteLine("Usage: NubArca.PrintAgent setup-cups [--printer <queue>] [--strip-printer <queue>]");
         return 2;
     }
-    var result = await new CupsQueueSetup(new ProcessRunner()).RunAsync(photo, strip, CancellationToken.None);
+    var setup = new CupsQueueSetup(new ProcessRunner());
+    var simulationOnly = args.Any(x => string.Equals(x, "--simulation-only", StringComparison.OrdinalIgnoreCase));
+    var simulation = simulationOnly || args.Any(x => string.Equals(x, "--simulation", StringComparison.OrdinalIgnoreCase));
+    var suffix = Value("--simulation-suffix", "-SIM");
+    if (simulation && !name.IsMatch(photo + suffix))
+    {
+        Console.Error.WriteLine("The simulation suffix makes an invalid queue name.");
+        return 2;
+    }
+    if (simulationOnly)
+    {
+        // No printer behind this box: only the twins, named as configured.
+        var twins = await setup.RunSimulationAsync(photo, strip, CancellationToken.None);
+        if (twins.Driver is not null) Console.WriteLine($"Driver:  {twins.Driver}");
+        Console.WriteLine(twins.Message);
+        return twins.StripQueue ? 0 : twins.PhotoQueue ? 10 : 4;
+    }
+    var result = await setup.RunAsync(photo, strip, CancellationToken.None);
     if (result.DeviceUri is not null) Console.WriteLine($"Printer: {result.DeviceUri}");
     if (result.Driver is not null) Console.WriteLine($"Driver:  {result.Driver}");
     Console.WriteLine(result.Message);
+    if (simulation)
+    {
+        // Beside the real queues, their twins — whatever the printer's state.
+        var twins = await setup.RunSimulationAsync(photo + suffix, strip + suffix, CancellationToken.None);
+        Console.WriteLine(twins.Message);
+    }
     // 0 both queues, 10 photos only (no cut size), 3 no printer, 4 anything else.
     return result.StripQueue ? 0 : result.PhotoQueue ? 10 : result.PrinterFound ? 4 : 3;
 }

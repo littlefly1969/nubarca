@@ -23,6 +23,12 @@ public sealed class PrintJob
     public DateTime? SubmittedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public string? FailureCode { get; set; }
+    /// <summary>
+    /// Fixed when the job is created, from its printer's simulation then: the
+    /// agent sends a simulated job to the simulated twin, never to paper, and a
+    /// switch changed later moves no job already queued.
+    /// </summary>
+    public bool Simulated { get; set; }
 }
 
 public static class PrintJobKinds

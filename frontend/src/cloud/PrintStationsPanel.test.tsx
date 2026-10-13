@@ -267,6 +267,64 @@ describe('PrintStationsPanel', () => {
     expect(screen.getByTestId('print-station-detail')).toBeInTheDocument();
   });
 
+  it('switches a printer to its simulated twin, shows the sheets it made and clears them', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const device = station.devices[0];
+    let simulated = false;
+    let prints = [{ id: 'sim-1', shortCode: 'abcd1234', kind: 'diagnostic', format: '10x15', state: 'completed',
+      createdAt: '2026-10-13T10:00:00Z', ownerName: 'Mario' }];
+    const base = `/api/print/stations/${station.id}/devices/${device.id}`;
+    const mock = mockApi({
+      'GET /api/print/stations': () => jsonResponse([{ ...station,
+        devices: [{ ...device, simulationAvailable: true, simulated }] }]),
+      [`PUT ${base}/simulation`]: () => { simulated = true; return jsonResponse({ ...device, simulated: true }); },
+      [`GET ${base}/simulated-jobs`]: () => jsonResponse(prints),
+      [`DELETE ${base}/simulated-jobs`]: () => { prints = []; return jsonResponse({ cleared: 1 }); },
+    });
+    render(view());
+    await openStation();
+    const section = screen.getByTestId('print-simulation');
+    await user.click(within(section).getByRole('button', { name: 'Attiva simulazione' }));
+    expect(JSON.parse(mock.calls.find((c) => c.method === 'PUT' && c.url.endsWith('/simulation'))!.body!))
+      .toEqual({ enabled: true });
+
+    expect(await screen.findByTestId('print-sim-badge')).toHaveTextContent('Simulata');
+    expect(within(screen.getByTestId('print-simulation')).getByRole('status'))
+      .toHaveTextContent('le stampe vanno su file, non su carta');
+    const row = await screen.findByTestId('print-simulated-row');
+    expect(row).toHaveTextContent('abcd1234');
+    expect(row).toHaveTextContent('Mario');
+    expect(within(row).getByRole('img', { name: 'Foglio abcd1234' }))
+      .toHaveAttribute('src', '/api/print/jobs/sim-1/simulated-sheet');
+    expect(within(row).getByRole('link', { name: 'Scarica' }))
+      .toHaveAttribute('href', '/api/print/jobs/sim-1/simulated-sheet');
+
+    await user.click(screen.getByRole('button', { name: 'Svuota' }));
+    expect(await screen.findByText('Stampe simulate cancellate: 1.')).toBeInTheDocument();
+    expect(await screen.findByText('Nessuna stampa simulata.')).toBeInTheDocument();
+  });
+
+  it('says when a printer’s agent offers no simulation, and when a box is only simulated', async () => {
+    mockApi({ 'GET /api/print/stations': () => jsonResponse([station]) });
+    render(view());
+    await openStation();
+    expect(screen.getByTestId('print-simulation')).toHaveTextContent('aggiorna il Print Agent');
+    expect(screen.queryByRole('button', { name: 'Attiva simulazione' })).not.toBeInTheDocument();
+
+    cleanup();
+    mockApi({
+      'GET /api/print/stations': () => jsonResponse([{ ...station, devices: [{ ...station.devices[0],
+        simulationAvailable: true, simulationOnly: true, simulated: true }] }]),
+      [`GET /api/print/stations/${station.id}/devices/${station.devices[0].id}/simulated-jobs`]: () => jsonResponse([]),
+    });
+    render(view());
+    expect(await screen.findByTestId('print-station-row')).toHaveTextContent('Simulata');
+    await openStation();
+    expect(screen.getByTestId('print-simulation')).toHaveTextContent('Stampante solo simulata');
+    expect(screen.queryByRole('button', { name: 'Torna alla carta' })).not.toBeInTheDocument();
+  });
+
   it('pauses a running station', async () => {
     const user = userEvent.setup();
     const mock = mockApi({

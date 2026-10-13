@@ -85,6 +85,14 @@ describe('PartyPrintSettings (owner panel)', () => {
     expect(screen.queryByTestId('party-print-enabled')).not.toBeInTheDocument();
   });
 
+  it('says, on the printer to choose, that a simulated one prints to a file', async () => {
+    mount(settings(), [station({ devices: [device({ simulated: true })] })], undefined,
+      [lent({ simulated: true })]);
+    view();
+    expect(await screen.findByTestId('party-print-option-dev-1-card')).toHaveTextContent('Simulata');
+    expect(screen.getByTestId('party-print-option-dev-9-card')).toHaveTextContent('Simulata');
+  });
+
   it('says plainly when a station exists but nothing on it can print 10×15', async () => {
     mount(settings(), [station({ devices: [device({ supportsPhoto10x15: false })] })]);
     view();

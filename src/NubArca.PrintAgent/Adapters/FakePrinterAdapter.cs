@@ -59,6 +59,8 @@ public sealed class FakePrinterAdapter : IPrinterAdapter
     public async Task<PrintSubmissionResult> SubmitAsync(PrintSubmission submission,
         CancellationToken cancellationToken)
     {
+        // No twin here: a simulated job is refused, never put on paper.
+        if (submission.Simulated) return new PrintSubmissionResult(false, null, "simulation_unavailable");
         SubmissionCount++;
         if (FailNextSubmission)
         {

@@ -232,6 +232,8 @@ export function SharePrintPage() {
         unavailable: printer.available ? null : 'ownerPrint.unavailable.offline',
         mediaRemaining: null, mediaObservedAt: null, offline: !printer.available,
         cutsStrips: printer.cutsStrips,
+        // The visitor chooses no printer: the owner's own one, as it is.
+        simulated: false,
       }];
     },
     loadPhotos: async (signal) => {
@@ -487,6 +489,7 @@ function PrintPage({ source: from, back, noPrinters, note }: {
                   <strong>{candidate.name}</strong>
                   {' · '}
                   {[
+                    ...(candidate.simulated ? [t('print.sim.badge')] : []),
                     PAPER_LABEL[candidate.paper],
                     candidate.stationName,
                     ...(candidate.ownerName ? [t('ownerPrint.sharedBy', { name: candidate.ownerName })] : []),

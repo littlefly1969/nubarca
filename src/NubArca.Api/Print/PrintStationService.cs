@@ -238,7 +238,8 @@ public sealed class PrintStationService
                 device.LoadedPaperChangedByUserId is Guid by ? people.GetValueOrDefault(by)?.Name : null,
                 device.LoadedPaperChangedAt,
                 share.MaxSheets, share.UsedSheets,
-                device.MediaRemainingPrints, device.MediaRemainingObservedAt);
+                device.MediaRemainingPrints, device.MediaRemainingObservedAt,
+                PrintSimulation.IsActive(device));
         }).Where(x => x is not null).Cast<SharedPrinterDto>()
             .OrderBy(x => x.OwnerName).ThenBy(x => x.DisplayName).ToArray();
     }
@@ -472,14 +473,9 @@ public sealed class PrintStationService
 
             var deviceIds = await _db.PrinterDevices.Where(x => x.PrintStationId == stationId)
                 .Select(x => x.Id).ToListAsync(cancellationToken);
-            var jobs = _db.PrintJobs.Where(x => x.PrintStationId == stationId || deviceIds.Contains(x.PrinterDeviceId));
-            artifactKeys = await jobs.Where(x => x.ArtifactStorageKey != null)
-                .Select(x => x.ArtifactStorageKey!).Distinct().ToListAsync(cancellationToken);
-            var jobIds = jobs.Select(x => x.Id);
-            await _db.PartyPrintRequests.Where(x => jobIds.Contains(x.PrintJobId)).ExecuteDeleteAsync(cancellationToken);
-            await _db.OwnerPhotoPrintRequests.Where(x => jobIds.Contains(x.PrintJobId)).ExecuteDeleteAsync(cancellationToken);
-            await _db.PrintJobSources.Where(x => jobIds.Contains(x.PrintJobId)).ExecuteDeleteAsync(cancellationToken);
-            await jobs.ExecuteDeleteAsync(cancellationToken);
+            artifactKeys = await DeleteJobsAsync(
+                _db.PrintJobs.Where(x => x.PrintStationId == stationId || deviceIds.Contains(x.PrinterDeviceId)),
+                cancellationToken);
             await _db.PartyPrintProfiles
                 .Where(x => x.PrintStationId == stationId
                     || (x.PrinterDeviceId != null && deviceIds.Contains(x.PrinterDeviceId.Value)))
@@ -509,6 +505,24 @@ public sealed class PrintStationService
         });
         if (erased == true) await DeleteUnownedArtifactsAsync(artifactKeys, cancellationToken);
         return erased;
+    }
+
+    /// <summary>
+    /// Deletes <paramref name="jobs"/> with what hangs off them — party and owner
+    /// requests, sources — inside the caller's transaction, and returns the keys
+    /// of their rendered sheets for <see cref="DeleteUnownedArtifactsAsync"/>
+    /// once that transaction has committed.
+    /// </summary>
+    private async Task<List<string>> DeleteJobsAsync(IQueryable<PrintJob> jobs, CancellationToken cancellationToken)
+    {
+        var keys = await jobs.Where(x => x.ArtifactStorageKey != null)
+            .Select(x => x.ArtifactStorageKey!).Distinct().ToListAsync(cancellationToken);
+        var jobIds = jobs.Select(x => x.Id);
+        await _db.PartyPrintRequests.Where(x => jobIds.Contains(x.PrintJobId)).ExecuteDeleteAsync(cancellationToken);
+        await _db.OwnerPhotoPrintRequests.Where(x => jobIds.Contains(x.PrintJobId)).ExecuteDeleteAsync(cancellationToken);
+        await _db.PrintJobSources.Where(x => jobIds.Contains(x.PrintJobId)).ExecuteDeleteAsync(cancellationToken);
+        await jobs.ExecuteDeleteAsync(cancellationToken);
+        return keys;
     }
 
     /// <summary>
@@ -547,6 +561,90 @@ public sealed class PrintStationService
         }
     }
 
+    /// <summary>
+    /// The owner switches a printer to its simulated twin, or back. Only the
+    /// owner — a loan never decides where prints go — and only while the agent
+    /// offers a twin; a simulation-only box cannot be switched to paper.
+    /// </summary>
+    public async Task<(PrintDeviceDto? Device, string? Error)> SetSimulationAsync(Guid ownerId, Guid stationId,
+        Guid deviceId, bool enabled, CancellationToken cancellationToken)
+    {
+        var device = await _db.PrinterDevices.SingleOrDefaultAsync(
+            x => x.Id == deviceId && x.PrintStationId == stationId
+                && _db.PrintStations.Any(s => s.Id == stationId && s.OwnerUserId == ownerId && s.RevokedAt == null),
+            cancellationToken);
+        if (device is null) return (null, null);
+        if (device.SimulationOnly && !enabled) return (null, "simulation_only");
+        if (enabled && !device.SimulationAvailable && !device.SimulationOnly) return (null, "simulation_unavailable");
+        device.Simulated = enabled;
+        await _db.SaveChangesAsync(cancellationToken);
+        return (ToDeviceDto(device), null);
+    }
+
+    /// <summary>The simulated prints of one of the owner's printers, newest first: the sheets themselves are downloaded apart.</summary>
+    public async Task<IReadOnlyList<SimulatedPrintDto>?> ListSimulatedAsync(Guid ownerId, Guid stationId, Guid deviceId,
+        CancellationToken cancellationToken)
+    {
+        if (!await OwnsDeviceAsync(ownerId, stationId, deviceId, cancellationToken)) return null;
+        var jobs = await _db.PrintJobs.AsNoTracking()
+            .Where(x => x.PrinterDeviceId == deviceId && x.Simulated)
+            .OrderByDescending(x => x.CreatedAt).ThenBy(x => x.Id).Take(100)
+            .ToListAsync(cancellationToken);
+        var people = await NamesAsync(jobs.Where(x => x.OwnerUserId != ownerId).Select(x => x.OwnerUserId),
+            cancellationToken);
+        return jobs.Select(x => new SimulatedPrintDto(x.Id, x.Id.ToString("N")[..8], x.Kind, x.Format, x.State,
+            x.CreatedAt, x.OwnerUserId == ownerId ? null : people.GetValueOrDefault(x.OwnerUserId)?.Name)).ToArray();
+    }
+
+    /// <summary>
+    /// The sheet of a SIMULATED print, for its printer's owner only — the same
+    /// sheet a real print would put on their paper. A real print's sheet is
+    /// never served here.
+    /// </summary>
+    public async Task<PrintArtifact?> OpenSimulatedSheetAsync(Guid ownerId, Guid jobId, CancellationToken cancellationToken)
+    {
+        var job = await _db.PrintJobs.AsNoTracking().SingleOrDefaultAsync(
+            x => x.Id == jobId && x.Simulated && x.ArtifactStorageKey != null
+                && _db.PrintStations.Any(s => s.Id == x.PrintStationId && s.OwnerUserId == ownerId),
+            cancellationToken);
+        if (job is null) return null;
+        return new PrintArtifact(await _artifacts.OpenReadAsync(job.ArtifactStorageKey!, cancellationToken),
+            job.ArtifactContentType ?? "image/png");
+    }
+
+    /// <summary>
+    /// Clears a printer's finished simulated prints — rows, requests, sheets —
+    /// and tells its box, at the next heartbeat, to delete its simulated output
+    /// up to now. Prints still on their way are left to finish.
+    /// </summary>
+    public async Task<int?> ClearSimulatedAsync(Guid ownerId, Guid stationId, Guid deviceId,
+        CancellationToken cancellationToken)
+    {
+        if (!await OwnsDeviceAsync(ownerId, stationId, deviceId, cancellationToken)) return null;
+        var now = Now;
+        List<string> keys = [];
+        var count = 0;
+        var strategy = _db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+            var finished = _db.PrintJobs.Where(x => x.PrinterDeviceId == deviceId && x.Simulated
+                && PrintJobStates.Terminal.Contains(x.State));
+            count = await finished.CountAsync(cancellationToken);
+            keys = await DeleteJobsAsync(finished, cancellationToken);
+            await _db.PrintStations.Where(x => x.Id == stationId)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.SimulatedOutputPurgeRequestedAt, now),
+                    cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        });
+        await DeleteUnownedArtifactsAsync(keys, cancellationToken);
+        return count;
+    }
+
+    private Task<bool> OwnsDeviceAsync(Guid ownerId, Guid stationId, Guid deviceId, CancellationToken cancellationToken) =>
+        _db.PrinterDevices.AnyAsync(x => x.Id == deviceId && x.PrintStationId == stationId
+            && _db.PrintStations.Any(s => s.Id == stationId && s.OwnerUserId == ownerId), cancellationToken);
+
     public async Task<PrintHeartbeatResponse?> HeartbeatAsync(Guid stationId,
         PrintHeartbeatRequest request, CancellationToken cancellationToken)
     {
@@ -579,11 +677,17 @@ public sealed class PrintStationService
             device.LastObservedState = report.ObservedState;
             device.LastSeenAt = now;
             ApplyMediaRemaining(stationId, device, report.MediaRemaining, now);
+            // An agent without a twin — or one that predates it — offers none,
+            // so the owner's switch stays inert rather than reaching paper.
+            device.SimulationAvailable = report.Simulation?.Available == true;
+            device.SimulationOnly = report.Simulation?.Only == true;
         }
         foreach (var missing in knownDevices.Values.Where(x => !reportedKeys.Contains(x.DeviceKey)))
             missing.LastObservedState = PrintDeviceStates.Offline;
         await _db.SaveChangesAsync(cancellationToken);
-        return new(station.DesiredState, now);
+        var simulated = knownDevices.Values.Concat(_db.PrinterDevices.Local.Where(x => x.PrintStationId == stationId))
+            .Where(PrintSimulation.IsActive).Select(x => x.DeviceKey).Distinct().ToArray();
+        return new(station.DesiredState, now, simulated, station.SimulatedOutputPurgeRequestedAt);
     }
 
     public async Task<(PrintJobSummaryDto? Job, string? Error)> CreateTestPrintAsync(Guid ownerId, Guid stationId,
@@ -615,6 +719,7 @@ public sealed class PrintStationService
             Id = Guid.NewGuid(), OwnerUserId = ownerId, PrintStationId = stationId,
             PrinterDeviceId = printerId, Kind = PrintJobKinds.Diagnostic,
             Format = paper, State = PrintJobStates.Requested,
+            Simulated = PrintSimulation.IsActive(printer),
             RenderSpecificationJson = JsonSerializer.Serialize(new { type = "diagnostic", width = 1800, height = 1200 }),
             CreatedAt = now,
         };
@@ -667,7 +772,7 @@ public sealed class PrintStationService
         [PrintFormats.Photo10x15, PrintFormats.Photo13x18, PrintFormats.Photo20x15, PrintFormats.Strip2x6Pair];
 
     public async Task<PrintClaimResponse?> ClaimAsync(Guid stationId, string? adapterKind,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool supportsSimulation = false)
     {
         var now = Now;
         var station = await _db.PrintStations.AsNoTracking().SingleOrDefaultAsync(
@@ -697,6 +802,9 @@ public sealed class PrintStationService
             if (!string.IsNullOrWhiteSpace(adapterKind))
                 query = query.Where(x => _db.PrinterDevices.Any(d => d.Id == x.PrinterDeviceId
                     && d.AdapterKind == adapterKind));
+            // A simulated job goes only to an agent that says it sends it to
+            // the twin: an older one would put it on paper.
+            if (!supportsSimulation) query = query.Where(x => !x.Simulated);
             var candidate = await query.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id)
                 .Select(x => new { x.Id, x.State }).FirstOrDefaultAsync(cancellationToken);
             if (candidate is null) return null;
@@ -718,7 +826,7 @@ public sealed class PrintStationService
                 .Select(x => x.DeviceKey).SingleAsync(cancellationToken);
             return new(job.Id, rawClaim, job.Kind, job.Format,
                 $"/api/print-agent/jobs/{job.Id:D}/artifact", job.ArtifactByteLength!.Value,
-                job.ArtifactContentType!, deviceKey);
+                job.ArtifactContentType!, deviceKey, job.Simulated);
         }
         return null;
     }
@@ -911,7 +1019,10 @@ public sealed class PrintStationService
             x.LoadedPaperChangedByUserId is Guid by ? people?.GetValueOrDefault(by)?.Name : null,
             x.LoadedPaperChangedAt,
             MediaRemainingPrints: x.MediaRemainingPrints,
-            MediaRemainingObservedAt: x.MediaRemainingObservedAt);
+            MediaRemainingObservedAt: x.MediaRemainingObservedAt,
+            Simulated: PrintSimulation.IsActive(x),
+            SimulationAvailable: x.SimulationAvailable,
+            SimulationOnly: x.SimulationOnly);
 
     private static string PaperOf(PrinterDevice x) =>
         PrintPapers.IsKnown(x.LoadedPaperSize) ? x.LoadedPaperSize : PrintPapers.Photo10x15;
@@ -921,7 +1032,7 @@ public sealed class PrintStationService
 
     private static PrintJobSummaryDto ToJobDto(PrintJob x, string? waitingForPaper = null, string? ownerName = null) =>
         new(x.Id, x.Id.ToString("N")[..8], x.Kind, x.Format, x.State, x.CreatedAt, x.FailureCode,
-            waitingForPaper, ownerName);
+            waitingForPaper, ownerName, x.Simulated);
 
     /// <summary>
     /// The paper a READY job is held for, when its printer has another in — or

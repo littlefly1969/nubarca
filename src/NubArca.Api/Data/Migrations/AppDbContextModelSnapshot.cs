@@ -6522,6 +6522,9 @@ namespace NubArca.Api.Data.Migrations
                     b.Property<DateTime?>("RenderedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("Simulated")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("State")
                         .IsRequired()
                         .HasMaxLength(24)
@@ -6635,6 +6638,9 @@ namespace NubArca.Api.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("SimulatedOutputPurgeRequestedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
@@ -6766,6 +6772,15 @@ namespace NubArca.Api.Data.Migrations
 
                     b.Property<Guid>("PrintStationId")
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("Simulated")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("SimulationAvailable")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("SimulationOnly")
+                        .HasColumnType("boolean");
 
                     b.HasKey("Id");
 

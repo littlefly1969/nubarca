@@ -27,6 +27,7 @@ import { PrinterCalibrationControls } from './PrinterCalibrationControls';
 import { isPrinterOffline, PrinterMediaRemaining } from './PrinterMediaRemaining';
 import { paperLabel, PrinterPaperControl } from './PrinterPaperControl';
 import { PrinterSharingControls } from './PrinterSharingControls';
+import { PrinterSimulationControls } from './PrinterSimulationControls';
 import { PrinterUsageSummary } from './PrinterUsageSummary';
 import { SharedPrintersList } from './SharedPrintersList';
 
@@ -303,7 +304,10 @@ export function PrintStationsPanel() {
                 data-testid="print-station-row" onClick={() => setView({ kind: 'station', id: station.id })}>
                 <span className="print-station-row-head">
                   <strong>{station.name}</strong>
-                  <span className={`print-status print-status-${station.status}`}>{t(STATUS_KEYS[station.status])}</span>
+                  <span className="print-station-row-badges">
+                    {printer?.simulated && <span className="print-sim-badge">{t('print.sim.badge')}</span>}
+                    <span className={`print-status print-status-${station.status}`}>{t(STATUS_KEYS[station.status])}</span>
+                  </span>
                 </span>
                 <span className="muted print-station-row-line">
                   {printer
@@ -357,7 +361,10 @@ function StationDetail({ station, busy, formatDate, onChanged, onAction, onRenew
     <article className={`print-station-card print-station-${station.status}`} data-testid="print-station-detail">
       <header>
         <h3>{station.name}</h3>
-        <span className={`print-status print-status-${station.status}`}>{t(STATUS_KEYS[station.status])}</span>
+        <span className="print-station-row-badges">
+          {printer?.simulated && <span className="print-sim-badge" data-testid="print-sim-badge">{t('print.sim.badge')}</span>}
+          <span className={`print-status print-status-${station.status}`}>{t(STATUS_KEYS[station.status])}</span>
+        </span>
       </header>
 
       <section className="print-station-section">
@@ -383,6 +390,8 @@ function StationDetail({ station, busy, formatDate, onChanged, onAction, onRenew
         </dl>
         {live && printer && <PrinterPaperControl stationId={station.id} device={printer} onSaved={onChanged} />}
       </section>
+
+      {live && printer && <PrinterSimulationControls stationId={station.id} device={printer} onChanged={onChanged} />}
 
       {(station.queue?.length ?? 0) > 0 && (
         <PrintQueueList jobs={station.queue ?? []} busy={busy}
@@ -478,6 +487,7 @@ function PrintQueueList({ jobs, busy, onCancel }: {
               {KIND_KEYS[job.kind] ? t(KIND_KEYS[job.kind]) : job.kind}
               {' · '}{job.format === '2x6x2' ? '2×6' : paperLabel(job.format)}
               {job.ownerName && <span className="muted">{' · '}{t('print.job.from', { name: job.ownerName })}</span>}
+              {job.simulated && <span className="print-sim-badge">{t('print.sim.badge')}</span>}
             </span>
             <span className={job.waitingForPaper ? 'print-queue-waiting' : 'muted'}>
               {job.waitingForPaper

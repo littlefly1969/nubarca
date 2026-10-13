@@ -117,6 +117,8 @@ interface PrinterOption {
   mediaRemaining: number | null;
   mediaObservedAt: string | null;
   offline: boolean;
+  /** Its prints go to a file, not to paper. */
+  simulated: boolean;
 }
 
 const OPTION_KEY = (stationId: string, deviceId: string) => `${stationId}:${deviceId}`;
@@ -153,6 +155,7 @@ export function printerOptions(stations: readonly PrintStation[]): PrinterOption
         mediaRemaining: device.mediaRemainingPrints ?? null,
         mediaObservedAt: device.mediaRemainingObservedAt ?? null,
         offline: isPrinterOffline(station.status, device.observedState),
+        simulated: device.simulated === true,
       })));
 }
 
@@ -177,6 +180,7 @@ export function sharedPrinterOptions(printers: readonly SharedPrinter[]): Printe
       mediaRemaining: printer.mediaRemainingPrints ?? null,
       mediaObservedAt: printer.mediaRemainingObservedAt ?? null,
       offline: isPrinterOffline(printer.stationStatus, printer.observedState),
+      simulated: printer.simulated === true,
     }));
 }
 
@@ -384,6 +388,8 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
                 testId={`party-print-option-${option.deviceId}`}
                 title={option.deviceName}
                 meta={[
+                  // A party printing to a file must never be mistaken for one printing on paper.
+                  ...(option.simulated ? [t('print.sim.badge')] : []),
                   t('partyPrintOwner.atStation', { station: option.stationName }),
                   t('partyPrintOwner.paper', { paper: option.paper.replace('x', '\u00d7') }),
                   ...(option.sharedBy ? [t('partyPrintOwner.sharedBy', { name: option.sharedBy })] : []),

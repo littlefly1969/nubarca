@@ -1,0 +1,67 @@
+#!/bin/bash
+# NubArca simulated DNP DS-RX1HS — a CUPS backend.
+#
+# A twin queue made with the SAME Gutenprint driver as the real printer sends
+# here exactly what that driver would send the DNP. This keeps it as a file, one
+# per job, under /var/spool/nubarca-sim/<queue>, and tells CUPS about its media
+# the way Gutenprint's dye-sub backend does for a real DNP: always 100 prints.
+# Nothing ever reaches a printer.
+#
+# Installed as /usr/lib/cups/backend/nubarca-sim, mode 0755, so CUPS runs it as
+# lp. Exit codes are CUPS's: 0 done, 1 failed.
+set -u
+
+if [ "$#" -eq 0 ]; then
+  # Device discovery: there is nothing to find; the twins name it themselves.
+  echo 'direct nubarca-sim "Unknown" "NubArca simulated DNP DS-RX1HS"'
+  exit 0
+fi
+if [ "$#" -lt 5 ] || [ "$#" -gt 6 ]; then
+  echo 'Usage: nubarca-sim job-id user title copies options [file]' >&2
+  exit 1
+fi
+
+job="$1"
+options="$5"
+queue="${PRINTER:-}"
+spool="${SIM_SPOOL_ROOT:-/var/spool/nubarca-sim}"
+keep=20
+
+case "$job" in ''|*[!0-9]*) echo 'ERROR: invalid job id' >&2; exit 1 ;; esac
+case "$queue" in ''|*[!A-Za-z0-9._-]*) echo 'ERROR: invalid queue name' >&2; exit 1 ;; esac
+
+# Group-writable, so the Print Agent (the spool's group) can clear it.
+umask 007
+dir="$spool/$queue"
+mkdir -p -- "$dir" || { echo "ERROR: cannot write the simulated output" >&2; exit 1; }
+name="$(date -u +%Y%m%dT%H%M%SZ)-job$job"
+if [ "$#" -eq 6 ]; then
+  cat -- "$6" > "$dir/$name.tmp" || exit 1
+else
+  cat > "$dir/$name.tmp" || exit 1
+fi
+mv -f -- "$dir/$name.tmp" "$dir/$name.prn"
+
+media='4x6'
+case " $options " in
+  *PageSize=w360h504*) media='5x7' ;;
+  *PageSize=w432h576*) media='6x8' ;;
+esac
+printf 'queue=%s\njob=%s\nbytes=%s\nmedia=%s\noptions=%s\n' \
+  "$queue" "$job" "$(wc -c < "$dir/$name.prn" | tr -d ' ')" "$media" "$options" > "$dir/$name.txt"
+
+# Only the latest jobs stay: a box left simulating never fills its disk.
+ls -1t -- "$dir"/*.prn 2>/dev/null | tail -n +"$((keep + 1))" | while IFS= read -r old; do
+  rm -f -- "$old" "${old%.prn}.txt"
+done
+
+# The media, as Gutenprint's dye-sub backend reports a DNP's to CUPS.
+echo 'ATTR: marker-colors=#00FFFF#FF00FF#FFFF00' >&2
+echo 'ATTR: marker-high-levels=100' >&2
+echo 'ATTR: marker-low-levels=10' >&2
+echo 'ATTR: marker-levels=100' >&2
+echo "ATTR: marker-names=\"Ribbon\"" >&2
+echo 'ATTR: marker-types=ribbonWax' >&2
+echo "ATTR: marker-message=\"100 native prints remaining on '$media' media\"" >&2
+echo 'INFO: Simulated: written to a file, not printed' >&2
+exit 0

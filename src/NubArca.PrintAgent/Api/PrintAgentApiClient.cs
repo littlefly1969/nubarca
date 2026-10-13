@@ -5,10 +5,11 @@ using NubArca.PrintAgent.Adapters;
 namespace NubArca.PrintAgent.Api;
 
 public sealed record AgentEnrollmentResponse(Guid StationId, string StationCredential, string DesiredState);
-public sealed record AgentHeartbeatResponse(string DesiredState, DateTime ServerTime);
+public sealed record AgentHeartbeatResponse(string DesiredState, DateTime ServerTime,
+    IReadOnlyList<string>? SimulatedDeviceKeys = null, DateTime? SimulatedOutputPurgeBefore = null);
 public sealed record AgentDeviceReport(string DeviceKey, string DisplayName, string? Manufacturer,
     string? Model, string AdapterKind, PrinterCapabilities Capabilities, string ObservedState,
-    AgentMediaRemaining? MediaRemaining = null);
+    AgentMediaRemaining? MediaRemaining = null, PrinterSimulation? Simulation = null);
 
 /// <summary>
 /// The physical media count as this agent read it. Always sent by an agent
@@ -22,7 +23,7 @@ public sealed record AgentMediaRemaining(bool Available, int? RemainingPrints, i
         : new(false, null, null);
 }
 public sealed record AgentClaim(Guid JobId, string ClaimToken, string Kind, string Format,
-    string ArtifactUrl, long ArtifactByteLength, string ContentType, string DeviceKey);
+    string ArtifactUrl, long ArtifactByteLength, string ContentType, string DeviceKey, bool Simulated = false);
 
 internal sealed record AgentRefusal(string? Error, string? MinimumVersion);
 
@@ -60,9 +61,10 @@ public sealed class PrintAgentApiClient
         return (await response.Content.ReadFromJsonAsync<AgentHeartbeatResponse>(cancellationToken))!;
     }
 
-    public async Task<AgentClaim?> ClaimAsync(string adapterKind, CancellationToken cancellationToken)
+    public async Task<AgentClaim?> ClaimAsync(string adapterKind, bool supportsSimulation,
+        CancellationToken cancellationToken)
     {
-        using var request = Json(HttpMethod.Post, "api/print-agent/jobs/claim", new { adapterKind });
+        using var request = Json(HttpMethod.Post, "api/print-agent/jobs/claim", new { adapterKind, supportsSimulation });
         using var response = await _http.SendAsync(request, cancellationToken);
         if (response.StatusCode == HttpStatusCode.NoContent) return null;
         response.EnsureSuccessStatusCode();

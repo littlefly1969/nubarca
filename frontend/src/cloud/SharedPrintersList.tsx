@@ -67,6 +67,7 @@ export function SharedPrintersList({ printers, onChanged }: {
               <header>
                 <div>
                   <h3>{printer.displayName}</h3>
+                  {printer.simulated && <span className="print-sim-badge">{t('print.sim.badge')}</span>}
                   <span className={`print-status print-status-${printer.stationStatus}`}>
                     {t(STATUS_KEYS[printer.stationStatus])}
                   </span>

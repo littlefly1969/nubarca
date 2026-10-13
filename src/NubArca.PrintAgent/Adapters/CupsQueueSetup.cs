@@ -32,6 +32,8 @@ public sealed partial class CupsQueueSetup
 {
     public const string PlainSize = "w288h432";
     public const string CutSize = "w288h432-div2";
+    /// <summary>The device of a simulated twin: the backend the installer puts in CUPS's backend directory.</summary>
+    public const string SimulationUri = "nubarca-sim:/";
 
     private static readonly TimeSpan ScanTimeout = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(30);
@@ -82,6 +84,32 @@ public sealed partial class CupsQueueSetup
 
         static CupsSetupResult Fail(bool found, string message, string? uri = null, string? driver = null) =>
             new(found, false, false, uri, driver, message);
+    }
+
+    /// <summary>
+    /// The simulated twins of the two queues — <paramref name="photoTwin"/> and
+    /// <paramref name="stripTwin"/> — made exactly as the real ones are (the
+    /// same Gutenprint DS-RX1 driver, page sizes and cut), on the
+    /// <c>nubarca-sim</c> backend instead of the printer. No DNP is needed:
+    /// a host with no printer at all can have them.
+    /// </summary>
+    public async Task<CupsSetupResult> RunSimulationAsync(string photoTwin, string stripTwin, CancellationToken ct)
+    {
+        var drivers = await _runner.RunAsync("lpinfo", ["-m"], ScanTimeout, ct);
+        var driver = drivers.Succeeded ? PickDriver(drivers.StdOut) : null;
+        if (driver is null)
+            return new CupsSetupResult(false, false, false, SimulationUri, null,
+                "The Gutenprint driver for the DS-RX1 is missing: install printer-driver-gutenprint.");
+        if (!await CreateAsync(photoTwin, SimulationUri, driver, "NubArca simulated DS-RX1HS (photos)", ct)
+            || !await SetPageSizeAsync(photoTwin, preferCut: false, ct))
+            return new CupsSetupResult(false, false, false, SimulationUri, driver,
+                $"CUPS could not set up the simulated {photoTwin} (is the nubarca-sim backend installed?).");
+        var strip = await CreateAsync(stripTwin, SimulationUri, driver, "NubArca simulated DS-RX1HS (strips, cut)", ct)
+            && await SetPageSizeAsync(stripTwin, preferCut: true, ct);
+        if (!strip) await _runner.RunAsync("lpadmin", ["-x", stripTwin], CommandTimeout, ct);
+        return new CupsSetupResult(false, true, strip, SimulationUri, driver, strip
+            ? $"Simulated {photoTwin} (4x6) and {stripTwin} (2x6 x2, cut) are ready."
+            : $"Simulated {photoTwin} is ready; this driver offers no 2x6 cut size.");
     }
 
     /// <summary>The Gutenprint dye-sub URI when there is one; the plain usb one only as a last resort.</summary>

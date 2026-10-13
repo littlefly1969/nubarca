@@ -8720,6 +8720,18 @@ video.lightbox-image {
 .print-erased p { margin: 0; }
 .print-erased pre { margin: 0; padding: .65rem; overflow-x: auto; border-radius: 8px; background: var(--surface-2, rgba(127,127,127,.12)); font-size: .82rem; }
 .print-erased button { justify-self: start; min-height: 2.75rem; }
+.print-station-row-badges { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
+.print-sim-badge { display: inline-block; padding: .1rem .5rem; border-radius: 999px; font-size: .75rem; font-weight: 600; color: var(--warning, #b45309); border: 1px solid currentColor; }
+.print-simulation-active { color: var(--warning, #b45309); font-weight: 600; }
+.print-simulated-prints { display: grid; gap: .5rem; }
+.print-simulated-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.print-simulated-head h5 { margin: 0; font-size: .95rem; }
+.print-simulated-head button { min-height: 2.75rem; }
+.print-simulated-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
+.print-simulated-row { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr) auto; align-items: center; gap: .65rem; padding: .4rem; border: 1px solid var(--border); border-radius: 10px; }
+.print-simulated-row img { width: 4.5rem; height: 3rem; object-fit: contain; background: var(--surface-2, rgba(127,127,127,.12)); border-radius: 6px; }
+.print-simulated-text { display: grid; gap: .15rem; min-width: 0; overflow-wrap: anywhere; font-size: .85rem; }
+.print-simulated-download { display: inline-flex; align-items: center; min-height: 2.75rem; padding: 0 .6rem; }
 .print-guide-connected { color: var(--success, #15803d); font-weight: 600; }
 @media (max-width: 480px) {
   .print-guide-command { grid-template-columns: 1fr; }

@@ -22,7 +22,8 @@ public static class PrintAgentPlatform
         PrintAdapterKinds.WindowsSpooler => throw new PlatformNotSupportedException("windows-spooler requires Windows."),
         PrintAdapterKinds.Cups when OperatingSystem.IsLinux() => new CupsPrinterAdapter(
             options.PrinterName, options.StripPrinterName, runner ?? new ProcessRunner(),
-            (loggers ?? NullLoggerFactory.Instance).CreateLogger<CupsPrinterAdapter>()),
+            (loggers ?? NullLoggerFactory.Instance).CreateLogger<CupsPrinterAdapter>(),
+            simulation: options.Simulation),
         PrintAdapterKinds.Cups => throw new PlatformNotSupportedException("cups requires Linux."),
         _ => throw new InvalidOperationException("Print Agent adapter is invalid."),
     };

@@ -173,10 +173,14 @@ if [[ "$provisioning" == true ]] && command -v netplan >/dev/null 2>&1; then
   fi
 fi
 
-# --- 1b. The printer's two queues ------------------------------------------------
+# --- 1b. The printer's two queues, and their simulated twins ----------------------
+# The twins (<queue>-SIM) use the same driver on the nubarca-sim backend, which
+# writes a file instead of printing. They exist on every box; the printer's
+# owner decides in NubArca whether its jobs go there.
+install -m 0755 -o root -g root "$script_dir/nubarca-sim" /usr/lib/cups/backend/nubarca-sim
 if [[ "$cups_setup" == true ]]; then
   set +e
-  "$agent" setup-cups --printer "$printer" --strip-printer "$strip"
+  "$agent" setup-cups --printer "$printer" --strip-printer "$strip" --simulation
   cups_status=$?
   set -e
   case "$cups_status" in
@@ -193,6 +197,8 @@ if ! id "$user" >/dev/null 2>&1; then
 fi
 install -d -o "$user" -g "$user" -m 0700 "$state_dir" "$state_dir/temp"
 install -d -o root -g root -m 0755 "$config_dir"
+# Written by the backend (lp), cleared by the agent (its group) on the owner's order.
+install -d -o lp -g "$user" -m 2770 /var/spool/nubarca-sim
 
 if [[ "$provisioning" == true ]]; then
   install -d -m 0755 /etc/polkit-1/rules.d
@@ -237,6 +243,11 @@ cat > "$config_path.tmp" <<EOF
     "MaxBackoffSeconds": 60,
     "MaxArtifactBytes": 33554432,
     "MaxTemporaryBytes": 134217728,
+    "Simulation": {
+      "QueueSuffix": "-SIM",
+      "OutputPath": "/var/spool/nubarca-sim",
+      "Only": false
+    },
     "NetworkProvisioning": {
       "Enabled": ${provisioning},
       "ConnectionGraceSeconds": 30,
@@ -278,6 +289,11 @@ cat > "$dropin_dir/print-box.conf" <<'EOF'
 Description=NubArca Print Box
 Wants=cups.service NetworkManager.service
 After=cups.service NetworkManager.service
+EOF
+# The simulated twins' output, which the agent clears when the owner asks.
+cat > "$dropin_dir/simulation.conf" <<'EOF'
+[Service]
+ReadWritePaths=/var/spool/nubarca-sim
 EOF
 if [[ "$provisioning" == true ]]; then
   # While the setup network is up, the agent redirects port 80 on it to the

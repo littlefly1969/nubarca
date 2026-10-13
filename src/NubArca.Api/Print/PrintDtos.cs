@@ -17,7 +17,15 @@ public sealed record PrinterDeviceReport(
     /// Absent from an agent that predates it — the stored count is then left
     /// exactly as it is. A current agent always sends it, available or not.
     /// </summary>
-    PrinterMediaRemainingReport? MediaRemaining = null);
+    PrinterMediaRemainingReport? MediaRemaining = null,
+    /// <summary>The simulated twin the agent offers; absent from an agent that has none.</summary>
+    PrinterSimulationReport? Simulation = null);
+
+/// <summary>
+/// <c>available</c>: the agent has a simulated twin of this printer (same queues
+/// and driver, a backend that writes a file); <c>only</c>: it has nothing else.
+/// </summary>
+public sealed record PrinterSimulationReport(bool Available, bool Only);
 
 /// <summary>
 /// The physical media count as the agent read it: <c>available</c> false when it
@@ -27,7 +35,11 @@ public sealed record PrinterDeviceReport(
 public sealed record PrinterMediaRemainingReport(bool Available, int? RemainingPrints, int? AgeSeconds);
 public sealed record PrintHeartbeatRequest(string AgentVersion, IReadOnlyList<PrinterDeviceReport> Devices,
     string? AgentBuild = null);
-public sealed record PrintHeartbeatResponse(string DesiredState, DateTime ServerTime);
+public sealed record PrintHeartbeatResponse(string DesiredState, DateTime ServerTime,
+    /// <summary>The printers to show as their simulated twin: status and prints left come from it.</summary>
+    IReadOnlyList<string>? SimulatedDeviceKeys = null,
+    /// <summary>The owner cleared the simulated prints: delete simulated output older than this.</summary>
+    DateTime? SimulatedOutputPurgeBefore = null);
 public sealed record PrintDeviceDto(
     Guid Id, string DisplayName, string? Manufacturer, string? Model,
     string AdapterKind, string ObservedState, DateTime LastSeenAt, bool SupportsPhoto10x15,
@@ -52,7 +64,13 @@ public sealed record PrintDeviceDto(
     /// the printer is online; otherwise as a last reading.
     /// </summary>
     int? MediaRemainingPrints = null,
-    DateTime? MediaRemainingObservedAt = null);
+    DateTime? MediaRemainingObservedAt = null,
+    /// <summary>Its jobs go to the simulated twin (the owner's switch, or a simulation-only box).</summary>
+    bool Simulated = false,
+    /// <summary>The agent offers a simulated twin, so the owner may switch it on.</summary>
+    bool SimulationAvailable = false,
+    /// <summary>Nothing but the twin: always simulated.</summary>
+    bool SimulationOnly = false);
 /// <summary>A live loan of a printer, as its owner sees it.</summary>
 public sealed record PrinterShareDto(
     Guid Id, string GranteeName, string GranteeEmail, int? MaxSheets, int UsedSheets, DateTime CreatedAt);
@@ -70,7 +88,9 @@ public sealed record SharedPrinterDto(
     string LoadedPaperSize, IReadOnlyList<string> Papers, bool SupportsPhoto10x15, bool CutsStrips,
     string? LoadedPaperChangedBy, DateTime? LoadedPaperChangedAt, int? MaxSheets, int UsedSheets,
     /// <summary>Prints physically left on the media (the printer's count, not the loan's).</summary>
-    int? MediaRemainingPrints = null, DateTime? MediaRemainingObservedAt = null);
+    int? MediaRemainingPrints = null, DateTime? MediaRemainingObservedAt = null,
+    /// <summary>Its prints go to a file, not to paper.</summary>
+    bool Simulated = false);
 public sealed record SharePrinterRequest(string? Email, int? MaxSheets);
 /// <summary>
 /// A loan's new ceiling. <c>maxSheets</c> must be present: null removes the
@@ -85,7 +105,9 @@ public sealed record PrintJobSummaryDto(Guid Id, string ShortCode, string Kind, 
     /// <summary>The paper a ready job waits for, when its printer has another in.</summary>
     string? WaitingForPaper = null,
     /// <summary>Who sent it, when that is not the printer's owner — a job from a loan.</summary>
-    string? OwnerName = null);
+    string? OwnerName = null,
+    /// <summary>Goes to the simulated twin, not to paper.</summary>
+    bool Simulated = false);
 public sealed record PrintStationDto(
     Guid Id, string Name, bool Enabled, string DesiredState, string Status,
     DateTime? LastSeenAt, string? AgentVersion, DateTime CreatedAt, DateTime? RevokedAt,
@@ -98,10 +120,16 @@ public sealed record PrintStationDto(
 public sealed record CreateTestPrintRequest(Guid PrinterDeviceId);
 /// <summary>What erasing a revoked station takes with it: counts, never what was printed or for whom.</summary>
 public sealed record PrintStationErasePreview(int Jobs, int Parties);
-public sealed record PrintClaimRequest(string? AdapterKind = null);
+/// <summary><c>SupportsSimulation</c>: the agent sends a simulated job to its twin; an agent that does not say so is never given one.</summary>
+public sealed record PrintClaimRequest(string? AdapterKind = null, bool SupportsSimulation = false);
 public sealed record PrintClaimResponse(
     Guid JobId, string ClaimToken, string Kind, string Format,
-    string ArtifactUrl, long ArtifactByteLength, string ContentType, string DeviceKey);
+    string ArtifactUrl, long ArtifactByteLength, string ContentType, string DeviceKey,
+    bool Simulated = false);
+public sealed record SetPrinterSimulationRequest(bool Enabled);
+/// <summary>A simulated print as its printer's owner sees it: what, when, whose — the sheet is downloaded apart.</summary>
+public sealed record SimulatedPrintDto(Guid Id, string ShortCode, string Kind, string Format, string State,
+    DateTime CreatedAt, string? OwnerName);
 public sealed record PrintSubmittingRequest(string ClaimToken);
 public sealed record PrintResultRequest(string ClaimToken, string Outcome, string? FailureCode, string? SpoolReference);
 public sealed record PrintArtifact(Stream Content, string ContentType);

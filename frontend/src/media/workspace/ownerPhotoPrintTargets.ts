@@ -27,6 +27,8 @@ export interface PrintTarget {
   sheetsLeft?: number | null;
   /** The printer cuts a 10x15 into the twin strip's two strips. */
   cutsStrips: boolean;
+  /** Its prints go to a file, not to paper: said wherever it is chosen. */
+  simulated: boolean;
 }
 
 const KEY = (stationId: string, deviceId: string) => `${stationId}:${deviceId}`;
@@ -58,6 +60,7 @@ export function printTargets(stations: readonly PrintStation[], shared: readonly
         mediaObservedAt: device.mediaRemainingObservedAt ?? null,
         offline,
         cutsStrips: device.cutsStrips === true,
+        simulated: device.simulated === true,
       };
     }));
   const lent = shared.map((printer): PrintTarget => {
@@ -80,6 +83,7 @@ export function printTargets(stations: readonly PrintStation[], shared: readonly
       offline,
       sheetsLeft,
       cutsStrips: printer.cutsStrips === true,
+      simulated: printer.simulated === true,
     };
   });
   return [...own, ...lent];

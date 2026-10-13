@@ -24,6 +24,8 @@ public sealed class PrintAgentOptions
     /// </summary>
     public string? StripPrinterName { get; set; }
 
+    /// <summary>The simulated twin of the CUPS printer: same queues and driver, a backend that writes a file.</summary>
+    public PrintSimulationOptions Simulation { get; set; } = new();
     /// <summary>The Linux Print Box's own Wi-Fi setup (NetworkManager). Off by default.</summary>
     public NetworkProvisioningOptions NetworkProvisioning { get; set; } = new();
     public string FakeOutputPath { get; set; } = @"%ProgramData%\NubArca\PrintAgent\fake-output";

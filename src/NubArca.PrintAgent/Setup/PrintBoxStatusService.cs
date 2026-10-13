@@ -24,7 +24,9 @@ public sealed record PrintBoxStatus(
 /// The box's printer. <see cref="RemainingPrints"/> is the physical media count
 /// the printer reports, or null when it reports none — never a guess.
 /// </summary>
-public sealed record PrintBoxPrinter(string Name, string State, string? Detail, int? RemainingPrints = null);
+/// <summary><c>Simulated</c>: its owner sent its jobs to the simulated twin — files, not paper.</summary>
+public sealed record PrintBoxPrinter(string Name, string State, string? Detail, int? RemainingPrints = null,
+    bool Simulated = false);
 
 public sealed record PrintBoxAttempt(string Ssid, string Outcome, DateTimeOffset At);
 
@@ -71,7 +73,8 @@ public sealed class PrintBoxStatusService
             catch (Exception ex) when (ex is not OperationCanceledException) { media = PrinterMediaStatus.Unavailable; }
             // An offline printer's last count is not a current one.
             var remaining = observed.State == "offline" ? null : media.RemainingPrints;
-            printer = new PrintBoxPrinter(chosen.DisplayName, DisplayState(observed.State), observed.Detail, remaining);
+            printer = new PrintBoxPrinter(chosen.DisplayName, DisplayState(observed.State), observed.Detail, remaining,
+                _adapter is CupsPrinterAdapter cupsAdapter && cupsAdapter.IsSimulated(chosen.DeviceKey));
         }
         else if (_options.PrinterName is { Length: > 0 } missing)
         {
