@@ -216,8 +216,20 @@ public static class PrintEndpoints
         app.MapPost("/api/print-agent/enroll", async ([FromBody] PrintEnrollmentRequest request,
             [FromServices] PrintStationService service, CancellationToken ct) =>
         {
-            var result = await service.EnrollAsync(request, ct);
-            return result is null ? Results.Unauthorized() : Results.Ok(result);
+            try
+            {
+                var result = await service.EnrollAsync(request, ct);
+                return result is null ? Results.Unauthorized() : Results.Ok(result);
+            }
+            catch (PrintAgentIncompatibleException)
+            {
+                // Said plainly, with what to install instead; the token is not spent.
+                return Results.Conflict(new
+                {
+                    error = "agent_incompatible",
+                    minimumVersion = PrintAgentCompatibility.Display(PrintAgentCompatibility.MinimumVersion),
+                });
+            }
         }).WithName("EnrollPrintStation").AllowAnonymous()
             .RequireRateLimiting(EnrollmentRateLimitPolicy);
 

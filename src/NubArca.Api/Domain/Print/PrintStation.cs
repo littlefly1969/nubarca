@@ -10,6 +10,8 @@ public sealed class PrintStation
     public string? CredentialHash { get; set; }
     public DateTime? LastSeenAt { get; set; }
     public string? AgentVersion { get; set; }
+    /// <summary>The source commit the agent was built from, as it reports it; null from an agent that does not.</summary>
+    public string? AgentBuild { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? RevokedAt { get; set; }
 }

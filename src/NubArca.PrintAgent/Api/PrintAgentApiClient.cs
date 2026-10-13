@@ -24,6 +24,8 @@ public sealed record AgentMediaRemaining(bool Available, int? RemainingPrints, i
 public sealed record AgentClaim(Guid JobId, string ClaimToken, string Kind, string Format,
     string ArtifactUrl, long ArtifactByteLength, string ContentType, string DeviceKey);
 
+internal sealed record AgentRefusal(string? Error, string? MinimumVersion);
+
 public sealed class PrintAgentApiClient
 {
     public const string CredentialHeader = "X-NubArca-Print-Credential";
@@ -35,18 +37,24 @@ public sealed class PrintAgentApiClient
     public void SetCredential(string credential) => _credential = credential;
 
     public async Task<AgentEnrollmentResponse> EnrollAsync(Guid stationId, string token,
-        string agentVersion, CancellationToken cancellationToken)
+        string agentVersion, string? agentBuild, CancellationToken cancellationToken)
     {
         using var response = await _http.PostAsJsonAsync("api/print-agent/enroll",
-            new { stationId, enrollmentToken = token, agentVersion }, cancellationToken);
+            new { stationId, enrollmentToken = token, agentVersion, agentBuild }, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.Conflict)
+        {
+            // Too old for this server: said with the version to install instead.
+            var refusal = await response.Content.ReadFromJsonAsync<AgentRefusal>(cancellationToken);
+            if (refusal?.Error == "agent_incompatible") throw new AgentIncompatibleException(refusal.MinimumVersion);
+        }
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<AgentEnrollmentResponse>(cancellationToken))!;
     }
 
-    public async Task<AgentHeartbeatResponse> HeartbeatAsync(string agentVersion,
+    public async Task<AgentHeartbeatResponse> HeartbeatAsync(string agentVersion, string? agentBuild,
         IReadOnlyList<AgentDeviceReport> devices, CancellationToken cancellationToken)
     {
-        using var request = Json(HttpMethod.Post, "api/print-agent/heartbeat", new { agentVersion, devices });
+        using var request = Json(HttpMethod.Post, "api/print-agent/heartbeat", new { agentVersion, agentBuild, devices });
         using var response = await _http.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<AgentHeartbeatResponse>(cancellationToken))!;

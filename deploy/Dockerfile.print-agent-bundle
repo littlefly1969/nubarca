@@ -1,0 +1,10 @@
+FROM scratch
+
+ARG GIT_SHA
+ARG RELEASE_VERSION
+
+LABEL io.nubarca.artifact="print-agent" \
+      org.opencontainers.image.revision="$GIT_SHA" \
+      org.opencontainers.image.version="$RELEASE_VERSION"
+
+COPY . /release/

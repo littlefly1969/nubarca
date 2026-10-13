@@ -211,6 +211,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Purely additive. It creates two new tables, resumable_uploads (its own primary key, two plain indexes, and a foreign key FROM it TO users that cascades in that direction only) and resumable_upload_chunks (a composite primary key and a foreign key to resumable_uploads that cascades). Nothing existing is altered, constrained, backfilled or dropped, and no delete path on an existing table gains a restriction: deleting a user simply also deletes that user's unfinished upload bookkeeping. The previously pinned application neither reads nor writes either table, so rolling the image back leaves uploads working exactly as before against the upgraded schema; any rows left behind are temporary transfers the new application's sweeper reclaims after their expiry."
+    },
+    "20261013214233_AddPrintAgentDistribution": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Purely additive. It adds one NULLABLE column AgentBuild to print_stations (no default, no backfill, no index, no constraint: a metadata-only ALTER TABLE ... ADD COLUMN) and creates one new table print_agent_distribution with its own integer primary key and no foreign key. Nothing existing is altered, constrained or dropped. The previously pinned application neither reads nor writes either: its station queries do not select the new column and its inserts omit it, so new rows take NULL, and it never touches the new table. Rolling the image back is therefore safe; a bundle sharing switch set by the new application simply has no effect under the previous one, which has no download route."
     }
   }
 }

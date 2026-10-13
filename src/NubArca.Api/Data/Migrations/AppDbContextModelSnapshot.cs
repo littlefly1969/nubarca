@@ -6434,6 +6434,25 @@ namespace NubArca.Api.Data.Migrations
                     b.ToTable("party_print_requests", (string)null);
                 });
 
+            modelBuilder.Entity("NubArca.Api.Domain.Print.PrintAgentDistribution", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("SharingEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("print_agent_distribution", (string)null);
+                });
+
             modelBuilder.Entity("NubArca.Api.Domain.Print.PrintJob", b =>
                 {
                     b.Property<Guid>("Id")
@@ -6579,6 +6598,10 @@ namespace NubArca.Api.Data.Migrations
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("AgentBuild")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("AgentVersion")
                         .HasMaxLength(64)

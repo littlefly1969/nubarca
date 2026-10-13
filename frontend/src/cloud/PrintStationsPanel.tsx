@@ -4,11 +4,14 @@ import {
   cancelPrintJob,
   createPrintStation,
   createPrintTestJob,
+  getPrintAgentBundle,
   listPrintStations,
   listSharedPrinters,
   renewPrintStationEnrollment,
   revokePrintStation,
   setPrintStationDesiredState,
+  type PrintAgentBundle,
+  type PrintAgentStatus,
   type PrintJobSummary,
   type PrintStation,
   type PrintStationEnrollment,
@@ -16,6 +19,8 @@ import {
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
+import { PrintAgentBundleCard } from './PrintAgentBundleCard';
+import { PrintAgentSetupGuide } from './PrintAgentSetupGuide';
 import { PrinterCalibrationControls } from './PrinterCalibrationControls';
 import { isPrinterOffline, PrinterMediaRemaining } from './PrinterMediaRemaining';
 import { paperLabel, PrinterPaperControl } from './PrinterPaperControl';
@@ -60,13 +65,33 @@ const CANCELLABLE = new Set(['requested', 'rendering', 'ready']);
  */
 export const PRINT_STATIONS_REFRESH_MS = 8_000;
 
+type View =
+  | { kind: 'list' }
+  | { kind: 'station'; id: string }
+  | { kind: 'add' }
+  /** Connect a box (with a code) or update one already connected (without). */
+  | { kind: 'guide'; id: string; enrollment: PrintStationEnrollment | null; awaiting: boolean };
+
+const AGENT_KEYS: Record<PrintAgentStatus['compatibility'], MessageKey> = {
+  current: 'print.agent.current',
+  'update-available': 'print.agent.updateAvailable',
+  incompatible: 'print.agent.incompatible',
+  unknown: 'print.agent.unknown',
+};
+
+/**
+ * The printers page, phone first: a list of compact cards — name, state,
+ * paper and prints left — each opening its printer; adding one is a short,
+ * guided path that ends with the box connected.
+ */
 export function PrintStationsPanel() {
   const { state, invalidateAuth } = useAuth();
   const { t, formatDate } = useI18n();
   const [stations, setStations] = useState<PrintStation[] | null>(null);
   const [shared, setShared] = useState<SharedPrinter[]>([]);
+  const [bundle, setBundle] = useState<PrintAgentBundle | null>(null);
+  const [view, setView] = useState<View>({ kind: 'list' });
   const [name, setName] = useState('');
-  const [enrollment, setEnrollment] = useState<PrintStationEnrollment | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,10 +103,15 @@ export function PrintStationsPanel() {
     try {
       // Your stations, and the printers lent to you: the second is its own
       // list, so a person with no station of their own still finds theirs.
-      const [own, lent] = await Promise.all([listPrintStations(signal), listSharedPrinters(signal)]);
+      // The bundle is a nicety: a page without it still works.
+      const [own, lent, published] = await Promise.all([
+        listPrintStations(signal), listSharedPrinters(signal),
+        getPrintAgentBundle(signal).catch(() => null),
+      ]);
       if (read !== latestRead.current) return;
       setStations(own);
       setShared(lent);
+      setBundle(published);
       setError(null);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -115,8 +145,9 @@ export function PrintStationsPanel() {
     if (!name.trim()) return;
     setBusy('create'); setError(null);
     try {
-      setEnrollment(await createPrintStation(name.trim()));
+      const enrollment = await createPrintStation(name.trim());
       setName('');
+      setView({ kind: 'guide', id: enrollment.id, enrollment, awaiting: true });
       await load();
     } catch { setError(t('print.createError')); }
     finally { setBusy(null); }
@@ -133,38 +164,102 @@ export function PrintStationsPanel() {
 
   async function renew(station: PrintStation) {
     setBusy(station.id); setError(null);
-    try { setEnrollment(await renewPrintStationEnrollment(station.id)); }
-    catch { setError(t('print.enrollmentError')); }
+    try {
+      const enrollment = await renewPrintStationEnrollment(station.id);
+      setView({ kind: 'guide', id: station.id, enrollment, awaiting: station.agentVersion === null });
+    } catch { setError(t('print.enrollmentError')); }
     finally { setBusy(null); }
   }
 
   if (state.status !== 'authed') return null;
 
+  const stationOf = (id: string) => stations?.find((x) => x.id === id) ?? null;
+  const errorLine = error && <p className="folder-error" role="alert">{error}</p>;
+
+  if (view.kind === 'add') {
+    return (
+      <section className="print-stations">
+        <button type="button" className="print-back" onClick={() => setView({ kind: 'list' })}>{t('print.backToList')}</button>
+        <form className="print-station-create" onSubmit={(event) => void create(event)}>
+          <h3>{t('print.addPrinter')}</h3>
+          <label>
+            <span>{t('print.printerName')}</span>
+            <input value={name} maxLength={120} autoFocus onChange={(event) => setName(event.target.value)} />
+          </label>
+          <div className="print-station-actions">
+            <button type="submit" className="primary-button" disabled={!name.trim() || busy !== null}>
+              {t('print.createAndConnect')}
+            </button>
+            <button type="button" onClick={() => setView({ kind: 'list' })}>{t('common.cancel')}</button>
+          </div>
+        </form>
+        {errorLine}
+      </section>
+    );
+  }
+
+  if (view.kind === 'guide') {
+    const station = stationOf(view.id);
+    const connected = view.awaiting && station?.agentVersion ? (station.agent?.version ?? station.agentVersion) : null;
+    return (
+      <section className="print-stations">
+        <button type="button" className="print-back" onClick={() => setView({ kind: 'list' })}>{t('print.backToList')}</button>
+        {bundle?.canManage && <PrintAgentBundleCard bundle={bundle} onChanged={setBundle} />}
+        <PrintAgentSetupGuide
+          stationName={station?.name ?? view.enrollment?.name ?? ''}
+          stationId={view.id}
+          enrollment={view.enrollment}
+          bundle={bundle}
+          connectedVersion={connected}
+          onNewCode={() => { if (station) void renew(station); }}
+          onDone={() => setView(station ? { kind: 'station', id: view.id } : { kind: 'list' })}
+          onOpenStation={() => setView({ kind: 'station', id: view.id })}
+        />
+        {errorLine}
+      </section>
+    );
+  }
+
+  if (view.kind === 'station') {
+    const station = stationOf(view.id);
+    if (!station) {
+      return (
+        <section className="print-stations">
+          <button type="button" className="print-back" onClick={() => setView({ kind: 'list' })}>{t('print.backToList')}</button>
+          {stations === null && <p className="muted" role="status">{t('print.loading')}</p>}
+        </section>
+      );
+    }
+    return (
+      <section className="print-stations" aria-busy={busy !== null}>
+        <button type="button" className="print-back" onClick={() => setView({ kind: 'list' })}>{t('print.backToList')}</button>
+        {errorLine}
+        <StationDetail
+          station={station}
+          busy={busy === station.id}
+          formatDate={formatDate}
+          onChanged={() => load()}
+          onAction={(operation, message) => void action(station.id, operation, message)}
+          onRenew={() => void renew(station)}
+          onUpdateGuide={() => setView({ kind: 'guide', id: station.id, enrollment: null, awaiting: false })}
+        />
+      </section>
+    );
+  }
+
   return (
     <section className="print-stations" aria-busy={stations === null || busy !== null}>
-      <form className="print-station-create" onSubmit={(event) => void create(event)}>
-        <label>
-          <span>{t('print.stationName')}</span>
-          <input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} />
-        </label>
-        <button type="submit" className="primary-button" disabled={!name.trim() || busy !== null}>
-          {t('print.createStation')}
+      <div className="print-stations-toolbar">
+        <button type="button" className="primary-button" onClick={() => { setError(null); setView({ kind: 'add' }); }}>
+          {t('print.addPrinter')}
         </button>
         <button type="button" className="refresh-button" onClick={() => void load()}>
           {t('common.refresh')}
         </button>
-      </form>
+      </div>
 
-      {enrollment && (
-        <section className="print-enrollment" role="status" data-testid="print-enrollment">
-          <h3>{t('print.enrollmentTitle')}</h3>
-          <p>{t('print.enrollmentWarning', { date: formatDate(enrollment.enrollmentExpiresAt) })}</p>
-          <code>{`NubArca.PrintAgent.exe enroll --server ${window.location.origin} --station ${enrollment.id} --token ${enrollment.enrollmentToken}`}</code>
-          <button type="button" onClick={() => setEnrollment(null)}>{t('common.close')}</button>
-        </section>
-      )}
-
-      {error && <p className="folder-error" role="alert">{error}</p>}
+      {bundle?.canManage && <PrintAgentBundleCard bundle={bundle} onChanged={setBundle} />}
+      {errorLine}
       {stations === null && <p className="muted" role="status">{t('print.loading')}</p>}
       {stations?.length === 0 && shared.length === 0 && (
         <p className="muted" data-testid="print-empty">{t('print.empty')}</p>
@@ -172,91 +267,32 @@ export function PrintStationsPanel() {
 
       <ul className="print-station-list" aria-label={t('print.listLabel')}>
         {stations?.map((station) => {
-          const observedPrinter = station.devices[0] ?? null;
-          // The test page goes on the paper in the printer, so it needs a
-          // printer that can print that paper.
-          const printPrinter = station.devices.find((device) =>
-            (device.papers ?? (device.supportsPhoto10x15 ? ['10x15'] : []))
-              .includes(device.loadedPaperSize ?? '10x15')
-            && (device.observedState === 'ready' || device.observedState === 'busy')) ?? null;
+          const printer = station.devices[0] ?? null;
+          const agent = station.agent ?? null;
           return (
-            <li key={station.id} className={`print-station-card print-station-${station.status}`}>
-              <header>
-                <div>
-                  <h3>{station.name}</h3>
+            <li key={station.id}>
+              <button type="button" className={`print-station-row print-station-${station.status}`}
+                data-testid="print-station-row" onClick={() => setView({ kind: 'station', id: station.id })}>
+                <span className="print-station-row-head">
+                  <strong>{station.name}</strong>
                   <span className={`print-status print-status-${station.status}`}>{t(STATUS_KEYS[station.status])}</span>
-                </div>
-                <span className="muted">{station.agentVersion ?? t('print.notEnrolled')}</span>
-              </header>
-              <dl>
-                <div><dt>{t('print.printer')}</dt><dd>{observedPrinter?.displayName ?? t('print.noPrinter')}</dd></div>
-                {observedPrinter && (
-                  <PrinterMediaRemaining
-                    remaining={observedPrinter.mediaRemainingPrints}
-                    observedAt={observedPrinter.mediaRemainingObservedAt}
-                    offline={isPrinterOffline(station.status, observedPrinter.observedState)}
-                  />
+                </span>
+                <span className="muted print-station-row-line">
+                  {printer
+                    ? [
+                      printer.displayName,
+                      paperLabel(printer.loadedPaperSize ?? '10x15'),
+                      ...(typeof printer.mediaRemainingPrints === 'number'
+                        ? [t('print.remainingShort', { count: printer.mediaRemainingPrints })] : []),
+                    ].join(' · ')
+                    : station.agentVersion ? t('print.noPrinter') : t('print.notEnrolled')}
+                </span>
+                {agent && agent.compatibility !== 'current' && agent.compatibility !== 'unknown' && (
+                  <span className={`print-agent-badge print-agent-${agent.compatibility}`}>
+                    {t(AGENT_KEYS[agent.compatibility], { version: agent.latestVersion ?? '' })}
+                  </span>
                 )}
-                {observedPrinter && (
-                  <div>
-                    <dt>{t('print.stripCut')}</dt>
-                    <dd data-testid="print-strip-cut">
-                      {t(observedPrinter.cutsStrips ? 'print.stripCutPrinter' : 'print.stripCutHand')}
-                    </dd>
-                  </div>
-                )}
-                <div><dt>{t('print.lastSeen')}</dt><dd>{station.lastSeenAt ? formatDate(station.lastSeenAt) : '—'}</dd></div>
-                <div><dt>{t('print.queue')}</dt><dd>{station.queueCount}</dd></div>
-                <div><dt>{t('print.currentJob')}</dt><dd>{station.currentJob ? `${station.currentJob.shortCode} · ${station.currentJob.state}` : '—'}</dd></div>
-                <div><dt>{t('print.lastError')}</dt><dd>{station.lastError ?? '—'}</dd></div>
-              </dl>
-              {(station.queue?.length ?? 0) > 0 && (
-                <PrintQueueList jobs={station.queue ?? []} busy={busy === station.id}
-                  onCancel={(job) => void action(station.id, () => cancelPrintJob(job.id), 'print.job.cancelError')} />
-              )}
-              {station.revokedAt === null && observedPrinter && (
-                <PrinterPaperControl stationId={station.id} device={observedPrinter}
-                  onSaved={() => load()} />
-              )}
-              {observedPrinter && <PrinterUsageSummary usage={observedPrinter.usage ?? []} />}
-              {station.revokedAt === null && observedPrinter && (
-                <PrinterCalibrationControls stationId={station.id} device={observedPrinter}
-                  onSaved={() => load()} />
-              )}
-              {station.revokedAt === null && observedPrinter && (
-                <PrinterSharingControls stationId={station.id} device={observedPrinter}
-                  onChanged={() => load()} />
-              )}
-              {station.revokedAt === null && (
-                <div className="print-station-actions">
-                  {station.desiredState === 'running' ? (
-                    <button type="button" disabled={busy === station.id}
-                      onClick={() => void action(station.id,
-                        () => setPrintStationDesiredState(station.id, 'paused'), 'print.actionError')}>
-                      {t('print.pause')}
-                    </button>
-                  ) : (
-                    <button type="button" disabled={busy === station.id}
-                      onClick={() => void action(station.id,
-                        () => setPrintStationDesiredState(station.id, 'running'), 'print.actionError')}>
-                      {t('print.resume')}
-                    </button>
-                  )}
-                  <button type="button" disabled={!printPrinter || station.desiredState !== 'running' || busy === station.id}
-                    onClick={() => printPrinter && void action(station.id,
-                      () => createPrintTestJob(station.id, printPrinter.id), 'print.testError')}>
-                    {t('print.testPrint')}
-                  </button>
-                  <button type="button" disabled={busy === station.id} onClick={() => void renew(station)}>
-                    {t('print.newEnrollment')}
-                  </button>
-                  <button type="button" className="destructive-button" disabled={busy === station.id}
-                    onClick={() => window.confirm(t('print.revokeConfirm', { name: station.name }))
-                      && void action(station.id, () => revokePrintStation(station.id), 'print.revokeError')}>
-                    {t('print.revoke')}
-                  </button>
-                </div>
-              )}
+              </button>
             </li>
           );
         })}
@@ -264,6 +300,118 @@ export function PrintStationsPanel() {
 
       <SharedPrintersList printers={shared} onChanged={() => load()} />
     </section>
+  );
+}
+
+/** One printer, opened from the list: its sections, then what can be done with it. */
+function StationDetail({ station, busy, formatDate, onChanged, onAction, onRenew, onUpdateGuide }: {
+  station: PrintStation;
+  busy: boolean;
+  formatDate: (value: string) => string;
+  onChanged: () => Promise<void>;
+  onAction: (operation: () => Promise<unknown>, message: MessageKey) => void;
+  onRenew: () => void;
+  onUpdateGuide: () => void;
+}) {
+  const { t } = useI18n();
+  const printer = station.devices[0] ?? null;
+  const agent = station.agent ?? null;
+  const live = station.revokedAt === null;
+  // The test page goes on the paper in the printer, so it needs a printer
+  // that can print that paper.
+  const printPrinter = station.devices.find((device) =>
+    (device.papers ?? (device.supportsPhoto10x15 ? ['10x15'] : []))
+      .includes(device.loadedPaperSize ?? '10x15')
+    && (device.observedState === 'ready' || device.observedState === 'busy')) ?? null;
+
+  return (
+    <article className={`print-station-card print-station-${station.status}`} data-testid="print-station-detail">
+      <header>
+        <h3>{station.name}</h3>
+        <span className={`print-status print-status-${station.status}`}>{t(STATUS_KEYS[station.status])}</span>
+      </header>
+
+      <section className="print-station-section">
+        <dl>
+          <div><dt>{t('print.printer')}</dt><dd>{printer?.displayName ?? t('print.noPrinter')}</dd></div>
+          {printer && (
+            <PrinterMediaRemaining
+              remaining={printer.mediaRemainingPrints}
+              observedAt={printer.mediaRemainingObservedAt}
+              offline={isPrinterOffline(station.status, printer.observedState)}
+            />
+          )}
+          {printer && (
+            <div>
+              <dt>{t('print.stripCut')}</dt>
+              <dd data-testid="print-strip-cut">
+                {t(printer.cutsStrips ? 'print.stripCutPrinter' : 'print.stripCutHand')}
+              </dd>
+            </div>
+          )}
+          <div><dt>{t('print.queue')}</dt><dd>{station.queueCount}</dd></div>
+          <div><dt>{t('print.currentJob')}</dt><dd>{station.currentJob ? `${station.currentJob.shortCode} · ${station.currentJob.state}` : '—'}</dd></div>
+        </dl>
+        {live && printer && <PrinterPaperControl stationId={station.id} device={printer} onSaved={onChanged} />}
+      </section>
+
+      {(station.queue?.length ?? 0) > 0 && (
+        <PrintQueueList jobs={station.queue ?? []} busy={busy}
+          onCancel={(job) => onAction(() => cancelPrintJob(job.id), 'print.job.cancelError')} />
+      )}
+
+      <section className="print-station-section" data-testid="print-agent">
+        <h4>{t('print.agent.section')}</h4>
+        <dl>
+          <div><dt>{t('print.agent.version')}</dt><dd>{agent?.version ?? station.agentVersion ?? t('print.notEnrolled')}</dd></div>
+          {agent?.build && <div><dt>{t('print.agent.build')}</dt><dd><code>{agent.build}</code></dd></div>}
+          <div><dt>{t('print.lastSeen')}</dt><dd>{station.lastSeenAt ? formatDate(station.lastSeenAt) : '—'}</dd></div>
+          <div><dt>{t('print.lastError')}</dt><dd>{station.lastError ?? '—'}</dd></div>
+        </dl>
+        {agent && (
+          <p className={`print-agent-badge print-agent-${agent.compatibility}`} data-testid="print-agent-status">
+            {t(AGENT_KEYS[agent.compatibility], { version: agent.latestVersion ?? '' })}
+            {agent.unofficial && <>{' · '}{t('print.agent.unofficial')}</>}
+          </p>
+        )}
+        {live && agent && (
+          <button type="button" onClick={onUpdateGuide}>{t('print.agent.updateGuide')}</button>
+        )}
+      </section>
+
+      {printer && <PrinterUsageSummary usage={printer.usage ?? []} />}
+      {live && printer && <PrinterCalibrationControls stationId={station.id} device={printer} onSaved={onChanged} />}
+      {live && printer && <PrinterSharingControls stationId={station.id} device={printer} onChanged={onChanged} />}
+
+      {live && (
+        <div className="print-station-actions">
+          {station.desiredState === 'running' ? (
+            <button type="button" disabled={busy}
+              onClick={() => onAction(() => setPrintStationDesiredState(station.id, 'paused'), 'print.actionError')}>
+              {t('print.pause')}
+            </button>
+          ) : (
+            <button type="button" disabled={busy}
+              onClick={() => onAction(() => setPrintStationDesiredState(station.id, 'running'), 'print.actionError')}>
+              {t('print.resume')}
+            </button>
+          )}
+          <button type="button" disabled={!printPrinter || station.desiredState !== 'running' || busy}
+            onClick={() => printPrinter && onAction(
+              () => createPrintTestJob(station.id, printPrinter.id), 'print.testError')}>
+            {t('print.testPrint')}
+          </button>
+          <button type="button" disabled={busy} onClick={onRenew}>
+            {t('print.newEnrollment')}
+          </button>
+          <button type="button" className="destructive-button" disabled={busy}
+            onClick={() => window.confirm(t('print.revokeConfirm', { name: station.name }))
+              && onAction(() => revokePrintStation(station.id), 'print.revokeError')}>
+            {t('print.revoke')}
+          </button>
+        </div>
+      )}
+    </article>
   );
 }
 

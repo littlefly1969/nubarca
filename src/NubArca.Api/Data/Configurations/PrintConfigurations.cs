@@ -16,6 +16,7 @@ public sealed class PrintStationConfiguration : IEntityTypeConfiguration<PrintSt
         builder.Property(x => x.DesiredState).IsRequired().HasMaxLength(20);
         builder.Property(x => x.CredentialHash).HasMaxLength(64).IsFixedLength();
         builder.Property(x => x.AgentVersion).HasMaxLength(64);
+        builder.Property(x => x.AgentBuild).HasMaxLength(64);
         builder.Property(x => x.LastSeenAt).HasColumnType("timestamp with time zone");
         builder.Property(x => x.CreatedAt).HasColumnType("timestamp with time zone");
         builder.Property(x => x.RevokedAt).HasColumnType("timestamp with time zone");
@@ -26,6 +27,19 @@ public sealed class PrintStationConfiguration : IEntityTypeConfiguration<PrintSt
             .HasDatabaseName("ix_print_stations_owner_created");
         builder.HasOne<User>().WithMany().HasForeignKey(x => x.OwnerUserId)
             .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class PrintAgentDistributionConfiguration : IEntityTypeConfiguration<PrintAgentDistribution>
+{
+    public void Configure(EntityTypeBuilder<PrintAgentDistribution> builder)
+    {
+        builder.ToTable("print_agent_distribution");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).ValueGeneratedNever();
+        builder.Property(x => x.UpdatedAt).HasColumnType("timestamp with time zone");
+        // UpdatedByUserId is a plain audit column: a deleted administrator never
+        // blocks the switch.
     }
 }
 
