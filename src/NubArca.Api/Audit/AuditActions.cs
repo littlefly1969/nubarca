@@ -292,6 +292,9 @@ public static class AuditActions
     // The installation's Print Agent bundle handed out, or no longer: who
     // switched it and which way — never a file name or a hash.
     public const string PrintAgentSharingSet = "print.agent.sharing.set";
+    // A revoked station erased with everything it left. The one line that
+    // remains of it: who erased which station id, and when — no name, no counts.
+    public const string PrintStationErase = "print.station.erase";
     public const string PartyGameStart = "party.game.start";
     public const string PartyGameFinish = "party.game.finish";
     // Playing the same party again. Recorded beside start and finish because it
@@ -463,6 +466,7 @@ public static class AuditEntityTypes
     public const string PartyAlbum = "party_album";
     public const string PrinterDevice = "printer_device";
     public const string PrintAgentDistribution = "print_agent_distribution";
+    public const string PrintStation = "print_station";
     public const string PartyMessage = "party_message";
     public const string PartyGuestbookEntry = "party_guestbook_entry";
     public const string Plate = "plate";

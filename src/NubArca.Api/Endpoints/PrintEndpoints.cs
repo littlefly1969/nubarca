@@ -80,6 +80,27 @@ public static class PrintEndpoints
             }
             return Results.NoContent();
         }).WithName("RevokePrintStation");
+        owner.MapGet("/stations/{stationId:guid}/erase", async (Guid stationId, HttpContext context,
+            [FromServices] PrintStationService service, CancellationToken ct) =>
+        {
+            try
+            {
+                var preview = await service.PreviewEraseAsync(context.GetCurrentUserId()!.Value, stationId, ct);
+                return preview is null ? Results.NotFound() : Results.Ok(preview);
+            }
+            catch (InvalidOperationException) { return Results.Conflict(new { error = "station_not_revoked" }); }
+        }).WithName("PreviewPrintStationErase");
+        owner.MapDelete("/stations/{stationId:guid}/erase", async (Guid stationId, HttpContext context,
+            [FromServices] PrintStationService service, [FromServices] IAuditLogger audit, CancellationToken ct) =>
+        {
+            var userId = context.GetCurrentUserId()!.Value;
+            var erased = await service.EraseAsync(userId, stationId, ct);
+            if (erased is null) return Results.NotFound();
+            if (erased == false) return Results.Conflict(new { error = "station_not_revoked" });
+            await audit.LogAsync(AuditActor.User(userId), AuditActions.PrintStationErase,
+                AuditEntityTypes.PrintStation, stationId, Ip(context), null, ct);
+            return Results.NoContent();
+        }).WithName("ErasePrintStation");
         owner.MapPut("/stations/{stationId:guid}/devices/{deviceId:guid}/calibration", async (Guid stationId,
             Guid deviceId, [FromBody] PrintCalibrationDto? request, HttpContext context,
             [FromServices] PrintStationService service, CancellationToken ct) =>

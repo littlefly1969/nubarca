@@ -4,9 +4,11 @@ import {
   cancelPrintJob,
   createPrintStation,
   createPrintTestJob,
+  erasePrintStation,
   getPrintAgentBundle,
   listPrintStations,
   listSharedPrinters,
+  previewPrintStationErase,
   renewPrintStationEnrollment,
   revokePrintStation,
   setPrintStationDesiredState,
@@ -94,6 +96,7 @@ export function PrintStationsPanel() {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [erased, setErased] = useState(false);
 
   // Only the newest read is applied, so a slow refresh can never put back
   // what a later one (or an action's own reload) already replaced.
@@ -159,6 +162,22 @@ export function PrintStationsPanel() {
     catch (err) {
       if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
       setError(t(message));
+    } finally { setBusy(null); }
+  }
+
+  /** Says what goes, asks once, then erases and returns to the list. */
+  async function erase(station: PrintStation) {
+    setBusy(station.id); setError(null);
+    try {
+      const preview = await previewPrintStationErase(station.id);
+      if (!window.confirm(t('print.erase.confirm', { name: station.name, jobs: preview.jobs, parties: preview.parties }))) return;
+      await erasePrintStation(station.id);
+      setErased(true);
+      setView({ kind: 'list' });
+      await load();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
+      setError(t('print.erase.error'));
     } finally { setBusy(null); }
   }
 
@@ -241,6 +260,7 @@ export function PrintStationsPanel() {
           onChanged={() => load()}
           onAction={(operation, message) => void action(station.id, operation, message)}
           onRenew={() => void renew(station)}
+          onErase={() => void erase(station)}
           onUpdateGuide={() => setView({ kind: 'guide', id: station.id, enrollment: null, awaiting: false })}
         />
       </section>
@@ -260,6 +280,14 @@ export function PrintStationsPanel() {
 
       {bundle?.canManage && <PrintAgentBundleCard bundle={bundle} onChanged={setBundle} />}
       {errorLine}
+      {erased && (
+        <section className="print-erased" role="status" data-testid="print-erased">
+          <p>{t('print.erase.done')}</p>
+          <p className="muted">{t('print.erase.boxHint')}</p>
+          <pre><code>{'sudo bash /opt/nubarca-print-agent/linux/uninstall-instance.sh --instance box --purge-state'}</code></pre>
+          <button type="button" onClick={() => setErased(false)}>{t('common.close')}</button>
+        </section>
+      )}
       {stations === null && <p className="muted" role="status">{t('print.loading')}</p>}
       {stations?.length === 0 && shared.length === 0 && (
         <p className="muted" data-testid="print-empty">{t('print.empty')}</p>
@@ -304,7 +332,7 @@ export function PrintStationsPanel() {
 }
 
 /** One printer, opened from the list: its sections, then what can be done with it. */
-function StationDetail({ station, busy, formatDate, onChanged, onAction, onRenew, onUpdateGuide }: {
+function StationDetail({ station, busy, formatDate, onChanged, onAction, onRenew, onUpdateGuide, onErase }: {
   station: PrintStation;
   busy: boolean;
   formatDate: (value: string) => string;
@@ -312,6 +340,7 @@ function StationDetail({ station, busy, formatDate, onChanged, onAction, onRenew
   onAction: (operation: () => Promise<unknown>, message: MessageKey) => void;
   onRenew: () => void;
   onUpdateGuide: () => void;
+  onErase: () => void;
 }) {
   const { t } = useI18n();
   const printer = station.devices[0] ?? null;
@@ -410,6 +439,18 @@ function StationDetail({ station, busy, formatDate, onChanged, onAction, onRenew
             {t('print.revoke')}
           </button>
         </div>
+      )}
+
+      {!live && (
+        <section className="print-station-section" data-testid="print-erase">
+          <h4>{t('print.erase.title')}</h4>
+          <p className="muted">{t('print.erase.help')}</p>
+          <div className="print-station-actions">
+            <button type="button" className="destructive-button" disabled={busy} onClick={onErase}>
+              {t('print.erase.title')}
+            </button>
+          </div>
+        </section>
       )}
     </article>
   );

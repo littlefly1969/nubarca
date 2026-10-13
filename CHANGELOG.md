@@ -6,6 +6,13 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Printers: erase a revoked printer for good
+
+- **A revoked printer can be erased with everything it left** — its prints,
+  rendered sheets, loans and codes. The page says how many prints and parties
+  are concerned and asks once; parties keep their budgets and numbering. Only
+  one line of the security log remains.
+
 ### Printers: connect a Print Box in a few copied commands, on a page made for the phone
 
 - **The printers page is a list of compact cards** — name, state, paper,

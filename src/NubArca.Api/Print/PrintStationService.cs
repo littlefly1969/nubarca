@@ -417,6 +417,110 @@ public sealed class PrintStationService
         return ended;
     }
 
+    /// <summary>
+    /// What <see cref="EraseAsync"/> would take: the station's jobs, and how many
+    /// parties lose their print history with them. Null for no such station of
+    /// this owner; refused for one not revoked.
+    /// </summary>
+    public async Task<PrintStationErasePreview?> PreviewEraseAsync(Guid ownerId, Guid stationId,
+        CancellationToken cancellationToken)
+    {
+        var station = await _db.PrintStations.AsNoTracking().SingleOrDefaultAsync(
+            x => x.Id == stationId && x.OwnerUserId == ownerId, cancellationToken);
+        if (station is null) return null;
+        if (station.RevokedAt is null) throw new InvalidOperationException("station_not_revoked");
+        var jobIds = _db.PrintJobs.Where(x => x.PrintStationId == stationId).Select(x => x.Id);
+        return new PrintStationErasePreview(
+            await jobIds.CountAsync(cancellationToken),
+            await _db.PartyPrintRequests.Where(x => jobIds.Contains(x.PrintJobId))
+                .Select(x => x.PartyAlbumId).Distinct().CountAsync(cancellationToken));
+    }
+
+    /// <summary>
+    /// Erases a REVOKED station and everything it left: its jobs and what hangs
+    /// off them (party and owner requests, sources), its printers' loans, its
+    /// printers, its enrollment codes and the station itself — then the
+    /// rendered sheets nothing else owns. A party keeps its budgets and its
+    /// numbering (they are counters on the party, not on the jobs) and only
+    /// loses its printer choice and its history of prints on this station.
+    /// Revocation already stopped every print here, so nothing live is cut.
+    /// Null: no such station of this owner; false: not revoked.
+    /// </summary>
+    public async Task<bool?> EraseAsync(Guid ownerId, Guid stationId, CancellationToken cancellationToken)
+    {
+        List<string> artifactKeys = [];
+        var strategy = _db.Database.CreateExecutionStrategy();
+        var erased = await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+            var station = await _db.PrintStations.AsNoTracking().SingleOrDefaultAsync(
+                x => x.Id == stationId && x.OwnerUserId == ownerId, cancellationToken);
+            if (station is null) return (bool?)null;
+            if (station.RevokedAt is null) return false;
+
+            var deviceIds = await _db.PrinterDevices.Where(x => x.PrintStationId == stationId)
+                .Select(x => x.Id).ToListAsync(cancellationToken);
+            var jobs = _db.PrintJobs.Where(x => x.PrintStationId == stationId || deviceIds.Contains(x.PrinterDeviceId));
+            artifactKeys = await jobs.Where(x => x.ArtifactStorageKey != null)
+                .Select(x => x.ArtifactStorageKey!).Distinct().ToListAsync(cancellationToken);
+            var jobIds = jobs.Select(x => x.Id);
+            await _db.PartyPrintRequests.Where(x => jobIds.Contains(x.PrintJobId)).ExecuteDeleteAsync(cancellationToken);
+            await _db.OwnerPhotoPrintRequests.Where(x => jobIds.Contains(x.PrintJobId)).ExecuteDeleteAsync(cancellationToken);
+            await _db.PrintJobSources.Where(x => jobIds.Contains(x.PrintJobId)).ExecuteDeleteAsync(cancellationToken);
+            await jobs.ExecuteDeleteAsync(cancellationToken);
+            await _db.PartyPrintProfiles
+                .Where(x => x.PrintStationId == stationId
+                    || (x.PrinterDeviceId != null && deviceIds.Contains(x.PrinterDeviceId.Value)))
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(x => x.PrintStationId, (Guid?)null)
+                    .SetProperty(x => x.PrinterDeviceId, (Guid?)null), cancellationToken);
+            await _db.PrinterShares.Where(x => deviceIds.Contains(x.PrinterDeviceId)).ExecuteDeleteAsync(cancellationToken);
+            await _db.PrinterDevices.Where(x => x.PrintStationId == stationId).ExecuteDeleteAsync(cancellationToken);
+            await _db.PrintStationEnrollments.Where(x => x.PrintStationId == stationId).ExecuteDeleteAsync(cancellationToken);
+            await _db.PrintStations.Where(x => x.Id == stationId).ExecuteDeleteAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return true;
+        });
+        if (erased == true) await DeleteUnownedArtifactsAsync(artifactKeys, cancellationToken);
+        return erased;
+    }
+
+    /// <summary>
+    /// Each rendered sheet of the erased jobs, unless something still owns the
+    /// same bytes: another job, or a library blob of identical content. Decided
+    /// under the exclusive storage lock, as the blob janitor decides a purge, so
+    /// no writer can publish these bytes between the check and the unlink. A
+    /// sheet that cannot be deleted is left for storage reconciliation to report.
+    /// </summary>
+    private async Task DeleteUnownedArtifactsAsync(IReadOnlyList<string> keys, CancellationToken cancellationToken)
+    {
+        foreach (var key in keys)
+        {
+            var sha = StorageMutationLock.ContentIdentityOf(key);
+            if (sha is null) continue;
+            try
+            {
+                var strategy = _db.Database.CreateExecutionStrategy();
+                await strategy.ExecuteAsync(async () =>
+                {
+                    await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+                    await StorageMutationLock.AcquireExclusiveAsync(_db, sha, cancellationToken);
+                    var owned = await _db.BlobObjects.AsNoTracking()
+                            .AnyAsync(x => x.StorageKey == key || x.Sha256 == sha, cancellationToken)
+                        || await _db.PrintJobs.AsNoTracking()
+                            .AnyAsync(x => x.ArtifactStorageKey == key, cancellationToken);
+                    if (!owned) await _artifacts.DeleteAsync(key, cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                });
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning("A rendered sheet of an erased print station could not be deleted ({ExceptionType}).",
+                    ex.GetType().Name);
+            }
+        }
+    }
+
     public async Task<PrintHeartbeatResponse?> HeartbeatAsync(Guid stationId,
         PrintHeartbeatRequest request, CancellationToken cancellationToken)
     {

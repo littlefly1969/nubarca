@@ -222,6 +222,47 @@ describe('PrintStationsPanel', () => {
     expect(screen.getByTestId('print-agent-status')).toHaveTextContent('Aggiornato · Build non ufficiale');
   });
 
+  it('erases a revoked printer with everything it left, after saying what goes', async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    let gone = false;
+    const revoked = { ...station, status: 'revoked', revokedAt: '2026-10-01T10:00:00Z' };
+    const mock = mockApi({
+      'GET /api/print/stations': () => jsonResponse(gone ? [] : [revoked]),
+      [`GET /api/print/stations/${station.id}/erase`]: () => jsonResponse({ jobs: 42, parties: 3 }),
+      [`DELETE /api/print/stations/${station.id}/erase`]: () => { gone = true; return emptyResponse(204); },
+    });
+    render(view());
+    await openStation();
+    // A revoked printer offers nothing to run, only to be erased.
+    expect(screen.queryByRole('button', { name: 'Pausa' })).not.toBeInTheDocument();
+    await user.click(within(screen.getByTestId('print-erase')).getByRole('button', { name: 'Cancella tutto' }));
+
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(
+      'Cancellare per sempre “Studio”? Spariscono 42 stampe e lo storico di stampa di 3 feste. Budget e numerazione delle feste restano.'));
+    await waitFor(() => expect(mock.calls.some((c) => c.method === 'DELETE'
+      && c.url === `/api/print/stations/${station.id}/erase`)).toBe(true));
+    const done = await screen.findByTestId('print-erased');
+    expect(done).toHaveTextContent('Stampante cancellata.');
+    expect(done).toHaveTextContent('uninstall-instance.sh --instance box --purge-state');
+    expect(await screen.findByTestId('print-empty')).toBeInTheDocument();
+  });
+
+  it('erases nothing when the person thinks again', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const mock = mockApi({
+      'GET /api/print/stations': () => jsonResponse([{ ...station, status: 'revoked', revokedAt: '2026-10-01T10:00:00Z' }]),
+      [`GET /api/print/stations/${station.id}/erase`]: () => jsonResponse({ jobs: 1, parties: 0 }),
+    });
+    render(view());
+    await openStation();
+    await user.click(within(screen.getByTestId('print-erase')).getByRole('button', { name: 'Cancella tutto' }));
+    await waitFor(() => expect(window.confirm).toHaveBeenCalled());
+    expect(mock.calls.some((c) => c.method === 'DELETE')).toBe(false);
+    expect(screen.getByTestId('print-station-detail')).toBeInTheDocument();
+  });
+
   it('pauses a running station', async () => {
     const user = userEvent.setup();
     const mock = mockApi({
