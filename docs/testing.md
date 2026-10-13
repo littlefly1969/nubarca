@@ -52,7 +52,8 @@ operator-controlled operation governed by `deploy/FAST_DEPLOY.md`.
 The Android startup smoke (an APK build and an emulator cold launch, the
 slowest job) runs on a pull request only when it changes `mobile/`,
 `packages/` or `ci.yml`, and always on `main`; otherwise it reports skipped,
-which satisfies a required check.
+which satisfies a required check. If the change detector itself fails, the
+smoke runs: it never skips for want of an answer.
 
 ### Backend slices
 
@@ -63,14 +64,18 @@ require). `scripts/test-backend-fast.sh --shard I/N` lists the built tests and
 asks `scripts/backend-test-shards.py` for slice I: whole test classes, the
 longest placed first, each on the least loaded slice, using the per-class
 seconds in `tests/backend-test-timings.json`. A class missing from that file
-counts as the median one, so new tests need no bookkeeping; the script refuses
-a split in which any test would run in no slice or in two.
+counts as the median one, so new tests need no bookkeeping, and no class counts
+for less than 0.1 s per test, so classes recorded as 0.0 s do not all land on
+one slice. The script refuses a split in which any test would run in no slice
+or in two.
 
-When the slices drift apart, refresh the timings from a full fast run:
+When the slices drift apart, refresh the timings from the `.trx` files of one
+CI run: the artifacts `backend-fast-test-results-1` to `-8`. They measure the
+classes as they actually run, in slices; a single-process local run is slowed
+by its tests contending with each other and distorts the balance.
 
 ```bash
-scripts/test-backend-fast.sh --logger "trx;LogFileName=fast.trx" --results-directory TestResults
-scripts/backend-test-shards.py timings TestResults/fast.trx
+scripts/backend-test-shards.py timings backend-fast-test-results-*/*.trx
 dotnet test tests/NubArca.Api.Tests --no-build --list-tests > /tmp/tests.txt
 scripts/backend-test-shards.py plan --list /tmp/tests.txt --shards 8
 ```

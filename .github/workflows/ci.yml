@@ -480,13 +480,16 @@ jobs:
 
   # The slowest job in CI (the APK build alone is about 7 minutes), so it runs
   # only when the change can affect the app. A skipped job satisfies a
-  # required check.
+  # required check, so this fails closed: when the detector itself did not
+  # succeed, the smoke runs.
   mobile_android_startup:
     name: Mobile Android startup smoke
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: changes
-    if: needs.changes.outputs.mobile == 'true'
+    if: >-
+      always() &&
+      (needs.changes.result != 'success' || needs.changes.outputs.mobile == 'true')
     steps:
       - name: Check out source
         uses: actions/checkout@v6

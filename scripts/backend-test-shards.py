@@ -7,14 +7,16 @@ its own shard. The split is by class (a class's tests share fixtures, so
 splitting one costs more than it saves) and balanced on the recorded class
 durations in tests/backend-test-timings.json: the longest classes are placed
 first, each on the least loaded shard. A class with no recorded duration
-(added since the file was last refreshed) counts as the median one. Every job
+(added since the file was last refreshed) counts as the median one, and no
+class counts for less than SECONDS_PER_TEST per test. Every job
 computes the same partition from the same list, so the shards together cover
 every class exactly once; the script checks that before printing a filter.
 
   filter   --list LIST --shard I --shards N    print shard I's filter (1-based)
   plan     --list LIST --shards N              print every shard's estimate
   timings  TRX...                              rewrite the timings file from
-                                               a full run's .trx results
+                                               .trx results: preferably all
+                                               eight CI slices of one run
 
 LIST is the output of `dotnet test --list-tests`.
 """
@@ -44,16 +46,35 @@ def listed_tests(path):
     return tests
 
 
+def class_counts(tests):
+    counts = {}
+    for test in tests:
+        cls = class_of(test)
+        counts[cls] = counts.get(cls, 0) + 1
+    return counts
+
+
 def load_timings():
     if not TIMINGS.exists():
         return {}
     return json.loads(TIMINGS.read_text(encoding="utf-8"))["classes"]
 
 
-def partition(classes, shards, timings):
+# Every test costs at least this much (a host to start, a database to clone),
+# so a class recorded as 0.0 seconds is never treated as free and classes of
+# many fast tests do not all pile onto one slice.
+SECONDS_PER_TEST = 0.1
+
+
+def partition(counts, shards, timings):
+    """counts: {class: number of listed tests}."""
+    classes = sorted(counts)
     known = [timings[c] for c in classes if c in timings]
     fallback = statistics.median(known) if known else 1.0
-    cost = {c: timings.get(c, fallback) for c in classes}
+    cost = {
+        c: max(timings.get(c, fallback), SECONDS_PER_TEST * counts[c])
+        for c in classes
+    }
 
     loads = [0.0] * shards
     members = [[] for _ in range(shards)]
@@ -83,8 +104,7 @@ def check_cover(tests, members):
 
 def cmd_filter(args):
     tests = listed_tests(args.list)
-    classes = sorted({class_of(t) for t in tests})
-    members, _ = partition(classes, args.shards, load_timings())
+    members, _ = partition(class_counts(tests), args.shards, load_timings())
     check_cover(tests, members)
     if not 1 <= args.shard <= args.shards:
         sys.exit(f"--shard must be between 1 and {args.shards}")
@@ -93,9 +113,10 @@ def cmd_filter(args):
 
 def cmd_plan(args):
     tests = listed_tests(args.list)
-    classes = sorted({class_of(t) for t in tests})
+    counts = class_counts(tests)
+    classes = sorted(counts)
     timings = load_timings()
-    members, loads = partition(classes, args.shards, timings)
+    members, loads = partition(counts, args.shards, timings)
     check_cover(tests, members)
     unknown = [c for c in classes if c not in timings]
     for i, (shard, load) in enumerate(zip(members, loads), start=1):
