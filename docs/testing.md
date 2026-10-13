@@ -69,10 +69,14 @@ for less than 0.1 s per test, so classes recorded as 0.0 s do not all land on
 one slice. The script refuses a split in which any test would run in no slice
 or in two.
 
-When the slices drift apart, refresh the timings from the `.trx` files of one
-CI run: the artifacts `backend-fast-test-results-1` to `-8`. They measure the
-classes as they actually run, in slices; a single-process local run is slowed
-by its tests contending with each other and distorts the balance.
+When the slices drift apart, refresh the timings from one CI run: the
+`Backend build and fast tests` job measures them from the eight slices' `.trx`
+files on every run, prints them in its log and uploads them as the
+`backend-test-timings` artifact, ready to copy over
+`tests/backend-test-timings.json`. They measure the classes as they actually
+run, in slices; a single-process local run is slowed by its tests contending
+with each other and distorts the balance. By hand, from the slice artifacts
+`backend-fast-test-results-1` to `-8`:
 
 ```bash
 scripts/backend-test-shards.py timings backend-fast-test-results-*/*.trx
