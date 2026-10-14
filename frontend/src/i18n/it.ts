@@ -4342,7 +4342,7 @@ const it = {
   'print.revokeConfirm': 'Revocare definitivamente “{name}”?',
   'print.addPrinter': 'Aggiungi stampante',
   'print.erase.title': 'Cancella tutto',
-  'print.erase.help': 'La stampante è revocata. Puoi cancellarla per sempre con tutto quello che ha lasciato: stampe, fogli, prestiti e codici. Resta solo una riga del registro di sicurezza.',
+  'print.erase.help': 'La stampante è revocata. Puoi cancellarla per sempre con tutto quello che ha lasciato: stampe, fogli, prestiti e codici. Il registro di sicurezza conserva le voci già scritte e aggiunge quella della cancellazione.',
   'print.erase.confirm': 'Cancellare per sempre “{name}”? Spariscono {jobs} stampe e lo storico di stampa di {parties} feste. Budget e numerazione delle feste restano.',
   'print.erase.error': 'Impossibile cancellare la stampante.',
   'print.erase.done': 'Stampante cancellata.',

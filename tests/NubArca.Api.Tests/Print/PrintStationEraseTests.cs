@@ -13,14 +13,45 @@ namespace NubArca.Api.Tests.Print;
 /// <summary>
 /// "Erase everything" for a revoked print station: only after revocation, only
 /// by its owner, and then nothing of it is left — jobs, rendered sheets, loans,
-/// printers, enrollment codes, the station — but one audit line saying who
-/// erased which station id.
+/// printers, enrollment codes, the station. The erase and its
+/// <c>print.station.erase</c> audit record are one transaction: if the record
+/// cannot be written, nothing is erased. Earlier audit records are kept
+/// (append-only); the erase adds exactly one.
 /// </summary>
 public sealed class PrintStationEraseTests : IDisposable
 {
-    private readonly SqliteWebApplicationFactory _factory = new();
-    public PrintStationEraseTests() => _factory.EnsureDatabaseCreated();
+    private readonly AuditSwitch _audit = new();
+    private readonly SqliteWebApplicationFactory _factory;
+
+    public PrintStationEraseTests()
+    {
+        // Its own host, never a pooled one: the audit logger below is this test's.
+        _factory = new SqliteWebApplicationFactory(new Dictionary<string, string?>());
+        _factory.ConfigureExtraServices = services => services.AddScoped<IAuditLogger>(provider =>
+            new SwitchableAudit(ActivatorUtilities.CreateInstance<AuditLogger>(provider), _audit));
+        _factory.EnsureDatabaseCreated();
+    }
+
     public void Dispose() => _factory.Dispose();
+
+    /// <summary>The audit store as a test decides: working, or failing the erase record.</summary>
+    private sealed class AuditSwitch
+    {
+        public bool FailEraseRecord { get; set; }
+    }
+
+    private sealed class SwitchableAudit(IAuditLogger inner, AuditSwitch state) : IAuditLogger
+    {
+        public Task LogAsync(AuditActor actor, string action, string entityType, Guid? entityId, string? ipAddress,
+            object? metadata, CancellationToken cancellationToken = default) =>
+            inner.LogAsync(actor, action, entityType, entityId, ipAddress, metadata, cancellationToken);
+
+        public Task WriteAsync(AuditActor actor, string action, string entityType, Guid? entityId, string? ipAddress,
+            object? metadata, CancellationToken cancellationToken = default) =>
+            state.FailEraseRecord && action == AuditActions.PrintStationErase
+                ? throw new InvalidOperationException("the audit store is unavailable")
+                : inner.WriteAsync(actor, action, entityType, entityId, ipAddress, metadata, cancellationToken);
+    }
 
     private sealed record Station(Guid Id, Guid DeviceId, string Credential);
 
@@ -63,57 +94,114 @@ public sealed class PrintStationEraseTests : IDisposable
         return new Station(id, deviceId, credential);
     }
 
-    [Fact]
-    public async Task A_Station_Not_Revoked_Is_Not_Erased_And_Another_Owners_Is_Not_Found()
+    /// <summary>Everything the station left, as rows: what an erase must take, or a rollback keep.</summary>
+    private async Task<(bool Station, int Devices, int Shares, int Enrollments, int Jobs, int EraseRecords)> LeftAsync(
+        Station station)
     {
-        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
-        var station = await StationWithAJobAndALoanAsync(owner);
-        Assert.Equal(HttpStatusCode.Conflict, (await owner.GetAsync($"/api/print/stations/{station.Id}/erase")).StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, (await owner.DeleteAsync($"/api/print/stations/{station.Id}/erase")).StatusCode);
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return (await db.PrintStations.AnyAsync(s => s.Id == station.Id),
+            await db.PrinterDevices.CountAsync(d => d.PrintStationId == station.Id),
+            await db.PrinterShares.CountAsync(s => s.PrinterDeviceId == station.DeviceId),
+            await db.PrintStationEnrollments.CountAsync(e => e.PrintStationId == station.Id),
+            await db.PrintJobs.CountAsync(j => j.PrintStationId == station.Id),
+            await db.AuditLogs.CountAsync(a => a.Action == AuditActions.PrintStationErase && a.EntityId == station.Id));
+    }
 
-        (await owner.DeleteAsync($"/api/print/stations/{station.Id}")).EnsureSuccessStatusCode();
-        var (_, stranger) = await _factory.CreateAuthenticatedClientAsync("stranger@example.com");
-        Assert.Equal(HttpStatusCode.NotFound, (await stranger.GetAsync($"/api/print/stations/{station.Id}/erase")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await stranger.DeleteAsync($"/api/print/stations/{station.Id}/erase")).StatusCode);
+    private async Task<string> ArtifactKeyAsync(Station station)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return (await scope.ServiceProvider.GetRequiredService<AppDbContext>().PrintJobs
+            .SingleAsync(j => j.PrintStationId == station.Id)).ArtifactStorageKey!;
+    }
+
+    private async Task<bool> ArtifactExistsAsync(string key)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IDerivedBlobStorage>().ExistsAsync(key);
     }
 
     [Fact]
-    public async Task A_Revoked_Station_Is_Erased_With_Everything_It_Left_But_One_Audit_Line()
+    public async Task A_Station_Not_Revoked_Or_Not_Ones_Own_Is_Neither_Erased_Nor_Touched()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
         var station = await StationWithAJobAndALoanAsync(owner);
-        string artifactKey;
+        var before = await LeftAsync(station);
+        Assert.Equal(HttpStatusCode.Conflict, (await owner.GetAsync($"/api/print/stations/{station.Id}/erase")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await owner.DeleteAsync($"/api/print/stations/{station.Id}/erase")).StatusCode);
+        Assert.Equal(before, await LeftAsync(station));
+
+        (await owner.DeleteAsync($"/api/print/stations/{station.Id}")).EnsureSuccessStatusCode();
+        var revoked = await LeftAsync(station);
+        var (_, stranger) = await _factory.CreateAuthenticatedClientAsync("stranger@example.com");
+        Assert.Equal(HttpStatusCode.NotFound, (await stranger.GetAsync($"/api/print/stations/{station.Id}/erase")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await stranger.DeleteAsync($"/api/print/stations/{station.Id}/erase")).StatusCode);
+        Assert.Equal(revoked, await LeftAsync(station));
+        Assert.Equal(0, revoked.EraseRecords);
+    }
+
+    [Fact]
+    public async Task A_Revoked_Station_Is_Erased_With_Everything_It_Left_And_One_Erase_Record_Added()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var station = await StationWithAJobAndALoanAsync(owner);
+        var artifactKey = await ArtifactKeyAsync(station);
+        Assert.True(await ArtifactExistsAsync(artifactKey));
+        (await owner.DeleteAsync($"/api/print/stations/{station.Id}")).EnsureSuccessStatusCode();
+        int earlierRecords;
         using (var scope = _factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            artifactKey = (await db.PrintJobs.SingleAsync(j => j.PrintStationId == station.Id)).ArtifactStorageKey!;
-            Assert.True(await scope.ServiceProvider.GetRequiredService<IDerivedBlobStorage>().ExistsAsync(artifactKey));
+            // The loan's creation and its end at revocation: records about this printer, written earlier.
+            earlierRecords = await scope.ServiceProvider.GetRequiredService<AppDbContext>().AuditLogs
+                .CountAsync(a => a.EntityId == station.DeviceId);
+            Assert.True(earlierRecords >= 2);
         }
-        (await owner.DeleteAsync($"/api/print/stations/{station.Id}")).EnsureSuccessStatusCode();
 
         var preview = await owner.GetFromJsonAsync<JsonElement>($"/api/print/stations/{station.Id}/erase");
         Assert.Equal(1, preview.GetProperty("jobs").GetInt32());
         Assert.Equal(0, preview.GetProperty("parties").GetInt32());
-
         Assert.Equal(HttpStatusCode.NoContent, (await owner.DeleteAsync($"/api/print/stations/{station.Id}/erase")).StatusCode);
 
+        Assert.Equal((false, 0, 0, 0, 0, 1), await LeftAsync(station));
+        Assert.False(await ArtifactExistsAsync(artifactKey));
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            Assert.False(await db.PrintStations.AnyAsync(s => s.Id == station.Id));
-            Assert.False(await db.PrinterDevices.AnyAsync(d => d.PrintStationId == station.Id));
-            Assert.False(await db.PrinterShares.AnyAsync(s => s.PrinterDeviceId == station.DeviceId));
-            Assert.False(await db.PrintStationEnrollments.AnyAsync(e => e.PrintStationId == station.Id));
-            Assert.False(await db.PrintJobs.AnyAsync(j => j.PrintStationId == station.Id));
-            Assert.False(await scope.ServiceProvider.GetRequiredService<IDerivedBlobStorage>().ExistsAsync(artifactKey));
-
             var erased = await db.AuditLogs.SingleAsync(a => a.Action == AuditActions.PrintStationErase);
             Assert.Equal(station.Id, erased.EntityId);
             Assert.Equal(AuditEntityTypes.PrintStation, erased.EntityType);
-            Assert.True(string.IsNullOrEmpty(erased.MetadataJson) || erased.MetadataJson == "null");
+            Assert.Null(erased.MetadataJson);
+            // Append-only: what the trail said before the erase, it still says.
+            Assert.Equal(earlierRecords, await db.AuditLogs.CountAsync(a => a.EntityId == station.DeviceId));
         }
         Assert.Empty((await owner.GetFromJsonAsync<JsonElement[]>("/api/print/stations"))!);
+    }
+
+    [Fact]
+    public async Task When_The_Erase_Record_Cannot_Be_Written_Nothing_Is_Erased_And_A_Retry_Erases_Once()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var station = await StationWithAJobAndALoanAsync(owner);
+        var artifactKey = await ArtifactKeyAsync(station);
+        (await owner.DeleteAsync($"/api/print/stations/{station.Id}")).EnsureSuccessStatusCode();
+        var revoked = await LeftAsync(station);
+
+        _audit.FailEraseRecord = true;
+        var failed = await owner.DeleteAsync($"/api/print/stations/{station.Id}/erase");
+        Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
+        // Rolled back whole: the station and everything it left are still there, with no record.
+        Assert.Equal(revoked, await LeftAsync(station));
+        Assert.Equal(0, revoked.EraseRecords);
+        Assert.True(await ArtifactExistsAsync(artifactKey));
+
+        // The retry finds the station as it was, and erases it — once.
+        _audit.FailEraseRecord = false;
+        Assert.Equal(HttpStatusCode.NoContent, (await owner.DeleteAsync($"/api/print/stations/{station.Id}/erase")).StatusCode);
+        Assert.Equal((false, 0, 0, 0, 0, 1), await LeftAsync(station));
+        Assert.False(await ArtifactExistsAsync(artifactKey));
+        // And once more: nothing left to erase, nothing recorded twice.
         Assert.Equal(HttpStatusCode.NotFound, (await owner.DeleteAsync($"/api/print/stations/{station.Id}/erase")).StatusCode);
+        Assert.Equal(1, (await LeftAsync(station)).EraseRecords);
     }
 
     [Fact]
@@ -122,15 +210,11 @@ public sealed class PrintStationEraseTests : IDisposable
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
         var erased = await StationWithAJobAndALoanAsync(owner);
         var kept = await StationWithAJobAndALoanAsync(owner);
+        var keptBefore = await LeftAsync(kept);
         (await owner.DeleteAsync($"/api/print/stations/{erased.Id}")).EnsureSuccessStatusCode();
         (await owner.DeleteAsync($"/api/print/stations/{erased.Id}/erase")).EnsureSuccessStatusCode();
 
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        Assert.True(await db.PrintStations.AnyAsync(s => s.Id == kept.Id));
-        Assert.Equal(1, await db.PrintJobs.CountAsync(j => j.PrintStationId == kept.Id));
-        Assert.True(await db.PrinterShares.AnyAsync(s => s.PrinterDeviceId == kept.DeviceId));
-        var key = (await db.PrintJobs.SingleAsync(j => j.PrintStationId == kept.Id)).ArtifactStorageKey!;
-        Assert.True(await scope.ServiceProvider.GetRequiredService<IDerivedBlobStorage>().ExistsAsync(key));
+        Assert.Equal(keptBefore, await LeftAsync(kept));
+        Assert.True(await ArtifactExistsAsync(await ArtifactKeyAsync(kept)));
     }
 }

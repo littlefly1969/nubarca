@@ -91,14 +91,24 @@ public static class PrintEndpoints
             catch (InvalidOperationException) { return Results.Conflict(new { error = "station_not_revoked" }); }
         }).WithName("PreviewPrintStationErase");
         owner.MapDelete("/stations/{stationId:guid}/erase", async (Guid stationId, HttpContext context,
-            [FromServices] PrintStationService service, [FromServices] IAuditLogger audit, CancellationToken ct) =>
+            [FromServices] PrintStationService service, [FromServices] ILoggerFactory loggers, CancellationToken ct) =>
         {
-            var userId = context.GetCurrentUserId()!.Value;
-            var erased = await service.EraseAsync(userId, stationId, ct);
+            // The erase writes its own audit record in the same transaction: a
+            // failure there rolled the erase back, so the station is still
+            // there and the same request can simply be made again.
+            bool? erased;
+            try
+            {
+                erased = await service.EraseAsync(context.GetCurrentUserId()!.Value, stationId, Ip(context), ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                loggers.CreateLogger("NubArca.Api.Print.Erase").LogWarning(
+                    "Print station erase rolled back ({ExceptionType}); nothing was erased.", ex.GetType().Name);
+                return Results.Json(new { error = "erase_failed" }, statusCode: StatusCodes.Status500InternalServerError);
+            }
             if (erased is null) return Results.NotFound();
             if (erased == false) return Results.Conflict(new { error = "station_not_revoked" });
-            await audit.LogAsync(AuditActor.User(userId), AuditActions.PrintStationErase,
-                AuditEntityTypes.PrintStation, stationId, Ip(context), null, ct);
             return Results.NoContent();
         }).WithName("ErasePrintStation");
         owner.MapPut("/stations/{stationId:guid}/devices/{deviceId:guid}/calibration", async (Guid stationId,

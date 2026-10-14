@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using NubArca.Api.Audit;
 using NubArca.Api.Data;
+using NubArca.Api.Domain;
 using NubArca.Api.Domain.Print;
 using NubArca.Api.Storage;
 
@@ -19,12 +21,15 @@ public sealed class PrintStationService
 
     private readonly ILogger<PrintStationService> _logger;
     private readonly PrintAgentBundleStore? _bundles;
+    private readonly IAuditLogger? _audit;
 
     public PrintStationService(AppDbContext db, TimeProvider clock, IOptions<PrintOptions> options,
         IDerivedBlobStorage artifacts, PrintArtifactRenderer renderer, IPrinterAccess printers,
-        ILogger<PrintStationService>? logger = null, PrintAgentBundleStore? bundles = null)
+        ILogger<PrintStationService>? logger = null, PrintAgentBundleStore? bundles = null,
+        IAuditLogger? audit = null)
     {
         _bundles = bundles;
+        _audit = audit;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PrintStationService>.Instance;
         _db = db;
         _clock = clock;
@@ -444,10 +449,17 @@ public sealed class PrintStationService
     /// numbering (they are counters on the party, not on the jobs) and only
     /// loses its printer choice and its history of prints on this station.
     /// Revocation already stopped every print here, so nothing live is cut.
+    ///
+    /// The erase and its security record are ONE transaction: the
+    /// <c>print.station.erase</c> audit row is written through the same
+    /// connection before the commit, and if it cannot be written nothing is
+    /// erased. There is never an erased station without its erase record.
     /// Null: no such station of this owner; false: not revoked.
     /// </summary>
-    public async Task<bool?> EraseAsync(Guid ownerId, Guid stationId, CancellationToken cancellationToken)
+    public async Task<bool?> EraseAsync(Guid ownerId, Guid stationId, string? ipAddress,
+        CancellationToken cancellationToken)
     {
+        if (_audit is null) throw new InvalidOperationException("An erase is never made without its audit record.");
         List<string> artifactKeys = [];
         var strategy = _db.Database.CreateExecutionStrategy();
         var erased = await strategy.ExecuteAsync(async () =>
@@ -478,6 +490,20 @@ public sealed class PrintStationService
             await _db.PrinterDevices.Where(x => x.PrintStationId == stationId).ExecuteDeleteAsync(cancellationToken);
             await _db.PrintStationEnrollments.Where(x => x.PrintStationId == stationId).ExecuteDeleteAsync(cancellationToken);
             await _db.PrintStations.Where(x => x.Id == stationId).ExecuteDeleteAsync(cancellationToken);
+            try
+            {
+                await _audit.WriteAsync(AuditActor.User(ownerId), AuditActions.PrintStationErase,
+                    AuditEntityTypes.PrintStation, stationId, ipAddress, null, cancellationToken);
+            }
+            catch
+            {
+                // Rolled back with the transaction: an attempt that is retried
+                // must not carry this one's unsaved record into the next.
+                foreach (var entry in _db.ChangeTracker.Entries<AuditLog>()
+                             .Where(x => x.State == EntityState.Added).ToList())
+                    entry.State = EntityState.Detached;
+                throw;
+            }
             await transaction.CommitAsync(cancellationToken);
             return true;
         });

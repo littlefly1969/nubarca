@@ -3965,7 +3965,7 @@ const es: Partial<Record<MessageKey, string>> = {
   'print.revokeConfirm': '¿Revocar definitivamente «{name}»?',
   'print.addPrinter': 'Añadir impresora',
   'print.erase.title': 'Borrar todo',
-  'print.erase.help': 'La impresora está revocada. Puedes borrarla para siempre con todo lo que dejó: impresiones, hojas, préstamos y códigos. Solo queda una línea del registro de seguridad.',
+  'print.erase.help': 'La impresora está revocada. Puedes borrarla para siempre con todo lo que dejó: impresiones, hojas, préstamos y códigos. El registro de seguridad conserva sus entradas anteriores y añade una por el borrado.',
   'print.erase.confirm': '¿Borrar «{name}» para siempre? Desaparecen {jobs} impresiones y el historial de impresión de {parties} fiestas. Presupuestos y numeración de las fiestas se mantienen.',
   'print.erase.error': 'No se pudo borrar la impresora.',
   'print.erase.done': 'Impresora borrada.',

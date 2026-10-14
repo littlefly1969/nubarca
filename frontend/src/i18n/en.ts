@@ -4302,7 +4302,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'print.revokeConfirm': 'Permanently revoke “{name}”?',
   'print.addPrinter': 'Add printer',
   'print.erase.title': 'Erase everything',
-  'print.erase.help': 'The printer is revoked. You can erase it for good with everything it left: prints, sheets, loans and codes. Only one line of the security log remains.',
+  'print.erase.help': 'The printer is revoked. You can erase it for good with everything it left: prints, sheets, loans and codes. The security log keeps its earlier entries and adds one for the erase.',
   'print.erase.confirm': 'Erase “{name}” for good? {jobs} prints and the print history of {parties} parties go. The parties keep their budgets and numbering.',
   'print.erase.error': 'Could not erase the printer.',
   'print.erase.done': 'Printer erased.',

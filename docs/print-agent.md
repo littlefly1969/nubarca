@@ -692,9 +692,11 @@ with their party and owner requests and sources, the rendered sheets that
 nothing else owns (under the exclusive storage lock, as the blob janitor
 does), its printers' loans, its printers, its enrollment codes and the
 station. A party that used it keeps its budgets and its numbering — they are
-counters on the party — and only loses its printer choice. One audit line
-remains, `print.station.erase`, with who erased which station id and nothing
-else. Container logs rotate on their own, and the box itself is not reached:
+counters on the party — and only loses its printer choice. The audit log is
+append-only: its earlier entries stay, and the erase adds one,
+`print.station.erase`, with who erased which station id and nothing else. That
+record is written in the same database transaction as the erase: if it cannot
+be written, the erase rolls back (`500 erase_failed`) and nothing is gone. Container logs rotate on their own, and the box itself is not reached:
 remove the agent there with
 `sudo bash /opt/nubarca-print-agent/linux/uninstall-instance.sh --instance box --purge-state`.
 

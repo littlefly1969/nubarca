@@ -26,9 +26,10 @@ is built is described by `ARCHITECTURE.md`.
   `nubarca-print-agent-data`) and handed out while an administrator has it
   switched on. Agents report version and build; from 0.2.2 up they are served,
   an older compatible one is only told an update exists. A revoked station can
-  be erased with everything it left (`DELETE /api/print/stations/{id}/erase`),
-  leaving one `print.station.erase` audit line; party budgets and numbering are
-  counters on the party and survive it. The Print Box reports the prints left
+  be erased with everything it left (`DELETE /api/print/stations/{id}/erase`);
+  the erase and its `print.station.erase` audit record commit in one
+  transaction, earlier audit entries are kept, and party budgets and numbering
+  are counters on the party and survive it. The Print Box reports the prints left
   on the media from Gutenprint's CUPS marker (IPP query shipped with the
   agent, `ipptool`); it is telemetry (`PrinterDevice.MediaRemainingPrints`),
   never a gate. DNP printers still require hardware acceptance on each path,
