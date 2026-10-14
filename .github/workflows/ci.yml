@@ -272,6 +272,9 @@ jobs:
       - name: Restore
         run: dotnet restore tests/NubArca.PrintAgent.Tests/NubArca.PrintAgent.Tests.csproj
 
+      - name: Check the Print Agent bundle trust boundary
+        run: node --test deploy/tests/printAgentBundle.test.mjs
+
       - name: Build and test
         run: dotnet test tests/NubArca.PrintAgent.Tests/NubArca.PrintAgent.Tests.csproj --configuration Release --no-restore
 
