@@ -88,7 +88,9 @@ may legitimately be managed by separate Compose invocations.
 Publishing a Print Agent bundle for the printers page is not a container
 deploy and never rebuilds an image. After a `Print Agent release` run with
 `publish`, run the command its summary prints, from the production checkout:
-`./deploy/pull-publish-print-agent-image.sh <image@sha256:digest>`. It needs the
+`./deploy/pull-publish-print-agent-image.sh <image@sha256:digest>`. It accepts
+only NubArca's own GHCR repository (`deploy/print-agent-bundle.py`) and refuses
+anything else before pulling. It needs the
 API to mount `nubarca-print-agent-data` already, so the first publication comes
 after the release that adds that volume. See `docs/print-agent.md`.
 
