@@ -3,16 +3,20 @@ import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 // The trust checks deploy/pull-publish-print-agent-image.sh runs before it
 // publishes a Print Agent bundle: the image must come from NubArca's own GHCR
 // repository by digest — whatever its labels and manifest claim — and inside
 // it the manifest, the labels and the zip must agree, from a commit on main.
 
-const validator = resolve(import.meta.dirname, '../../deploy/print-agent-bundle.py');
-const publisher = resolve(import.meta.dirname, '../../deploy/pull-publish-print-agent-image.sh');
+// Beside the deploy scripts it checks, and run by the Print Agent CI job — not
+// under tv/, where any change would make the production gate demand a TV release.
+const here = dirname(fileURLToPath(import.meta.url));
+const validator = resolve(here, '../print-agent-bundle.py');
+const publisher = resolve(here, '../pull-publish-print-agent-image.sh');
 const trusted = 'ghcr.io/littlefly1969/nubarca-print-agent';
 const digest = `sha256:${'a'.repeat(64)}`;
 
@@ -138,7 +142,7 @@ test('the publisher checks the reference before pulling, and switches the pointe
 });
 
 test('the release workflow pushes to the one trusted repository', () => {
-  const workflow = readFileSync(resolve(import.meta.dirname, '../../.github/workflows/print-agent-release.yml'), 'utf8');
+  const workflow = readFileSync(resolve(here, '../../.github/workflows/print-agent-release.yml'), 'utf8');
   assert.match(workflow, /image=ghcr\.io\/\$\{owner\}\/nubarca-print-agent:/);
   assert.equal(trusted, 'ghcr.io/littlefly1969/nubarca-print-agent');
 });
