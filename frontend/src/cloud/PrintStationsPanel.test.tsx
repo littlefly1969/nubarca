@@ -305,6 +305,21 @@ describe('PrintStationsPanel', () => {
     expect(await screen.findByText('Nessuna stampa simulata.')).toBeInTheDocument();
   });
 
+  it('keeps a simulated printer simulated when its twin goes away, and says prints wait instead of going to paper', async () => {
+    mockApi({
+      'GET /api/print/stations': () => jsonResponse([{ ...station, devices: [{ ...station.devices[0],
+        simulated: true, simulationAvailable: false }] }]),
+      [`GET /api/print/stations/${station.id}/devices/${station.devices[0].id}/simulated-jobs`]: () => jsonResponse([]),
+    });
+    render(view());
+    // Never shown as a printer on paper just because the twin is gone.
+    expect(await screen.findByTestId('print-station-row')).toHaveTextContent('Simulata');
+    await openStation();
+    expect(screen.getByTestId('print-simulation-waiting')).toHaveTextContent('non vanno mai su carta');
+    expect(screen.getByRole('button', { name: 'Torna alla carta' })).toBeEnabled();
+    expect(screen.queryByText('Questo Print Agent non offre la simulazione: aggiorna il Print Agent.')).not.toBeInTheDocument();
+  });
+
   it('says when a printer’s agent offers no simulation, and when a box is only simulated', async () => {
     mockApi({ 'GET /api/print/stations': () => jsonResponse([station]) });
     render(view());

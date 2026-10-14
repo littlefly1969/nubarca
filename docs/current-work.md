@@ -31,9 +31,13 @@ is built is described by `ARCHITECTURE.md`.
   transaction, earlier audit entries are kept, and party budgets and numbering
   are counters on the party and survive it. A CUPS printer has a simulated twin
   (same Gutenprint queues on the `nubarca-sim` backend, writing files, 100
-  prints): the owner switches it per printer, each job records
-  `Simulated` at creation and only an agent that can simulate gets one; the
-  printers page lists, downloads and clears the simulated sheets.
+  prints): `PrinterDevice.Simulated` is the owner's intent and stays until the
+  owner switches it off — a missing twin (`SimulationAvailable` false) makes
+  simulated jobs wait or fail `simulation_unavailable`, never print on paper;
+  each job records `Simulated` at creation and only an agent that can simulate
+  gets one; the printers page lists, downloads and clears the simulated sheets,
+  a clear naming that printer's cleared job ids so its box deletes exactly
+  those files.
   `install-simulated-printer.sh` makes a simulated-only DS-RX1HS on a host
   without a printer. The Print Box reports the prints left
   on the media from Gutenprint's CUPS marker (IPP query shipped with the

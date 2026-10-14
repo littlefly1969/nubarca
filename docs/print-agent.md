@@ -697,21 +697,31 @@ with a `.txt` of its options), and reports the media to CUPS with the DNP
 driver's own message: `100 native prints remaining`. The agent reads it with
 the same IPP query as a real DNP, and reports 100 before the twin's first job.
 
-- **The switch** is the owner's, per printer, on the printers page
-  (**Simulation**). It is offered only while the agent reports a twin, and is
-  audited (`print.printer.simulation.set`). While it is on, the printer is
-  reported through its twin — ready, with its media — and every new job goes
-  there. The printer stays the same printer: paper, papers, cut, queue,
-  loans, calibration.
-- **Jobs remember.** A job records at creation whether its printer was
-  simulated: switching later moves no queued job. A simulated job goes only to
-  an agent that says it can simulate (older agents are never given one), the
-  agent's journal keeps the flag across a restart, and an agent whose twin is
-  missing refuses the job (`simulation_unavailable`) instead of printing it.
+- **The switch** is the owner's INTENT, per printer, on the printers page
+  (**Simulation**), audited (`print.printer.simulation.set`). Switching on is
+  offered while the agent reports a twin; once on, it stays on until the owner
+  switches it off. Whether the twin is there right now (`SimulationAvailable`)
+  decides only whether a simulated job can run, never whether a job is
+  simulated. While it is on, the printer is reported through its twin — ready,
+  with its media — and every new job is simulated. The printer stays the same
+  printer: paper, papers, cut, queue, loans, calibration. A simulation-only box
+  is simulated for good, whatever a later heartbeat says.
+- **Jobs remember, and never degrade to paper.** A job records at creation
+  whether its printer was to be simulated: switching later moves no queued job,
+  and a twin that disappears leaves simulated jobs simulated — the box reports
+  the printer through its missing twin (not ready), and an agent that gets one
+  anyway refuses it (`simulation_unavailable`); a retry keeps it simulated. A
+  simulated job goes only to an agent that says it can simulate (older agents
+  are never given one), and the agent's journal keeps the flag across a
+  restart.
 - **The simulated prints** are listed on the printer's page with the sheet
   the server rendered (the same bytes the agent sent to the twin), to look at
-  or download; **Clear** deletes the finished ones and, at the next heartbeat,
-  the box deletes its output older than that.
+  or download. Each file on the box is named by its NubArca job (the twin job's
+  title carries the id). **Clear** deletes the printer's finished simulated
+  jobs and records, on that printer, a sequence and the ids it removed; at the
+  next heartbeat the box deletes exactly those jobs' files from that printer's
+  photo and strip twins — no other printer's, nothing printed after the clear,
+  no clock involved — and applies each sequence once.
 - **"Simulated"** is shown wherever the printer is chosen — the owner's print,
   a party's printer setting, a printer lent to someone — and on the box's own
   setup page.

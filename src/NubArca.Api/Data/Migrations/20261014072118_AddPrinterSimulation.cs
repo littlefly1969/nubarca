@@ -1,5 +1,4 @@
-﻿using System;
-using Microsoft.EntityFrameworkCore.Migrations;
+﻿using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -18,6 +17,19 @@ namespace NubArca.Api.Data.Migrations
                 nullable: false,
                 defaultValue: false);
 
+            migrationBuilder.AddColumn<string>(
+                name: "SimulatedPurgeJobIds",
+                table: "printer_devices",
+                type: "text",
+                nullable: true);
+
+            migrationBuilder.AddColumn<long>(
+                name: "SimulatedPurgeSequence",
+                table: "printer_devices",
+                type: "bigint",
+                nullable: false,
+                defaultValue: 0L);
+
             migrationBuilder.AddColumn<bool>(
                 name: "SimulationAvailable",
                 table: "printer_devices",
@@ -31,12 +43,6 @@ namespace NubArca.Api.Data.Migrations
                 type: "boolean",
                 nullable: false,
                 defaultValue: false);
-
-            migrationBuilder.AddColumn<DateTime>(
-                name: "SimulatedOutputPurgeRequestedAt",
-                table: "print_stations",
-                type: "timestamp with time zone",
-                nullable: true);
 
             migrationBuilder.AddColumn<bool>(
                 name: "Simulated",
@@ -54,16 +60,20 @@ namespace NubArca.Api.Data.Migrations
                 table: "printer_devices");
 
             migrationBuilder.DropColumn(
+                name: "SimulatedPurgeJobIds",
+                table: "printer_devices");
+
+            migrationBuilder.DropColumn(
+                name: "SimulatedPurgeSequence",
+                table: "printer_devices");
+
+            migrationBuilder.DropColumn(
                 name: "SimulationAvailable",
                 table: "printer_devices");
 
             migrationBuilder.DropColumn(
                 name: "SimulationOnly",
                 table: "printer_devices");
-
-            migrationBuilder.DropColumn(
-                name: "SimulatedOutputPurgeRequestedAt",
-                table: "print_stations");
 
             migrationBuilder.DropColumn(
                 name: "Simulated",

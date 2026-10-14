@@ -16,7 +16,7 @@ public sealed class PrintAgentWorker : BackgroundService
     private readonly PrintAgentOptions _options;
     private readonly ILogger<PrintAgentWorker> _logger;
     private readonly AgentConnectionState _connection;
-    private DateTime? _purgedBefore;
+    private SimulatedOutputPurger? _purger;
 
     public PrintAgentWorker(PrintAgentApiClient api, ICredentialStore credentials,
         IPrinterAdapter adapter, ExecutionJournal journal, AgentExecutionCoordinator coordinator,
@@ -44,11 +44,8 @@ public sealed class PrintAgentWorker : BackgroundService
                 var heartbeat = await _api.HeartbeatAsync(AgentBuildInfo.Version, AgentBuildInfo.Build, reports, stoppingToken);
                 _connection.MarkContact(DateTimeOffset.UtcNow);
                 _adapter.UseSimulation(new HashSet<string>(heartbeat.SimulatedDeviceKeys ?? [], StringComparer.Ordinal));
-                if (heartbeat.SimulatedOutputPurgeBefore is { } purge && purge != _purgedBefore)
-                {
-                    SimulatedOutput.PurgeOlderThan(_options.Simulation.OutputPath, purge, _logger);
-                    _purgedBefore = purge;
-                }
+                _purger ??= new SimulatedOutputPurger(_options.Simulation.OutputPath, _logger);
+                _purger.Apply(heartbeat.SimulatedOutputPurges, _adapter);
                 if (heartbeat.DesiredState == "running")
                 {
                     var claim = await _api.ClaimAsync(_adapter.Kind, _adapter.SupportsSimulation, stoppingToken);

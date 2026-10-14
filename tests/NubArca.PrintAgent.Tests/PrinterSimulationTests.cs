@@ -213,21 +213,110 @@ public sealed class PrinterSimulationTests : IDisposable
     }
 
     [Fact]
-    public void Clearing_Deletes_Only_What_Was_Written_Before_The_Owners_Order()
+    public async Task With_Simulation_Requested_And_The_Twin_Gone_Nothing_Reaches_Any_Queue()
     {
-        var queue = Directory.CreateDirectory(Path.Combine(_root, "spool", Photo + "-SIM")).FullName;
-        var before = Path.Combine(queue, "old.prn");
-        var after = Path.Combine(queue, "new.prn");
-        File.WriteAllText(before, "x");
-        File.WriteAllText(after, "y");
-        var order = DateTime.UtcNow;
-        File.SetLastWriteTimeUtc(before, order.AddMinutes(-5));
-        File.SetLastWriteTimeUtc(after, order.AddMinutes(5));
+        // The owner switched to the twin; the twin has since disappeared.
+        var (adapter, runner) = Adapter(Queue(Photo) + Queue(Strip));
+        adapter.UseSimulation(new HashSet<string> { Photo });
+        var device = new DiscoveredPrinter(Photo, Photo, "DNP", Photo, "cups");
+        // Reported through its (missing) twin: not ready, so no job is claimed for it…
+        Assert.NotEqual("ready", (await adapter.GetStatusAsync(device, default)).State);
+        Assert.Equal(PrinterSimulation.None, await adapter.GetSimulationAsync(device, default));
+        // …and a simulated job that reaches it anyway is refused, not printed.
+        foreach (var format in new[] { "10x15", "2x6x2" })
+        {
+            var result = await adapter.SubmitAsync(Job(format, simulated: true), default);
+            Assert.Equal("simulation_unavailable", result.FailureCode);
+        }
+        Assert.DoesNotContain(runner.Calls, c => c.File == "lp");
+    }
 
-        Assert.Equal(1, SimulatedOutput.PurgeOlderThan(Path.Combine(_root, "spool"), order, NullLogger.Instance));
-        Assert.False(File.Exists(before));
-        Assert.True(File.Exists(after));
-        Assert.Equal(0, SimulatedOutput.PurgeOlderThan(Path.Combine(_root, "missing"), order, NullLogger.Instance));
+    [Fact]
+    public async Task A_Simulated_Job_Is_Titled_By_Its_Whole_Id_And_A_Real_One_As_Before()
+    {
+        var (adapter, runner) = Adapter(WithTwins);
+        var simulated = Job("10x15", simulated: true);
+        await adapter.SubmitAsync(simulated, default);
+        var real = Job("10x15", simulated: false);
+        await adapter.SubmitAsync(real, default);
+        var titles = runner.Calls.Where(c => c.File == "lp").Select(c => c.Args[3]).ToList();
+        Assert.Equal([$"NubArca-{simulated.JobId:N}", $"NubArca-{real.JobId.ToString("N")[..8]}"], titles);
+    }
+
+    [Fact]
+    public void A_Printers_Twin_Queues_Are_Its_Own_Photo_And_Strip_Twins()
+    {
+        var (adapter, _) = Adapter(WithTwins);
+        Assert.Equal([Photo + "-SIM", Strip + "-SIM"], adapter.SimulatedQueuesOf(Photo));
+        var (only, _) = Adapter(Queue("NubArca-sala-SIM"), only: true, configured: "NubArca-sala-SIM",
+            strip: "NubArca-sala-STRIP-SIM");
+        Assert.Equal(["NubArca-sala-SIM", "NubArca-sala-STRIP-SIM"], only.SimulatedQueuesOf("NubArca-sala-SIM"));
+    }
+
+    /// <summary>Two simulated printers on one host, each with a photo and a strip twin, and a job file in each.</summary>
+    private (string Root, string[] A, string[] B) TwoPrinters()
+    {
+        var root = Path.Combine(_root, "spool");
+        string[] a = ["NubArca-a-SIM", "NubArca-a-STRIP-SIM"];
+        string[] b = ["NubArca-b-SIM", "NubArca-b-STRIP-SIM"];
+        foreach (var queue in a.Concat(b)) Directory.CreateDirectory(Path.Combine(root, queue));
+        return (root, a, b);
+    }
+
+    private static string Id(char c) => new(c, 32);
+
+    private static void Output(string root, string queue, string id)
+    {
+        File.WriteAllText(Path.Combine(root, queue, id + ".prn"), "raster");
+        File.WriteAllText(Path.Combine(root, queue, id + ".txt"), "queue=" + queue);
+    }
+
+    private static bool Has(string root, string queue, string id) => File.Exists(Path.Combine(root, queue, id + ".prn"));
+
+    [Fact]
+    public void Clearing_One_Printer_Deletes_Its_Cleared_Jobs_And_Nothing_Of_Another_Printer_Or_Of_Later_Jobs()
+    {
+        var (root, a, b) = TwoPrinters();
+        Output(root, a[0], Id('1'));
+        Output(root, a[1], Id('2'));
+        Output(root, a[0], Id('3')); // printed after the clear: not named by it
+        Output(root, b[0], Id('4'));
+        Output(root, b[1], Id('1')); // even a same-named file in another printer's queue
+
+        Assert.Equal(4, SimulatedOutput.Purge(root, a, [Id('1'), Id('2')], NullLogger.Instance));
+        Assert.False(Has(root, a[0], Id('1')));
+        Assert.False(Has(root, a[1], Id('2')));
+        Assert.True(Has(root, a[0], Id('3')));
+        Assert.True(Has(root, b[0], Id('4')));
+        Assert.True(Has(root, b[1], Id('1')));
+        // Again: nothing more to delete.
+        Assert.Equal(0, SimulatedOutput.Purge(root, a, [Id('1'), Id('2')], NullLogger.Instance));
+        // Nothing malformed is ever a path.
+        Assert.Equal(0, SimulatedOutput.Purge(root, ["../NubArca-b-SIM", a[0]], ["../" + Id('4'), "*", ""], NullLogger.Instance));
+        Assert.True(Has(root, b[0], Id('4')));
+    }
+
+    [Fact]
+    public void Each_Clear_Is_Applied_Once_And_Only_To_The_Printer_It_Names()
+    {
+        var (root, a, b) = TwoPrinters();
+        var (adapter, _) = Adapter(Queue(Photo), configured: Photo, strip: Strip);
+        // This agent's printer is Photo; its twins are Photo-SIM and Strip-SIM.
+        foreach (var queue in adapter.SimulatedQueuesOf(Photo)) Directory.CreateDirectory(Path.Combine(root, queue));
+        Output(root, Photo + "-SIM", Id('a'));
+        Output(root, Strip + "-SIM", Id('a'));
+        Output(root, b[0], Id('a'));
+        var purger = new SimulatedOutputPurger(root, NullLogger.Instance);
+
+        Assert.Equal(4, purger.Apply([new(Photo, 1, [Id('a')])], adapter));
+        Assert.True(Has(root, b[0], Id('a')));
+        // Printed again under the same name after the clear: the same sequence is not applied twice.
+        Output(root, Photo + "-SIM", Id('a'));
+        Assert.Equal(0, purger.Apply([new(Photo, 1, [Id('a')])], adapter));
+        Assert.True(Has(root, Photo + "-SIM", Id('a')));
+        // A newer clear is.
+        Assert.Equal(2, purger.Apply([new(Photo, 2, [Id('a')])], adapter));
+        Assert.Equal(0, purger.Apply(null, adapter));
     }
 
     // --- The backend CUPS runs -----------------------------------------------------------
@@ -235,7 +324,7 @@ public sealed class PrinterSimulationTests : IDisposable
     private static string Backend => Path.Combine(AppContext.BaseDirectory, "linux", "nubarca-sim");
 
     private (int Exit, string Errors) RunBackend(string spool, string job, string options = "fit-to-page",
-        string queue = Photo + "-SIM")
+        string queue = Photo + "-SIM", string? title = null)
     {
         var info = new ProcessStartInfo("bash")
         {
@@ -243,7 +332,7 @@ public sealed class PrinterSimulationTests : IDisposable
             RedirectStandardError = true,
             RedirectStandardOutput = true,
         };
-        foreach (var argument in new[] { Backend, job, "lp", "NubArca-test", "1", options }) info.ArgumentList.Add(argument);
+        foreach (var argument in new[] { Backend, job, "lp", title ?? "Test page", "1", options }) info.ArgumentList.Add(argument);
         info.Environment["PRINTER"] = queue;
         info.Environment["SIM_SPOOL_ROOT"] = spool;
         using var process = Process.Start(info)!;
@@ -259,9 +348,11 @@ public sealed class PrinterSimulationTests : IDisposable
     {
         if (!OperatingSystem.IsLinux()) return;
         var spool = Path.Combine(_root, "spool");
-        var (exit, errors) = RunBackend(spool, "42", "PageSize=w360h504 fit-to-page");
+        var (exit, errors) = RunBackend(spool, "42", "PageSize=w360h504 fit-to-page", title: $"NubArca-{Id('c')}");
         Assert.Equal(0, exit);
         var written = Assert.Single(Directory.GetFiles(Path.Combine(spool, Photo + "-SIM"), "*.prn"));
+        // Named by the NubArca job its title carries, so a clear can name it.
+        Assert.Equal(Id('c') + ".prn", Path.GetFileName(written));
         Assert.Equal("RASTER-FROM-GUTENPRINT", File.ReadAllText(written));
         Assert.Contains("media=5x7", File.ReadAllText(Path.ChangeExtension(written, ".txt")));
         // The very message the agent reads from a real DNP's driver.

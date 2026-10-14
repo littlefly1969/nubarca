@@ -67,4 +67,7 @@ public interface IPrinterAdapter
     void UseSimulation(IReadOnlySet<string> deviceKeys)
     {
     }
+
+    /// <summary>The twin queues of <paramref name="deviceKey"/> — its photo and strip twins — whose output a clear may delete.</summary>
+    IReadOnlyList<string> SimulatedQueuesOf(string deviceKey) => [];
 }

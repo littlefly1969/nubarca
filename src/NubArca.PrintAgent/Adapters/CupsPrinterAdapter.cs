@@ -114,6 +114,21 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
         return queues?.ContainsKey(twin) == true ? new PrinterSimulation(true, _simulationOnly) : PrinterSimulation.None;
     }
 
+    /// <summary>
+    /// The twin queues of this printer: the twin of its photo queue and, when it
+    /// is the configured printer, of its strip queue. Another printer's twins
+    /// are never among them.
+    /// </summary>
+    public IReadOnlyList<string> SimulatedQueuesOf(string deviceKey)
+    {
+        var queues = new List<string>();
+        if (Twin(deviceKey) is { } photo) queues.Add(photo);
+        if (_stripPrinter is not null && string.Equals(deviceKey, _configuredPrinter, StringComparison.OrdinalIgnoreCase)
+            && Twin(_stripPrinter) is { } strip)
+            queues.Add(strip);
+        return queues;
+    }
+
     /// <summary>The queue to ask about <paramref name="deviceKey"/>: its twin while it is simulated.</summary>
     private string Observed(string deviceKey) =>
         IsSimulated(deviceKey) && Twin(deviceKey) is { } twin ? twin : deviceKey;
@@ -226,7 +241,11 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
         if (!File.Exists(submission.ArtifactPath))
             return new PrintSubmissionResult(false, null, "artifact_missing");
 
-        var title = $"NubArca-{submission.JobId.ToString("N")[..8]}";
+        // A simulated job carries its whole id as its title: the twin's backend
+        // names its output by it, so a clear can name exactly what to delete.
+        var title = submission.Simulated
+            ? $"NubArca-{submission.JobId:N}"
+            : $"NubArca-{submission.JobId.ToString("N")[..8]}";
         // fit-to-page: the artifact is exactly the sheet's shape, so fitting it
         // fills the page; without it CUPS would print the JPEG at an assumed
         // pixel density and the photograph would come out the wrong size.

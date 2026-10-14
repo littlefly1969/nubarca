@@ -4347,6 +4347,7 @@ const it = {
   'print.sim.on': 'Attiva simulazione',
   'print.sim.off': 'Torna alla carta',
   'print.sim.active': 'Simulazione attiva: le stampe vanno su file, non su carta.',
+  'print.sim.waiting': 'La simulazione resta attiva, ma ora il Print Box non offre la stampante simulata: le stampe restano in attesa o falliscono, e non vanno mai su carta.',
   'print.sim.only': 'Stampante solo simulata: le stampe vanno sempre su file.',
   'print.sim.unavailable': 'Questo Print Agent non offre la simulazione: aggiorna il Print Agent.',
   'print.sim.error': 'Impossibile cambiare la simulazione.',

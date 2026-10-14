@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NubArca.Api.Audit;
 using NubArca.Api.Data;
+using NubArca.Api.Print;
 using NubArca.Api.Storage;
 using NubArca.Api.Tests.Endpoints;
 
@@ -148,6 +149,8 @@ public sealed class PrinterSimulationTests : IDisposable
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
         var printer = await PrinterAsync(owner, new { available = true, only = true });
+        // Whatever a later heartbeat says, it stays a simulated printer.
+        (await HeartbeatAsync(printer.Credential, simulation: null)).EnsureSuccessStatusCode();
         var device = (await owner.GetFromJsonAsync<JsonElement[]>("/api/print/stations"))![0].GetProperty("devices")[0];
         Assert.True(device.GetProperty("simulated").GetBoolean());
         Assert.True(device.GetProperty("simulationOnly").GetBoolean());
@@ -194,9 +197,116 @@ public sealed class PrinterSimulationTests : IDisposable
             Assert.True(await db.PrintJobs.AnyAsync(j => j.Id == real), "a real print is never cleared");
             Assert.False(await scope.ServiceProvider.GetRequiredService<IDerivedBlobStorage>().ExistsAsync(key));
         }
-        // The box hears it at its next heartbeat.
+        // The box hears it at its next heartbeat: this printer, exactly the job cleared.
         var heartbeat = await (await HeartbeatAsync(printer.Credential, new { available = true, only = false }))
             .Content.ReadFromJsonAsync<JsonElement>();
-        Assert.NotEqual(JsonValueKind.Null, heartbeat.GetProperty("simulatedOutputPurgeBefore").ValueKind);
+        var purge = Assert.Single(heartbeat.GetProperty("simulatedOutputPurges").EnumerateArray());
+        Assert.Equal("NubArca-RX1HS", purge.GetProperty("deviceKey").GetString());
+        Assert.Equal(1, purge.GetProperty("sequence").GetInt64());
+        Assert.Equal([simulated.ToString("N")], purge.GetProperty("jobIds").EnumerateArray().Select(x => x.GetString()));
+    }
+
+    private async Task<Guid> FinishedJobAsync(HttpClient owner, Printer printer)
+    {
+        var id = await TestJobAsync(owner, printer);
+        await CompleteAsync(printer.Credential);
+        return id;
+    }
+
+    private async Task<JsonElement> PurgesAsync(Printer printer) =>
+        (await (await HeartbeatAsync(printer.Credential, new { available = true, only = false }))
+            .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("simulatedOutputPurges");
+
+    [Fact]
+    public async Task Clearing_One_Printer_Names_Only_Its_Own_Cleared_Jobs_And_Leaves_Another_Printers_Prints()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var a = await PrinterAsync(owner, new { available = true, only = false });
+        var b = await PrinterAsync(owner, new { available = true, only = false });
+        (await SwitchAsync(owner, a, true)).EnsureSuccessStatusCode();
+        (await SwitchAsync(owner, b, true)).EnsureSuccessStatusCode();
+        var aCleared = await FinishedJobAsync(owner, a);
+        var bKept = await FinishedJobAsync(owner, b);
+        var listA = $"/api/print/stations/{a.StationId}/devices/{a.DeviceId}/simulated-jobs";
+        var listB = $"/api/print/stations/{b.StationId}/devices/{b.DeviceId}/simulated-jobs";
+
+        Assert.Equal(1, (await (await owner.DeleteAsync(listA)).Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("cleared").GetInt32());
+        // Printed on A after the clear: not named by it.
+        var aLater = await TestJobAsync(owner, a);
+
+        var purge = Assert.Single((await PurgesAsync(a)).EnumerateArray());
+        Assert.Equal([aCleared.ToString("N")], purge.GetProperty("jobIds").EnumerateArray().Select(x => x.GetString()));
+        Assert.DoesNotContain(aLater.ToString("N"), purge.GetProperty("jobIds").EnumerateArray().Select(x => x.GetString()));
+        // B's box is told nothing, and B's prints are all still there, sheets and all.
+        Assert.Empty((await PurgesAsync(b)).EnumerateArray());
+        Assert.Equal(bKept, Assert.Single((await owner.GetFromJsonAsync<JsonElement[]>(listB))!).GetProperty("id").GetGuid());
+        Assert.Equal(HttpStatusCode.OK, (await owner.GetAsync($"/api/print/jobs/{bKept}/simulated-sheet")).StatusCode);
+
+        // Clearing again with nothing finished to clear changes nothing.
+        Assert.Equal(0, (await (await owner.DeleteAsync(listA)).Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("cleared").GetInt32());
+        Assert.Equal(1, Assert.Single((await PurgesAsync(a)).EnumerateArray()).GetProperty("sequence").GetInt64());
+    }
+
+    [Fact]
+    public async Task Once_Requested_Simulation_Never_Degrades_Into_Paper_When_The_Twin_Disappears()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        // 1. The printer reports its twin; 2. the owner switches to it.
+        var printer = await PrinterAsync(owner, new { available = true, only = false });
+        (await SwitchAsync(owner, printer, true)).EnsureSuccessStatusCode();
+        // 3. A later heartbeat: the twin is gone (or the agent offers none at all).
+        (await HeartbeatAsync(printer.Credential, simulation: null)).EnsureSuccessStatusCode();
+        var device = (await owner.GetFromJsonAsync<JsonElement[]>("/api/print/stations"))![0].GetProperty("devices")[0];
+        Assert.True(device.GetProperty("simulated").GetBoolean(), "the owner's intent stands");
+        Assert.False(device.GetProperty("simulationAvailable").GetBoolean());
+
+        // 4. A new print; 5. it is stored simulated.
+        var job = await TestJobAsync(owner, printer);
+        using (var scope = _factory.Services.CreateScope())
+            Assert.True((await scope.ServiceProvider.GetRequiredService<AppDbContext>().PrintJobs.SingleAsync(j => j.Id == job)).Simulated);
+
+        // 6. An agent that cannot simulate is never given it.
+        Assert.Equal(HttpStatusCode.NoContent, (await ClaimAsync(printer.Credential, supportsSimulation: false)).StatusCode);
+        // 7. One that can is given it as simulated, and says the twin is missing.
+        var claim = await (await ClaimAsync(printer.Credential, supportsSimulation: true)).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(job, claim.GetProperty("jobId").GetGuid());
+        Assert.True(claim.GetProperty("simulated").GetBoolean());
+        var token = claim.GetProperty("claimToken").GetString();
+        foreach (var (path, body) in new (string, object)[]
+                 {
+                     ($"/api/print-agent/jobs/{job}/submitting", new { claimToken = token }),
+                     ($"/api/print-agent/jobs/{job}/result", new { claimToken = token, outcome = "failed", failureCode = "simulation_unavailable" }),
+                 })
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body) };
+            request.Headers.Add("X-NubArca-Print-Credential", printer.Credential);
+            (await _factory.CreateClient().SendAsync(request)).EnsureSuccessStatusCode();
+        }
+        // Retried by the owner, it is still simulated, and still never offered to an agent that cannot simulate.
+        Assert.Equal(HttpStatusCode.NoContent, (await owner.PostAsync($"/api/print/jobs/{job}/retry", null)).StatusCode);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var stored = await scope.ServiceProvider.GetRequiredService<AppDbContext>().PrintJobs.SingleAsync(j => j.Id == job);
+            Assert.True(stored.Simulated);
+        }
+        Assert.Equal(HttpStatusCode.NoContent, (await ClaimAsync(printer.Credential, supportsSimulation: false)).StatusCode);
+
+        // The owner's own switch is what turns it off — twin or not.
+        Assert.Equal(HttpStatusCode.OK, (await SwitchAsync(owner, printer, false)).StatusCode);
+    }
+
+    [Fact]
+    public async Task The_Rule_Every_Print_Path_Uses_Is_The_Owners_Intent_Not_The_Twins_Presence()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var printer = await PrinterAsync(owner, new { available = true, only = false });
+        (await SwitchAsync(owner, printer, true)).EnsureSuccessStatusCode();
+        (await HeartbeatAsync(printer.Credential, new { available = false, only = false })).EnsureSuccessStatusCode();
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // Owner photo, party and QR-card prints all fix Simulated through this.
+        Assert.True(await PrintSimulation.IsRequestedAsync(db, printer.DeviceId, default));
     }
 }

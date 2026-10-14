@@ -13,8 +13,6 @@ public sealed class PrintStation
     /// <summary>The source commit the agent was built from, as it reports it; null from an agent that does not.</summary>
     public string? AgentBuild { get; set; }
     public DateTime CreatedAt { get; set; }
-    /// <summary>The owner cleared the simulated prints: the box deletes its simulated output older than this.</summary>
-    public DateTime? SimulatedOutputPurgeRequestedAt { get; set; }
     public DateTime? RevokedAt { get; set; }
 }
 
