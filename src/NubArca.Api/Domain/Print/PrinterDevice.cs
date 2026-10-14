@@ -52,17 +52,27 @@ public sealed class PrinterDevice
     public DateTime? MediaRemainingObservedAt { get; set; }
 
     /// <summary>
-    /// The owner's switch: this printer's jobs go to its simulated twin — the
-    /// same CUPS queues and driver ending in a backend that writes a file —
-    /// instead of paper. Effective only while the agent reports a twin.
+    /// The owner's INTENT: this printer's jobs are simulated — sent to its twin,
+    /// the same CUPS queues and driver ending in a backend that writes a file —
+    /// until the owner switches it off. A twin that goes missing does not
+    /// change it: simulated jobs then wait, or fail, and never reach paper.
     /// </summary>
     public bool Simulated { get; set; }
 
-    /// <summary>The agent reports a simulated twin for this printer (written by every heartbeat).</summary>
+    /// <summary>Whether the agent can run a simulated job right now (its twin is there); every heartbeat writes it.</summary>
     public bool SimulationAvailable { get; set; }
 
-    /// <summary>The agent has no real printer behind it, only the simulated twin: always simulated.</summary>
+    /// <summary>
+    /// The box has no real printer, only the twin. Once reported it stays: this
+    /// printer is simulated for good, whatever a later heartbeat says.
+    /// </summary>
     public bool SimulationOnly { get; set; }
+
+    /// <summary>Bumped by each clear of simulated prints that removed any: the box applies each purge once.</summary>
+    public long SimulatedPurgeSequence { get; set; }
+
+    /// <summary>The jobs (N-format ids, JSON array) the latest clear removed: their files on the box go too, and nothing else.</summary>
+    public string? SimulatedPurgeJobIds { get; set; }
 }
 
 public static class PrintDeviceStates

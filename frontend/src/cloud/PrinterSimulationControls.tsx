@@ -67,11 +67,12 @@ export function PrinterSimulationControls({ stationId, device, onChanged }: {
       <h4>{t('print.sim.title')}</h4>
       {device.simulationOnly ? (
         <p className="print-simulation-active">{t('print.sim.only')}</p>
-      ) : device.simulationAvailable ? (
+      ) : simulated || device.simulationAvailable ? (
         <>
           <p className="muted">{t('print.sim.help')}</p>
           {simulated && <p className="print-simulation-active" role="status">{t('print.sim.active')}</p>}
           <div className="print-station-actions">
+            {/* Switching off is always the owner's; switching on needs the twin. */}
             <button type="button" className={simulated ? '' : 'primary-button'} disabled={busy}
               aria-pressed={simulated} onClick={() => void toggle()}>
               {t(simulated ? 'print.sim.off' : 'print.sim.on')}
@@ -80,6 +81,12 @@ export function PrinterSimulationControls({ stationId, device, onChanged }: {
         </>
       ) : (
         <p className="muted">{t('print.sim.unavailable')}</p>
+      )}
+      {simulated && !device.simulationAvailable && (
+        // Still simulated, never paper: the box's twin is just not there now.
+        <p className="print-simulation-waiting" role="alert" data-testid="print-simulation-waiting">
+          {t('print.sim.waiting')}
+        </p>
       )}
       {error && <p className="folder-error" role="alert">{error}</p>}
 

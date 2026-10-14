@@ -319,7 +319,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             // A party print artifact is owned ONLY by PrintJob.ArtifactStorageKey,
             // so the bytes and that column have to become durable together or a
             // purge of identical content could unlink them in between.
-            var simulated = await PrintSimulation.IsActiveAsync(_db, access.PrinterDeviceId, cancellationToken);
+            var simulated = await PrintSimulation.IsRequestedAsync(_db, access.PrinterDeviceId, cancellationToken);
             var staged = await _artifacts.StageAsync(stream, cancellationToken);
             await using var stagedScope = staged.ConfigureAwait(false);
             await StoragePublish.PublishOwnedAsync(

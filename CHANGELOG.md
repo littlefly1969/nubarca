@@ -12,9 +12,11 @@ originating repository and is deliberately not reproduced here.
   stays the same printer for NubArca — paper, cut strips, queue — but every
   sheet goes through the real CUPS queues and Gutenprint driver into a file
   instead of onto paper, with 100 prints always left. Jobs already queued keep
-  going where they were meant to go.
+  going where they were meant to go, and if the simulated printer goes missing
+  its prints wait or fail — they never go to paper. Only the owner switches it
+  back.
 - **The simulated sheets are on the printer's page**, to look at, download or
-  clear (which clears them on the box too). "Simulated" is shown wherever the
+  clear (which clears exactly that printer's sheets on the box too). "Simulated" is shown wherever the
   printer can be chosen.
 - **A simulated-only printer** can run where there is no printer at all, such
   as the server (`install-simulated-printer.sh`).

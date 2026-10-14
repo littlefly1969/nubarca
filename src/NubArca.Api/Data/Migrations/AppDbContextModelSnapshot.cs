@@ -6640,9 +6640,6 @@ namespace NubArca.Api.Data.Migrations
                     b.Property<DateTime?>("RevokedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTime?>("SimulatedOutputPurgeRequestedAt")
-                        .HasColumnType("timestamp with time zone");
-
                     b.HasKey("Id");
 
                     b.HasIndex("CredentialHash")
@@ -6775,6 +6772,12 @@ namespace NubArca.Api.Data.Migrations
 
                     b.Property<bool>("Simulated")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("SimulatedPurgeJobIds")
+                        .HasColumnType("text");
+
+                    b.Property<long>("SimulatedPurgeSequence")
+                        .HasColumnType("bigint");
 
                     b.Property<bool>("SimulationAvailable")
                         .HasColumnType("boolean");

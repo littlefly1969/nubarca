@@ -38,8 +38,15 @@ public sealed record PrintHeartbeatRequest(string AgentVersion, IReadOnlyList<Pr
 public sealed record PrintHeartbeatResponse(string DesiredState, DateTime ServerTime,
     /// <summary>The printers to show as their simulated twin: status and prints left come from it.</summary>
     IReadOnlyList<string>? SimulatedDeviceKeys = null,
-    /// <summary>The owner cleared the simulated prints: delete simulated output older than this.</summary>
-    DateTime? SimulatedOutputPurgeBefore = null);
+    /// <summary>
+    /// Per printer, the simulated output the owner cleared: the box deletes the
+    /// files of exactly these jobs from that printer's twin queues, once per
+    /// sequence, and touches nothing else.
+    /// </summary>
+    IReadOnlyList<SimulatedOutputPurge>? SimulatedOutputPurges = null);
+
+/// <summary>One printer's latest clear: its sequence, and the jobs (N-format ids) whose files go.</summary>
+public sealed record SimulatedOutputPurge(string DeviceKey, long Sequence, IReadOnlyList<string> JobIds);
 public sealed record PrintDeviceDto(
     Guid Id, string DisplayName, string? Manufacturer, string? Model,
     string AdapterKind, string ObservedState, DateTime LastSeenAt, bool SupportsPhoto10x15,
@@ -65,9 +72,9 @@ public sealed record PrintDeviceDto(
     /// </summary>
     int? MediaRemainingPrints = null,
     DateTime? MediaRemainingObservedAt = null,
-    /// <summary>Its jobs go to the simulated twin (the owner's switch, or a simulation-only box).</summary>
+    /// <summary>Its jobs are simulated (the owner's intent, or a simulation-only box) — whether or not the twin is there now.</summary>
     bool Simulated = false,
-    /// <summary>The agent offers a simulated twin, so the owner may switch it on.</summary>
+    /// <summary>The agent can run a simulated job right now: the owner may switch on, and simulated jobs can print.</summary>
     bool SimulationAvailable = false,
     /// <summary>Nothing but the twin: always simulated.</summary>
     bool SimulationOnly = false);

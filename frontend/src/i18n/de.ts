@@ -3970,6 +3970,7 @@ const de: Partial<Record<MessageKey, string>> = {
   'print.sim.on': 'Simulation einschalten',
   'print.sim.off': 'Zurück zu Papier',
   'print.sim.active': 'Simulation aktiv: Drucke gehen in eine Datei, nicht auf Papier.',
+  'print.sim.waiting': 'Die Simulation bleibt aktiv, aber die Print Box bietet gerade keinen simulierten Drucker: Drucke warten oder schlagen fehl und gehen nie auf Papier.',
   'print.sim.only': 'Nur simulierter Drucker: Drucke gehen immer in eine Datei.',
   'print.sim.unavailable': 'Dieser Print Agent bietet keine Simulation: Print Agent aktualisieren.',
   'print.sim.error': 'Die Simulation konnte nicht geändert werden.',

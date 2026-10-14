@@ -4307,6 +4307,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'print.sim.on': 'Turn simulation on',
   'print.sim.off': 'Back to paper',
   'print.sim.active': 'Simulation on: prints go to a file, not to paper.',
+  'print.sim.waiting': 'Simulation stays on, but the Print Box offers no simulated printer right now: prints wait or fail, and never go to paper.',
   'print.sim.only': 'A simulated-only printer: prints always go to a file.',
   'print.sim.unavailable': 'This Print Agent offers no simulation: update the Print Agent.',
   'print.sim.error': 'Could not change the simulation.',

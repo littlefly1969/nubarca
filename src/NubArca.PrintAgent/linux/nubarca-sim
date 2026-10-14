@@ -34,7 +34,13 @@ case "$queue" in ''|*[!A-Za-z0-9._-]*) echo 'ERROR: invalid queue name' >&2; exi
 umask 007
 dir="$spool/$queue"
 mkdir -p -- "$dir" || { echo "ERROR: cannot write the simulated output" >&2; exit 1; }
-name="$(date -u +%Y%m%dT%H%M%SZ)-job$job"
+# A NubArca job names its output by its own id (its title), so a clear in
+# NubArca deletes exactly its files; anything else gets a time and CUPS's id.
+if [[ "${3:-}" =~ ^NubArca-([0-9a-f]{32})$ ]]; then
+  name="${BASH_REMATCH[1]}"
+else
+  name="$(date -u +%Y%m%dT%H%M%SZ)-job$job"
+fi
 if [ "$#" -eq 6 ]; then
   cat -- "$6" > "$dir/$name.tmp" || exit 1
 else
@@ -47,8 +53,8 @@ case " $options " in
   *PageSize=w360h504*) media='5x7' ;;
   *PageSize=w432h576*) media='6x8' ;;
 esac
-printf 'queue=%s\njob=%s\nbytes=%s\nmedia=%s\noptions=%s\n' \
-  "$queue" "$job" "$(wc -c < "$dir/$name.prn" | tr -d ' ')" "$media" "$options" > "$dir/$name.txt"
+printf 'queue=%s\njob=%s\ntitle=%s\nbytes=%s\nmedia=%s\noptions=%s\n' \
+  "$queue" "$job" "${3:-}" "$(wc -c < "$dir/$name.prn" | tr -d ' ')" "$media" "$options" > "$dir/$name.txt"
 
 # Only the latest jobs stay: a box left simulating never fills its disk.
 ls -1t -- "$dir"/*.prn 2>/dev/null | tail -n +"$((keep + 1))" | while IFS= read -r old; do

@@ -6,7 +6,11 @@ namespace NubArca.PrintAgent.Api;
 
 public sealed record AgentEnrollmentResponse(Guid StationId, string StationCredential, string DesiredState);
 public sealed record AgentHeartbeatResponse(string DesiredState, DateTime ServerTime,
-    IReadOnlyList<string>? SimulatedDeviceKeys = null, DateTime? SimulatedOutputPurgeBefore = null);
+    IReadOnlyList<string>? SimulatedDeviceKeys = null,
+    IReadOnlyList<AgentSimulatedOutputPurge>? SimulatedOutputPurges = null);
+
+/// <summary>One printer's latest clear of simulated prints: delete exactly these jobs' files from its twin queues.</summary>
+public sealed record AgentSimulatedOutputPurge(string DeviceKey, long Sequence, IReadOnlyList<string> JobIds);
 public sealed record AgentDeviceReport(string DeviceKey, string DisplayName, string? Manufacturer,
     string? Model, string AdapterKind, PrinterCapabilities Capabilities, string ObservedState,
     AgentMediaRemaining? MediaRemaining = null, PrinterSimulation? Simulation = null);

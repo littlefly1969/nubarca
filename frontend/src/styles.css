@@ -8722,6 +8722,7 @@ video.lightbox-image {
 .print-erased button { justify-self: start; min-height: 2.75rem; }
 .print-station-row-badges { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
 .print-sim-badge { display: inline-block; padding: .1rem .5rem; border-radius: 999px; font-size: .75rem; font-weight: 600; color: var(--warning, #b45309); border: 1px solid currentColor; }
+.print-simulation-waiting { margin: 0; padding: .6rem .75rem; border-radius: 8px; border: 1px solid var(--warning-border, #f59e0b); color: var(--warning, #b45309); }
 .print-simulation-active { color: var(--warning, #b45309); font-weight: 600; }
 .print-simulated-prints { display: grid; gap: .5rem; }
 .print-simulated-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
