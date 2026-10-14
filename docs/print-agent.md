@@ -27,8 +27,16 @@ production checkout:
 ./deploy/pull-publish-print-agent-image.sh ghcr.io/<owner>/nubarca-print-agent@sha256:<digest>
 ```
 
-It accepts only a bundle built from that checkout's `main`, checks the zip
-against its manifest, and writes it into the API's read-only volume
+Trust comes from where the image lives, not from what it says about itself:
+`deploy/print-agent-bundle.py` accepts only `TRUSTED_REPOSITORY`
+(`ghcr.io/littlefly1969/nubarca-print-agent`, where the release workflow
+pushes) by immutable digest, before anything is pulled — an image in any other
+namespace is refused whatever commit its labels and manifest claim. Inside a
+trusted image the manifest, labels and zip (name, size, SHA-256, runtime,
+version) must agree and the source commit must be on the checkout's `main`.
+GitHub artifact attestations are not verified on the server: that would need an
+authenticated `gh` on the production host, which the deploy toolchain does not
+carry. The script then writes the bundle into the API's read-only volume
 `nubarca-print-agent-data` (the pointer `current-linux-x64.json` last). The API
 hashes the zip again before it offers it. An administrator then switches the
 download on or off on the printers page (**Print Agent for the Print Box**);

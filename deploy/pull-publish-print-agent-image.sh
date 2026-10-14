@@ -3,10 +3,13 @@
 # the printers page: the zip, then — last, as the activation pointer — its
 # current-<runtime>.json, into the API's read-only volume nubarca-print-agent-data.
 #
-# The bundle must be built from this checkout's main (its commit an ancestor of
-# HEAD), and the API must already mount the volume: deploy the release that adds
-# it before the first publication. Whether the page hands the bundle out is a
-# separate switch, set by an administrator on the printers page.
+# Trust comes from WHERE the image lives, not from what it says about itself:
+# only NubArca's own GHCR repository is accepted (deploy/print-agent-bundle.py,
+# TRUSTED_REPOSITORY), by immutable digest. Inside it, the manifest, labels and
+# zip must agree, and the source commit must be on this checkout's main. The API
+# must already mount the volume: deploy the release that adds it before the
+# first publication. Whether the page hands the bundle out is a separate switch,
+# set by an administrator on the printers page.
 
 set -Eeuo pipefail
 
@@ -16,14 +19,14 @@ fail() { printf '[print-agent-pull] error: %s\n' "$*" >&2; exit 1; }
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VOLUME="nubarca-print-agent-data"
 
-[[ $# -eq 1 ]] || fail "usage: $0 <ghcr.io/<owner>/nubarca-print-agent@sha256:digest>"
-IMAGE="$1"
-[[ "$IMAGE" =~ ^ghcr\.io/[a-z0-9._-]+/nubarca-print-agent@sha256:[0-9a-f]{64}$ ]] || \
-    fail "image must be ghcr.io/<owner>/nubarca-print-agent@sha256:<64 lowercase hex>"
+[[ $# -eq 1 ]] || fail "usage: $0 <trusted repository>@sha256:<digest>"
 
 cd "$REPO_ROOT"
 command -v docker >/dev/null || fail "docker is required"
 command -v python3 >/dev/null || fail "python3 is required"
+VALIDATOR="$REPO_ROOT/deploy/print-agent-bundle.py"
+# Checked before anything is pulled: an image from any other repository is refused.
+IMAGE="$(python3 "$VALIDATOR" image "$1")" || fail "untrusted or malformed image reference"
 [[ "$(git branch --show-current)" == "main" ]] || fail "production checkout must be on main"
 [[ -z "$(git status --porcelain)" ]] || fail "production checkout is dirty"
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || fail "HEAD must equal the already-fetched origin/main"
@@ -36,9 +39,6 @@ log "pulling immutable bundle $IMAGE"
 docker pull "$IMAGE" >/dev/null
 artifact_label="$(docker image inspect --format '{{ index .Config.Labels "io.nubarca.artifact" }}' "$IMAGE")"
 source_sha="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE")"
-[[ "$artifact_label" == "print-agent" ]] || fail "image is not a NubArca Print Agent bundle"
-[[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || fail "bundle carries no source commit"
-git merge-base --is-ancestor "$source_sha" HEAD || fail "bundle source $source_sha is not on this checkout's main"
 
 bundle_dir="$(mktemp -d /tmp/nubarca-print-agent-bundle.XXXXXXXX)"
 container=""
@@ -53,28 +53,9 @@ docker cp "$container:/release/." "$bundle_dir"
 docker rm -f "$container" >/dev/null
 container=""
 
-# The pointer names exactly one zip, of exactly these bytes, from this commit.
-values="$(python3 - "$bundle_dir" "$source_sha" <<'PY'
-import hashlib, json, os, re, sys
-root, source = sys.argv[1], sys.argv[2]
-manifest = json.load(open(os.path.join(root, "nubarca-print-agent.release.json"), encoding="utf-8"))
-version, runtime = manifest.get("version", ""), manifest.get("runtime", "")
-name, digest, size = manifest.get("fileName", ""), manifest.get("sha256", ""), manifest.get("sizeBytes")
-if manifest.get("artifact") != "print-agent": sys.exit("manifest is not a Print Agent bundle")
-if not re.fullmatch(r"\d{1,4}\.\d{1,4}\.\d{1,4}", version): sys.exit("invalid version")
-if runtime != "linux-x64": sys.exit("only linux-x64 is published")
-if name != f"nubarca-print-agent-{version}-{runtime}.zip": sys.exit("unexpected file name")
-if not re.fullmatch(r"[0-9a-f]{64}", digest): sys.exit("invalid sha256")
-if manifest.get("sourceCommit") != source: sys.exit("manifest commit differs from the image's")
-path = os.path.join(root, name)
-if not isinstance(size, int) or os.path.getsize(path) != size: sys.exit("size differs from the manifest")
-h = hashlib.sha256()
-with open(path, "rb") as f:
-    for chunk in iter(lambda: f.read(1 << 20), b""): h.update(chunk)
-if h.hexdigest() != digest: sys.exit("zip does not hash to the manifest")
-print(f"{name}\t{digest}\t{version}\t{size}")
-PY
-)" || fail "bundle validation failed"
+# The pointer names exactly one zip, of exactly these bytes, from a commit on main.
+values="$(python3 "$VALIDATOR" validate "$bundle_dir" "$artifact_label" "$source_sha" "$REPO_ROOT")" || \
+    fail "bundle validation failed"
 IFS=$'\t' read -r zip_name zip_sha version zip_bytes <<< "$values"
 
 # The volume belongs to Docker: a throwaway container of the API's own image
