@@ -10,8 +10,9 @@ originating repository and is deliberately not reproduced here.
 
 - **A revoked printer can be erased with everything it left** — its prints,
   rendered sheets, loans and codes. The page says how many prints and parties
-  are concerned and asks once; parties keep their budgets and numbering. Only
-  one line of the security log remains.
+  are concerned and asks once; parties keep their budgets and numbering. The
+  security log keeps its earlier entries and records the erase, in the same
+  step: if that record cannot be written, nothing is erased.
 
 ### Printers: connect a Print Box in a few copied commands, on a page made for the phone
 

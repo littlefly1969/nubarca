@@ -3965,7 +3965,7 @@ const de: Partial<Record<MessageKey, string>> = {
   'print.revokeConfirm': '„{name}“ endgültig widerrufen?',
   'print.addPrinter': 'Drucker hinzufügen',
   'print.erase.title': 'Alles löschen',
-  'print.erase.help': 'Der Drucker ist widerrufen. Du kannst ihn mit allem, was er hinterlassen hat, endgültig löschen: Drucke, Blätter, Freigaben und Codes. Nur eine Zeile im Sicherheitsprotokoll bleibt.',
+  'print.erase.help': 'Der Drucker ist widerrufen. Du kannst ihn mit allem, was er hinterlassen hat, endgültig löschen: Drucke, Blätter, Freigaben und Codes. Das Sicherheitsprotokoll behält seine früheren Einträge und fügt einen für das Löschen hinzu.',
   'print.erase.confirm': '„{name}“ endgültig löschen? {jobs} Drucke und der Druckverlauf von {parties} Feiern verschwinden. Budgets und Nummerierung der Feiern bleiben.',
   'print.erase.error': 'Der Drucker konnte nicht gelöscht werden.',
   'print.erase.done': 'Drucker gelöscht.',

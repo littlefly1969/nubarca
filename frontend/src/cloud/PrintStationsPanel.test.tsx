@@ -236,6 +236,10 @@ describe('PrintStationsPanel', () => {
     await openStation();
     // A revoked printer offers nothing to run, only to be erased.
     expect(screen.queryByRole('button', { name: 'Pausa' })).not.toBeInTheDocument();
+    // Said as the server does it: earlier log entries stay, the erase adds one.
+    expect(screen.getByTestId('print-erase')).toHaveTextContent(
+      'Il registro di sicurezza conserva le voci già scritte e aggiunge quella della cancellazione.');
+    expect(screen.getByTestId('print-erase')).not.toHaveTextContent('Resta solo');
     await user.click(within(screen.getByTestId('print-erase')).getByRole('button', { name: 'Cancella tutto' }));
 
     await waitFor(() => expect(confirm).toHaveBeenCalledWith(
