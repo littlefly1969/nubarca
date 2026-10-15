@@ -3,6 +3,7 @@ using NubArca.PrintAgent.Api;
 using NubArca.PrintAgent.Execution;
 using NubArca.PrintAgent.Journal;
 using NubArca.PrintAgent.Security;
+using NubArca.PrintAgent.Update;
 
 namespace NubArca.PrintAgent;
 
@@ -17,6 +18,7 @@ public sealed class PrintAgentWorker : BackgroundService
     private readonly ILogger<PrintAgentWorker> _logger;
     private readonly AgentConnectionState _connection;
     private SimulatedOutputPurger? _purger;
+    private readonly AgentSelfUpdate _selfUpdate;
 
     public PrintAgentWorker(PrintAgentApiClient api, ICredentialStore credentials,
         IPrinterAdapter adapter, ExecutionJournal journal, AgentExecutionCoordinator coordinator,
@@ -24,6 +26,7 @@ public sealed class PrintAgentWorker : BackgroundService
     {
         _api = api; _credentials = credentials; _adapter = adapter; _journal = journal;
         _coordinator = coordinator; _options = options; _logger = logger; _connection = connection;
+        _selfUpdate = AgentSelfUpdate.For(options, logger);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -41,12 +44,18 @@ public sealed class PrintAgentWorker : BackgroundService
             try
             {
                 var reports = await ObservePrintersAsync(stoppingToken);
-                var heartbeat = await _api.HeartbeatAsync(AgentBuildInfo.Version, AgentBuildInfo.Build, reports, stoppingToken);
-                _connection.MarkContact(DateTimeOffset.UtcNow);
+                var heartbeat = await _api.HeartbeatAsync(AgentBuildInfo.Version, AgentBuildInfo.Build, reports,
+                    stoppingToken, _selfUpdate.Supported, _selfUpdate.ReadResult());
+                var now = DateTimeOffset.UtcNow;
+                _connection.MarkContact(now);
+                _selfUpdate.MarkHeartbeat(AgentBuildInfo.Version);
                 _adapter.UseSimulation(new HashSet<string>(heartbeat.SimulatedDeviceKeys ?? [], StringComparer.Ordinal));
                 _purger ??= new SimulatedOutputPurger(_options.Simulation.OutputPath, _logger);
                 _purger.Apply(heartbeat.SimulatedOutputPurges, _adapter);
-                if (heartbeat.DesiredState == "running")
+                // Between jobs is the only time an update is asked for, and
+                // while it may restart this agent no new job is taken.
+                _selfUpdate.Handle(heartbeat.AgentUpdate, now);
+                if (heartbeat.DesiredState == "running" && !_selfUpdate.Pending(now))
                 {
                     var claim = await _api.ClaimAsync(_adapter.Kind, _adapter.SupportsSimulation, stoppingToken);
                     if (claim is not null)

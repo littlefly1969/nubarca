@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   ApiError,
+  cancelPrintAgentUpdate,
   cancelPrintJob,
   createPrintStation,
   createPrintTestJob,
@@ -10,6 +11,7 @@ import {
   listSharedPrinters,
   previewPrintStationErase,
   renewPrintStationEnrollment,
+  requestPrintAgentUpdate,
   revokePrintStation,
   setPrintStationDesiredState,
   type PrintAgentBundle,
@@ -411,6 +413,35 @@ function StationDetail({ station, busy, formatDate, onChanged, onAction, onRenew
             {t(AGENT_KEYS[agent.compatibility], { version: agent.latestVersion ?? '' })}
             {agent.unofficial && <>{' · '}{t('print.agent.unofficial')}</>}
           </p>
+        )}
+        {agent?.updateTarget && (
+          <p className="muted" data-testid="print-agent-updating">
+            {t('updates.boxes.pending', { version: agent.updateTarget })}
+          </p>
+        )}
+        {!agent?.updateTarget && agent?.updateResult === 'superseded' && agent.compatibility !== 'current' && (
+          <p className="muted" data-testid="print-agent-update-superseded">
+            {t('updates.boxes.superseded', { version: agent.updateResultVersion ?? '' })}
+          </p>
+        )}
+        {!agent?.updateTarget && agent?.updateResult === 'failed' && (
+          <p className="print-agent-badge print-agent-incompatible" data-testid="print-agent-update-failed">
+            {t('updates.boxes.failed', { version: agent.updateResultVersion ?? '' })}
+          </p>
+        )}
+        {live && agent?.updateTarget && (
+          <button type="button" disabled={busy}
+            onClick={() => onAction(() => cancelPrintAgentUpdate(station.id), 'updates.error.generic')}>
+            {t('common.cancel')}
+          </button>
+        )}
+        {/* A Print Box with the update service installs it by itself, between prints. */}
+        {live && agent?.selfUpdate && !agent.updateTarget && agent.latestVersion
+          && (agent.compatibility === 'update-available' || agent.compatibility === 'incompatible') && (
+          <button type="button" disabled={busy} data-testid="print-agent-update-now"
+            onClick={() => onAction(() => requestPrintAgentUpdate(station.id), 'updates.error.generic')}>
+            {t('print.agent.updateNow', { version: agent.latestVersion })}
+          </button>
         )}
         {live && agent && (
           <button type="button" onClick={onUpdateGuide}>{t('print.agent.updateGuide')}</button>

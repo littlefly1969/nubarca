@@ -38,3 +38,4 @@ export * from './partyMessageText';
 export * from './beautyLabUpload';
 export * from './cast';
 export * from './printStations';
+export * from './systemUpdate';

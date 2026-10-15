@@ -8855,3 +8855,11 @@ video.lightbox-image {
   .ws-mobile-tools { display: none; }
   .ws-desktop-selection { display: inline-flex; }
 }
+
+/* Admin Updates page */
+.admin-updates .updates-message { margin: 0 0 0.75rem; }
+.admin-updates .updates-list { margin: 0.5rem 0 0; padding-left: 1.25rem; font-size: 0.85rem; }
+.admin-updates .updates-list li { overflow-wrap: anywhere; }
+.admin-updates .updates-confirm { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.875rem; }
+.admin-updates .updates-run-message { overflow-wrap: anywhere; }
+.admin-updates .updates-boxes { margin-top: 1.5rem; overflow-x: auto; }

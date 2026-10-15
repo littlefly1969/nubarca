@@ -46,7 +46,10 @@ test('gates images, Compose, backup, and migrations before replacing release pin
   assert.ok(composeGate < backup);
   assert.ok(backup < migration);
   assert.ok(migration < pinReplace);
-  assert.match(script, /restoring the previous image pins/);
+  // The rollback restores the previous release whole: checkout, then pins, then containers
+  // (behaviour covered end to end by deploy/tests/productionRollback.test.mjs).
+  const rollback = script.slice(script.indexOf('on_apply_exit() {'));
+  assert.match(rollback, /restore_checkout[\s\S]*install -m 0644 "\$pin_previous"[\s\S]*up -d --no-build[\s\S]*previous_healthy/);
 });
 
 test('approved migrations require explicit confirmation and a verified backup', () => {

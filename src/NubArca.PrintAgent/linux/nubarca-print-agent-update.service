@@ -1,0 +1,13 @@
+[Unit]
+Description=NubArca Print Box update
+After=network.target
+
+# Root, because it replaces /opt/nubarca-print-agent and restarts the agent.
+# It runs the copy of the script in the bundle that is installed now, and
+# fetches what to install from the server itself (update-print-box.sh).
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/nubarca-print-agent/linux/update-print-box.sh
+TimeoutStartSec=20min
+PrivateTmp=true
+ProtectHome=true

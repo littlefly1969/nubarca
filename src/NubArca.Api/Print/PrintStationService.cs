@@ -189,7 +189,7 @@ public sealed class PrintStationService
                 stationJobs.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).Take(25).Select(Job).ToArray(),
                 // Never enrolled: no agent to describe yet.
                 station.AgentVersion is null ? null
-                    : PrintAgentCompatibility.Describe(station.AgentVersion, station.AgentBuild, bundle));
+                    : PrintAgentUpdates.Describe(station, bundle));
         }).ToArray();
     }
 
@@ -670,6 +670,11 @@ public sealed class PrintStationService
         station.LastSeenAt = now;
         station.AgentVersion = NormalizeVersion(request.AgentVersion);
         station.AgentBuild = NormalizeBuild(request.AgentBuild);
+        PrintAgentUpdates.ApplyHeartbeat(station, request, now);
+        // The request pins one bundle; once another is published it is no longer offered.
+        var bundle = station.AgentUpdateTarget is null || _bundles is null ? null
+            : await _bundles.CurrentAsync(cancellationToken);
+        if (_bundles is not null) PrintAgentUpdates.EndIfSuperseded(station, bundle, now);
         var knownDevices = await _db.PrinterDevices
             .Where(x => x.PrintStationId == stationId)
             .ToDictionaryAsync(x => x.DeviceKey, StringComparer.Ordinal, cancellationToken);
@@ -713,7 +718,7 @@ public sealed class PrintStationService
             .Select(x => new SimulatedOutputPurge(x.DeviceKey, x.SimulatedPurgeSequence,
                 JsonSerializer.Deserialize<string[]>(x.SimulatedPurgeJobIds!) ?? []))
             .ToArray();
-        return new(station.DesiredState, now, simulated, purges);
+        return new(station.DesiredState, now, simulated, purges, PrintAgentUpdates.Offer(station, bundle));
     }
 
     public async Task<(PrintJobSummaryDto? Job, string? Error)> CreateTestPrintAsync(Guid ownerId, Guid stationId,

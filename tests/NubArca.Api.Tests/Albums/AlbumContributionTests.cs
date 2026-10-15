@@ -1012,6 +1012,8 @@ public sealed class AlbumContributionTests : IDisposable
         Assert.DoesNotContain(
             "075face6-ae71-486f-adef-0c0c0c0c0c0c",
             PeopleVocabulary("{\"items\":[{\"id\":\"075face6-ae71-486f-adef-0c0c0c0c0c0c\"}]}"));
+        Assert.DoesNotContain(PeopleVocabulary("{\"url\":\"/api/media/8ffaceaa-5795-44cc-b96c-0c0c0c0c0c0c/thumb\"}"),
+            token => token.Contains("face", StringComparison.OrdinalIgnoreCase));
 
         foreach (var path in new[]
                  {
@@ -1033,9 +1035,10 @@ public sealed class AlbumContributionTests : IDisposable
     }
 
     /// <summary>
-    /// Every field name and text value in a response, with GUID-shaped values
-    /// left out: those are identifiers, and their hexadecimal digits spell
-    /// words no one wrote.
+    /// Every field name and text value in a response, with GUIDs left out —
+    /// whole values and GUIDs inside a value, such as a media URL: those are
+    /// identifiers, and their hexadecimal digits spell words no one wrote
+    /// (a URL with `8ffaceaa-…` failed this once).
     /// </summary>
     private static IEnumerable<string> PeopleVocabulary(string json)
     {
@@ -1059,8 +1062,11 @@ public sealed class AlbumContributionTests : IDisposable
                     foreach (var item in element.EnumerateArray()) stack.Push(item);
                     break;
                 case JsonValueKind.String:
+                    // GUIDs inside a value (an id in a URL) are identifiers too.
                     var value = element.GetString();
-                    if (value is not null && !Guid.TryParse(value, out _)) found.Add(value);
+                    if (value is not null)
+                        found.Add(System.Text.RegularExpressions.Regex.Replace(value,
+                            "[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}", ""));
                     break;
             }
         }

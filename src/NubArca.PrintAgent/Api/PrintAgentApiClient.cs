@@ -7,7 +7,11 @@ namespace NubArca.PrintAgent.Api;
 public sealed record AgentEnrollmentResponse(Guid StationId, string StationCredential, string DesiredState);
 public sealed record AgentHeartbeatResponse(string DesiredState, DateTime ServerTime,
     IReadOnlyList<string>? SimulatedDeviceKeys = null,
-    IReadOnlyList<AgentSimulatedOutputPurge>? SimulatedOutputPurges = null);
+    IReadOnlyList<AgentSimulatedOutputPurge>? SimulatedOutputPurges = null,
+    AgentUpdateOffer? AgentUpdate = null);
+
+/// <summary>The bundle the server asks this box to install, and the request it answers.</summary>
+public sealed record AgentUpdateOffer(string Version, string FileName, string Sha256, long SizeBytes, string RequestId);
 
 /// <summary>One printer's latest clear of simulated prints: delete exactly these jobs' files from its twin queues.</summary>
 public sealed record AgentSimulatedOutputPurge(string DeviceKey, long Sequence, IReadOnlyList<string> JobIds);
@@ -57,12 +61,45 @@ public sealed class PrintAgentApiClient
     }
 
     public async Task<AgentHeartbeatResponse> HeartbeatAsync(string agentVersion, string? agentBuild,
-        IReadOnlyList<AgentDeviceReport> devices, CancellationToken cancellationToken)
+        IReadOnlyList<AgentDeviceReport> devices, CancellationToken cancellationToken,
+        bool selfUpdate = false, string? updateResult = null)
     {
-        using var request = Json(HttpMethod.Post, "api/print-agent/heartbeat", new { agentVersion, agentBuild, devices });
+        using var request = Json(HttpMethod.Post, "api/print-agent/heartbeat",
+            new { agentVersion, agentBuild, devices, selfUpdate, updateResult });
         using var response = await _http.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<AgentHeartbeatResponse>(cancellationToken))!;
+    }
+
+    /// <summary>What the server asks this box to install now, or null.</summary>
+    public async Task<AgentUpdateOffer?> GetUpdateOfferAsync(CancellationToken cancellationToken)
+    {
+        using var request = Auth(HttpMethod.Get, "api/print-agent/update");
+        using var response = await _http.SendAsync(request, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NoContent) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<AgentUpdateOffer>(cancellationToken);
+    }
+
+    /// <summary>Downloads the offered bundle to <paramref name="path"/>, refusing more than <paramref name="maxBytes"/>.</summary>
+    public async Task DownloadUpdateAsync(string path, long maxBytes, CancellationToken cancellationToken)
+    {
+        using var request = Auth(HttpMethod.Get, "api/print-agent/update/bundle");
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength is long length && length > maxBytes)
+            throw new InvalidDataException("The update bundle exceeds the size the server named.");
+        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using var target = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        var buffer = new byte[81920];
+        long total = 0;
+        int read;
+        while ((read = await source.ReadAsync(buffer, cancellationToken)) > 0)
+        {
+            total += read;
+            if (total > maxBytes) throw new InvalidDataException("The update bundle exceeds the size the server named.");
+            await target.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
     }
 
     public async Task<AgentClaim?> ClaimAsync(string adapterKind, bool supportsSimulation,

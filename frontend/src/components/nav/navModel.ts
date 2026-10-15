@@ -116,6 +116,8 @@ const ADMIN: NavItem[] = [
   },
   { to: '/admin/import', labelKey: 'nav.import', icon: 'import', permission: PERMISSIONS.adminImport },
   { to: '/admin/jobs', labelKey: 'nav.jobs', icon: 'jobs', permission: PERMISSIONS.adminJobsManage },
+  // Installing a release is the installation's own business: the same authority as its dashboard.
+  { to: '/admin/updates', labelKey: 'nav.updates', icon: 'restore', permission: PERMISSIONS.adminDashboard },
 ];
 
 export interface NavModelInput {

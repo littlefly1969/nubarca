@@ -12,8 +12,19 @@ is built is described by `ARCHITECTURE.md`.
 - Backend: ASP.NET Core / .NET 10, EF Core, PostgreSQL 17
 - Frontend: React, TypeScript, Vite
 - Runtime: Docker Compose with separate API, worker and frontend services
+- Updates: every push to `main` publishes a cosign-signed release manifest
+  (`release.yml`, `ghcr.io/<owner>/nubarca-release:<sha>`, images by digest,
+  reused across commits only when `git diff` proves the component unchanged).
+  `deploy/update-production.sh check|apply` verifies it, and the host updater
+  (`deploy/updater/`, a systemd service outside the containers, mailbox
+  `NUBARCA_UPDATER_DIR`) runs it when an administrator presses Check or
+  Install on `/admin/updates`. The api never touches Docker.
+  `NUBARCA_API_VARIANT` (openvino|runtime) and `NUBARCA_TV_ENABLED` describe
+  the installation. Linux Print Boxes from agent 0.9.0 install the published
+  bundle on request (root path unit, server-named SHA-256, rollback on no
+  heartbeat). See `docs/system-updates.md`
 - Print foundation: server-owned stations/devices/jobs plus a separately
-  packaged headless Print Agent `0.8.0`: a Windows service (spooler), a Linux
+  packaged headless Print Agent `0.9.0`: a Windows service (spooler), a Linux
   fake simulator (systemd instances, protocol acceptance) and a headless Linux
   Print Box on Ubuntu Server 24.04+ or Debian 12+ (`cups` adapter over
   CUPS/Gutenprint with queues created by the installer, NetworkManager Wi-Fi

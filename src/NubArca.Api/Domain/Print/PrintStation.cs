@@ -12,6 +12,23 @@ public sealed class PrintStation
     public string? AgentVersion { get; set; }
     /// <summary>The source commit the agent was built from, as it reports it; null from an agent that does not.</summary>
     public string? AgentBuild { get; set; }
+    /// <summary>The agent said it can update itself (a Print Box with the update service installed).</summary>
+    public bool AgentSelfUpdate { get; set; }
+    /// <summary>The version an administrator or the owner asked this agent to update to; null when none is pending.</summary>
+    public string? AgentUpdateTarget { get; set; }
+    public DateTime? AgentUpdateRequestedAt { get; set; }
+    /// <summary>
+    /// The exact bundle the request is for, pinned when someone asked: the box
+    /// is offered that bundle and nothing else, never a newer one published
+    /// meanwhile.
+    /// </summary>
+    public string? AgentUpdateSha256 { get; set; }
+    public long? AgentUpdateSizeBytes { get; set; }
+    /// <summary>How the last requested update ended: <c>ok</c>, <c>failed</c>, or <c>superseded</c> (the pinned bundle is no longer published); null before the first.</summary>
+    public string? AgentUpdateResult { get; set; }
+    /// <summary>The version that last update was for.</summary>
+    public string? AgentUpdateResultVersion { get; set; }
+    public DateTime? AgentUpdateResultAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? RevokedAt { get; set; }
 }

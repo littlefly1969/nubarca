@@ -307,7 +307,17 @@ EOF
 else
   rm -f "$dropin_dir/captive-portal.conf"
 fi
+# Updates asked for from NubArca: the agent, idle, writes a request into its
+# state directory; this root path unit then runs linux/update-print-box.sh,
+# which fetches the offered bundle from the server itself and rolls back if the
+# new agent does not reach the server. The marker tells the agent it may ask.
+install -m 0644 "$script_dir/nubarca-print-agent-update.path" /etc/systemd/system/nubarca-print-agent-update.path
+install -m 0644 "$script_dir/nubarca-print-agent-update.service" /etc/systemd/system/nubarca-print-agent-update.service
+chmod 0755 "$script_dir/update-print-box.sh"
+printf 'Updates asked for in NubArca are installed by nubarca-print-agent-update.path.\n' > "$config_dir/self-update"
+chmod 0644 "$config_dir/self-update"
 systemctl daemon-reload
+systemctl enable --now nubarca-print-agent-update.path
 systemctl enable "$unit"
 systemctl restart "$unit"
 

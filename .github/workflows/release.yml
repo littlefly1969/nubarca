@@ -1,0 +1,347 @@
+name: Release
+
+# Every push to main becomes an installable release: the components whose
+# paths changed are built and verified (build-production-images.yml,
+# print-agent-release.yml), and one signed manifest names, by digest, the
+# images that make up this commit. Installations update only to a manifest
+# whose signature they can prove from the signer they already hold
+# (deploy/release-manifest.py); GitHub never connects to an installation.
+#
+# A component that did not change is not rebuilt: its entry is carried over
+# from the previous signed release, and an installation re-checks against Git
+# that nothing of that component changed since.
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One release at a time, never cancelled half-way: a newer push waits, and
+# finds the images this run published.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  # Pinned with its published checksum; verify-blob on the installation uses
+  # the same major version (deploy/updater/install-updater.sh).
+  COSIGN_VERSION: v2.6.1
+  COSIGN_SHA256: 064954c5d8c7e3b28188eee5b1727b31c411550bc5fefd41aa672d3c761d103a
+
+jobs:
+  plan:
+    name: Plan the release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      api: ${{ steps.plan.outputs.api }}
+      frontend: ${{ steps.plan.outputs.frontend }}
+      print_agent: ${{ steps.plan.outputs.print_agent }}
+      previous: ${{ steps.plan.outputs.previous }}
+      published: ${{ steps.plan.outputs.published }}
+    steps:
+      - name: Enforce release policy
+        run: |
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+            echo "Releases are made only from main; got $GITHUB_REF" >&2
+            exit 1
+          }
+
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        run: |
+          set -euo pipefail
+          install -d "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/cosign" \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          echo "${COSIGN_SHA256}  $RUNNER_TEMP/bin/cosign" | sha256sum -c -
+          chmod 0755 "$RUNNER_TEMP/bin/cosign"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # The previous release is the newest signed manifest among this commit's
+      # first-parent ancestors, its signature checked against the signer its
+      # own commit declares. A component nothing of which changed since that
+      # release is carried over from it; every other component is built now.
+      # No image is ever taken on trust from a registry tag.
+      - name: Decide what to build
+        id: plan
+        run: |
+          set -euo pipefail
+          # A commit's release is published once and never replaced: an
+          # installation's check pins the exact manifest it read, and a re-run
+          # must not quietly swap it (a re-run of a published commit is a no-op).
+          if docker manifest inspect "$(python3 deploy/release-manifest.py trust release-image):$GITHUB_SHA" >/dev/null 2>&1; then
+            echo "The release of $GITHUB_SHA is already published; nothing to do."
+            {
+              echo "api=false"; echo "frontend=false"; echo "print_agent=false"
+              echo "previous="; echo "published=true"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          previous="$(python3 deploy/release-manifest.py previous . "$GITHUB_SHA" "$RUNNER_TEMP/previous")"
+          previous_json=-
+          [[ -n "$previous" ]] && previous_json="$RUNNER_TEMP/previous/release.json"
+          python3 deploy/release-manifest.py plan . "$GITHUB_SHA" "$previous_json" > "$RUNNER_TEMP/plan.json"
+          cat "$RUNNER_TEMP/plan.json"
+          builds() {
+            python3 -c 'import json,sys; print(str(sys.argv[2] in json.load(open(sys.argv[1]))["build"]).lower())' \
+              "$RUNNER_TEMP/plan.json" "$1"
+          }
+          api="$(builds api)"; frontend="$(builds frontend)"; print_agent="$(builds print-agent)"
+          {
+            echo "api=$api"
+            echo "frontend=$frontend"
+            echo "print_agent=$print_agent"
+            echo "previous=$previous"
+            echo "published=false"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Release plan for \`$GITHUB_SHA\`"
+            echo
+            echo "Previous release: \`${previous:-none}\`"
+            echo
+            echo "| Component | Build now |"
+            echo "| --- | --- |"
+            echo "| api | $api |"
+            echo "| frontend | $frontend |"
+            echo "| print-agent | $print_agent |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  images:
+    name: Application images
+    needs: plan
+    if: needs.plan.outputs.api == 'true' || needs.plan.outputs.frontend == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-production-images.yml
+    with:
+      backend: ${{ needs.plan.outputs.api == 'true' }}
+      frontend: ${{ needs.plan.outputs.frontend == 'true' }}
+
+  print_agent:
+    name: Print Box bundle
+    needs: plan
+    if: needs.plan.outputs.print_agent == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/print-agent-release.yml
+    with:
+      runtime: linux-x64
+      publish: true
+
+  manifest:
+    name: Sign and publish the release manifest
+    needs: [plan, images, print_agent]
+    if: >-
+      always() && needs.plan.result == 'success' && needs.plan.outputs.published != 'true'
+      && (needs.images.result == 'success' || needs.images.result == 'skipped')
+      && (needs.print_agent.result == 'success' || needs.print_agent.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      # Keyless Sigstore signing: the certificate names this workflow, this
+      # repository and refs/heads/main, which is what installations verify.
+      id-token: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        run: |
+          set -euo pipefail
+          install -d "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/cosign" \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          echo "${COSIGN_SHA256}  $RUNNER_TEMP/bin/cosign" | sha256sum -c -
+          chmod 0755 "$RUNNER_TEMP/bin/cosign"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # Fresh images are named by the digests their build jobs pushed, and
+      # each must carry this commit; the rest come from the previous signed
+      # release, which is fetched and verified again here.
+      - name: Assemble the manifest
+        env:
+          PLANNED_PREVIOUS: ${{ needs.plan.outputs.previous }}
+          BUILD_API: ${{ needs.plan.outputs.api }}
+          BUILD_FRONTEND: ${{ needs.plan.outputs.frontend }}
+          BUILD_PRINT_AGENT: ${{ needs.plan.outputs.print_agent }}
+          RUNTIME_DIGEST: ${{ needs.images.outputs.runtime_digest }}
+          OPENVINO_DIGEST: ${{ needs.images.outputs.openvino_digest }}
+          FRONTEND_DIGEST: ${{ needs.images.outputs.frontend_digest }}
+          PRINT_AGENT_DIGEST: ${{ needs.print_agent.outputs.digest }}
+        run: |
+          set -euo pipefail
+          owner="$(python3 deploy/release-manifest.py trust owner)"
+          previous="$(python3 deploy/release-manifest.py previous . "$GITHUB_SHA" "$RUNNER_TEMP/previous")"
+          [[ "$previous" == "$PLANNED_PREVIOUS" ]] || {
+            echo "the previous release changed since the plan ('$PLANNED_PREVIOUS' -> '$previous')" >&2
+            exit 1
+          }
+          previous_json=-
+          [[ -n "$previous" ]] && previous_json="$RUNNER_TEMP/previous/release.json"
+          revision() {
+            docker buildx imagetools inspect "$1" --format '{{json .Image}}' |
+              python3 -c 'import json,sys
+          image=json.load(sys.stdin); config=image.get("config") or {}
+          env=dict(e.split("=",1) for e in config.get("Env") or [] if "=" in e)
+          print(env.get("NUBARCA_GIT_SHA") or (config.get("Labels") or {}).get("org.opencontainers.image.revision",""))'
+          }
+          rows=()
+          [[ "$BUILD_API" == true ]] && rows+=(
+            "api runtime $REGISTRY/$owner/nubarca-api@$RUNTIME_DIGEST"
+            "api openvino $REGISTRY/$owner/nubarca-api-openvino@$OPENVINO_DIGEST")
+          [[ "$BUILD_FRONTEND" == true ]] && rows+=("frontend default $REGISTRY/$owner/nubarca-frontend@$FRONTEND_DIGEST")
+          [[ "$BUILD_PRINT_AGENT" == true ]] && rows+=("print-agent linux-x64 $REGISTRY/$owner/nubarca-print-agent@$PRINT_AGENT_DIGEST")
+          printf '' > "$RUNNER_TEMP/built.tsv"
+          for row in "${rows[@]}"; do
+            read -r component variant image <<< "$row"
+            [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]] || { echo "$component/$variant: no digest from its build" >&2; exit 1; }
+            [[ "$(revision "$image")" == "$GITHUB_SHA" ]] || { echo "$image does not carry $GITHUB_SHA" >&2; exit 1; }
+            printf '%s\t%s\t%s\n' "$component" "$variant" "$image" >> "$RUNNER_TEMP/built.tsv"
+          done
+          python3 - "$RUNNER_TEMP/built.tsv" "$RUNNER_TEMP/built.json" <<'PY'
+          import json, sys
+          built = {}
+          for line in open(sys.argv[1]):
+              if line.strip():
+                  component, variant, image = line.rstrip("\n").split("\t")
+                  built.setdefault(component, {})[variant] = image
+          json.dump(built, open(sys.argv[2], "w"), indent=2)
+          PY
+          version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/NubArca.Api/NubArca.Api.csproj)"
+          python3 deploy/release-manifest.py assemble . "$GITHUB_SHA" "$version" "$RUNNER_TEMP/built.json" \
+            "$previous_json" > "$RUNNER_TEMP/release.json"
+          cat "$RUNNER_TEMP/release.json"
+
+      # The signer is the one THIS commit declares: keyless by default, or
+      # NubArca's own key when deploy/release-signing.pub is committed (the
+      # private key in RELEASE_SIGNING_KEY, signed without a public
+      # transparency-log entry, for a private repository).
+      #
+      # When the signer differs from the previous release's, this release is
+      # a trust transition and is signed a second time, by the PREVIOUS
+      # signer (release.transition.sigstore.json): installations accept the
+      # new signer only because the one they hold authorized it. A rotation
+      # from one key to another needs the old private key once more, in
+      # RELEASE_SIGNING_KEY_PREVIOUS.
+      - name: Sign the manifest
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          RELEASE_SIGNING_KEY_PASSWORD: ${{ secrets.RELEASE_SIGNING_KEY_PASSWORD }}
+          RELEASE_SIGNING_KEY_PREVIOUS: ${{ secrets.RELEASE_SIGNING_KEY_PREVIOUS }}
+          RELEASE_SIGNING_KEY_PREVIOUS_PASSWORD: ${{ secrets.RELEASE_SIGNING_KEY_PREVIOUS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          release="$RUNNER_TEMP/release.json"
+          normalized() { tr -d '[:space:]' < "$1"; }
+          # sign_as <current|previous> <bundle>
+          sign_as() {
+            local role="$1" bundle="$2" mode slot key_var password_var
+            mode="$(python3 deploy/release-manifest.py signer "$release" "$role" "$RUNNER_TEMP/$role.pub")"
+            if [[ "$mode" == keyless ]]; then
+              cosign sign-blob --yes --bundle "$bundle" "$release"
+            else
+              for slot in '' _PREVIOUS; do
+                key_var="RELEASE_SIGNING_KEY$slot"; password_var="RELEASE_SIGNING_KEY${slot}_PASSWORD"
+                [[ -n "${!key_var:-}" ]] || continue
+                COSIGN_PASSWORD="${!password_var:-}" cosign public-key --key "env://$key_var" \
+                  --outfile "$RUNNER_TEMP/slot.pub"
+                if [[ "$(normalized "$RUNNER_TEMP/slot.pub")" == "$(normalized "$RUNNER_TEMP/$role.pub")" ]]; then
+                  COSIGN_PASSWORD="${!password_var:-}" cosign sign-blob --yes --key "env://$key_var" \
+                    --tlog-upload=false --bundle "$bundle" "$release"
+                  return 0
+                fi
+              done
+              echo "no RELEASE_SIGNING_KEY secret holds the $role signer's private key" >&2
+              exit 1
+            fi
+          }
+          sign_as current "$RUNNER_TEMP/release.sigstore.json"
+          # Proved here exactly as an installation will prove it.
+          python3 deploy/release-manifest.py check-signature "$RUNNER_TEMP/release.json" "$RUNNER_TEMP/release.sigstore.json" current
+          if [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["transition"] is not None)' "$release")" == True ]]; then
+            echo "This release hands signing trust to a new signer; the previous signer signs it too."
+            sign_as previous "$RUNNER_TEMP/release.transition.sigstore.json"
+            python3 deploy/release-manifest.py check-signature "$RUNNER_TEMP/release.json" "$RUNNER_TEMP/release.transition.sigstore.json" previous
+          fi
+
+      - name: Publish the release manifest image
+        run: |
+          set -euo pipefail
+          image="$(python3 deploy/release-manifest.py trust release-image):$GITHUB_SHA"
+          # Never replace a published release. One that appeared since the plan
+          # is accepted only if it says exactly what this run would publish.
+          if docker manifest inspect "$image" >/dev/null 2>&1; then
+            existing="$RUNNER_TEMP/existing-release"
+            install -d "$existing"
+            container="$(docker create "$image" /bin/true)"
+            docker cp "$container:/release/release.json" "$existing/release.json"
+            docker rm -f "$container" >/dev/null
+            if cmp -s "$existing/release.json" "$RUNNER_TEMP/release.json"; then
+              echo "The release of $GITHUB_SHA is already published with this exact manifest; nothing to do."
+              exit 0
+            fi
+            echo "The release of $GITHUB_SHA is already published with another manifest; it is never replaced." >&2
+            exit 1
+          fi
+          context="$RUNNER_TEMP/release-context"
+          install -d "$context"
+          cp "$RUNNER_TEMP/release.json" "$RUNNER_TEMP/release.sigstore.json" "$context/"
+          if [[ -f "$RUNNER_TEMP/release.transition.sigstore.json" ]]; then
+            cp "$RUNNER_TEMP/release.transition.sigstore.json" "$context/"
+          fi
+          printf 'FROM scratch\nCOPY . /release/\n' > "$RUNNER_TEMP/release.Dockerfile"
+          docker buildx build --push --provenance=false --sbom=false \
+            --label org.opencontainers.image.revision="$GITHUB_SHA" \
+            --label org.opencontainers.image.source="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label io.nubarca.artifact=release \
+            -f "$RUNNER_TEMP/release.Dockerfile" -t "$image" "$context"
+          digest="$(docker buildx imagetools inspect "$image" --format '{{.Manifest.Digest}}')"
+          {
+            echo "## Release \`$GITHUB_SHA\`"
+            echo
+            echo "Signed manifest: \`$image\` (\`$digest\`)"
+            echo
+            echo '```json'
+            cat "$RUNNER_TEMP/release.json"
+            echo '```'
+            echo
+            echo "Install it from the administration page (**Cloud functions → Updates**)"
+            echo "or on the server with \`./deploy/update-production.sh check --env-file .env\`."
+          } >> "$GITHUB_STEP_SUMMARY"

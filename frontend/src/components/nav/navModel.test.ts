@@ -67,7 +67,7 @@ describe('primary navigation model', () => {
     expect(groups.map((g) => g.id)).toEqual(['main', 'more', 'admin']);
     const admin = groups.find((g) => g.id === 'admin')!;
     expect(admin.items.map((i) => i.to)).toEqual([
-      '/admin', '/admin/users', '/admin/roles', '/admin/import', '/admin/jobs',
+      '/admin', '/admin/users', '/admin/roles', '/admin/import', '/admin/jobs', '/admin/updates',
     ]);
   });
 
@@ -146,6 +146,7 @@ describe('primary navigation model', () => {
     expect(gated['/admin/users']).toBe(PERMISSIONS.adminUsersManage);
     expect(gated['/admin/import']).toBe(PERMISSIONS.adminImport);
     expect(gated['/admin/jobs']).toBe(PERMISSIONS.adminJobsManage);
+    expect(gated['/admin/updates']).toBe(PERMISSIONS.adminDashboard);
 
     for (const core of ['/', '/media', '/albums', '/shared-albums', '/shares', '/trash']) {
       expect(gated[core]).toBeUndefined();

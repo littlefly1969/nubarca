@@ -44,6 +44,16 @@ public sealed class PrintAgentOptions
     /// produces. Null reports none. Deterministic, for tests and simulators.
     /// </summary>
     public int? FakeRemainingPrints { get; set; }
+    /// <summary>
+    /// Left by the Print Box's root update service when it is installed; while
+    /// it exists the agent tells the server it can update itself.
+    /// </summary>
+    public string SelfUpdateMarkerPath { get; set; } = "/etc/nubarca-print-agent/self-update";
+    /// <summary>
+    /// Kept by the root update service for exactly as long as it runs; the
+    /// agent takes no job while it exists (linux/update-print-box.sh).
+    /// </summary>
+    public string SelfUpdateInProgressPath { get; set; } = "/run/nubarca-print-agent-update/in-progress";
     public long MaxArtifactBytes { get; set; } = 32 * 1024 * 1024;
     public long MaxTemporaryBytes { get; set; } = 128 * 1024 * 1024;
 

@@ -208,6 +208,31 @@ describe('PrintStationsPanel', () => {
     expect(screen.queryByTestId('print-guide-code')).not.toBeInTheDocument();
   });
 
+  it('asks a self-updating box to install the published agent, and only such a box', async () => {
+    let target: string | null = null;
+    const agent = () => ({ version: '0.9.0', build: null, compatibility: 'update-available', unofficial: false,
+      latestVersion: '0.10.0', selfUpdate: true, updateTarget: target });
+    const api = mockApi({
+      'GET /api/print/stations': () => jsonResponse([{ ...station, agent: agent() }]),
+      'POST /api/print/stations/11111111-1111-1111-1111-111111111111/agent-update': () => {
+        target = '0.10.0';
+        return jsonResponse({ requested: 1, version: '0.10.0' });
+      },
+    });
+    render(view());
+    await openStation();
+    fireEvent.click(screen.getByTestId('print-agent-update-now'));
+    expect(await screen.findByTestId('print-agent-updating')).toHaveTextContent('0.10.0');
+    expect(api.calls.some((c) => c.method === 'POST' && c.url.endsWith('/agent-update'))).toBe(true);
+    expect(screen.queryByTestId('print-agent-update-now')).not.toBeInTheDocument();
+
+    cleanup();
+    mockApi({ 'GET /api/print/stations': () => jsonResponse([{ ...station, agent: { ...agent(), selfUpdate: false } }]) });
+    render(view());
+    await openStation();
+    expect(screen.queryByTestId('print-agent-update-now')).not.toBeInTheDocument();
+  });
+
   it('says plainly when an agent is too old or not an official build', async () => {
     mockApi({ 'GET /api/print/stations': () => jsonResponse([{ ...station,
       agent: { version: '0.2.1', build: null, compatibility: 'incompatible', unofficial: false, latestVersion: '0.7.0' } }]) });

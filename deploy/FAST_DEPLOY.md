@@ -101,12 +101,32 @@ migration, the server provides a review/apply pair:
 
 ```bash
 ./deploy/update-production.sh check --env-file .env
-./deploy/update-production.sh apply --env-file .env --confirm <full-main-sha> [--confirm-migrations]
+./deploy/update-production.sh apply --env-file .env --confirm <full-main-sha> --confirm-release <release-id> [--confirm-migrations]
 ```
 
-`check` fetches `origin/main` and reports, without changing the checkout,
-release pins or containers, which backend/frontend/TV components changed and
-whether the corresponding immutable GHCR artifacts exist. A TV change requires
+The same pair runs from **Administration › Updates** through the host updater
+(`deploy/updater/`, installed once per server). Both routes have the same gates.
+The setup, the signing modes and the Print Box updates are described in
+[`../docs/system-updates.md`](../docs/system-updates.md).
+
+`check` fetches `origin/main` and pulls that commit's **signed release
+manifest** (`ghcr.io/<owner>/nubarca-release:<sha>`, written by
+`.github/workflows/release.yml`). It verifies the manifest's `cosign`
+signature with `deploy/release-manifest.py fetch-verified`, starting from the
+signer the installed checkout holds: keyless against the Release workflow on
+`main`, or `deploy/release-signing.pub` when that file is committed. A new
+signer is accepted only through releases the previous signer also signed. It verifies the
+content with `deploy/release-manifest.py verify`: only NubArca's GHCR
+repositories, by digest, and an image from an earlier commit only if none of
+its component's files changed since. A commit whose release is still building
+reports `release-not-published`. Without changing the checkout, release pins or
+containers, it then reports which backend/frontend/Print Agent/TV components
+changed and whether the corresponding immutable GHCR artifacts exist.
+`NUBARCA_API_VARIANT` in `.env` picks the API image: `openvino`, the default,
+uses the four-file stack above, and `runtime` uses the lean CPU image without
+`docker-compose.facedirect-api.yml`. `NUBARCA_TV_ENABLED=false` skips TV
+publication on purpose. A changed Print Agent is published for the printers
+page after a healthy deploy. A TV change requires
 either a native APK bundle or a signed OTA bundle for the exact SHA; an absent
 TV artifact is never silently skipped. It prints the exact
 `apply` command. For an approved migration it also verifies the configured
@@ -122,7 +142,11 @@ and the effective-Compose gate, then recreates only affected application service
 image first, creates and validates a pre-migration PostgreSQL dump on the
 dedicated backup mount, applies the migration with that candidate image, and
 verifies every expected id in `__EFMigrationsHistory` before changing a release
-pin. It restores the previous pin if smoke checks fail; this rollback is allowed
+pin. Any failure after the fast-forward resets the checkout to the commit it
+came from. If smoke checks fail it restores, in order, that checkout, the
+previous pin and the previous containers, and waits for them to answer healthy;
+keeping the old Compose files is what makes the rollback the previous release
+rather than old images under new configuration. This rollback is allowed
 only because the tracked migration policy has declared the old application
 compatible with the new schema. A TV bundle is activated locally only when CI
 published one for that exact source SHA.
@@ -687,9 +711,11 @@ Verify that the worker claims the returned job ID. This command excludes
 ## 9. Rollback
 
 Keep the previous image references until smoke checks pass. To roll back,
-restore the previous pins in `docker-compose.release.local.yml` and recreate
-only the affected services with the same four-file Compose stack, again with
-`--no-build`.
+first return the checkout to the previous release commit (`git reset --keep
+<previous-sha>`), so its own Compose files are the ones used, then restore the
+previous pins in `docker-compose.release.local.yml` and recreate only the
+affected services with the same four-file Compose stack, again with
+`--no-build`. The guided `apply` does exactly this on its own.
 
 For the backend this is now a pin change and nothing else: **no recompilation**.
 The previous image is still in the local daemon, and the one being rolled back

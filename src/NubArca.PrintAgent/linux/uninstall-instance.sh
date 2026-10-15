@@ -27,7 +27,12 @@ systemctl disable --now "$unit" 2>/dev/null || true
 rm -f "/etc/nubarca-print-agent/$instance.json"
 # What install-print-box.sh adds for the Print Box instance.
 rm -rf "/etc/systemd/system/$unit.d"
-if [[ "$instance" == box ]]; then rm -f /etc/polkit-1/rules.d/49-nubarca-print-box.rules; fi
+if [[ "$instance" == box ]]; then
+  rm -f /etc/polkit-1/rules.d/49-nubarca-print-box.rules
+  systemctl disable --now nubarca-print-agent-update.path 2>/dev/null || true
+  rm -f /etc/systemd/system/nubarca-print-agent-update.path /etc/systemd/system/nubarca-print-agent-update.service \
+    /etc/nubarca-print-agent/self-update
+fi
 # The simulated queues install-simulated-printer.sh made for this instance.
 if command -v lpadmin >/dev/null 2>&1; then
   for queue in "NubArca-$instance-SIM" "NubArca-$instance-STRIP-SIM"; do
