@@ -2,17 +2,33 @@
   "schemaVersion": 1,
   "components": {
     "api": {
-      "description": "API and worker image, lean (runtime) and OpenVINO (openvino) variants",
+      "description": "API and worker image, lean (runtime) and OpenVINO (openvino) variants. paths is the image's whole build input (deploy/tests/releaseManifest.test.mjs checks it against the Dockerfile and the project): the help corpus is built from README.md, ARCHITECTURE.md and docs/.",
       "paths": [
         "src/NubArca.Api",
         "global.json",
         "assets/brand/nubarca/runtime/web",
         "mobile/assets/fonts",
+        "README.md",
+        "ARCHITECTURE.md",
+        "docs",
+        ".dockerignore",
+        ".github/workflows/build-production-images.yml",
         "scripts/openvino-direct",
         "scripts/verify-production-image.sh",
         "docker-compose.prod.yml",
         "docker-compose.facedirect-api.yml"
       ],
+      "buildInputs": {
+        "dockerfiles": [
+          "src/NubArca.Api/Dockerfile"
+        ],
+        "projects": [
+          "src/NubArca.Api/NubArca.Api.csproj"
+        ],
+        "workflows": [
+          ".github/workflows/build-production-images.yml"
+        ]
+      },
       "images": {
         "runtime": "nubarca-api",
         "openvino": "nubarca-api-openvino"
@@ -24,8 +40,19 @@
       "paths": [
         "frontend",
         "packages/contracts",
+        ".dockerignore",
+        ".github/workflows/build-production-images.yml",
         "scripts/verify-production-frontend-image.sh"
       ],
+      "buildInputs": {
+        "dockerfiles": [
+          "frontend/Dockerfile"
+        ],
+        "projects": [],
+        "workflows": [
+          ".github/workflows/build-production-images.yml"
+        ]
+      },
       "images": {
         "default": "nubarca-frontend"
       },
@@ -35,8 +62,19 @@
       "description": "Print Box bundle (linux-x64) the server hands to its boxes",
       "paths": [
         "src/NubArca.PrintAgent",
-        "deploy/Dockerfile.print-agent-bundle"
+        "global.json",
+        "deploy/Dockerfile.print-agent-bundle",
+        ".github/workflows/print-agent-release.yml"
       ],
+      "buildInputs": {
+        "dockerfiles": [],
+        "projects": [
+          "src/NubArca.PrintAgent/NubArca.PrintAgent.csproj"
+        ],
+        "workflows": [
+          ".github/workflows/print-agent-release.yml"
+        ]
+      },
       "images": {
         "linux-x64": "nubarca-print-agent"
       },

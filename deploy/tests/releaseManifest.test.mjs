@@ -125,6 +125,21 @@ test('verify refuses an image whose component changed after it was built', () =>
   assert.match(result.stderr, /component frontend changed after/);
 });
 
+test('verify refuses an API image older than a documentation change its help corpus is built from', () => {
+  const { cwd, base, frontend, head } = checkout();
+  mkdirSync(join(cwd, 'docs'), { recursive: true });
+  writeFileSync(join(cwd, 'docs/guide.md'), 'new help\n');
+  git(cwd, 'add', '.');
+  git(cwd, 'commit', '-qm', 'docs only');
+  const docs = git(cwd, 'rev-parse', 'HEAD');
+  const plan = JSON.parse(run('plan', cwd, docs).stdout);
+  assert.equal(plan.api, docs, 'a docs-only commit rebuilds the API image');
+  const result = run('verify', write(manifest(docs, { api: base, frontend, agent: base })), docs, cwd);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /component api changed after/);
+  assert.ok(head);
+});
+
 test('verify refuses a manifest for another commit', () => {
   const { cwd, base, frontend, head } = checkout();
   const result = run('verify', write(manifest(frontend, { api: base, frontend, agent: base })), head, cwd);
@@ -198,4 +213,74 @@ test('the Release workflow signs keylessly from main with a pinned cosign', () =
   assert.match(releaseWorkflow, /sha256sum -c -/);
   assert.match(releaseWorkflow, /cosign" sign-blob --yes/);
   assert.match(releaseWorkflow, /cancel-in-progress: false/);
+});
+
+// A component's paths decide whether its image is rebuilt and whether an
+// older image may stand for a release, so they must contain EVERY build
+// input: anything the Dockerfile copies, every file the project pulls in
+// from outside its directory, the Dockerfile, the .dockerignore that shapes
+// its context, and the workflow that runs the build.
+const componentsFile = JSON.parse(readFileSync(resolve(root, 'deploy/release-components.json'), 'utf8'));
+
+function covered(paths, file) {
+  const normal = file.replace(/\/+$/, '');
+  return paths.some((p) => normal === p || normal.startsWith(`${p}/`));
+}
+
+function dockerfileSources(text) {
+  const joined = text.replace(/\\\r?\n/g, ' ');
+  const sources = [];
+  for (const line of joined.split(/\r?\n/)) {
+    const match = line.match(/^\s*(COPY|ADD)\s+(.*)$/i);
+    if (!match) continue;
+    const words = match[2].trim().split(/\s+/);
+    if (words.some((w) => /^--from=/i.test(w))) continue;
+    const args = words.filter((w) => !w.startsWith('--'));
+    sources.push(...args.slice(0, -1).map((s) => s.replace(/^\.\//, '')));
+  }
+  return sources;
+}
+
+function projectInputs(project) {
+  const text = readFileSync(resolve(root, project), 'utf8');
+  const dir = dirname(project);
+  const inputs = [];
+  for (const match of text.matchAll(/(?:Include|Update|Project)="([^"]+)"/g)) {
+    const value = match[1].replace(/\\/g, '/');
+    if (!value.startsWith('../')) continue;
+    inputs.push(join(dir, value).replace(/\\/g, '/'));
+  }
+  return inputs;
+}
+
+for (const [name, component] of Object.entries(componentsFile.components)) {
+  test(`component ${name} declares every input of its build`, () => {
+    const build = component.buildInputs;
+    assert.ok(build, `${name} names its build inputs`);
+    const required = [...build.workflows];
+    for (const dockerfile of build.dockerfiles) {
+      required.push(dockerfile, '.dockerignore');
+      const sources = dockerfileSources(readFileSync(resolve(root, dockerfile), 'utf8'));
+      assert.ok(sources.length > 0, `${dockerfile} copies something`);
+      required.push(...sources);
+    }
+    for (const project of build.projects) {
+      required.push(project, ...projectInputs(project));
+    }
+    const missing = [...new Set(required)].filter((file) => !covered(component.paths, file));
+    assert.deepEqual(missing, [], `${name} paths miss build inputs`);
+  });
+}
+
+test('the API image declares the documentation its help corpus is built from', () => {
+  const sources = dockerfileSources(readFileSync(resolve(root, 'src/NubArca.Api/Dockerfile'), 'utf8'));
+  for (const doc of ['README.md', 'ARCHITECTURE.md', 'docs/']) assert.ok(sources.includes(doc), doc);
+  const paths = componentsFile.components.api.paths;
+  for (const doc of ['README.md', 'ARCHITECTURE.md', 'docs/guide.md']) assert.ok(covered(paths, doc), doc);
+});
+
+test('the build-input check catches an undeclared input', () => {
+  const sources = dockerfileSources('FROM x AS a\nCOPY --from=a /x /y\nCOPY README.md \\\n  other.md ./\nCOPY docs/ docs/\n');
+  assert.deepEqual(sources, ['README.md', 'other.md', 'docs/']);
+  assert.equal(covered(['src/NubArca.Api'], 'README.md'), false);
 });

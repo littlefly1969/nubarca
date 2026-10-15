@@ -51,7 +51,7 @@ COMMIT = re.compile(r"[0-9a-f]{40}")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 VERSION = re.compile(r"\d{1,4}\.\d{1,4}\.\d{1,4}")
 NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
-PATH = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]{0,200}")
+PATH = re.compile(r"[A-Za-z0-9_.][A-Za-z0-9_./-]{0,200}")
 
 
 def fail(reason: str) -> None:
