@@ -291,14 +291,25 @@ else
     docker rm -f "$release_container" >/dev/null
     release_container=""
     # The signature, then the content: the manifest is believed only once
-    # Sigstore proves NubArca's Release workflow on main wrote these bytes.
-    cosign verify-blob \
-        --bundle "$RELEASE_DIR/release.sigstore.json" \
-        --certificate-identity "$SIGNER_IDENTITY" \
-        --certificate-oidc-issuer "$SIGNER_ISSUER" \
-        "$RELEASE_DIR/release.json" >/dev/null 2>&1 || \
-        fail "the release manifest signature does not verify; nothing from it is installed"
-    log "release manifest signature verified ($SIGNER_IDENTITY)"
+    # its signature proves NubArca's Release workflow on main wrote these bytes.
+    # The key mode is the one THIS checkout (the release already installed)
+    # declares: a new key takes effect only through a release the old one signed.
+    if [[ -f deploy/release-signing.pub ]]; then
+        cosign verify-blob \
+            --key deploy/release-signing.pub --insecure-ignore-tlog=true \
+            --bundle "$RELEASE_DIR/release.sigstore.json" \
+            "$RELEASE_DIR/release.json" >/dev/null 2>&1 || \
+            fail "the release manifest signature does not verify; nothing from it is installed"
+        log "release manifest signature verified (NubArca release key)"
+    else
+        cosign verify-blob \
+            --bundle "$RELEASE_DIR/release.sigstore.json" \
+            --certificate-identity "$SIGNER_IDENTITY" \
+            --certificate-oidc-issuer "$SIGNER_ISSUER" \
+            "$RELEASE_DIR/release.json" >/dev/null 2>&1 || \
+            fail "the release manifest signature does not verify; nothing from it is installed"
+        log "release manifest signature verified ($SIGNER_IDENTITY)"
+    fi
     release_lines="$(python3 deploy/release-manifest.py verify "$RELEASE_DIR/release.json" "$CANDIDATE_SHA" "$REPO_ROOT")" || \
         fail "the release manifest does not describe the candidate"
     RELEASE_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$RELEASE_DIR/release.json")"

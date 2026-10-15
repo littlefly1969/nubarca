@@ -429,6 +429,11 @@ services:
       # The published Print Agent bundle (zip + its current-<runtime>.json
       # pointer), written only by deploy/pull-publish-print-agent-image.sh.
       - print-agent-data:/var/lib/nubarca/print-agent:ro
+      # The mailbox shared with the host updater (deploy/updater/): the api
+      # writes an administrator's check/install request, the updater writes
+      # back its status. install-updater.sh sets NUBARCA_UPDATER_DIR; without
+      # it this is an unused named volume and the Updates page says so.
+      - ${NUBARCA_UPDATER_DIR:-nubarca-updater-data}:/var/lib/nubarca/updater
       # Slice 72: mount a separate volume for derived media ONLY if you set
       # Storage__DerivedRootPath (above) to this in-container path. Leave both
       # commented for the single-root default. The host backing for this volume
@@ -684,6 +689,10 @@ volumes:
   # so it needs no host path and no .env setting.
   print-agent-data:
     name: nubarca-print-agent-data
+
+  # Only used while NUBARCA_UPDATER_DIR is unset (no host updater installed).
+  nubarca-updater-data:
+    name: nubarca-updater-data
 
   storage-data:
     name: nubarca-storage-data
