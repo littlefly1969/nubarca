@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "components": {
+    "api": {
+      "description": "API and worker image, lean (runtime) and OpenVINO (openvino) variants",
+      "paths": [
+        "src/NubArca.Api",
+        "global.json",
+        "assets/brand/nubarca/runtime/web",
+        "mobile/assets/fonts",
+        "scripts/openvino-direct",
+        "scripts/verify-production-image.sh",
+        "docker-compose.prod.yml",
+        "docker-compose.facedirect-api.yml"
+      ],
+      "images": {
+        "runtime": "nubarca-api",
+        "openvino": "nubarca-api-openvino"
+      },
+      "tagSuffix": ""
+    },
+    "frontend": {
+      "description": "Web frontend image",
+      "paths": [
+        "frontend",
+        "packages/contracts",
+        "scripts/verify-production-frontend-image.sh"
+      ],
+      "images": {
+        "default": "nubarca-frontend"
+      },
+      "tagSuffix": ""
+    },
+    "print-agent": {
+      "description": "Print Box bundle (linux-x64) the server hands to its boxes",
+      "paths": [
+        "src/NubArca.PrintAgent",
+        "deploy/Dockerfile.print-agent-bundle"
+      ],
+      "images": {
+        "linux-x64": "nubarca-print-agent"
+      },
+      "tagSuffix": "-linux-x64"
+    }
+  }
+}

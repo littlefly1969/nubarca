@@ -20,6 +20,15 @@ on:
         required: true
         default: true
         type: boolean
+  # The Release workflow (release.yml) calls it for linux-x64 when the agent changed.
+  workflow_call:
+    inputs:
+      runtime:
+        type: string
+        default: linux-x64
+      publish:
+        type: boolean
+        default: true
 
 permissions:
   contents: read

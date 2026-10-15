@@ -1,11 +1,30 @@
 name: Build production images
 
-# Manual only, deliberately.
+# Manual, or called by the Release workflow (release.yml) for every push to
+# main whose component changed.
 #
 # This workflow only builds, verifies and publishes immutable application
-# images. Deployment remains a separate explicit production step.
+# images. Deployment remains a separate explicit production step: an
+# installation installs only what a signed release manifest names.
 on:
   workflow_dispatch:
+    inputs:
+      backend:
+        description: Build the API images (lean and OpenVINO)
+        type: boolean
+        default: true
+      frontend:
+        description: Build the frontend image
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      backend:
+        type: boolean
+        default: true
+      frontend:
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -25,6 +44,7 @@ env:
 jobs:
   backend:
     name: Build and publish production API images
+    if: inputs.backend
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -145,6 +165,7 @@ jobs:
 
   frontend:
     name: Build and publish production frontend image
+    if: inputs.frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
