@@ -646,6 +646,8 @@ public sealed class PartyPrintComposer
     /// The crop arrives as fractions of the auto-oriented source, so it means
     /// the same thing here as it did in the browser that produced it. Nothing
     /// about the picture itself changes: no filter, no saturation, no rotation.
+    /// Its colours are only brought into sRGB from the profile it carries
+    /// (<see cref="PrintColourSpace"/>), so they print as they were shot.
     /// </summary>
     private static void DrawFramed(
         Image<Rgba32> sheet, Image<Rgba32> source, PartyPrintPhoto photo,
@@ -695,6 +697,7 @@ public sealed class PartyPrintComposer
             Math.Max(1, (int)Math.Round(visible.Width * slot.Width)),
             Math.Max(1, (int)Math.Round(visible.Height * slot.Height)));
         using var drawn = source.Clone(x => x.Crop(from).Resize(to.Width, to.Height));
+        PrintColourSpace.ToSrgb(drawn, source.Metadata);
         target.Mutate(x => x.DrawImage(drawn, new Point(to.X, to.Y), 1f));
     }
 
@@ -718,6 +721,7 @@ public sealed class PartyPrintComposer
                 Mode = ResizeMode.Crop,
                 Position = AnchorPositionMode.Center,
             }));
+        PrintColourSpace.ToSrgb(framed, source.Metadata);
 
         sheet.Mutate(x => x.DrawImage(framed, new Point(slot.X, slot.Y), 1f));
     }

@@ -6,6 +6,14 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Printing: photographs print in their own colours
+
+- **Photos shot in a wide colour space print as they were shot.** A Display P3
+  photo from a recent phone or an Adobe RGB photo from a camera used to be
+  read as sRGB and came out dull and shifted; every print (owner photo, party
+  sheet, strips) now converts it to sRGB from the profile it carries. sRGB
+  photos and photos without a profile print exactly as before.
+
 ### Updates: install a new release from the administration page
 
 - **Administration › Updates** checks whether a newer release exists and
