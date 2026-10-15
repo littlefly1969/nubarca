@@ -45,6 +45,19 @@ namespace NubArca.Api.Data.Migrations
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
+                name: "AgentUpdateSha256",
+                table: "print_stations",
+                type: "character varying(64)",
+                maxLength: 64,
+                nullable: true);
+
+            migrationBuilder.AddColumn<long>(
+                name: "AgentUpdateSizeBytes",
+                table: "print_stations",
+                type: "bigint",
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
                 name: "AgentUpdateTarget",
                 table: "print_stations",
                 type: "character varying(32)",
@@ -73,6 +86,14 @@ namespace NubArca.Api.Data.Migrations
 
             migrationBuilder.DropColumn(
                 name: "AgentUpdateResultVersion",
+                table: "print_stations");
+
+            migrationBuilder.DropColumn(
+                name: "AgentUpdateSha256",
+                table: "print_stations");
+
+            migrationBuilder.DropColumn(
+                name: "AgentUpdateSizeBytes",
                 table: "print_stations");
 
             migrationBuilder.DropColumn(

@@ -117,7 +117,7 @@ public sealed class SystemUpdateTests : IDisposable
     public async Task The_Report_Reaches_The_Page_As_Fixed_Fields_Only()
     {
         Status(last: new { action = "check", outcome = "ready", message = "fine", startedAt = Now(), finishedAt = Now() });
-        Report(migrations: ["20261015101023_AddPrintAgentSelfUpdate"]);
+        Report(migrations: ["20261015170717_AddPrintAgentSelfUpdate"]);
         var admin = await AdminAsync();
         var raw = await admin.GetStringAsync("/api/admin/system-update");
         Assert.DoesNotContain("/srv/secret", raw);
@@ -138,7 +138,7 @@ public sealed class SystemUpdateTests : IDisposable
     public async Task An_Install_Is_Confirmed_Against_The_Last_Check_Only()
     {
         Status();
-        Report(migrations: ["20261015101023_AddPrintAgentSelfUpdate"]);
+        Report(migrations: ["20261015170717_AddPrintAgentSelfUpdate"]);
         var admin = await AdminAsync();
 
         async Task<string?> Refusal(object body)
@@ -192,6 +192,38 @@ public sealed class SystemUpdateTests : IDisposable
         var (_, member) = await _factory.CreateAuthenticatedClientAsync("member@example.com");
         Assert.Equal(HttpStatusCode.Forbidden, (await member.GetAsync("/api/admin/system-update")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await member.PostAsync("/api/admin/system-update/check", null)).StatusCode);
+        Assert.Null(Request());
+    }
+
+    private sealed class FailingAuditLogger : IAuditLogger
+    {
+        public Task LogAsync(AuditActor actor, string action, string entityType, Guid? entityId, string? ipAddress,
+            object? metadata, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task WriteAsync(AuditActor actor, string action, string entityType, Guid? entityId, string? ipAddress,
+            object? metadata, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("the audit store is unavailable");
+    }
+
+    [Fact]
+    public async Task Without_Its_Audit_Record_Nothing_Reaches_The_Updater()
+    {
+        using var factory = new SqliteWebApplicationFactory(new Dictionary<string, string?>
+        {
+            ["SystemUpdate:Directory"] = _mailbox,
+        });
+        factory.ConfigureExtraServices = services => services.AddScoped<IAuditLogger, FailingAuditLogger>();
+        factory.EnsureDatabaseCreated();
+        Status();
+        Report();
+        var (id, admin) = await factory.CreateAuthenticatedClientAsync("admin@example.com");
+        await factory.PromoteToAdminAsync(id);
+
+        await Assert.ThrowsAnyAsync<Exception>(async () =>
+            (await admin.PostAsync("/api/admin/system-update/check", null)).EnsureSuccessStatusCode());
+        await Assert.ThrowsAnyAsync<Exception>(async () =>
+            (await admin.PostAsJsonAsync("/api/admin/system-update/apply", new { sha = Candidate, confirmMigrations = false }))
+                .EnsureSuccessStatusCode());
         Assert.Null(Request());
     }
 }

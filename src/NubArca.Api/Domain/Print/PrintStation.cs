@@ -17,7 +17,14 @@ public sealed class PrintStation
     /// <summary>The version an administrator or the owner asked this agent to update to; null when none is pending.</summary>
     public string? AgentUpdateTarget { get; set; }
     public DateTime? AgentUpdateRequestedAt { get; set; }
-    /// <summary>How the last requested update ended: <c>ok</c> or <c>failed</c>; null before the first.</summary>
+    /// <summary>
+    /// The exact bundle the request is for, pinned when someone asked: the box
+    /// is offered that bundle and nothing else, never a newer one published
+    /// meanwhile.
+    /// </summary>
+    public string? AgentUpdateSha256 { get; set; }
+    public long? AgentUpdateSizeBytes { get; set; }
+    /// <summary>How the last requested update ended: <c>ok</c>, <c>failed</c>, or <c>superseded</c> (the pinned bundle is no longer published); null before the first.</summary>
     public string? AgentUpdateResult { get; set; }
     /// <summary>The version that last update was for.</summary>
     public string? AgentUpdateResultVersion { get; set; }

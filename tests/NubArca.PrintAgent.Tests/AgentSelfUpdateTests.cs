@@ -18,18 +18,20 @@ public sealed class AgentSelfUpdateTests : IDisposable
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"nubarca-agent-update-{Guid.NewGuid():N}");
     private readonly string _state;
     private readonly string _marker;
+    private readonly string _inProgress;
 
     public AgentSelfUpdateTests()
     {
         _state = Path.Combine(_directory, "box");
         _marker = Path.Combine(_directory, "self-update");
+        _inProgress = Path.Combine(_directory, "in-progress");
         Directory.CreateDirectory(_state);
         File.WriteAllText(_marker, "");
     }
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
-    private AgentSelfUpdate Agent() => new(_state, _marker, NullLogger.Instance);
+    private AgentSelfUpdate Agent() => new(_state, _marker, _inProgress, NullLogger.Instance);
 
     private static AgentUpdateOffer Offer(string requestId = "1700000000000") =>
         new("0.9.0", "nubarca-print-agent-0.9.0-linux-x64.zip", new string('a', 64), 1024, requestId);
@@ -49,7 +51,7 @@ public sealed class AgentSelfUpdateTests : IDisposable
     }
 
     [Fact]
-    public void An_Offer_Rings_Once_And_Pauses_Claims_For_A_Bounded_Time()
+    public void An_Offer_Rings_Once_And_Claims_Wait_Until_The_Root_Service_Picks_It_Up()
     {
         if (!OperatingSystem.IsLinux()) return;
         var agent = Agent();
@@ -62,19 +64,74 @@ public sealed class AgentSelfUpdateTests : IDisposable
         Assert.Equal("1700000000000", request.GetProperty("requestId").GetString());
         // An earlier attempt's outcome is not relayed as this one's.
         Assert.False(File.Exists(Path.Combine(_state, AgentSelfUpdate.ResultFile)));
-        Assert.True(agent.Pending(now.AddMinutes(1)));
-        Assert.False(agent.Pending(now + AgentSelfUpdate.PendingLimit));
+        Assert.Null(agent.ReadResult());
+        Assert.True(agent.Pending(now.AddSeconds(30)));
 
         // The same request is not rung again, even after the root service took the bell down.
         File.Delete(RequestPath);
-        agent.Handle(Offer(), now.AddMinutes(20));
+        agent.Handle(Offer(), now.AddMinutes(1));
         Assert.False(File.Exists(RequestPath));
+        Assert.False(agent.Pending(now.AddMinutes(1)));
+    }
 
-        // A withdrawn offer resumes work at once.
-        agent.Handle(Offer("1700000000001"), now.AddMinutes(21));
-        Assert.True(agent.Pending(now.AddMinutes(22)));
-        agent.Handle(null, now.AddMinutes(22));
-        Assert.False(agent.Pending(now.AddMinutes(22)));
+    [Fact]
+    public void Claims_Wait_For_Exactly_As_Long_As_The_Root_Service_Runs()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        var agent = Agent();
+        var now = DateTimeOffset.UtcNow;
+        agent.Handle(Offer(), now);
+        // The service picked it up and runs: past the pickup limit, and past
+        // any fixed pause of the agent's own, no job is taken.
+        File.WriteAllText(_inProgress, "");
+        Assert.True(agent.Pending(now + AgentSelfUpdate.PickupLimit + TimeSpan.FromMinutes(1)));
+        Assert.True(agent.Pending(now.AddMinutes(19)));
+        Assert.True(File.Exists(RequestPath));
+
+        // The service ended (it removes both): work resumes at once.
+        File.Delete(_inProgress);
+        File.Delete(RequestPath);
+        Assert.False(agent.Pending(now.AddMinutes(19)));
+    }
+
+    [Fact]
+    public void A_Marker_That_Outlived_Its_Service_Does_Not_Pause_For_Ever()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        File.WriteAllText(_inProgress, "");
+        var agent = Agent();
+        Assert.True(agent.Pending(DateTimeOffset.UtcNow));
+        Assert.False(agent.Pending(DateTimeOffset.UtcNow + AgentSelfUpdate.InProgressLimit + TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
+    public void A_Request_Nobody_Picks_Up_Is_Taken_Back_And_Reported_Failed()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        var agent = Agent();
+        var now = DateTimeOffset.UtcNow;
+        agent.Handle(Offer(), now);
+        Assert.False(agent.Pending(now + AgentSelfUpdate.PickupLimit + TimeSpan.FromSeconds(5)));
+        Assert.False(File.Exists(RequestPath));
+        Assert.Equal("failed 0.9.0 1700000000000", agent.ReadResult());
+    }
+
+    [Fact]
+    public void The_Root_Service_Is_Stopped_Before_Its_Marker_Would_Be_Ignored()
+    {
+        var unit = Path.Combine(RepositoryRoot(), "src/NubArca.PrintAgent/linux/nubarca-print-agent-update.service");
+        var line = File.ReadAllLines(unit).Single(l => l.StartsWith("TimeoutStartSec=", StringComparison.Ordinal));
+        var minutes = int.Parse(line["TimeoutStartSec=".Length..].TrimEnd('m', 'i', 'n'), System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(TimeSpan.FromMinutes(minutes) + TimeSpan.FromMinutes(2) < AgentSelfUpdate.InProgressLimit,
+            "the service must be stopped (and its marker removed) well before the agent would ignore the marker");
+    }
+
+    private static string RepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "NubArca.sln")))
+            directory = directory.Parent;
+        return directory?.FullName ?? throw new InvalidOperationException("repository root not found");
     }
 
     [Theory]

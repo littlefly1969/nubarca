@@ -4264,6 +4264,7 @@ const de: Partial<Record<MessageKey, string>> = {
   'updates.boxes.cancelled': 'Anfrage zurückgezogen.',
   'updates.boxes.pending': 'Wird auf {version} aktualisiert…',
   'updates.boxes.failed': 'Aktualisierung auf {version} fehlgeschlagen: zurück auf der vorherigen Version',
+  'updates.boxes.superseded': 'Anfrage für {version} überholt: Eine andere Version wurde veröffentlicht, bitte erneut anfordern.',
   'updates.boxes.manual': 'Einmal manuell aktualisieren, um automatische Aktualisierungen zu aktivieren',
   'print.agent.updateNow': 'Jetzt auf {version} aktualisieren',
 };

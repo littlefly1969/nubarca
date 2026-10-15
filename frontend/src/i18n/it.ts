@@ -4657,6 +4657,7 @@ const it = {
   'updates.boxes.cancelled': 'Richiesta annullata.',
   'updates.boxes.pending': 'In aggiornamento a {version}…',
   'updates.boxes.failed': 'Aggiornamento a {version} non riuscito: tornata alla versione precedente',
+  'updates.boxes.superseded': 'Richiesta per la {version} superata: è stata pubblicata un’altra versione, chiedi di nuovo.',
   'updates.boxes.manual': 'Da aggiornare a mano (una volta) per abilitare gli aggiornamenti automatici',
   'print.agent.updateNow': 'Aggiorna ora alla {version}',
 } as const;

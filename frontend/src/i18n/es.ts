@@ -4264,6 +4264,7 @@ const es: Partial<Record<MessageKey, string>> = {
   'updates.boxes.cancelled': 'Solicitud anulada.',
   'updates.boxes.pending': 'Actualizando a {version}…',
   'updates.boxes.failed': 'La actualización a {version} falló: ha vuelto a la versión anterior',
+  'updates.boxes.superseded': 'Solicitud para {version} superada: se publicó otra versión, vuelve a pedirla.',
   'updates.boxes.manual': 'Actualiza a mano una vez para activar las actualizaciones automáticas',
   'print.agent.updateNow': 'Actualizar ahora a {version}',
 };

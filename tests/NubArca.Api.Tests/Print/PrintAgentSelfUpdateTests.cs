@@ -22,14 +22,29 @@ public sealed class PrintAgentSelfUpdateTests : IDisposable
     private readonly string _bundles = Path.Combine(Path.GetTempPath(), $"nubarca-agent-self-update-{Guid.NewGuid():N}");
     private readonly SqliteWebApplicationFactory _factory;
 
-    public PrintAgentSelfUpdateTests()
+    public PrintAgentSelfUpdateTests() : this(failAudit: false) { }
+
+    private PrintAgentSelfUpdateTests(bool failAudit)
     {
         Directory.CreateDirectory(_bundles);
         _factory = new SqliteWebApplicationFactory(new Dictionary<string, string?>
         {
             ["PrintAgentBundle:Directory"] = _bundles,
         });
+        if (failAudit)
+            _factory.ConfigureExtraServices = services => services.AddScoped<IAuditLogger, FailingAuditLogger>();
         _factory.EnsureDatabaseCreated();
+    }
+
+    /// <summary>An audit trail that cannot be written: nothing it would describe may happen.</summary>
+    private sealed class FailingAuditLogger : IAuditLogger
+    {
+        public Task LogAsync(AuditActor actor, string action, string entityType, Guid? entityId, string? ipAddress,
+            object? metadata, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task WriteAsync(AuditActor actor, string action, string entityType, Guid? entityId, string? ipAddress,
+            object? metadata, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("the audit store is unavailable");
     }
 
     public void Dispose()
@@ -199,5 +214,60 @@ public sealed class PrintAgentSelfUpdateTests : IDisposable
             .GetProperty("canUpdate").GetBoolean());
         Assert.Equal(HttpStatusCode.NoContent,
             (await admin.DeleteAsync($"/api/admin/system-update/print-boxes/{stationId}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_Request_Installs_The_Bundle_It_Named_And_Never_One_Published_Later()
+    {
+        var asked = Publish("0.9.0");
+        var (owner, stationId, credential) = await BoxAsync(Assembly(0, 8, 0), selfUpdate: true);
+        (await owner.PostAsync($"/api/print/stations/{stationId}/agent-update", null)).EnsureSuccessStatusCode();
+
+        // A newer bundle is published before the box fetches: it is not what was asked for.
+        Publish("0.10.0");
+        Assert.Equal(HttpStatusCode.NoContent, (await AsStation(credential, "/api/print-agent/update")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await AsStation(credential, "/api/print-agent/update/bundle")).StatusCode);
+
+        // The heartbeat ends that request as superseded and offers nothing.
+        Assert.False(Offered(await HeartbeatAsync(credential, Assembly(0, 8, 0), true)));
+        var agent = await AgentOf(owner);
+        Assert.Equal(JsonValueKind.Null, agent.GetProperty("updateTarget").ValueKind);
+        Assert.Equal("superseded", agent.GetProperty("updateResult").GetString());
+        Assert.Equal("0.9.0", agent.GetProperty("updateResultVersion").GetString());
+        Assert.NotEmpty(asked);
+    }
+
+    [Fact]
+    public async Task The_Same_Version_Republished_With_Other_Bytes_Is_Not_Offered()
+    {
+        Publish("0.9.0");
+        var (owner, stationId, credential) = await BoxAsync(Assembly(0, 8, 0), selfUpdate: true);
+        (await owner.PostAsync($"/api/print/stations/{stationId}/agent-update", null)).EnsureSuccessStatusCode();
+        Publish("0.9.0");
+        Assert.Equal(HttpStatusCode.NoContent, (await AsStation(credential, "/api/print-agent/update")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Only_Reaching_Exactly_The_Pinned_Version_Counts_As_Done()
+    {
+        Publish("0.9.0");
+        var (owner, stationId, credential) = await BoxAsync(Assembly(0, 8, 0), selfUpdate: true);
+        (await owner.PostAsync($"/api/print/stations/{stationId}/agent-update", null)).EnsureSuccessStatusCode();
+        await HeartbeatAsync(credential, Assembly(0, 10, 0), true);
+        Assert.Equal("superseded", (await AgentOf(owner)).GetProperty("updateResult").GetString());
+    }
+
+    [Fact]
+    public async Task Without_Its_Audit_Record_No_Request_Is_Made()
+    {
+        using var failing = new PrintAgentSelfUpdateTests(failAudit: true);
+        failing.Publish("0.9.0");
+        var (owner, stationId, _) = await failing.BoxAsync(Assembly(0, 8, 0), selfUpdate: true);
+        await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            var response = await owner.PostAsync($"/api/print/stations/{stationId}/agent-update", null);
+            response.EnsureSuccessStatusCode();
+        });
+        Assert.Equal(JsonValueKind.Null, (await AgentOf(owner)).GetProperty("updateTarget").ValueKind);
     }
 }

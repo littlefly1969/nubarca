@@ -278,7 +278,7 @@ jobs:
       # The signed release manifest and the host updater: what an installation
       # accepts before it installs anything.
       - name: Check the release and updater trust boundary
-        run: node --test deploy/tests/releaseManifest.test.mjs deploy/tests/hostUpdater.test.mjs
+        run: node --test deploy/tests/releaseManifest.test.mjs deploy/tests/hostUpdater.test.mjs deploy/tests/printBoxUpdate.test.mjs
 
       - name: Build and test
         run: dotnet test tests/NubArca.PrintAgent.Tests/NubArca.PrintAgent.Tests.csproj --configuration Release --no-restore

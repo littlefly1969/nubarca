@@ -22,8 +22,19 @@ public sealed partial class AgentSelfUpdate
     public const string ResultFile = "update-result";
     public const string HeartbeatFile = "heartbeat-ok";
 
-    /// <summary>How long claims stay paused for an install that never restarts the agent.</summary>
-    public static readonly TimeSpan PendingLimit = TimeSpan.FromMinutes(15);
+    /// <summary>
+    /// How long a request may wait for the root service to pick it up. Past it
+    /// the service is not there to run (its path unit missing or broken): the
+    /// agent takes its request back, reports it failed and works again.
+    /// </summary>
+    public static readonly TimeSpan PickupLimit = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// An in-progress marker older than this outlived its service, which
+    /// systemd stops well before it (TimeoutStartSec in
+    /// linux/nubarca-print-agent-update.service): it is ignored.
+    /// </summary>
+    public static readonly TimeSpan InProgressLimit = TimeSpan.FromMinutes(25);
 
     [GeneratedRegex(@"^(ok|failed) \d{1,4}\.\d{1,4}\.\d{1,4} \d{1,20}$", RegexOptions.CultureInvariant)]
     private static partial Regex ResultPattern();
@@ -32,25 +43,54 @@ public sealed partial class AgentSelfUpdate
 
     private readonly string _stateDirectory;
     private readonly string _marker;
+    private readonly string _inProgress;
     private readonly ILogger _logger;
-    private DateTimeOffset? _pendingSince;
     private string? _requestedId;
+    private string? _requestedVersion;
+    private string? _localResult;
 
-    public AgentSelfUpdate(string stateDirectory, string marker, ILogger logger)
+    public AgentSelfUpdate(string stateDirectory, string marker, string inProgress, ILogger logger)
     {
         _stateDirectory = stateDirectory;
         _marker = marker;
+        _inProgress = inProgress;
         _logger = logger;
     }
 
     public static AgentSelfUpdate For(PrintAgentOptions options, ILogger logger) =>
-        new(Path.GetDirectoryName(Path.GetFullPath(options.CredentialPath))!, options.SelfUpdateMarkerPath, logger);
+        new(Path.GetDirectoryName(Path.GetFullPath(options.CredentialPath))!, options.SelfUpdateMarkerPath,
+            options.SelfUpdateInProgressPath, logger);
 
     /// <summary>A Linux box whose root update service is installed (it leaves the marker).</summary>
     public bool Supported => OperatingSystem.IsLinux() && File.Exists(_marker) && Directory.Exists(_stateDirectory);
 
-    /// <summary>Claims wait while an install this agent asked for may still restart it.</summary>
-    public bool Pending(DateTimeOffset now) => _pendingSince is { } since && now - since < PendingLimit;
+    /// <summary>
+    /// Claims wait while an update may restart this agent: from the moment it
+    /// asks until the root service picks the request up, and then for exactly
+    /// as long as that service runs (its in-progress marker) — not for a timer
+    /// of the agent's own that the service could outlive.
+    /// </summary>
+    public bool Pending(DateTimeOffset now)
+    {
+        try
+        {
+            var marker = new FileInfo(_inProgress);
+            if (marker.Exists && now - marker.LastWriteTimeUtc < InProgressLimit) return true;
+            var request = new FileInfo(Path.Combine(_stateDirectory, RequestFile));
+            if (!request.Exists) return false;
+            if (now - request.LastWriteTimeUtc < PickupLimit) return true;
+            // Nobody picked it up: take it back, say so, and work again.
+            request.Delete();
+            if (_requestedVersion is not null && _requestedId is not null)
+                _localResult = $"failed {_requestedVersion} {_requestedId}";
+            _logger.LogWarning("print.agent.update.not_picked_up: the box's update service did not start");
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>The root service's last outcome, exactly as it may be relayed, or null.</summary>
     public string? ReadResult()
@@ -58,7 +98,7 @@ public sealed partial class AgentSelfUpdate
         try
         {
             var path = Path.Combine(_stateDirectory, ResultFile);
-            if (!File.Exists(path) || new FileInfo(path).Length > 128) return null;
+            if (!File.Exists(path) || new FileInfo(path).Length > 128) return _localResult;
             var value = File.ReadAllText(path).Trim();
             return ResultPattern().IsMatch(value) ? value : null;
         }
@@ -93,23 +133,20 @@ public sealed partial class AgentSelfUpdate
     /// </summary>
     public void Handle(AgentUpdateOffer? offer, DateTimeOffset now)
     {
-        if (offer is null)
-        {
-            // Withdrawn, done, or failed: work resumes.
-            _pendingSince = null;
-            return;
-        }
+        // Withdrawn, done, failed or superseded: nothing to ring for.
+        if (offer is null) return;
         if (!Supported || !RequestIdPattern().IsMatch(offer.RequestId)) return;
-        // One ring per request; a request that timed out is not rung again —
+        // One ring per request; a request that failed is not rung again —
         // the box reports, and someone asks again.
         if (offer.RequestId == _requestedId) return;
         try
         {
             // The outcome of an earlier attempt is no longer news.
             File.Delete(Path.Combine(_stateDirectory, ResultFile));
+            _localResult = null;
             Write(RequestFile, JsonSerializer.Serialize(new { version = offer.Version, requestId = offer.RequestId }));
             _requestedId = offer.RequestId;
-            _pendingSince = now;
+            _requestedVersion = offer.Version;
             _logger.LogInformation("print.agent.update.requested version={Version}", offer.Version);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

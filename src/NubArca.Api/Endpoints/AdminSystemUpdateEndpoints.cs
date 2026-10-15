@@ -24,27 +24,31 @@ public static class AdminSystemUpdateEndpoints
         admin.MapGet("", ([FromServices] SystemUpdateService service) => Results.Ok(service.Describe()))
             .WithName("DescribeSystemUpdate");
 
+        // The audit record is written first and must land: a request is handed
+        // to the updater only once it is on record (WriteAsync, not best effort).
         admin.MapPost("/check", async (HttpContext context, [FromServices] SystemUpdateService service,
             [FromServices] IAuditLogger audit, CancellationToken ct) =>
         {
-            var error = service.RequestCheck(out var requestId);
+            var error = service.PrepareCheck(out var request);
             if (error != SystemUpdateRequestError.None) return Refused(error);
-            await audit.LogAsync(AuditActor.User(context.GetCurrentUserId()!.Value), AuditActions.SystemUpdateCheck,
-                AuditEntityTypes.SystemUpdate, requestId,
+            await audit.WriteAsync(AuditActor.User(context.GetCurrentUserId()!.Value), AuditActions.SystemUpdateCheck,
+                AuditEntityTypes.SystemUpdate, request!.Id,
                 context.Connection.RemoteIpAddress?.ToString(), null, ct);
-            return Results.Accepted(value: service.Describe());
+            error = service.Submit(request);
+            return error == SystemUpdateRequestError.None ? Results.Accepted(value: service.Describe()) : Refused(error);
         }).WithName("RequestSystemUpdateCheck");
 
-        admin.MapPost("/apply", async ([FromBody] SystemUpdateApplyRequest request, HttpContext context,
+        admin.MapPost("/apply", async ([FromBody] SystemUpdateApplyRequest body, HttpContext context,
             [FromServices] SystemUpdateService service, [FromServices] IAuditLogger audit, CancellationToken ct) =>
         {
-            var error = service.RequestApply(request, out var requestId);
+            var error = service.PrepareApply(body, out var request);
             if (error != SystemUpdateRequestError.None) return Refused(error);
-            await audit.LogAsync(AuditActor.User(context.GetCurrentUserId()!.Value), AuditActions.SystemUpdateApply,
-                AuditEntityTypes.SystemUpdate, requestId,
+            await audit.WriteAsync(AuditActor.User(context.GetCurrentUserId()!.Value), AuditActions.SystemUpdateApply,
+                AuditEntityTypes.SystemUpdate, request!.Id,
                 context.Connection.RemoteIpAddress?.ToString(),
                 new { sha = request.Sha, confirmMigrations = request.ConfirmMigrations }, ct);
-            return Results.Accepted(value: service.Describe());
+            error = service.Submit(request);
+            return error == SystemUpdateRequestError.None ? Results.Accepted(value: service.Describe()) : Refused(error);
         }).WithName("RequestSystemUpdateApply");
 
         admin.MapGet("/print-boxes", async ([FromServices] PrintAgentUpdateService service,
@@ -54,66 +58,57 @@ public static class AdminSystemUpdateEndpoints
             .WithName("ListPrintBoxUpdates");
 
         admin.MapPost("/print-boxes", async (HttpContext context, [FromServices] PrintAgentUpdateService service,
-            [FromServices] IAuditLogger audit, CancellationToken ct) =>
+            CancellationToken ct) =>
         {
-            var (requested, version) = await service.RequestAllAsync(ct);
-            if (requested > 0)
-                await audit.LogAsync(AuditActor.User(context.GetCurrentUserId()!.Value),
-                    AuditActions.PrintAgentUpdateRequest, AuditEntityTypes.PrintStation, null,
-                    context.Connection.RemoteIpAddress?.ToString(), new { stations = requested, version }, ct);
+            var (requested, version) = await service.RequestAllAsync(AuditActor.User(context.GetCurrentUserId()!.Value),
+                context.Connection.RemoteIpAddress?.ToString(), ct);
             return Results.Ok(new { requested, version });
         }).WithName("RequestAllPrintBoxUpdates");
 
         admin.MapPost("/print-boxes/{stationId:guid}", async (Guid stationId, HttpContext context,
-            [FromServices] PrintAgentUpdateService service, [FromServices] IAuditLogger audit, CancellationToken ct) =>
-            await RequestOneAsync(null, stationId, context, service, audit, ct))
+            [FromServices] PrintAgentUpdateService service, CancellationToken ct) =>
+            await RequestOneAsync(null, stationId, context, service, ct))
             .WithName("RequestPrintBoxUpdateAsAdministrator");
 
         admin.MapDelete("/print-boxes/{stationId:guid}", async (Guid stationId, HttpContext context,
-            [FromServices] PrintAgentUpdateService service, [FromServices] IAuditLogger audit, CancellationToken ct) =>
-            await CancelOneAsync(null, stationId, context, service, audit, ct))
+            [FromServices] PrintAgentUpdateService service, CancellationToken ct) =>
+            await CancelOneAsync(null, stationId, context, service, ct))
             .WithName("CancelPrintBoxUpdateAsAdministrator");
 
         // The station's owner asks the same for their own box, from the printers page.
         var owner = app.MapGroup("/api/print/stations").RequireAuthorization();
         owner.MapPost("/{stationId:guid}/agent-update", async (Guid stationId, HttpContext context,
-            [FromServices] PrintAgentUpdateService service, [FromServices] IAuditLogger audit, CancellationToken ct) =>
-            await RequestOneAsync(context.GetCurrentUserId()!.Value, stationId, context, service, audit, ct))
+            [FromServices] PrintAgentUpdateService service, CancellationToken ct) =>
+            await RequestOneAsync(context.GetCurrentUserId()!.Value, stationId, context, service, ct))
             .WithName("RequestPrintBoxUpdate");
         owner.MapDelete("/{stationId:guid}/agent-update", async (Guid stationId, HttpContext context,
-            [FromServices] PrintAgentUpdateService service, [FromServices] IAuditLogger audit, CancellationToken ct) =>
-            await CancelOneAsync(context.GetCurrentUserId()!.Value, stationId, context, service, audit, ct))
+            [FromServices] PrintAgentUpdateService service, CancellationToken ct) =>
+            await CancelOneAsync(context.GetCurrentUserId()!.Value, stationId, context, service, ct))
             .WithName("CancelPrintBoxUpdate");
 
         return app;
     }
 
     private static async Task<IResult> RequestOneAsync(Guid? ownerId, Guid stationId, HttpContext context,
-        PrintAgentUpdateService service, IAuditLogger audit, CancellationToken ct)
+        PrintAgentUpdateService service, CancellationToken ct)
     {
-        var (result, version) = await service.RequestAsync(ownerId, stationId, ct);
-        switch (result)
+        var (result, version) = await service.RequestAsync(ownerId, stationId,
+            AuditActor.User(context.GetCurrentUserId()!.Value), context.Connection.RemoteIpAddress?.ToString(), ct);
+        return result switch
         {
-            case PrintAgentUpdateRequestResult.NotFound: return Results.NotFound();
-            case PrintAgentUpdateRequestResult.NoBundle: return Results.Conflict(new { error = "no_bundle" });
-            case PrintAgentUpdateRequestResult.UpToDate: return Results.Conflict(new { error = "up_to_date" });
-            case PrintAgentUpdateRequestResult.NotSelfUpdating: return Results.Conflict(new { error = "manual_update" });
-        }
-        await audit.LogAsync(AuditActor.User(context.GetCurrentUserId()!.Value), AuditActions.PrintAgentUpdateRequest,
-            AuditEntityTypes.PrintStation, stationId,
-            context.Connection.RemoteIpAddress?.ToString(), new { version }, ct);
-        return Results.Ok(new { requested = 1, version });
+            PrintAgentUpdateRequestResult.NotFound => Results.NotFound(),
+            PrintAgentUpdateRequestResult.NoBundle => Results.Conflict(new { error = "no_bundle" }),
+            PrintAgentUpdateRequestResult.UpToDate => Results.Conflict(new { error = "up_to_date" }),
+            PrintAgentUpdateRequestResult.NotSelfUpdating => Results.Conflict(new { error = "manual_update" }),
+            _ => Results.Ok(new { requested = 1, version }),
+        };
     }
 
     private static async Task<IResult> CancelOneAsync(Guid? ownerId, Guid stationId, HttpContext context,
-        PrintAgentUpdateService service, IAuditLogger audit, CancellationToken ct)
-    {
-        if (!await service.CancelAsync(ownerId, stationId, ct)) return Results.NotFound();
-        await audit.LogAsync(AuditActor.User(context.GetCurrentUserId()!.Value), AuditActions.PrintAgentUpdateCancel,
-            AuditEntityTypes.PrintStation, stationId,
-            context.Connection.RemoteIpAddress?.ToString(), null, ct);
-        return Results.NoContent();
-    }
+        PrintAgentUpdateService service, CancellationToken ct) =>
+        await service.CancelAsync(ownerId, stationId, AuditActor.User(context.GetCurrentUserId()!.Value),
+            context.Connection.RemoteIpAddress?.ToString(), ct)
+            ? Results.NoContent() : Results.NotFound();
 
     private static IResult Refused(SystemUpdateRequestError error) => error switch
     {

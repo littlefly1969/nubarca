@@ -12,7 +12,7 @@ using NubArca.Api.Data;
 namespace NubArca.Api.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261015101023_AddPrintAgentSelfUpdate")]
+    [Migration("20261015170717_AddPrintAgentSelfUpdate")]
     partial class AddPrintAgentSelfUpdate
     {
         /// <inheritdoc />
@@ -6625,6 +6625,13 @@ namespace NubArca.Api.Data.Migrations
                     b.Property<string>("AgentUpdateResultVersion")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
+
+                    b.Property<string>("AgentUpdateSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long?>("AgentUpdateSizeBytes")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("AgentUpdateTarget")
                         .HasMaxLength(32)

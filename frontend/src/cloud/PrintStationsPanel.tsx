@@ -419,6 +419,11 @@ function StationDetail({ station, busy, formatDate, onChanged, onAction, onRenew
             {t('updates.boxes.pending', { version: agent.updateTarget })}
           </p>
         )}
+        {!agent?.updateTarget && agent?.updateResult === 'superseded' && agent.compatibility !== 'current' && (
+          <p className="muted" data-testid="print-agent-update-superseded">
+            {t('updates.boxes.superseded', { version: agent.updateResultVersion ?? '' })}
+          </p>
+        )}
         {!agent?.updateTarget && agent?.updateResult === 'failed' && (
           <p className="print-agent-badge print-agent-incompatible" data-testid="print-agent-update-failed">
             {t('updates.boxes.failed', { version: agent.updateResultVersion ?? '' })}

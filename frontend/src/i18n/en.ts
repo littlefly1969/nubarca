@@ -4611,6 +4611,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'updates.boxes.cancelled': 'Request withdrawn.',
   'updates.boxes.pending': 'Updating to {version}…',
   'updates.boxes.failed': 'Update to {version} failed: back on the previous version',
+  'updates.boxes.superseded': 'The request for {version} was superseded: another version was published, ask again.',
   'updates.boxes.manual': 'Update by hand once to enable automatic updates',
   'print.agent.updateNow': 'Update to {version} now',
 };

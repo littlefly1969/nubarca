@@ -6623,6 +6623,13 @@ namespace NubArca.Api.Data.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
+                    b.Property<string>("AgentUpdateSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long?>("AgentUpdateSizeBytes")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("AgentUpdateTarget")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");

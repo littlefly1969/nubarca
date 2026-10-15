@@ -85,6 +85,25 @@ describe('AdminUpdatesPage', () => {
     expect(await screen.findByTestId('updates-busy')).toBeInTheDocument();
   });
 
+  it('does not carry a migration confirmation over to another release', async () => {
+    let report = described().report;
+    installFetchMock({
+      'GET /api/admin/system-update': () => jsonResponse(described({ report })),
+      'GET /api/admin/system-update/print-boxes': () => jsonResponse([]),
+    });
+    renderPage();
+    fireEvent.click(await screen.findByTestId('updates-confirm-migrations'));
+    expect(screen.getByTestId('updates-install')).toBeEnabled();
+
+    // A newer check finds another release with other migrations.
+    report = { ...report, candidateSha: 'f'.repeat(40), candidateVersion: '0.5.0', checkedAt: '2026-10-15T11:00:00Z',
+      migrations: ['20261016000000_Another'] };
+    fireEvent.click(screen.getByRole('button', { name: 'Aggiorna' }));
+    await waitFor(() => expect(screen.getByTestId('updates-outcome').textContent).toContain('0.5.0'));
+    expect(screen.getByTestId('updates-confirm-migrations')).not.toBeChecked();
+    expect(screen.getByTestId('updates-install')).toBeDisabled();
+  });
+
   it('offers nothing to run without the host updater', async () => {
     installFetchMock({
       'GET /api/admin/system-update': () => jsonResponse(described({ updaterConnected: false, state: null })),

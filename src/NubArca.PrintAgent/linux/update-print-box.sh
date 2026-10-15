@@ -6,10 +6,22 @@
 # Nothing the agent account wrote decides what is installed: that file only
 # rings the bell. This script asks the server itself, with the station
 # credential and the agent binary already installed, which bundle to fetch,
-# and checks it against the size and SHA-256 the server names. The new bundle
-# replaces /opt/nubarca-print-agent only after its binary answers with the
-# offered version, and stays only once the restarted agent has reached the
-# server again; otherwise the previous bundle comes back.
+# and checks it against the size and SHA-256 the server names (the server
+# offers only the exact bundle the request pinned). The new bundle replaces
+# /opt/nubarca-print-agent only after its binary answers with the offered
+# version, and stays only once the restarted agent has reached the server
+# again.
+#
+# From the moment the installed bundle is first moved, ANY way this script
+# ends short of that health check — the new agent never reaching the server,
+# a failed unit install or daemon-reload, an error, a signal — puts the
+# previous bundle and its system files back and restarts it (restore, run by
+# the EXIT trap while the swap is armed).
+#
+# While it runs it keeps /run/nubarca-print-agent-update/in-progress, and the
+# agent takes no job while that marker exists: the pause lasts exactly as long
+# as this service, not a timer of its own. /run is emptied at boot, so a power
+# loss mid-update leaves no pause behind.
 #
 # The outcome, "ok|failed <version> <request id>", is left in update-result for
 # the agent to relay on its next heartbeat.
@@ -17,37 +29,44 @@ set -euo pipefail
 export LC_ALL=C
 umask 0022
 
+# Tests run this script against a scratch tree (deploy/tests/printBoxUpdate.test.mjs);
+# on a box it is always /.
+root="${NUBARCA_PRINT_UPDATE_TEST_ROOT:-}"
 instance='box'
 user="nubarca-print-$instance"
 unit="nubarca-print-agent@$instance.service"
-install_dir='/opt/nubarca-print-agent'
+install_dir="$root/opt/nubarca-print-agent"
 next_dir="$install_dir.new"
 previous_dir="$install_dir.previous"
-state_dir="/var/lib/nubarca-print-agent/$instance"
-config_path="/etc/nubarca-print-agent/$instance.json"
-staging='/var/lib/nubarca-print-agent-update'
+state_dir="$root/var/lib/nubarca-print-agent/$instance"
+config_path="$root/etc/nubarca-print-agent/$instance.json"
+staging="$root/var/lib/nubarca-print-agent-update"
+run_dir="$root/run/nubarca-print-agent-update"
+in_progress="$run_dir/in-progress"
+systemd_dir="$root/etc/systemd/system"
+cups_backend="$root/usr/lib/cups/backend/nubarca-sim"
+polkit_rule="$root/etc/polkit-1/rules.d/49-nubarca-print-box.rules"
 request="$state_dir/update-request.json"
 result_name='update-result'
 health_seconds="${NUBARCA_PRINT_UPDATE_HEALTH_SECONDS:-180}"
+poll_seconds="${NUBARCA_PRINT_UPDATE_POLL_SECONDS:-3}"
 
 log() { printf 'nubarca-print-agent-update: %s\n' "$*"; }
 
-[[ $EUID -eq 0 ]] || { echo 'Run as root (the update service does).' >&2; exit 1; }
+[[ -n "$root" || $EUID -eq 0 ]] || { echo 'Run as root (the update service does).' >&2; exit 1; }
 [[ -d "$state_dir" && ! -L "$state_dir" ]] || { log "no state directory $state_dir"; exit 1; }
 
-exec 9>/run/nubarca-print-agent-update.lock
+install -d -m 0755 "$run_dir"
+exec 9>"$run_dir/lock"
 flock -n 9 || { log 'another update is running'; exit 0; }
+: > "$in_progress"
+chmod 0644 "$in_progress"
 
 version=''
 request_id=''
-# The bell is always taken down, whatever happens: the path unit would
-# otherwise start this service again at once.
-# shellcheck disable=SC2317  # run by the EXIT trap
-cleanup() {
-  rm -f -- "$request"
-  rm -rf -- "$staging" "$next_dir"
-}
-trap cleanup EXIT
+# Set just before the installed bundle is first moved; cleared only once the
+# new agent has reached the server.
+rollback_armed=false
 
 # Written into the agent's own directory: a fresh file renamed over the old
 # name, so a link the agent account left there is replaced, never followed.
@@ -63,19 +82,60 @@ report() {
 
 # The units, CUPS backend and polkit rule of whichever bundle is in place.
 install_system_files() {
-  local linux="$install_dir/linux"
-  install -m 0644 "$linux/nubarca-print-agent@.service" /etc/systemd/system/nubarca-print-agent@.service
-  local name
+  local linux="$install_dir/linux" name
+  install -m 0644 "$linux/nubarca-print-agent@.service" "$systemd_dir/nubarca-print-agent@.service"
   for name in nubarca-print-agent-update.path nubarca-print-agent-update.service; do
-    [[ -f "$linux/$name" ]] && install -m 0644 "$linux/$name" "/etc/systemd/system/$name"
+    if [[ -f "$linux/$name" ]]; then install -m 0644 "$linux/$name" "$systemd_dir/$name"; fi
   done
-  install -m 0755 -o root -g root "$linux/nubarca-sim" /usr/lib/cups/backend/nubarca-sim
-  if [[ -f /etc/polkit-1/rules.d/49-nubarca-print-box.rules ]]; then
-    install -m 0644 "$linux/nubarca-print-box.rules" /etc/polkit-1/rules.d/49-nubarca-print-box.rules
+  install -m 0755 "$linux/nubarca-sim" "$cups_backend"
+  if [[ -f "$polkit_rule" ]]; then
+    install -m 0644 "$linux/nubarca-print-box.rules" "$polkit_rule"
   fi
   chmod 0755 "$install_dir/NubArca.PrintAgent" "$linux"/*.sh "$linux/nubarca-sim"
   systemctl daemon-reload
 }
+
+# Best effort, step by step: every step that can still help is tried.
+# shellcheck disable=SC2317  # run from the EXIT trap
+restore() {
+  set +e
+  log "restoring the previous agent"
+  systemctl stop "$unit"
+  if [[ -d "$previous_dir" ]]; then
+    if [[ -e "$install_dir" ]]; then
+      rm -rf -- "$install_dir.failed"
+      mv -T -- "$install_dir" "$install_dir.failed"
+    fi
+    mv -T -- "$previous_dir" "$install_dir"
+  fi
+  install_system_files
+  systemctl reset-failed "$unit"
+  systemctl start "$unit"
+  rm -rf -- "$install_dir.failed"
+  report failed
+}
+
+# shellcheck disable=SC2317  # run by the EXIT trap
+on_exit() {
+  local status=$?
+  trap - EXIT
+  if [[ "$rollback_armed" == true ]]; then
+    rollback_armed=false
+    restore
+    status=1
+  fi
+  # The bell is always taken down, whatever happens: the path unit would
+  # otherwise start this service again at once.
+  rm -f -- "$request"
+  rm -rf -- "$staging" "$next_dir"
+  rm -f -- "$in_progress"
+  exit "$status"
+}
+trap on_exit EXIT
+# A signal ends the script through the EXIT trap, and so through restore.
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
 
 # The restarted agent reached the server: it wrote this version after a heartbeat.
 healthy() {
@@ -86,7 +146,7 @@ healthy() {
       [[ "$seen" == "$version" ]] && return 0
     fi
     systemctl is-failed --quiet "$unit" && return 1
-    sleep 3
+    sleep "$poll_seconds"
   done
   return 1
 }
@@ -110,7 +170,7 @@ fi
 
 # --- 1. What the server offers, fetched and checked by the installed agent ----------
 rm -rf -- "$staging"
-install -d -o root -g root -m 0700 "$staging"
+install -d -m 0700 "$staging"
 set +e
 (cd "$install_dir" && DOTNET_ENVIRONMENT=Production "$install_dir/NubArca.PrintAgent" \
   self-update-fetch --config "$config_path" --output "$staging")
@@ -118,7 +178,7 @@ fetched=$?
 set -e
 case "$fetched" in
   0) ;;
-  3) log 'nothing is offered (withdrawn, or already installed)'; exit 0 ;;
+  3) log 'nothing is offered (withdrawn, superseded, or already installed)'; exit 0 ;;
   *) log "the update could not be fetched (exit $fetched)"; report failed; exit 1 ;;
 esac
 
@@ -169,25 +229,16 @@ fi
 # --- 3. Swap, restart, and keep it only if it reaches the server ----------------------
 systemctl stop "$unit"
 rm -rf -- "$previous_dir"
+rollback_armed=true
 mv -T -- "$install_dir" "$previous_dir"
 mv -T -- "$next_dir" "$install_dir"
 install_system_files
 started="$(date +%s)"
 systemctl start "$unit" || true
 
-if healthy "$started"; then
-  report ok
-  exit 0
+if ! healthy "$started"; then
+  log "$version did not reach the server"
+  exit 1
 fi
-
-log "$version did not reach the server; restoring the previous agent"
-systemctl stop "$unit" || true
-rm -rf -- "$install_dir.failed"
-mv -T -- "$install_dir" "$install_dir.failed"
-mv -T -- "$previous_dir" "$install_dir"
-install_system_files
-systemctl reset-failed "$unit" 2>/dev/null || true
-systemctl start "$unit" || true
-rm -rf -- "$install_dir.failed"
-report failed
-exit 1
+rollback_armed=false
+report ok

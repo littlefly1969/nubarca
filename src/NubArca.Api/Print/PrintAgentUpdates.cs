@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using NubArca.Api.Audit;
 using NubArca.Api.Data;
 using NubArca.Api.Domain.Print;
 
@@ -18,16 +19,37 @@ public static partial class PrintAgentUpdates
 {
     public const string Ok = "ok";
     public const string Failed = "failed";
+    public const string Superseded = "superseded";
 
     [GeneratedRegex(@"^(ok|failed) (\d{1,4}\.\d{1,4}\.\d{1,4}) (\d{1,20})$", RegexOptions.CultureInvariant)]
     private static partial Regex ResultPattern();
 
-    /// <summary>The bundle this box is asked to install now, or null.</summary>
+    /// <summary>
+    /// The request pins one exact bundle — version, size and SHA-256 — when
+    /// someone asks. The box is offered that bundle only while it is the one
+    /// published; anything else (a newer bundle published meanwhile, the
+    /// bundle withdrawn) is not what was asked for, and is never offered.
+    /// </summary>
+    public static bool Matches(PrintStation station, PrintAgentBundle? bundle) =>
+        bundle is not null && station.AgentUpdateTarget == bundle.Version
+        && station.AgentUpdateSha256 == bundle.Sha256 && station.AgentUpdateSizeBytes == bundle.SizeBytes;
+
+    /// <summary>The pinned bundle this box is asked to install now, or null.</summary>
     public static PrintAgentUpdateOffer? Offer(PrintStation station, PrintAgentBundle? bundle)
     {
-        if (station.AgentUpdateTarget is null || !station.AgentSelfUpdate || bundle is null) return null;
-        if (!IsNewer(bundle.Version, station.AgentVersion)) return null;
-        return new(bundle.Version, bundle.FileName, bundle.Sha256, bundle.SizeBytes, RequestId(station));
+        if (station.AgentUpdateTarget is null || !station.AgentSelfUpdate || !Matches(station, bundle)) return null;
+        return new(bundle!.Version, bundle.FileName, bundle.Sha256, bundle.SizeBytes, RequestId(station));
+    }
+
+    /// <summary>
+    /// A request whose pinned bundle is no longer the published one ends as
+    /// superseded: the box keeps its agent and someone asks again for the new one.
+    /// </summary>
+    public static bool EndIfSuperseded(PrintStation station, PrintAgentBundle? bundle, DateTime now)
+    {
+        if (station.AgentUpdateTarget is not { } target || Matches(station, bundle)) return false;
+        Finish(station, Superseded, target, now);
+        return true;
     }
 
     /// <summary>
@@ -49,8 +71,8 @@ public static partial class PrintAgentUpdates
 
     /// <summary>
     /// What one heartbeat says about self-update: the capability, and whether the
-    /// pending request is now done (the agent reports the target or newer) or
-    /// failed (its update service said so for THIS request). A failed update is
+    /// pending request is now done (the agent reports exactly the pinned version)
+    /// or failed (its update service said so for THIS request). A failed update is
     /// not retried on its own: someone asks again.
     /// </summary>
     public static void ApplyHeartbeat(PrintStation station, PrintHeartbeatRequest request, DateTime now)
@@ -59,22 +81,30 @@ public static partial class PrintAgentUpdates
         if (station.AgentUpdateTarget is not { } target) return;
         var reported = PrintAgentCompatibility.Parse(station.AgentVersion);
         var wanted = PrintAgentCompatibility.Parse(target);
-        if (reported is not null && wanted is not null && reported >= wanted)
+        if (reported is not null && wanted is not null && reported == wanted)
         {
             Finish(station, Ok, target, now);
             return;
         }
+        // Updated some other way, past what was asked: this request has nothing left to do.
+        if (reported is not null && wanted is not null && reported > wanted)
+        {
+            Finish(station, Superseded, target, now);
+            return;
+        }
         var match = request.UpdateResult is null ? null : ResultPattern().Match(request.UpdateResult.Trim());
         if (match is { Success: true } && match.Groups[1].Value == Failed
-            && match.Groups[3].Value == RequestId(station))
+            && match.Groups[3].Value == RequestId(station) && match.Groups[2].Value == target)
         {
-            Finish(station, Failed, match.Groups[2].Value, now);
+            Finish(station, Failed, target, now);
         }
     }
 
     private static void Finish(PrintStation station, string result, string version, DateTime now)
     {
         station.AgentUpdateTarget = null;
+        station.AgentUpdateSha256 = null;
+        station.AgentUpdateSizeBytes = null;
         station.AgentUpdateResult = result;
         station.AgentUpdateResultVersion = version;
         station.AgentUpdateResultAt = now;
@@ -111,20 +141,23 @@ public sealed class PrintAgentUpdateService
     private readonly AppDbContext _db;
     private readonly PrintAgentBundleStore _bundles;
     private readonly TimeProvider _time;
+    private readonly IAuditLogger _audit;
 
-    public PrintAgentUpdateService(AppDbContext db, PrintAgentBundleStore bundles, TimeProvider time)
+    public PrintAgentUpdateService(AppDbContext db, PrintAgentBundleStore bundles, TimeProvider time, IAuditLogger audit)
     {
         _db = db;
         _bundles = bundles;
         _time = time;
+        _audit = audit;
     }
 
     /// <summary>
     /// Asks one station's box to update to the published bundle: its owner, or
-    /// an administrator (<paramref name="ownerId"/> null) for any station.
+    /// an administrator (<paramref name="ownerId"/> null) for any station. The
+    /// request and its audit record are saved together, or neither is.
     /// </summary>
     public async Task<(PrintAgentUpdateRequestResult Result, string? Version)> RequestAsync(
-        Guid? ownerId, Guid stationId, CancellationToken cancellationToken)
+        Guid? ownerId, Guid stationId, AuditActor actor, string? ipAddress, CancellationToken cancellationToken)
     {
         var station = await _db.PrintStations.SingleOrDefaultAsync(x => x.Id == stationId
             && x.RevokedAt == null && (ownerId == null || x.OwnerUserId == ownerId), cancellationToken);
@@ -132,21 +165,33 @@ public sealed class PrintAgentUpdateService
         var bundle = await _bundles.CurrentAsync(cancellationToken);
         if (bundle is null) return (PrintAgentUpdateRequestResult.NoBundle, null);
         var result = Request(station, bundle);
-        if (result == PrintAgentUpdateRequestResult.Requested) await _db.SaveChangesAsync(cancellationToken);
+        if (result == PrintAgentUpdateRequestResult.Requested)
+        {
+            // WriteAsync saves the station's change in the same SaveChanges as the entry.
+            await _audit.WriteAsync(actor, AuditActions.PrintAgentUpdateRequest, AuditEntityTypes.PrintStation,
+                station.Id, ipAddress, new { version = bundle.Version, sha256 = bundle.Sha256 }, cancellationToken);
+        }
         return (result, bundle.Version);
     }
 
-    /// <summary>Asks every box that can update itself and is behind the published bundle.</summary>
-    public async Task<(int Requested, string? Version)> RequestAllAsync(CancellationToken cancellationToken)
+    /// <summary>Asks every box that can update itself and is behind the published bundle, with one audit record.</summary>
+    public async Task<(int Requested, string? Version)> RequestAllAsync(AuditActor actor, string? ipAddress,
+        CancellationToken cancellationToken)
     {
         var bundle = await _bundles.CurrentAsync(cancellationToken);
         if (bundle is null) return (0, null);
         var stations = await _db.PrintStations
             .Where(x => x.RevokedAt == null && x.AgentSelfUpdate && x.AgentUpdateTarget == null)
             .ToListAsync(cancellationToken);
-        var requested = stations.Count(station => Request(station, bundle) == PrintAgentUpdateRequestResult.Requested);
-        if (requested > 0) await _db.SaveChangesAsync(cancellationToken);
-        return (requested, bundle.Version);
+        var requested = stations.Where(station => Request(station, bundle) == PrintAgentUpdateRequestResult.Requested)
+            .Select(station => station.Id).ToArray();
+        if (requested.Length > 0)
+        {
+            await _audit.WriteAsync(actor, AuditActions.PrintAgentUpdateRequest, AuditEntityTypes.PrintStation, null,
+                ipAddress, new { stations = requested, version = bundle.Version, sha256 = bundle.Sha256 },
+                cancellationToken);
+        }
+        return (requested.Length, bundle.Version);
     }
 
     private PrintAgentUpdateRequestResult Request(PrintStation station, PrintAgentBundle bundle)
@@ -154,19 +199,25 @@ public sealed class PrintAgentUpdateService
         if (!station.AgentSelfUpdate) return PrintAgentUpdateRequestResult.NotSelfUpdating;
         if (!PrintAgentUpdates.IsNewer(bundle.Version, station.AgentVersion)) return PrintAgentUpdateRequestResult.UpToDate;
         station.AgentUpdateTarget = bundle.Version;
+        station.AgentUpdateSha256 = bundle.Sha256;
+        station.AgentUpdateSizeBytes = bundle.SizeBytes;
         station.AgentUpdateRequestedAt = _time.GetUtcNow().UtcDateTime;
         return PrintAgentUpdateRequestResult.Requested;
     }
 
     /// <summary>Withdraws a pending request; a box already installing finishes or rolls back on its own.</summary>
-    public async Task<bool> CancelAsync(Guid? ownerId, Guid stationId, CancellationToken cancellationToken)
+    public async Task<bool> CancelAsync(Guid? ownerId, Guid stationId, AuditActor actor, string? ipAddress,
+        CancellationToken cancellationToken)
     {
         var station = await _db.PrintStations.SingleOrDefaultAsync(x => x.Id == stationId
             && (ownerId == null || x.OwnerUserId == ownerId), cancellationToken);
         if (station is null) return false;
         station.AgentUpdateTarget = null;
+        station.AgentUpdateSha256 = null;
+        station.AgentUpdateSizeBytes = null;
         station.AgentUpdateRequestedAt = null;
-        await _db.SaveChangesAsync(cancellationToken);
+        await _audit.WriteAsync(actor, AuditActions.PrintAgentUpdateCancel, AuditEntityTypes.PrintStation,
+            station.Id, ipAddress, null, cancellationToken);
         return true;
     }
 

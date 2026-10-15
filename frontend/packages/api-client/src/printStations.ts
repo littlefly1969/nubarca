@@ -178,8 +178,8 @@ export interface PrintAgentStatus {
   /** The version it was asked to update to and has not reached yet. */
   updateTarget?: string | null;
   updateRequestedAt?: string | null;
-  /** How the last requested update ended. */
-  updateResult?: 'ok' | 'failed' | null;
+  /** How the last requested update ended; superseded: another bundle was published before it was installed. */
+  updateResult?: 'ok' | 'failed' | 'superseded' | null;
   updateResultVersion?: string | null;
   updateResultAt?: string | null;
 }

@@ -52,6 +52,9 @@ public sealed record SystemUpdateDto(
 
 public sealed record SystemUpdateApplyRequest(string? Sha, bool ConfirmMigrations);
 
+/// <summary>One validated request for the host updater, before it is handed over.</summary>
+public sealed record SystemUpdateRequest(Guid Id, string Action, string? Sha, bool ConfirmMigrations);
+
 public enum SystemUpdateRequestError
 {
     None,
@@ -120,12 +123,19 @@ public sealed partial class SystemUpdateService
             Report(Read(ReportPath)));
     }
 
-    public SystemUpdateRequestError RequestCheck(out Guid requestId)
+    /// <summary>
+    /// A check, ready to hand over: <paramref name="request"/> is set only when
+    /// nothing refuses it. The caller records it in the audit trail first and
+    /// only then hands it over with <see cref="Submit"/>, so no request reaches
+    /// the updater without its record.
+    /// </summary>
+    public SystemUpdateRequestError PrepareCheck(out SystemUpdateRequest? request)
     {
-        requestId = Guid.NewGuid();
+        request = null;
         var error = CanRequest(Describe());
         if (error != SystemUpdateRequestError.None) return error;
-        return Write(new { id = requestId.ToString("D"), action = "check" });
+        request = new SystemUpdateRequest(Guid.NewGuid(), "check", null, false);
+        return SystemUpdateRequestError.None;
     }
 
     /// <summary>
@@ -133,27 +143,28 @@ public sealed partial class SystemUpdateService
     /// the same migration answer, from a check recent enough to still describe
     /// it. Anything else asks for a new check — the updater would refuse it too.
     /// </summary>
-    public SystemUpdateRequestError RequestApply(SystemUpdateApplyRequest request, out Guid requestId)
+    public SystemUpdateRequestError PrepareApply(SystemUpdateApplyRequest body, out SystemUpdateRequest? request)
     {
-        requestId = Guid.NewGuid();
+        request = null;
         var described = Describe();
         var error = CanRequest(described);
         if (error != SystemUpdateRequestError.None) return error;
         var report = described.Report;
-        if (report is null || request.Sha is null || !Commit().IsMatch(request.Sha)
-            || report.CandidateSha != request.Sha || report.ConfirmMigrations != request.ConfirmMigrations
+        if (report is null || body.Sha is null || !Commit().IsMatch(body.Sha)
+            || report.CandidateSha != body.Sha || report.ConfirmMigrations != body.ConfirmMigrations
             || report.CheckedAt is null
             || _time.GetUtcNow() - report.CheckedAt.Value > TimeSpan.FromHours(_options.ReportMaxAgeHours))
             return SystemUpdateRequestError.CheckAgain;
         if (report.Outcome != "ready") return SystemUpdateRequestError.NotDeployable;
-        return Write(new
-        {
-            id = requestId.ToString("D"),
-            action = "apply",
-            sha = request.Sha,
-            confirmMigrations = request.ConfirmMigrations,
-        });
+        request = new SystemUpdateRequest(Guid.NewGuid(), "apply", body.Sha, body.ConfirmMigrations);
+        return SystemUpdateRequestError.None;
     }
+
+    /// <summary>Drops the prepared request in the mailbox; never over a pending one.</summary>
+    public SystemUpdateRequestError Submit(SystemUpdateRequest request) =>
+        Write(request.Action == "apply"
+            ? new { id = request.Id.ToString("D"), action = "apply", sha = request.Sha, confirmMigrations = request.ConfirmMigrations }
+            : new { id = request.Id.ToString("D"), action = "check" });
 
     private static SystemUpdateRequestError CanRequest(SystemUpdateDto described)
     {

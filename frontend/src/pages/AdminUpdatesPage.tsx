@@ -67,7 +67,10 @@ export function AdminUpdatesPage() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [message, setMessage] = useState<MessageKey | null>(null);
   const [sending, setSending] = useState(false);
-  const [confirmed, setConfirmed] = useState(false);
+  // The migration confirmation belongs to ONE check: the release and the exact
+  // migrations it found. A later check (another release, other migrations)
+  // starts unconfirmed.
+  const [confirmedFor, setConfirmedFor] = useState<string | null>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -120,6 +123,8 @@ export function AdminUpdatesPage() {
 
   const report = update?.report ?? null;
   const ready = report?.outcome === 'ready' && report.candidateSha !== null;
+  const confirmationKey = report ? `${report.candidateSha}|${report.checkedAt}|${report.migrations.join(',')}` : null;
+  const confirmed = confirmationKey !== null && confirmedFor === confirmationKey;
 
   return (
     <section className="admin-page admin-updates" aria-busy={update === null && !loadFailed}>
@@ -183,7 +188,7 @@ export function AdminUpdatesPage() {
                   {report.confirmMigrations && (
                     <label className="updates-confirm">
                       <input type="checkbox" checked={confirmed} data-testid="updates-confirm-migrations"
-                        onChange={(event) => setConfirmed(event.target.checked)} />
+                        onChange={(event) => setConfirmedFor(event.target.checked ? confirmationKey : null)} />
                       {t('updates.confirmMigrations', { count: report.migrations.length })}
                     </label>
                   )}
@@ -290,6 +295,9 @@ function BoxState({ box, formatDate }: { box: PrintBoxUpdate; formatDate: (value
   const { t } = useI18n();
   const agent = box.agent;
   if (agent.updateTarget) return <>{t('updates.boxes.pending', { version: agent.updateTarget })}</>;
+  if (agent.updateResult === 'superseded' && agent.compatibility !== 'current') {
+    return <>{t('updates.boxes.superseded', { version: agent.updateResultVersion ?? '' })}</>;
+  }
   if (agent.updateResult === 'failed') {
     return <span className="print-agent-badge print-agent-incompatible">
       {t('updates.boxes.failed', { version: agent.updateResultVersion ?? '' })}
