@@ -297,6 +297,14 @@ public static class AuditActions
     public const string PrintStationErase = "print.station.erase";
     // A printer switched to its simulated twin (sheets to a file) or back to paper.
     public const string PrinterSimulationSet = "print.printer.simulation.set";
+    // A Print Box asked to update its agent to the published bundle, or the
+    // request withdrawn: who, which station, which version — never a hash.
+    public const string PrintAgentUpdateRequest = "print.agent.update.request";
+    public const string PrintAgentUpdateCancel = "print.agent.update.cancel";
+    // An administrator asked the host updater to check for, or install, a
+    // release: who, and for an install the confirmed commit and migration answer.
+    public const string SystemUpdateCheck = "system.update.check";
+    public const string SystemUpdateApply = "system.update.apply";
     public const string PartyGameStart = "party.game.start";
     public const string PartyGameFinish = "party.game.finish";
     // Playing the same party again. Recorded beside start and finish because it
@@ -469,6 +477,7 @@ public static class AuditEntityTypes
     public const string PrinterDevice = "printer_device";
     public const string PrintAgentDistribution = "print_agent_distribution";
     public const string PrintStation = "print_station";
+    public const string SystemUpdate = "system_update";
     public const string PartyMessage = "party_message";
     public const string PartyGuestbookEntry = "party_guestbook_entry";
     public const string Plate = "plate";

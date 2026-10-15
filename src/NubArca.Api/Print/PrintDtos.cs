@@ -34,7 +34,11 @@ public sealed record PrinterSimulationReport(bool Available, bool Only);
 /// </summary>
 public sealed record PrinterMediaRemainingReport(bool Available, int? RemainingPrints, int? AgeSeconds);
 public sealed record PrintHeartbeatRequest(string AgentVersion, IReadOnlyList<PrinterDeviceReport> Devices,
-    string? AgentBuild = null);
+    string? AgentBuild = null,
+    /// <summary>The agent can update itself: a Print Box whose root update service is installed.</summary>
+    bool? SelfUpdate = null,
+    /// <summary>How its last self-update ended, as the box's update service wrote it: <c>failed 0.9.0 &lt;request id&gt;</c>.</summary>
+    string? UpdateResult = null);
 public sealed record PrintHeartbeatResponse(string DesiredState, DateTime ServerTime,
     /// <summary>The printers to show as their simulated twin: status and prints left come from it.</summary>
     IReadOnlyList<string>? SimulatedDeviceKeys = null,
@@ -43,7 +47,18 @@ public sealed record PrintHeartbeatResponse(string DesiredState, DateTime Server
     /// files of exactly these jobs from that printer's twin queues, once per
     /// sequence, and touches nothing else.
     /// </summary>
-    IReadOnlyList<SimulatedOutputPurge>? SimulatedOutputPurges = null);
+    IReadOnlyList<SimulatedOutputPurge>? SimulatedOutputPurges = null,
+    /// <summary>
+    /// Update to this bundle, when it is idle: only while an update was asked
+    /// for and the agent can update itself. The box's root update service then
+    /// fetches it through <c>/api/print-agent/update</c> and checks this hash.
+    /// </summary>
+    PrintAgentUpdateOffer? AgentUpdate = null);
+
+/// <summary>The bundle a box is asked to install, as the server published it.</summary>
+public sealed record PrintAgentUpdateOffer(string Version, string FileName, string Sha256, long SizeBytes,
+    /// <summary>Echoed back by the box with the outcome, so an earlier attempt's outcome is never this one's.</summary>
+    string RequestId);
 
 /// <summary>One printer's latest clear: its sequence, and the jobs (N-format ids) whose files go.</summary>
 public sealed record SimulatedOutputPurge(string DeviceKey, long Sequence, IReadOnlyList<string> JobIds);

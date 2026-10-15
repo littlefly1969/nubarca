@@ -221,6 +221,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Purely additive. It adds to printer_devices three NOT NULL booleans with a constant DEFAULT FALSE (Simulated, SimulationAvailable, SimulationOnly), one NOT NULL bigint DEFAULT 0 (SimulatedPurgeSequence) and one NULLABLE text (SimulatedPurgeJobIds), and to print_jobs one NOT NULL boolean DEFAULT FALSE (Simulated). Each is a metadata-only ALTER TABLE ... ADD COLUMN with a constant default on PostgreSQL 11+; no row is rewritten, nothing is backfilled, and no existing column, index or constraint is touched. The previous application neither reads nor writes these columns and its inserts omit them, so new rows take FALSE/0/NULL. Rolled back, it knows no simulation and every job it creates is an ordinary one, as before this release; a printer an owner had switched to simulation would then print on paper again under it, so roll back only with simulation switched off."
+    },
+    "20261015101023_AddPrintAgentSelfUpdate": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Purely additive. It adds to print_stations one NOT NULL boolean with a constant DEFAULT FALSE (AgentSelfUpdate) and five NULLABLE columns (AgentUpdateTarget, AgentUpdateRequestedAt, AgentUpdateResult, AgentUpdateResultVersion, AgentUpdateResultAt). Each is a metadata-only ALTER TABLE ... ADD COLUMN on PostgreSQL 11+; no row is rewritten, nothing is backfilled, and no existing column, index or constraint is touched. The previous application neither reads nor writes these columns and its updates leave them alone, so rolled back it simply offers no agent self-update; a pending request is then ignored until the newer application runs again."
     }
   }
 }

@@ -17,6 +17,11 @@ public sealed class PrintStationConfiguration : IEntityTypeConfiguration<PrintSt
         builder.Property(x => x.CredentialHash).HasMaxLength(64).IsFixedLength();
         builder.Property(x => x.AgentVersion).HasMaxLength(64);
         builder.Property(x => x.AgentBuild).HasMaxLength(64);
+        builder.Property(x => x.AgentUpdateTarget).HasMaxLength(32);
+        builder.Property(x => x.AgentUpdateRequestedAt).HasColumnType("timestamp with time zone");
+        builder.Property(x => x.AgentUpdateResult).HasMaxLength(16);
+        builder.Property(x => x.AgentUpdateResultVersion).HasMaxLength(32);
+        builder.Property(x => x.AgentUpdateResultAt).HasColumnType("timestamp with time zone");
         builder.Property(x => x.LastSeenAt).HasColumnType("timestamp with time zone");
         builder.Property(x => x.CreatedAt).HasColumnType("timestamp with time zone");
         builder.Property(x => x.RevokedAt).HasColumnType("timestamp with time zone");

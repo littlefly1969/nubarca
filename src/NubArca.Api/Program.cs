@@ -1193,6 +1193,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<JobProcessor>();
     builder.Services.AddScoped<NubArca.Api.Print.PrintStationService>();
     builder.Services.AddScoped<NubArca.Api.Print.PrintAgentDistributionService>();
+    builder.Services.AddScoped<NubArca.Api.Print.PrintAgentUpdateService>();
     builder.Services.AddSingleton<NubArca.Api.Print.PrintArtifactRenderer>();
     builder.Services.AddScoped<NubArca.Api.Print.IOwnerPhotoPrintService, NubArca.Api.Print.OwnerPhotoPrintService>();
     builder.Services.AddScoped<NubArca.Api.Print.IPartyQrCardPrintService, NubArca.Api.Print.PartyQrCardPrintService>();
@@ -1447,6 +1448,10 @@ builder.Services.Configure<NubArca.Api.Print.PrintAgentBundleOptions>(
     builder.Configuration.GetSection(NubArca.Api.Print.PrintAgentBundleOptions.SectionName));
 // The published Print Agent bundle: read-only files, hashed once per publication.
 builder.Services.AddSingleton<NubArca.Api.Print.PrintAgentBundleStore>();
+// The host updater's mailbox: the Updates page reads its status and drops one request.
+builder.Services.Configure<NubArca.Api.Admin.SystemUpdateOptions>(
+    builder.Configuration.GetSection(NubArca.Api.Admin.SystemUpdateOptions.SectionName));
+builder.Services.AddSingleton<NubArca.Api.Admin.SystemUpdateService>();
 builder.Services.AddSingleton(TimeProvider.System);
 // Password-recovery email. Bound outside the Postgres-conditional block so the
 // public status endpoint answers even on a host without a database, and so a
@@ -1635,6 +1640,7 @@ app.MapAuthEndpoints();
 app.MapTvEndpoints();
 app.MapPrintEndpoints();
 app.MapPrintAgentDistributionEndpoints();
+app.MapAdminSystemUpdateEndpoints();
 
 // Slice 65: the caller's own logical storage usage + quota. Owner-scoped:
 // returns ONLY the authenticated user's figures, never anyone else's. No

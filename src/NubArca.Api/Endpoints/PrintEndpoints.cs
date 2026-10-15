@@ -308,6 +308,17 @@ public static class PrintEndpoints
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         }).WithName("PrintStationHeartbeat");
+        // The box's root update service asks what to install, with the
+        // station's own credential, and downloads exactly that bundle.
+        station.MapGet("/update", async (HttpContext context, [FromServices] PrintAgentUpdateService updates,
+            CancellationToken ct) =>
+            await updates.OfferAsync(StationId(context), ct) is { } offer
+                ? Results.Ok(offer.Offer) : Results.NoContent()).WithName("PrintAgentUpdateOffer");
+        station.MapGet("/update/bundle", async (HttpContext context, [FromServices] PrintAgentUpdateService updates,
+            CancellationToken ct) =>
+            await updates.OfferAsync(StationId(context), ct) is { } offer
+                ? Results.File(offer.Bundle.FilePath, "application/zip", offer.Bundle.FileName)
+                : Results.NotFound()).WithName("DownloadPrintAgentUpdate");
         station.MapPost("/jobs/claim", async ([FromBody] PrintClaimRequest request,
             HttpContext context, [FromServices] PrintStationService service, CancellationToken ct) =>
         {

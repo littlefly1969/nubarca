@@ -201,7 +201,16 @@ public sealed record SetPrintAgentSharingRequest(bool Enabled);
 
 /// <summary>How a station's agent stands: its version, build, compatibility and whether it is an official build.</summary>
 public sealed record PrintAgentStatusDto(
-    string? Version, string? Build, string Compatibility, bool Unofficial, string? LatestVersion);
+    string? Version, string? Build, string Compatibility, bool Unofficial, string? LatestVersion,
+    /// <summary>The agent updates itself on request (a Print Box with the update service).</summary>
+    bool SelfUpdate = false,
+    /// <summary>The version it was asked to update to and has not reached yet.</summary>
+    string? UpdateTarget = null,
+    DateTime? UpdateRequestedAt = null,
+    /// <summary><c>ok</c> or <c>failed</c>: how the last requested update ended.</summary>
+    string? UpdateResult = null,
+    string? UpdateResultVersion = null,
+    DateTime? UpdateResultAt = null);
 
 public sealed class PrintAgentDistributionService
 {
