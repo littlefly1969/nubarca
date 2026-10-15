@@ -94,7 +94,7 @@ public sealed class AgentSelfUpdateTests : IDisposable
     public void The_Health_Mark_Carries_The_Three_Part_Version()
     {
         if (!OperatingSystem.IsLinux()) return;
-        Agent().MarkHeartbeat("0.9.0.0");
+        Agent().MarkHeartbeat(new Version(0, 9, 0, 0).ToString());
         Assert.Equal("0.9.0\n", File.ReadAllText(Path.Combine(_state, AgentSelfUpdate.HeartbeatFile)));
     }
 

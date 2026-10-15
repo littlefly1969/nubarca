@@ -6,6 +6,30 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Updates: install a new release from the administration page
+
+- **Administration › Updates** checks whether a newer release exists and
+  shows what it would change on this server: components, database
+  migrations and the commits included. **Install** installs it with every
+  gate of the guided deploy: the migration policy, a backup before
+  migrations, smoke checks and rollback. The page follows the restart and
+  shows the outcome. The server also checks on its own every few hours, and
+  never installs by itself.
+- **Every release is signed.** Each push to `main` publishes a release
+  manifest naming every image by digest, signed by NubArca's own Release
+  workflow (keyless, or with a NubArca key for a private repository). A
+  server installs nothing whose signature or content does not check out.
+- **One-time setup per server:** `deploy/updater/install-updater.sh`
+  (see `docs/system-updates.md`). Lean CPU-only installations and
+  installations without TV are supported (`NUBARCA_API_VARIANT`,
+  `NUBARCA_TV_ENABLED`).
+- **Print Boxes follow the server.** From Print Agent 0.9.0 a Linux Print
+  Box installs the agent the server publishes when its owner or an
+  administrator asks, one box or all at once. It installs between prints,
+  checks the bundle against the server's hash, and goes back to the previous
+  version if the new one does not connect. Update each box by hand once to
+  0.9.0. Windows agents keep the manual update.
+
 ### Printers: a simulated DS-RX1HS for testing, as real as it gets
 
 - **Any Print Box printer can be switched to simulation** from its page: it

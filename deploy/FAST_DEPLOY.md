@@ -104,9 +104,27 @@ migration, the server provides a review/apply pair:
 ./deploy/update-production.sh apply --env-file .env --confirm <full-main-sha> [--confirm-migrations]
 ```
 
-`check` fetches `origin/main` and reports, without changing the checkout,
-release pins or containers, which backend/frontend/TV components changed and
-whether the corresponding immutable GHCR artifacts exist. A TV change requires
+The same pair runs from **Administration › Updates** through the host updater
+(`deploy/updater/`, installed once per server). Both routes have the same gates.
+The setup, the signing modes and the Print Box updates are described in
+[`../docs/system-updates.md`](../docs/system-updates.md).
+
+`check` fetches `origin/main` and pulls that commit's **signed release
+manifest** (`ghcr.io/<owner>/nubarca-release:<sha>`, written by
+`.github/workflows/release.yml`). It verifies the manifest's `cosign`
+signature, either keyless against the Release workflow on `main` or against
+`deploy/release-signing.pub` when that file is committed. It verifies the
+content with `deploy/release-manifest.py verify`: only NubArca's GHCR
+repositories, by digest, and an image from an earlier commit only if none of
+its component's files changed since. A commit whose release is still building
+reports `release-not-published`. Without changing the checkout, release pins or
+containers, it then reports which backend/frontend/Print Agent/TV components
+changed and whether the corresponding immutable GHCR artifacts exist.
+`NUBARCA_API_VARIANT` in `.env` picks the API image: `openvino`, the default,
+uses the four-file stack above, and `runtime` uses the lean CPU image without
+`docker-compose.facedirect-api.yml`. `NUBARCA_TV_ENABLED=false` skips TV
+publication on purpose. A changed Print Agent is published for the printers
+page after a healthy deploy. A TV change requires
 either a native APK bundle or a signed OTA bundle for the exact SHA; an absent
 TV artifact is never silently skipped. It prints the exact
 `apply` command. For an approved migration it also verifies the configured

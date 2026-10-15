@@ -400,6 +400,41 @@ so it can redirect port 80 on the setup network with `nft` (next sections);
 the shared unit — and so every simulator instance — has none.
 Printing needs no privilege at all: any local account may submit to CUPS.
 
+### Updates on request (agent 0.9.0 and later)
+
+From **Print Agent 0.9.0** a Print Box installs the agent this server
+publishes whenever its owner (printer page, **Update to X now**) or an
+administrator (**Administration › Updates**) asks. Nothing updates on its own.
+`install-print-box.sh` installs the root unit pair
+`nubarca-print-agent-update.path` / `.service` and the marker
+`/etc/nubarca-print-agent/self-update`. The marker tells the agent it may ask.
+
+The steps of an update are these:
+
+1. **The agent asks, between prints.** It writes `update-request.json` into
+   its own state directory and takes no new job while the install may restart
+   it. It waits at most 15 minutes.
+2. **Root fetches the bundle itself.** The path unit starts
+   `linux/update-print-box.sh`. That script runs the installed agent's
+   `self-update-fetch` with the station credential. Nothing the agent account
+   wrote decides what is installed. The bundle must match the size and SHA-256
+   the server names, and its binary must report the offered version.
+3. **The bundle is swapped and checked.** The script swaps the bundle in
+   (`/opt/nubarca-print-agent.previous` keeps the old one), reinstalls the
+   units, the CUPS backend and the polkit rule from it, and restarts the
+   agent.
+4. **It keeps the new agent only once that agent reaches the server.** The
+   agent's `heartbeat-ok` file is the check, with a 3-minute limit. Otherwise
+   it restores the previous bundle.
+5. **The outcome is reported.** It is written as `update-result` and relayed
+   on the next heartbeat. A failure ends that request; it is not retried until
+   someone asks again.
+
+Logs: `journalctl -u nubarca-print-agent-update`. A box with an older agent is
+updated once by hand, with the printer page's **Update instructions**. Windows
+agents keep the manual update. See also
+[`system-updates.md`](system-updates.md).
+
 ### The two CUPS queues
 
 Both point at the same printer and the same 4×6 media; they differ only in the
