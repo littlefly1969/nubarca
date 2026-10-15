@@ -653,6 +653,13 @@ are.
 wedge from black to white and eight colour and skin patches, rendered with the
 printer's adjustment. Adjust, save, print the test page, compare.
 
+Before that, each photograph is brought into **sRGB** from the colour profile it
+carries (`PrintColourSpace`): an ICC matrix/TRC profile such as Display P3 or
+Adobe RGB, or the cICP tag FFmpeg writes on a decoded HEIC frame. The sheet
+leaves without a profile and the driver reads it as sRGB, so a wide-gamut
+photograph drawn unconverted would print dull. sRGB, untagged, LUT-based and
+HDR sources are drawn as they are.
+
 Leave the driver's own tone options (for example Gutenprint's `StpGamma`) at
 their defaults, or the two corrections add up.
 
