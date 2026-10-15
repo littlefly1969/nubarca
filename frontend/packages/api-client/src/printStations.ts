@@ -173,6 +173,15 @@ export interface PrintAgentStatus {
   /** Claims the published version without being that build (a development one). */
   unofficial: boolean;
   latestVersion: string | null;
+  /** A Print Box that installs updates when asked (its update service is installed). */
+  selfUpdate?: boolean;
+  /** The version it was asked to update to and has not reached yet. */
+  updateTarget?: string | null;
+  updateRequestedAt?: string | null;
+  /** How the last requested update ended. */
+  updateResult?: 'ok' | 'failed' | null;
+  updateResultVersion?: string | null;
+  updateResultAt?: string | null;
 }
 
 /** The Print Agent bundle this installation hands out to a Print Box. */
@@ -365,4 +374,13 @@ export function getOwnerPhotoPrintDate(
 ): Promise<OwnerPhotoPrintDate> {
   const query = new URLSearchParams({ fileItemId, timeZone });
   return api(`/api/print/photo-jobs/date?${query}`, { signal });
+}
+
+/** Asks the owner's Print Box to install the published Print Agent when idle. */
+export async function requestPrintAgentUpdate(stationId: string): Promise<{ requested: number; version: string }> {
+  return api(`/api/print/stations/${encodeURIComponent(stationId)}/agent-update`, { method: 'POST' });
+}
+
+export async function cancelPrintAgentUpdate(stationId: string): Promise<void> {
+  return api(`/api/print/stations/${encodeURIComponent(stationId)}/agent-update`, { method: 'DELETE' });
 }

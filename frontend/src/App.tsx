@@ -13,6 +13,7 @@ import { AdminImportPage } from './pages/AdminImportPage';
 import { AdminJobsPage } from './pages/AdminJobsPage';
 import { AdminRolesPage } from './pages/AdminRolesPage';
 import { AdminStatsPage } from './pages/AdminStatsPage';
+import { AdminUpdatesPage } from './pages/AdminUpdatesPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
 import { AlbumDetailPage } from './pages/AlbumDetailPage';
 import { HelpPage } from './pages/HelpPage';
@@ -358,6 +359,14 @@ export function App() {
               element={
                 <PermissionRoute permissions={[PERMISSIONS.adminJobsManage]}>
                   <AdminJobsPage />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/admin/updates"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.adminDashboard]}>
+                  <AdminUpdatesPage />
                 </PermissionRoute>
               }
             />
