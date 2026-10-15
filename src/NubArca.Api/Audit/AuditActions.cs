@@ -302,9 +302,14 @@ public static class AuditActions
     public const string PrintAgentUpdateRequest = "print.agent.update.request";
     public const string PrintAgentUpdateCancel = "print.agent.update.cancel";
     // An administrator asked the host updater to check for, or install, a
-    // release: who, and for an install the confirmed commit and migration answer.
+    // release: who, and for an install the confirmed commit, the release
+    // identity its check found (a hash of the signed release manifest and the
+    // TV bundle digests, no user content) and the migration answer. Recorded
+    // before the request is delivered; a delivery that then fails is recorded
+    // as not delivered, so every request on record has a known fate.
     public const string SystemUpdateCheck = "system.update.check";
     public const string SystemUpdateApply = "system.update.apply";
+    public const string SystemUpdateNotDelivered = "system.update.not_delivered";
     public const string PartyGameStart = "party.game.start";
     public const string PartyGameFinish = "party.game.finish";
     // Playing the same party again. Recorded beside start and finish because it

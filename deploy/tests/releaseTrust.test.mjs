@@ -312,3 +312,20 @@ test('the updater installs from the signature chain, and CI dual-signs a hand-ov
   assert.match(releaseWorkflow, /check-signature "\$RUNNER_TEMP\/release\.json" "\$RUNNER_TEMP\/release\.transition\.sigstore\.json" previous/);
   assert.match(releaseWorkflow, /RELEASE_SIGNING_KEY_PREVIOUS/);
 });
+
+test('a published release is never replaced, and an install confirms the exact release its check found', () => {
+  // CI: a commit already released is a no-op; one published meanwhile must be byte-identical.
+  assert.match(releaseWorkflow, /already published; nothing to do/);
+  assert.match(releaseWorkflow, /needs\.plan\.outputs\.published != 'true'/);
+  assert.match(releaseWorkflow, /cmp -s "\$existing\/release\.json" "\$RUNNER_TEMP\/release\.json"/);
+  assert.match(releaseWorkflow, /it is never replaced/);
+  // The installation: the identity covers the signed manifest's bytes and both TV digests,
+  // the check reports it, and apply refuses anything else before installing.
+  assert.match(updater, /manifest:%s\\ntv-apk:%s\\ntv-ota:%s\\n/);
+  assert.match(updater, /"releaseId": e\.get\("R_RELEASE_ID"\)/);
+  assert.match(updater, /\[\[ "\$MODE" == "apply" && "\$CONFIRM_SHA" =~ \^\[0-9a-f\]\{40\}\$ && "\$CONFIRM_RELEASE" =~ \^\[0-9a-f\]\{64\}\$ \]\]/);
+  const pinned = updater.indexOf('"$CONFIRM_RELEASE" == "$RELEASE_ID"');
+  const tvResolved = updater.indexOf('TV_OTA_DIGEST="$(manifest_digest');
+  const firstPull = updater.indexOf('docker pull "$NEW_API_IMAGE"');
+  assert.ok(tvResolved > 0 && tvResolved < pinned && pinned < firstPull);
+});

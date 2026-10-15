@@ -35,6 +35,8 @@ public sealed record SystemUpdateComponentsDto(bool Backend, bool Frontend, bool
 public sealed record SystemUpdateReportDto(
     string Outcome, string? Reason, DateTimeOffset? CheckedAt,
     string? CandidateSha, string? CandidateVersion, bool Signed,
+    /// <summary>The exact release the check found; an install confirms this, not just the commit.</summary>
+    string? ReleaseId,
     string? CurrentVersion, string? ApiVariant,
     SystemUpdateComponentsDto Components,
     IReadOnlyList<string> Migrations, bool ConfirmMigrations,
@@ -50,10 +52,13 @@ public sealed record SystemUpdateDto(
     DateTimeOffset? LastCheckAt, double? AutoCheckHours,
     SystemUpdateReportDto? Report);
 
-public sealed record SystemUpdateApplyRequest(string? Sha, bool ConfirmMigrations);
+public sealed record SystemUpdateApplyRequest(string? Sha, string? ReleaseId, bool ConfirmMigrations);
 
 /// <summary>One validated request for the host updater, before it is handed over.</summary>
-public sealed record SystemUpdateRequest(Guid Id, string Action, string? Sha, bool ConfirmMigrations);
+public sealed record SystemUpdateRequest(Guid Id, string Action, string? Sha, string? ReleaseId, bool ConfirmMigrations);
+
+/// <summary>A request written beside the mailbox, not yet delivered (see <see cref="SystemUpdateService.Stage"/>).</summary>
+public sealed record StagedSystemUpdateRequest(SystemUpdateRequest Request, string Path);
 
 public enum SystemUpdateRequestError
 {
@@ -72,6 +77,8 @@ public enum SystemUpdateRequestError
 public sealed partial class SystemUpdateService
 {
     private const long MaxFileBytes = 256 * 1024;
+    [GeneratedRegex("^[0-9a-f]{64}$", RegexOptions.CultureInvariant)]
+    private static partial Regex ReleaseId();
     [GeneratedRegex("^[0-9a-f]{40}$", RegexOptions.CultureInvariant)]
     private static partial Regex Commit();
     [GeneratedRegex("^[0-9a-f]{7,40}$", RegexOptions.CultureInvariant)]
@@ -125,23 +132,24 @@ public sealed partial class SystemUpdateService
 
     /// <summary>
     /// A check, ready to hand over: <paramref name="request"/> is set only when
-    /// nothing refuses it. The caller records it in the audit trail first and
-    /// only then hands it over with <see cref="Submit"/>, so no request reaches
-    /// the updater without its record.
+    /// nothing refuses it. The caller stages it (<see cref="Stage"/>), records
+    /// it in the audit trail, and only then delivers it (<see cref="Deliver"/>):
+    /// no request reaches the updater without its record.
     /// </summary>
     public SystemUpdateRequestError PrepareCheck(out SystemUpdateRequest? request)
     {
         request = null;
         var error = CanRequest(Describe());
         if (error != SystemUpdateRequestError.None) return error;
-        request = new SystemUpdateRequest(Guid.NewGuid(), "check", null, false);
+        request = new SystemUpdateRequest(Guid.NewGuid(), "check", null, null, false);
         return SystemUpdateRequestError.None;
     }
 
     /// <summary>
-    /// An install is confirmed against the last check: the same release and
-    /// the same migration answer, from a check recent enough to still describe
-    /// it. Anything else asks for a new check — the updater would refuse it too.
+    /// An install is confirmed against the last check: the same commit, the
+    /// same exact release (its manifest and TV bundles), the same migration
+    /// answer, from a check recent enough to still describe it. Anything else
+    /// asks for a new check — the updater would refuse it too.
     /// </summary>
     public SystemUpdateRequestError PrepareApply(SystemUpdateApplyRequest body, out SystemUpdateRequest? request)
     {
@@ -152,35 +160,54 @@ public sealed partial class SystemUpdateService
         var report = described.Report;
         if (report is null || body.Sha is null || !Commit().IsMatch(body.Sha)
             || report.CandidateSha != body.Sha || report.ConfirmMigrations != body.ConfirmMigrations
+            || report.ReleaseId is null || body.ReleaseId != report.ReleaseId
             || report.CheckedAt is null
             || _time.GetUtcNow() - report.CheckedAt.Value > TimeSpan.FromHours(_options.ReportMaxAgeHours))
             return SystemUpdateRequestError.CheckAgain;
         if (report.Outcome != "ready") return SystemUpdateRequestError.NotDeployable;
-        request = new SystemUpdateRequest(Guid.NewGuid(), "apply", body.Sha, body.ConfirmMigrations);
+        request = new SystemUpdateRequest(Guid.NewGuid(), "apply", body.Sha, body.ReleaseId, body.ConfirmMigrations);
         return SystemUpdateRequestError.None;
     }
 
-    /// <summary>Drops the prepared request in the mailbox; never over a pending one.</summary>
-    public SystemUpdateRequestError Submit(SystemUpdateRequest request) =>
-        Write(request.Action == "apply"
-            ? new { id = request.Id.ToString("D"), action = "apply", sha = request.Sha, confirmMigrations = request.ConfirmMigrations }
-            : new { id = request.Id.ToString("D"), action = "check" });
-
-    private static SystemUpdateRequestError CanRequest(SystemUpdateDto described)
+    /// <summary>
+    /// Writes the request beside the mailbox under a name the updater ignores:
+    /// everything that can fail on the way to the mailbox fails here, before
+    /// the audit record is written.
+    /// </summary>
+    public SystemUpdateRequestError Stage(SystemUpdateRequest request, out StagedSystemUpdateRequest? staged)
     {
-        if (!described.UpdaterConnected) return SystemUpdateRequestError.UpdaterUnavailable;
-        if (described.RequestPending || described.State is "checking" or "applying") return SystemUpdateRequestError.Busy;
-        return SystemUpdateRequestError.None;
-    }
-
-    private SystemUpdateRequestError Write(object request)
-    {
-        var temporary = Path.Combine(_options.Directory, $".request-{Guid.NewGuid():N}.tmp");
+        staged = null;
+        if (File.Exists(RequestPath)) return SystemUpdateRequestError.Busy;
+        var path = Path.Combine(_options.Directory, $".request-{request.Id:N}.tmp");
         try
         {
-            File.WriteAllText(temporary, JsonSerializer.Serialize(request));
-            // Never over a pending request: the first one wins, the second is told to wait.
-            File.Move(temporary, RequestPath, overwrite: false);
+            File.WriteAllText(path, JsonSerializer.Serialize(request.Action == "apply"
+                ? new
+                {
+                    id = request.Id.ToString("D"), action = "apply", sha = request.Sha, release = request.ReleaseId,
+                    confirmMigrations = request.ConfirmMigrations,
+                }
+                : (object)new { id = request.Id.ToString("D"), action = "check" }));
+            staged = new StagedSystemUpdateRequest(request, path);
+            return SystemUpdateRequestError.None;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogError("The updater mailbox could not be written ({ExceptionType}).", ex.GetType().Name);
+            Discard(path);
+            return SystemUpdateRequestError.UpdaterUnavailable;
+        }
+    }
+
+    /// <summary>
+    /// Delivers a staged request with one rename in the same directory, never
+    /// over a pending request: the first one wins, the second is told to wait.
+    /// </summary>
+    public SystemUpdateRequestError Deliver(StagedSystemUpdateRequest staged)
+    {
+        try
+        {
+            File.Move(staged.Path, RequestPath, overwrite: false);
             return SystemUpdateRequestError.None;
         }
         catch (IOException) when (File.Exists(RequestPath))
@@ -194,8 +221,23 @@ public sealed partial class SystemUpdateService
         }
         finally
         {
-            try { if (File.Exists(temporary)) File.Delete(temporary); } catch (IOException) { }
+            Discard(staged.Path);
         }
+    }
+
+    /// <summary>A staged request that will not be delivered.</summary>
+    public void Discard(StagedSystemUpdateRequest staged) => Discard(staged.Path);
+
+    private static void Discard(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    private static SystemUpdateRequestError CanRequest(SystemUpdateDto described)
+    {
+        if (!described.UpdaterConnected) return SystemUpdateRequestError.UpdaterUnavailable;
+        if (described.RequestPending || described.State is "checking" or "applying") return SystemUpdateRequestError.Busy;
+        return SystemUpdateRequestError.None;
     }
 
     private JsonElement? Read(string path)
@@ -268,7 +310,7 @@ public sealed partial class SystemUpdateService
         return new SystemUpdateReportDto(
             outcome, Matching(Text(r, "reason"), Word()), Time(r, "finishedAt"),
             Matching(Text(candidate, "sha"), Commit()), Matching(Text(candidate, "version"), Version()),
-            Flag(candidate, "signed"),
+            Flag(candidate, "signed"), Matching(Text(candidate, "releaseId"), ReleaseId()),
             Matching(Text(current, "version"), Version()), Matching(Text(current, "apiVariant"), Word()),
             new SystemUpdateComponentsDto(
                 Flag(Child(components, "backend"), "changed"), Flag(Child(components, "frontend"), "changed"),

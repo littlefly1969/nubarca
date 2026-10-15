@@ -18,6 +18,7 @@ namespace NubArca.Api.Tests.Admin;
 public sealed class SystemUpdateTests : IDisposable
 {
     private const string Candidate = "0123456789abcdef0123456789abcdef01234567";
+    private const string Release = "89abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567";
     private readonly string _mailbox = Path.Combine(Path.GetTempPath(), $"nubarca-updater-{Guid.NewGuid():N}");
     private readonly SqliteWebApplicationFactory _factory;
 
@@ -52,7 +53,7 @@ public sealed class SystemUpdateTests : IDisposable
         {
             schemaVersion = 1, mode = "check", outcome, reason = (string?)null,
             finishedAt = Now(-(age ?? TimeSpan.Zero)),
-            candidate = new { sha = Candidate, version = "0.4.0", signed = true },
+            candidate = new { sha = Candidate, version = "0.4.0", signed = true, releaseId = Release },
             current = new { apiSha = new string('1', 40), version = "0.3.0", apiVariant = "openvino",
                 // Anything the report carries beyond the fixed fields never reaches the page.
                 checkoutPath = "/srv/secret/checkout" },
@@ -148,16 +149,20 @@ public sealed class SystemUpdateTests : IDisposable
                 : (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString();
         }
 
-        Assert.Equal("check_again", await Refusal(new { sha = new string('f', 40), confirmMigrations = true }));
+        Assert.Equal("check_again", await Refusal(new { sha = new string('f', 40), releaseId = Release, confirmMigrations = true }));
         // The migration answer must be the check's: an install never slips a migration past it.
-        Assert.Equal("check_again", await Refusal(new { sha = Candidate, confirmMigrations = false }));
-        Assert.Equal("check_again", await Refusal(new { sha = "main", confirmMigrations = true }));
+        Assert.Equal("check_again", await Refusal(new { sha = Candidate, releaseId = Release, confirmMigrations = false }));
+        Assert.Equal("check_again", await Refusal(new { sha = "main", releaseId = Release, confirmMigrations = true }));
+        // The same commit is not enough: the install names the exact release the check found.
+        Assert.Equal("check_again", await Refusal(new { sha = Candidate, releaseId = new string('c', 64), confirmMigrations = true }));
+        Assert.Equal("check_again", await Refusal(new { sha = Candidate, confirmMigrations = true }));
         Assert.Null(Request());
 
-        Assert.Null(await Refusal(new { sha = Candidate, confirmMigrations = true }));
+        Assert.Null(await Refusal(new { sha = Candidate, releaseId = Release, confirmMigrations = true }));
         var request = JsonDocument.Parse(Request()!).RootElement;
         Assert.Equal("apply", request.GetProperty("action").GetString());
         Assert.Equal(Candidate, request.GetProperty("sha").GetString());
+        Assert.Equal(Release, request.GetProperty("release").GetString());
         Assert.True(request.GetProperty("confirmMigrations").GetBoolean());
     }
 
@@ -167,10 +172,10 @@ public sealed class SystemUpdateTests : IDisposable
         Status();
         var admin = await AdminAsync();
         Report(age: TimeSpan.FromDays(2));
-        var stale = await admin.PostAsJsonAsync("/api/admin/system-update/apply", new { sha = Candidate, confirmMigrations = false });
+        var stale = await admin.PostAsJsonAsync("/api/admin/system-update/apply", new { sha = Candidate, releaseId = Release, confirmMigrations = false });
         Assert.Equal("check_again", (await stale.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
         Report(outcome: "not-deployable");
-        var refused = await admin.PostAsJsonAsync("/api/admin/system-update/apply", new { sha = Candidate, confirmMigrations = false });
+        var refused = await admin.PostAsJsonAsync("/api/admin/system-update/apply", new { sha = Candidate, releaseId = Release, confirmMigrations = false });
         Assert.Equal("not_deployable", (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
         Assert.Null(Request());
     }
@@ -181,7 +186,7 @@ public sealed class SystemUpdateTests : IDisposable
         Status(state: "applying");
         Report();
         var admin = await AdminAsync();
-        var busy = await admin.PostAsJsonAsync("/api/admin/system-update/apply", new { sha = Candidate, confirmMigrations = false });
+        var busy = await admin.PostAsJsonAsync("/api/admin/system-update/apply", new { sha = Candidate, releaseId = Release, confirmMigrations = false });
         Assert.Equal("update_busy", (await busy.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
     }
 
@@ -222,8 +227,9 @@ public sealed class SystemUpdateTests : IDisposable
         await Assert.ThrowsAnyAsync<Exception>(async () =>
             (await admin.PostAsync("/api/admin/system-update/check", null)).EnsureSuccessStatusCode());
         await Assert.ThrowsAnyAsync<Exception>(async () =>
-            (await admin.PostAsJsonAsync("/api/admin/system-update/apply", new { sha = Candidate, confirmMigrations = false }))
+            (await admin.PostAsJsonAsync("/api/admin/system-update/apply", new { sha = Candidate, releaseId = Release, confirmMigrations = false }))
                 .EnsureSuccessStatusCode());
         Assert.Null(Request());
+        Assert.Empty(Directory.GetFiles(_mailbox, ".request-*"));
     }
 }

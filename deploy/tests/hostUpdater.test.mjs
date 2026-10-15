@@ -15,6 +15,7 @@ const updater = resolve(here, '../updater/nubarca-updater.py');
 const installer = readFileSync(resolve(here, '../updater/install-updater.sh'), 'utf8');
 const id = '0f8fad5b-d9cb-469f-a165-70867728950e';
 const sha = 'a'.repeat(40);
+const release = 'b'.repeat(64);
 
 /** A mailbox, and a fake update script that records its arguments and writes the report it is told to. */
 function setup(report, exitCode = 0) {
@@ -58,14 +59,15 @@ test('a check request runs the script once and publishes its report', () => {
   assert.ok(!existsSync(join(box.mailbox, 'request.json')));
 });
 
-test('an install request passes exactly the confirmed commit and the migration confirmation', () => {
+test('an install request passes exactly the confirmed commit, release and migration confirmation', () => {
   const box = setup({ schemaVersion: 1, mode: 'apply', outcome: 'applied' });
   writeFileSync(join(box.mailbox, 'report.json'), '{"outcome":"ready"}');
-  box.request({ id, action: 'apply', sha, confirmMigrations: true });
+  box.request({ id, action: 'apply', sha, release, confirmMigrations: true });
   box.run();
   const args = box.args();
   assert.equal(args[0], 'apply');
   assert.equal(args[args.indexOf('--confirm') + 1], sha);
+  assert.equal(args[args.indexOf('--confirm-release') + 1], release);
   assert.ok(args.includes('--confirm-migrations'));
   assert.equal(box.status().last.outcome, 'applied');
   // What was installed is the new baseline: the old check report is gone.
@@ -77,6 +79,8 @@ test('a request that names anything but the two actions is refused without runni
     { id, action: 'shell', command: 'rm -rf /' },
     { id, action: 'apply', sha: 'main', confirmMigrations: false },
     { id, action: 'apply', sha },
+    { id, action: 'apply', sha, confirmMigrations: false },
+    { id, action: 'apply', sha, release: 'latest', confirmMigrations: false },
     { id: '../../etc', action: 'check' },
   ]) {
     const box = setup({ outcome: 'ready' });
@@ -92,7 +96,7 @@ test('a failure reaches the api as one sanitized line, without paths or credenti
     schemaVersion: 1, mode: 'apply', outcome: 'failed',
     message: 'pg_dump failed writing /srv/backups/pre-update.sql.gz with password=hunter2',
   }, 1);
-  box.request({ id, action: 'apply', sha, confirmMigrations: false });
+  box.request({ id, action: 'apply', sha, release, confirmMigrations: false });
   box.run();
   const { last } = box.status();
   assert.equal(last.outcome, 'failed');
@@ -125,6 +129,32 @@ test('a run interrupted by a restart is reported as interrupted', () => {
     '--env-file', join(fresh.dir, '.env'), '--auto-check-hours', '0', '--poll-seconds', '0.1']);
   assert.equal(fresh.status().last.outcome, 'interrupted');
   assert.equal(fresh.status().state, 'idle');
+});
+
+test('a request taken just before a crash is reported as interrupted, never silently lost', () => {
+  const box = setup({ outcome: 'ready' });
+  // The process took the request (renamed it) and died before publishing anything.
+  writeFileSync(join(box.mailbox, 'request.json.processing'),
+    JSON.stringify({ id, action: 'apply', sha, release, confirmMigrations: false }));
+  writeFileSync(join(box.mailbox, 'status.json'), JSON.stringify({ state: 'idle', current: null, last: null }));
+  spawnSync('timeout', ['2', 'python3', updater, '--mailbox', box.mailbox, '--checkout', box.dir,
+    '--env-file', join(box.dir, '.env'), '--script', join(box.dir, 'update.sh'),
+    '--auto-check-hours', '0', '--poll-seconds', '0.1']);
+  const { last, state } = box.status();
+  assert.equal(state, 'idle');
+  assert.equal(last.requestId, id);
+  assert.equal(last.action, 'apply');
+  assert.equal(last.outcome, 'interrupted');
+  assert.equal(box.args(), null, 'an install is never re-run unasked');
+  assert.ok(!existsSync(join(box.mailbox, 'request.json.processing')));
+});
+
+test('the request stays journaled until its run is published', () => {
+  const source = readFileSync(updater, 'utf8');
+  const run = source.slice(source.indexOf('    def run('));
+  assert.ok(run.indexOf('self.publish()') < run.indexOf('self.release_request()'));
+  const take = source.slice(source.indexOf('    def take_request('), source.indexOf('    def auto_check_due('));
+  assert.doesNotMatch(take, /os\.remove/);
 });
 
 test('the installer pins cosign by checksum and never runs the updater as root', () => {

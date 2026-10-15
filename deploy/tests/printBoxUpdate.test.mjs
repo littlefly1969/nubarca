@@ -64,7 +64,7 @@ shift 3
 exec "$@"
 `;
 
-function box({ healthy = true, failReload = false, stagedVersion = '0.9.0' } = {}) {
+function box({ healthy = true, failReload = false, stagedVersion = '0.9.0', request = { version: '0.9.0', requestId: REQUEST_ID } } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'nubarca-print-box-update-'));
   const bin = join(root, 'fakebin');
   mkdirSync(bin);
@@ -75,7 +75,7 @@ function box({ healthy = true, failReload = false, stagedVersion = '0.9.0' } = {
   bundle(join(root, 'opt/nubarca-print-agent'), '0.8.0');
   const state = join(root, 'var/lib/nubarca-print-agent/box');
   mkdirSync(state, { recursive: true });
-  writeFileSync(join(state, 'update-request.json'), JSON.stringify({ version: '0.9.0', requestId: REQUEST_ID }));
+  if (request) writeFileSync(join(state, 'update-request.json'), JSON.stringify(request));
   mkdirSync(join(root, 'etc/nubarca-print-agent'), { recursive: true });
   writeFileSync(join(root, 'etc/nubarca-print-agent/box.json'), '{}');
   mkdirSync(join(root, 'etc/systemd/system'), { recursive: true });
@@ -115,6 +115,7 @@ const result = (state) => readFileSync(join(state, 'update-result'), 'utf8').tri
 
 function assertFinished(root, state) {
   assert.equal(existsSync(join(state, 'update-request.json')), false, 'the request is always taken down');
+  assert.equal(existsSync(join(state, 'update-request.claimed')), false, 'and so is its claim');
   assert.equal(existsSync(join(root, 'run/nubarca-print-agent-update/in-progress')), false,
     'the in-progress marker is always removed');
   assert.equal(existsSync(join(root, 'opt/nubarca-print-agent.new')), false);
@@ -177,4 +178,36 @@ test('a staged bundle that is not the offered version is never swapped in', () =
   assert.equal(existsSync(join(root, 'agent-state')), false, 'the running agent was never stopped');
   assert.equal(result(state), `failed 0.9.0 ${REQUEST_ID}`);
   assertFinished(root, state);
+});
+
+function assertUntouched(root, state) {
+  assert.equal(installed(root), '0.8.0');
+  assert.equal(existsSync(join(root, 'agent-state')), false, 'the running agent was never stopped');
+  assert.equal(existsSync(join(root, 'run/nubarca-print-agent-update/in-progress')), false);
+  assert.equal(existsSync(join(state, 'update-request.claimed')), false);
+}
+
+test('a request the agent already took back is never installed', () => {
+  // The agent renamed its request away before this service could claim it.
+  const { root, state, env } = box({ request: null });
+  const run = spawnSync('bash', [script], { env, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stdout, /no update request to pick up/);
+  assertUntouched(root, state);
+  assert.equal(existsSync(join(state, 'update-result')), false);
+});
+
+test('a request that is not valid installs nothing', () => {
+  const { root, state, env } = box({ request: { version: '../0.9', requestId: 'x' } });
+  const run = spawnSync('bash', [script], { env, encoding: 'utf8' });
+  assert.equal(run.status, 1);
+  assertUntouched(root, state);
+});
+
+test('an offer that is not what the agent asked for installs nothing', () => {
+  const { root, state, env } = box({ request: { version: '0.9.0', requestId: '42' } });
+  const run = spawnSync('bash', [script], { env, encoding: 'utf8' });
+  assert.equal(run.status, 1);
+  assertUntouched(root, state);
+  assert.equal(result(state), 'failed 0.9.0 42');
 });

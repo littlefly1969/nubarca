@@ -122,8 +122,10 @@ export function AdminUpdatesPage() {
   if (state.status !== 'authed') return null;
 
   const report = update?.report ?? null;
-  const ready = report?.outcome === 'ready' && report.candidateSha !== null;
-  const confirmationKey = report ? `${report.candidateSha}|${report.checkedAt}|${report.migrations.join(',')}` : null;
+  const ready = report?.outcome === 'ready' && report.candidateSha !== null && report.releaseId !== null;
+  const confirmationKey = report
+    ? `${report.candidateSha}|${report.releaseId}|${report.checkedAt}|${report.migrations.join(',')}`
+    : null;
   const confirmed = confirmationKey !== null && confirmedFor === confirmationKey;
 
   return (
@@ -195,7 +197,7 @@ export function AdminUpdatesPage() {
                   <button type="button" className="row-action-primary" data-testid="updates-install"
                     disabled={!update.updaterConnected || busy || sending || (report.confirmMigrations && !confirmed)}
                     onClick={() => void send(
-                      () => requestSystemUpdateApply(report.candidateSha!, report.confirmMigrations),
+                      () => requestSystemUpdateApply(report.candidateSha!, report.releaseId!, report.confirmMigrations),
                       'updates.installRequested',
                     )}>
                     {t('updates.install', { version: report.candidateVersion ?? short(report.candidateSha) })}

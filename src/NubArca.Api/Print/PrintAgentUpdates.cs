@@ -169,7 +169,7 @@ public sealed class PrintAgentUpdateService
         {
             // WriteAsync saves the station's change in the same SaveChanges as the entry.
             await _audit.WriteAsync(actor, AuditActions.PrintAgentUpdateRequest, AuditEntityTypes.PrintStation,
-                station.Id, ipAddress, new { version = bundle.Version, sha256 = bundle.Sha256 }, cancellationToken);
+                station.Id, ipAddress, new { version = bundle.Version }, cancellationToken);
         }
         return (result, bundle.Version);
     }
@@ -188,7 +188,7 @@ public sealed class PrintAgentUpdateService
         if (requested.Length > 0)
         {
             await _audit.WriteAsync(actor, AuditActions.PrintAgentUpdateRequest, AuditEntityTypes.PrintStation, null,
-                ipAddress, new { stations = requested, version = bundle.Version, sha256 = bundle.Sha256 },
+                ipAddress, new { stations = requested, version = bundle.Version },
                 cancellationToken);
         }
         return (requested.Length, bundle.Version);

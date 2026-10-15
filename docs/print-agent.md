@@ -416,7 +416,9 @@ The steps of an update are these:
    starts, and then for as long as that service runs: the service keeps
    `/run/nubarca-print-agent-update/in-progress` until it ends. If the service
    does not start within 2 minutes, the agent takes the request back and
-   reports it failed.
+   reports it failed. The take-back and the root service's claim are each
+   one rename of `update-request.json`, so exactly one of them wins: the root
+   service installs only a request it claimed, after raising its marker.
 2. **Root fetches the bundle itself.** The path unit starts
    `linux/update-print-box.sh`. That script runs the installed agent's
    `self-update-fetch` with the station credential. Nothing the agent account

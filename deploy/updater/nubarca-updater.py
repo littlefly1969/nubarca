@@ -12,7 +12,10 @@ outcome back through the mailbox when the new api starts.
 Mailbox (all JSON, all written atomically):
 
   request.json  written by the api: {"id", "action": "check"|"apply",
-                "sha" (apply), "confirmMigrations" (apply)}. Consumed here.
+                "sha", "release" and "confirmMigrations" (apply)}. Consumed
+                here: renamed to request.json.processing, which stays until
+                the request's state is published, so a crash in between is
+                reported as interrupted on restart, never lost.
   status.json   written here: heartbeat, what runs now, the last outcome.
   report.json   written here: the last `check` report, as the script wrote it.
 
@@ -41,6 +44,7 @@ MAX_REQUEST_BYTES = 4096
 MAX_REPORT_BYTES = 256 * 1024
 REQUEST_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 COMMIT = re.compile(r"[0-9a-f]{40}")
+RELEASE_ID = re.compile(r"[0-9a-f]{64}")
 CHECK_TIMEOUT_SECONDS = 20 * 60
 APPLY_TIMEOUT_SECONDS = 3 * 60 * 60
 KEEP_LOGS = 30
@@ -101,11 +105,15 @@ def validate_request(request) -> tuple:
     if action == "apply":
         sha = request.get("sha")
         confirm = request.get("confirmMigrations")
+        release = request.get("release")
         if not isinstance(sha, str) or not COMMIT.fullmatch(sha):
             return None, "an install request must name the full commit it confirms"
+        if not isinstance(release, str) or not RELEASE_ID.fullmatch(release):
+            return None, "an install request must name the exact release its check found"
         if not isinstance(confirm, bool):
             return None, "an install request must say whether it confirms migrations"
-        return {"id": request_id, "action": "apply", "sha": sha, "confirmMigrations": confirm}, None
+        return {"id": request_id, "action": "apply", "sha": sha, "release": release,
+                "confirmMigrations": confirm}, None
     return None, "unknown action"
 
 
@@ -121,6 +129,7 @@ class Updater:
         self.status_path = os.path.join(mailbox, "status.json")
         self.report_path = os.path.join(mailbox, "report.json")
         self.request_path = os.path.join(mailbox, "request.json")
+        self.processing_path = self.request_path + ".processing"
         previous = read_json(self.status_path, MAX_REPORT_BYTES) or {}
         last = previous.get("last") if isinstance(previous.get("last"), dict) else None
         # A run that was in progress when this process stopped did not finish here.
@@ -141,25 +150,48 @@ class Updater:
             "lastCheckAt": previous.get("lastCheckAt"),
             "autoCheckHours": auto_check_hours,
         }
+        # A request taken from the mailbox whose run was never published: the
+        # process stopped in between. It is reported, not silently dropped, and
+        # not run again unasked (an install is confirmed by a person).
+        if os.path.exists(self.processing_path):
+            taken = read_json(self.processing_path, MAX_REQUEST_BYTES)
+            taken_id = taken.get("id") if isinstance(taken, dict) else None
+            taken_id = taken_id if isinstance(taken_id, str) and REQUEST_ID.fullmatch(taken_id) else None
+            if taken_id is None or (last or {}).get("requestId") != taken_id:
+                action = taken.get("action") if isinstance(taken, dict) else None
+                self.status["last"] = {
+                    "requestId": taken_id,
+                    "action": action if action in ("check", "apply") else "invalid",
+                    "sha": None,
+                    "automatic": False,
+                    "outcome": "interrupted",
+                    "message": "the updater stopped before this request started; ask again",
+                    "startedAt": now(),
+                    "finishedAt": now(),
+                }
+            self.release_request()
 
     def publish(self) -> None:
         self.status["heartbeatAt"] = now()
         write_json(self.status_path, self.status)
 
-    def take_request(self):
-        """Consumes the pending request, if any: (request, error)."""
-        if not os.path.exists(self.request_path):
-            return None, None
-        processing = self.request_path + ".processing"
+    def release_request(self) -> None:
+        """The taken request's state is published: its journal is no longer needed."""
         try:
-            os.replace(self.request_path, processing)
-        except OSError:
-            return None, None
-        request = read_json(processing, MAX_REQUEST_BYTES)
-        try:
-            os.remove(processing)
+            os.remove(self.processing_path)
         except OSError:
             pass
+
+    def take_request(self):
+        """Takes the pending request, if any: (request, error). It stays in
+        request.json.processing until run() or fail_request() publishes it."""
+        if not os.path.exists(self.request_path):
+            return None, None
+        try:
+            os.replace(self.request_path, self.processing_path)
+        except OSError:
+            return None, None
+        request = read_json(self.processing_path, MAX_REQUEST_BYTES)
         validated, reason = validate_request(request)
         if validated is None:
             request_id = request.get("id") if isinstance(request, dict) else None
@@ -178,7 +210,7 @@ class Updater:
     def command_for(self, request: dict, report: str) -> list:
         command = [self.script, request["action"], "--env-file", self.env_file, "--report-json", report]
         if request["action"] == "apply":
-            command += ["--confirm", request["sha"]]
+            command += ["--confirm", request["sha"], "--confirm-release", request["release"]]
             if request["confirmMigrations"]:
                 command.append("--confirm-migrations")
         return command
@@ -194,6 +226,8 @@ class Updater:
             "startedAt": started,
         }
         self.publish()
+        # From here a crash shows as an interrupted run (state "checking"/"applying").
+        self.release_request()
         os.makedirs(self.log_dir, mode=0o700, exist_ok=True)
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         log_path = os.path.join(self.log_dir, f"{stamp}-{request['action']}.log")
@@ -269,6 +303,7 @@ class Updater:
             "finishedAt": now(),
         }
         self.publish()
+        self.release_request()
 
     def prune_logs(self) -> None:
         try:

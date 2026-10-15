@@ -45,6 +45,7 @@ jobs:
       frontend: ${{ steps.plan.outputs.frontend }}
       print_agent: ${{ steps.plan.outputs.print_agent }}
       previous: ${{ steps.plan.outputs.previous }}
+      published: ${{ steps.plan.outputs.published }}
     steps:
       - name: Enforce release policy
         run: |
@@ -85,6 +86,17 @@ jobs:
         id: plan
         run: |
           set -euo pipefail
+          # A commit's release is published once and never replaced: an
+          # installation's check pins the exact manifest it read, and a re-run
+          # must not quietly swap it (a re-run of a published commit is a no-op).
+          if docker manifest inspect "$(python3 deploy/release-manifest.py trust release-image):$GITHUB_SHA" >/dev/null 2>&1; then
+            echo "The release of $GITHUB_SHA is already published; nothing to do."
+            {
+              echo "api=false"; echo "frontend=false"; echo "print_agent=false"
+              echo "previous="; echo "published=true"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           previous="$(python3 deploy/release-manifest.py previous . "$GITHUB_SHA" "$RUNNER_TEMP/previous")"
           previous_json=-
           [[ -n "$previous" ]] && previous_json="$RUNNER_TEMP/previous/release.json"
@@ -100,6 +112,7 @@ jobs:
             echo "frontend=$frontend"
             echo "print_agent=$print_agent"
             echo "previous=$previous"
+            echo "published=false"
           } >> "$GITHUB_OUTPUT"
           {
             echo "## Release plan for \`$GITHUB_SHA\`"
@@ -141,7 +154,7 @@ jobs:
     name: Sign and publish the release manifest
     needs: [plan, images, print_agent]
     if: >-
-      always() && needs.plan.result == 'success'
+      always() && needs.plan.result == 'success' && needs.plan.outputs.published != 'true'
       && (needs.images.result == 'success' || needs.images.result == 'skipped')
       && (needs.print_agent.result == 'success' || needs.print_agent.result == 'skipped')
     runs-on: ubuntu-24.04
@@ -292,6 +305,21 @@ jobs:
         run: |
           set -euo pipefail
           image="$(python3 deploy/release-manifest.py trust release-image):$GITHUB_SHA"
+          # Never replace a published release. One that appeared since the plan
+          # is accepted only if it says exactly what this run would publish.
+          if docker manifest inspect "$image" >/dev/null 2>&1; then
+            existing="$RUNNER_TEMP/existing-release"
+            install -d "$existing"
+            container="$(docker create "$image" /bin/true)"
+            docker cp "$container:/release/release.json" "$existing/release.json"
+            docker rm -f "$container" >/dev/null
+            if cmp -s "$existing/release.json" "$RUNNER_TEMP/release.json"; then
+              echo "The release of $GITHUB_SHA is already published with this exact manifest; nothing to do."
+              exit 0
+            fi
+            echo "The release of $GITHUB_SHA is already published with another manifest; it is never replaced." >&2
+            exit 1
+          fi
           context="$RUNNER_TEMP/release-context"
           install -d "$context"
           cp "$RUNNER_TEMP/release.json" "$RUNNER_TEMP/release.sigstore.json" "$context/"

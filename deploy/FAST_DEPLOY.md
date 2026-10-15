@@ -101,7 +101,7 @@ migration, the server provides a review/apply pair:
 
 ```bash
 ./deploy/update-production.sh check --env-file .env
-./deploy/update-production.sh apply --env-file .env --confirm <full-main-sha> [--confirm-migrations]
+./deploy/update-production.sh apply --env-file .env --confirm <full-main-sha> --confirm-release <release-id> [--confirm-migrations]
 ```
 
 The same pair runs from **Administration › Updates** through the host updater

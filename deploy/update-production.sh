@@ -48,7 +48,7 @@ usage() {
     cat >&2 <<'EOF'
 usage:
   ./deploy/update-production.sh check --env-file <production.env> [--report-json <file>]
-  ./deploy/update-production.sh apply --env-file <production.env> --confirm <full-main-sha> [--confirm-migrations] [--report-json <file>]
+  ./deploy/update-production.sh apply --env-file <production.env> --confirm <full-main-sha> --confirm-release <release-id> [--confirm-migrations] [--report-json <file>]
 EOF
     exit 2
 }
@@ -59,19 +59,21 @@ shift
 [[ "$MODE" == "check" || "$MODE" == "apply" ]] || usage
 ENV_FILE=""
 CONFIRM_SHA=""
+CONFIRM_RELEASE=""
 CONFIRM_MIGRATIONS=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --env-file) [[ $# -ge 2 ]] || usage; ENV_FILE="$2"; shift 2 ;;
         --confirm) [[ $# -ge 2 ]] || usage; CONFIRM_SHA="$2"; shift 2 ;;
+        --confirm-release) [[ $# -ge 2 ]] || usage; CONFIRM_RELEASE="$2"; shift 2 ;;
         --confirm-migrations) CONFIRM_MIGRATIONS=true; shift ;;
         --report-json) [[ $# -ge 2 ]] || usage; REPORT_JSON="$2"; shift 2 ;;
         *) usage ;;
     esac
 done
 [[ -n "$ENV_FILE" ]] || fail "--env-file is required"
-[[ "$MODE" == "check" && -z "$CONFIRM_SHA" && "$CONFIRM_MIGRATIONS" == false ]] || \
-    [[ "$MODE" == "apply" && "$CONFIRM_SHA" =~ ^[0-9a-f]{40}$ ]] || usage
+[[ "$MODE" == "check" && -z "$CONFIRM_SHA" && -z "$CONFIRM_RELEASE" && "$CONFIRM_MIGRATIONS" == false ]] || \
+    [[ "$MODE" == "apply" && "$CONFIRM_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRM_RELEASE" =~ ^[0-9a-f]{64}$ ]] || usage
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -417,6 +419,19 @@ if [[ "$TV_CHANGED" == true ]]; then
         NOT_DEPLOYABLE_REASON="tv-artifact-missing"
 fi
 
+# The release this check found, exactly: the signed manifest's bytes (which
+# name every component image by digest) and the TV bundles' digests. An
+# install confirms this identity, not just the commit, so a release tag
+# re-pointed or a TV tag republished between check and install is refused.
+RELEASE_ID=""
+if [[ -z "$NOT_DEPLOYABLE_REASON" ]]; then
+    MANIFEST_SHA256="$(sha256sum "$RELEASE_DIR/release.json" | awk '{print $1}')"
+    RELEASE_ID="$(printf 'manifest:%s\ntv-apk:%s\ntv-ota:%s\n' \
+        "$MANIFEST_SHA256" "${TV_DIGEST:-none}" "${TV_OTA_DIGEST:-none}" | sha256sum | awk '{print $1}')"
+    [[ "$MODE" != "apply" || "$CONFIRM_RELEASE" == "$RELEASE_ID" ]] || \
+        fail "the release for $CANDIDATE_SHA changed since it was checked; run check again"
+fi
+
 UP_TO_DATE=false
 if [[ -z "$NOT_DEPLOYABLE_REASON" && "$HEAD_SHA" == "$CANDIDATE_SHA" && "$BACKEND_CHANGED" == false && \
       "$FRONTEND_CHANGED" == false && "$TV_CHANGED" == false && "$PRINT_AGENT_CHANGED" == false ]]; then
@@ -449,7 +464,7 @@ write_report() {
     [[ -n "$REPORT_JSON" ]] || return 0
     local outcome="$1" commits
     commits="$(git log --no-merges --max-count=50 --format='%h%x1f%s' "$CURRENT_API_SHA..$CANDIDATE_SHA" 2>/dev/null || true)"
-    R_OUTCOME="$outcome" R_MODE="$MODE" R_REASON="$NOT_DEPLOYABLE_REASON" R_CANDIDATE="$CANDIDATE_SHA" \
+    R_OUTCOME="$outcome" R_MODE="$MODE" R_REASON="$NOT_DEPLOYABLE_REASON" R_CANDIDATE="$CANDIDATE_SHA" R_RELEASE_ID="$RELEASE_ID" \
     R_CANDIDATE_VERSION="$CANDIDATE_VERSION" R_CURRENT_API="$CURRENT_API_SHA" R_CURRENT_FRONTEND="$CURRENT_FRONTEND_SHA" \
     R_CURRENT_VERSION="$CURRENT_VERSION" R_CHECKOUT="$HEAD_SHA" R_VARIANT="$API_VARIANT" \
     R_BACKEND="$BACKEND_CHANGED" R_FRONTEND="$FRONTEND_CHANGED" R_TV="$TV_CHANGED" R_TV_ENABLED="$TV_ENABLED" \
@@ -468,7 +483,7 @@ report = {
     "reason": e.get("R_REASON") or None,
     "finishedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
     "candidate": {"sha": e["R_CANDIDATE"], "version": e.get("R_CANDIDATE_VERSION") or None,
-                  "signed": flag("R_SIGNED")},
+                  "signed": flag("R_SIGNED"), "releaseId": e.get("R_RELEASE_ID") or None},
     "current": {"apiSha": e["R_CURRENT_API"], "frontendSha": e["R_CURRENT_FRONTEND"],
                 "checkoutSha": e["R_CHECKOUT"], "version": e.get("R_CURRENT_VERSION") or None,
                 "apiVariant": e["R_VARIANT"]},
@@ -510,8 +525,8 @@ if [[ "$MODE" == "check" ]]; then
         exit 0
     fi
     log "ready. After reviewing the SHA, run:"
-    printf './deploy/update-production.sh apply --env-file %q --confirm %s' \
-        "$ENV_FILE" "$CANDIDATE_SHA"
+    printf './deploy/update-production.sh apply --env-file %q --confirm %s --confirm-release %s' \
+        "$ENV_FILE" "$CANDIDATE_SHA" "$RELEASE_ID"
     if [[ ${#MIGRATION_IDS[@]} -gt 0 ]]; then
         printf ' --confirm-migrations'
     fi

@@ -23,6 +23,11 @@
 # as this service, not a timer of its own. /run is emptied at boot, so a power
 # loss mid-update leaves no pause behind.
 #
+# It installs only on a request it claimed: it renames update-request.json to
+# update-request.claimed after raising the marker. The agent takes a request
+# nobody picked up back with a rename too, so exactly one of the two wins: an
+# agent that went back to work is never updated under a job.
+#
 # The outcome, "ok|failed <version> <request id>", is left in update-result for
 # the agent to relay on its next heartbeat.
 set -euo pipefail
@@ -47,6 +52,7 @@ systemd_dir="$root/etc/systemd/system"
 cups_backend="$root/usr/lib/cups/backend/nubarca-sim"
 polkit_rule="$root/etc/polkit-1/rules.d/49-nubarca-print-box.rules"
 request="$state_dir/update-request.json"
+claimed="$state_dir/update-request.claimed"
 result_name='update-result'
 health_seconds="${NUBARCA_PRINT_UPDATE_HEALTH_SECONDS:-180}"
 poll_seconds="${NUBARCA_PRINT_UPDATE_POLL_SECONDS:-3}"
@@ -124,9 +130,8 @@ on_exit() {
     restore
     status=1
   fi
-  # The bell is always taken down, whatever happens: the path unit would
-  # otherwise start this service again at once.
-  rm -f -- "$request"
+  # The claimed bell is always taken down, whatever happens.
+  rm -f -- "$claimed"
   rm -rf -- "$staging" "$next_dir"
   rm -f -- "$in_progress"
   exit "$status"
@@ -151,10 +156,16 @@ healthy() {
   return 1
 }
 
-# The request names what the agent was offered. It decides nothing here; it
-# only lets a fetch that fails be reported against the right request.
-if [[ -f "$request" && ! -L "$request" ]]; then
-  read -r version request_id < <(python3 -I - "$request" <<'PY' || true
+# The claim: one atomic rename, after the marker is up. If the agent took its
+# request back first, there is nothing to install.
+if ! mv -T -- "$request" "$claimed" 2>/dev/null; then
+  log 'no update request to pick up (the agent took it back)'
+  exit 0
+fi
+# The request names what the agent asked for. It decides nothing that is
+# installed; the offer must match it, and a failure is reported against it.
+if [[ -f "$claimed" && ! -L "$claimed" ]]; then
+  read -r version request_id < <(python3 -I - "$claimed" <<'PY' || true
 import json, re, sys
 try:
     with open(sys.argv[1]) as f:
@@ -167,6 +178,7 @@ except Exception:
 PY
   ) || true
 fi
+[[ -n "$version" && -n "$request_id" ]] || { log 'the update request is not valid; nothing is installed'; exit 1; }
 
 # --- 1. What the server offers, fetched and checked by the installed agent ----------
 rm -rf -- "$staging"
@@ -192,7 +204,11 @@ assert re.fullmatch(r"\d{1,20}", request_id)
 print(version, name, request_id)
 PY
 )"
-read -r version file_name request_id <<<"$offer_fields"
+read -r offer_version file_name offer_request_id <<<"$offer_fields"
+if [[ "$offer_version" != "$version" || "$offer_request_id" != "$request_id" ]]; then
+  log "the server offers $offer_version (request $offer_request_id), not what the agent asked for"
+  report failed; exit 1
+fi
 log "installing $version"
 
 # --- 2. The new bundle, beside the current one ---------------------------------------

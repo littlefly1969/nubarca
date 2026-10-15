@@ -29,6 +29,8 @@ export interface SystemUpdateReport {
   candidateSha: string | null;
   candidateVersion: string | null;
   signed: boolean;
+  /** The exact release the check found (signed manifest and TV bundles); an install confirms it. */
+  releaseId: string | null;
   currentVersion: string | null;
   apiVariant: string | null;
   components: {
@@ -78,9 +80,13 @@ export async function requestSystemUpdateCheck(): Promise<SystemUpdate> {
   return api('/api/admin/system-update/check', { method: 'POST' });
 }
 
-/** Installs the release the last check found, with that check's migration answer. */
-export async function requestSystemUpdateApply(sha: string, confirmMigrations: boolean): Promise<SystemUpdate> {
-  return api('/api/admin/system-update/apply', { method: 'POST', json: { sha, confirmMigrations } });
+/** Installs exactly the release the last check found, with that check's migration answer. */
+export async function requestSystemUpdateApply(
+  sha: string,
+  releaseId: string,
+  confirmMigrations: boolean,
+): Promise<SystemUpdate> {
+  return api('/api/admin/system-update/apply', { method: 'POST', json: { sha, releaseId, confirmMigrations } });
 }
 
 export async function listPrintBoxUpdates(signal?: AbortSignal): Promise<PrintBoxUpdate[]> {

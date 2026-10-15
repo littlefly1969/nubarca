@@ -117,6 +117,33 @@ public sealed class AgentSelfUpdateTests : IDisposable
     }
 
     [Fact]
+    public void A_Request_The_Root_Service_Claimed_Is_Never_Taken_Back()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        var agent = Agent();
+        var now = DateTimeOffset.UtcNow;
+        agent.Handle(Offer(), now);
+        // The root service raised its marker and claimed the request (its rename won).
+        File.WriteAllText(_inProgress, "");
+        File.Move(RequestPath, Path.Combine(_state, "update-request.claimed"));
+        Assert.True(agent.Pending(now + AgentSelfUpdate.PickupLimit + TimeSpan.FromMinutes(1)));
+        Assert.Null(agent.ReadResult());
+    }
+
+    [Fact]
+    public void A_Request_Taken_Back_Can_No_Longer_Be_Claimed()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        var agent = Agent();
+        var now = DateTimeOffset.UtcNow;
+        agent.Handle(Offer(), now);
+        Assert.False(agent.Pending(now + AgentSelfUpdate.PickupLimit + TimeSpan.FromSeconds(5)));
+        // Gone under the name the root service claims, and not left anywhere else.
+        Assert.False(File.Exists(RequestPath));
+        Assert.Empty(Directory.GetFiles(_state, "update-request*"));
+    }
+
+    [Fact]
     public void The_Root_Service_Is_Stopped_Before_Its_Marker_Would_Be_Ignored()
     {
         var unit = Path.Combine(RepositoryRoot(), "src/NubArca.PrintAgent/linux/nubarca-print-agent-update.service");

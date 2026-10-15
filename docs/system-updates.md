@@ -31,8 +31,14 @@ themselves are unchanged and documented in
    `origin/main`, pulls that commit's manifest, verifies the signature, checks
    every image against the trusted GHCR repository, and reports what would
    change: components, migrations and commits. A release whose images are
-   still building reports *not published yet*.
-4. **The server installs** (`deploy/update-production.sh apply`) with every
+   still building reports *not published yet*. The check also reports the
+   **release id**: a hash of the signed manifest's bytes and of the TV bundle
+   digests it found.
+4. **The server installs** (`deploy/update-production.sh apply`) exactly the
+   release the check found: the install names the release id, and anything
+   that changed since (a re-pointed tag, a republished TV bundle) is refused
+   with *run check again*. CI publishes a commit's release once and never
+   replaces it. The install runs with every
    existing gate. That covers the migration policy, a backup before any
    migration, the image verifiers, smoke checks and the rollback of the pins.
    It then publishes the new Print Agent bundle and, where enabled, the TV
@@ -156,9 +162,15 @@ no heartbeat, a failed unit install, an error or a stop signal. The page then
 shows that the update failed. A failed update is not retried until someone
 asks again.
 
-Every request from the page, for the server or for a Print Box, writes its
-audit record in the same transaction as the request. If the audit record
-cannot be written, the request is not made.
+Every request from the page is on record before it takes effect. A Print Box
+request writes its audit record in the same transaction as the request. A
+server check or install is written beside the updater's mailbox first, then
+recorded, then delivered with one rename; if the audit record cannot be
+written, nothing is delivered, and a delivery that fails after the record is
+recorded as *not delivered*. The updater keeps a taken request as a journal
+until it has published that request's state, so a crash in between shows the
+request as *interrupted*, never as lost. An interrupted install is not re-run
+until someone asks again.
 
 Self-update arrives with **Print Agent 0.9.0**. Update each existing box by
 hand once, re-running `install-print-box.sh` from the 0.9.0 bundle as the

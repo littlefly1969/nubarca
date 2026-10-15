@@ -9,6 +9,7 @@ afterEach(() => {
 });
 
 const CANDIDATE = '0123456789abcdef0123456789abcdef01234567';
+const RELEASE = '89abcdef'.repeat(8);
 
 function described(overrides: Record<string, unknown> = {}) {
   return {
@@ -29,6 +30,7 @@ function described(overrides: Record<string, unknown> = {}) {
       candidateSha: CANDIDATE,
       candidateVersion: '0.4.0',
       signed: true,
+      releaseId: RELEASE,
       currentVersion: '0.3.0',
       apiVariant: 'openvino',
       components: { backend: true, frontend: false, printAgent: true, printAgentVersion: '0.9.0', tv: false, tvEnabled: false },
@@ -81,7 +83,7 @@ describe('AdminUpdatesPage', () => {
 
     await waitFor(() => expect(mock.calls.some((c) => c.method === 'POST')).toBe(true));
     const post = mock.calls.find((c) => c.method === 'POST')!;
-    expect(JSON.parse(post.body!)).toEqual({ sha: CANDIDATE, confirmMigrations: true });
+    expect(JSON.parse(post.body!)).toEqual({ sha: CANDIDATE, releaseId: RELEASE, confirmMigrations: true });
     expect(await screen.findByTestId('updates-busy')).toBeInTheDocument();
   });
 
@@ -97,7 +99,7 @@ describe('AdminUpdatesPage', () => {
 
     // A newer check finds another release with other migrations.
     report = { ...report, candidateSha: 'f'.repeat(40), candidateVersion: '0.5.0', checkedAt: '2026-10-15T11:00:00Z',
-      migrations: ['20261016000000_Another'] };
+      releaseId: 'e'.repeat(64), migrations: ['20261016000000_Another'] };
     fireEvent.click(screen.getByRole('button', { name: 'Aggiorna' }));
     await waitFor(() => expect(screen.getByTestId('updates-outcome').textContent).toContain('0.5.0'));
     expect(screen.getByTestId('updates-confirm-migrations')).not.toBeChecked();

@@ -19,13 +19,17 @@ namespace NubArca.PrintAgent.Update;
 public sealed partial class AgentSelfUpdate
 {
     public const string RequestFile = "update-request.json";
+    /// <summary>A request the agent took back, renamed so the root service can no longer claim it.</summary>
+    public const string WithdrawnFile = "update-request.withdrawn";
     public const string ResultFile = "update-result";
     public const string HeartbeatFile = "heartbeat-ok";
 
     /// <summary>
     /// How long a request may wait for the root service to pick it up. Past it
     /// the service is not there to run (its path unit missing or broken): the
-    /// agent takes its request back, reports it failed and works again.
+    /// agent takes its request back, reports it failed and works again. The
+    /// take-back and the root service's claim are both one rename of the same
+    /// file, so exactly one of them wins.
     /// </summary>
     public static readonly TimeSpan PickupLimit = TimeSpan.FromMinutes(2);
 
@@ -79,8 +83,20 @@ public sealed partial class AgentSelfUpdate
             var request = new FileInfo(Path.Combine(_stateDirectory, RequestFile));
             if (!request.Exists) return false;
             if (now - request.LastWriteTimeUtc < PickupLimit) return true;
-            // Nobody picked it up: take it back, say so, and work again.
-            request.Delete();
+            // Nobody picked it up: take it back, say so, and work again —
+            // unless the root service claimed it in the meantime.
+            var withdrawn = Path.Combine(_stateDirectory, WithdrawnFile);
+            try
+            {
+                File.Move(request.FullName, withdrawn, overwrite: true);
+            }
+            catch (FileNotFoundException)
+            {
+                // The root service won: it raised its marker first, and the
+                // next poll sees it. Until then, still no job.
+                return true;
+            }
+            File.Delete(withdrawn);
             if (_requestedVersion is not null && _requestedId is not null)
                 _localResult = $"failed {_requestedVersion} {_requestedId}";
             _logger.LogWarning("print.agent.update.not_picked_up: the box's update service did not start");

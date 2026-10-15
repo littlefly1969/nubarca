@@ -24,31 +24,27 @@ public static class AdminSystemUpdateEndpoints
         admin.MapGet("", ([FromServices] SystemUpdateService service) => Results.Ok(service.Describe()))
             .WithName("DescribeSystemUpdate");
 
-        // The audit record is written first and must land: a request is handed
-        // to the updater only once it is on record (WriteAsync, not best effort).
+        // Staged, then on record, then delivered: the audit record must land
+        // before a request reaches the updater (WriteAsync, not best effort),
+        // and a delivery that fails after it is recorded as not delivered.
         admin.MapPost("/check", async (HttpContext context, [FromServices] SystemUpdateService service,
             [FromServices] IAuditLogger audit, CancellationToken ct) =>
         {
             var error = service.PrepareCheck(out var request);
-            if (error != SystemUpdateRequestError.None) return Refused(error);
-            await audit.WriteAsync(AuditActor.User(context.GetCurrentUserId()!.Value), AuditActions.SystemUpdateCheck,
-                AuditEntityTypes.SystemUpdate, request!.Id,
-                context.Connection.RemoteIpAddress?.ToString(), null, ct);
-            error = service.Submit(request);
-            return error == SystemUpdateRequestError.None ? Results.Accepted(value: service.Describe()) : Refused(error);
+            return error != SystemUpdateRequestError.None
+                ? Refused(error)
+                : await HandOverAsync(request!, AuditActions.SystemUpdateCheck, null, context, service, audit, ct);
         }).WithName("RequestSystemUpdateCheck");
 
         admin.MapPost("/apply", async ([FromBody] SystemUpdateApplyRequest body, HttpContext context,
             [FromServices] SystemUpdateService service, [FromServices] IAuditLogger audit, CancellationToken ct) =>
         {
             var error = service.PrepareApply(body, out var request);
-            if (error != SystemUpdateRequestError.None) return Refused(error);
-            await audit.WriteAsync(AuditActor.User(context.GetCurrentUserId()!.Value), AuditActions.SystemUpdateApply,
-                AuditEntityTypes.SystemUpdate, request!.Id,
-                context.Connection.RemoteIpAddress?.ToString(),
-                new { sha = request.Sha, confirmMigrations = request.ConfirmMigrations }, ct);
-            error = service.Submit(request);
-            return error == SystemUpdateRequestError.None ? Results.Accepted(value: service.Describe()) : Refused(error);
+            return error != SystemUpdateRequestError.None
+                ? Refused(error)
+                : await HandOverAsync(request!, AuditActions.SystemUpdateApply,
+                    new { sha = request!.Sha, releaseId = request.ReleaseId, confirmMigrations = request.ConfirmMigrations },
+                    context, service, audit, ct);
         }).WithName("RequestSystemUpdateApply");
 
         admin.MapGet("/print-boxes", async ([FromServices] PrintAgentUpdateService service,
@@ -109,6 +105,29 @@ public static class AdminSystemUpdateEndpoints
         await service.CancelAsync(ownerId, stationId, AuditActor.User(context.GetCurrentUserId()!.Value),
             context.Connection.RemoteIpAddress?.ToString(), ct)
             ? Results.NoContent() : Results.NotFound();
+
+    private static async Task<IResult> HandOverAsync(SystemUpdateRequest request, string action, object? metadata,
+        HttpContext context, SystemUpdateService service, IAuditLogger audit, CancellationToken ct)
+    {
+        var error = service.Stage(request, out var staged);
+        if (error != SystemUpdateRequestError.None) return Refused(error);
+        var actor = AuditActor.User(context.GetCurrentUserId()!.Value);
+        var ip = context.Connection.RemoteIpAddress?.ToString();
+        try
+        {
+            await audit.WriteAsync(actor, action, AuditEntityTypes.SystemUpdate, request.Id, ip, metadata, ct);
+        }
+        catch
+        {
+            service.Discard(staged!);
+            throw;
+        }
+        error = service.Deliver(staged!);
+        if (error == SystemUpdateRequestError.None) return Results.Accepted(value: service.Describe());
+        await audit.WriteAsync(actor, AuditActions.SystemUpdateNotDelivered, AuditEntityTypes.SystemUpdate, request.Id,
+            ip, new { reason = error == SystemUpdateRequestError.Busy ? "busy" : "unavailable" }, CancellationToken.None);
+        return Refused(error);
+    }
 
     private static IResult Refused(SystemUpdateRequestError error) => error switch
     {
