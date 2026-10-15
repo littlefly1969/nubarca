@@ -4,13 +4,12 @@ name: Release
 # paths changed are built and verified (build-production-images.yml,
 # print-agent-release.yml), and one signed manifest names, by digest, the
 # images that make up this commit. Installations update only to a manifest
-# whose Sigstore signature proves it was written by THIS workflow on main
-# (deploy/release-manifest.py, SIGNER_IDENTITY); GitHub never connects to an
-# installation.
+# whose signature they can prove from the signer they already hold
+# (deploy/release-manifest.py); GitHub never connects to an installation.
 #
-# A component that did not change is not rebuilt: the manifest names the image
-# built from the last commit that changed it, and an installation re-checks
-# against Git that nothing of that component changed since.
+# A component that did not change is not rebuilt: its entry is carried over
+# from the previous signed release, and an installation re-checks against Git
+# that nothing of that component changed since.
 on:
   push:
     branches:
@@ -37,7 +36,7 @@ jobs:
   plan:
     name: Plan the release
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: read
@@ -45,6 +44,7 @@ jobs:
       api: ${{ steps.plan.outputs.api }}
       frontend: ${{ steps.plan.outputs.frontend }}
       print_agent: ${{ steps.plan.outputs.print_agent }}
+      previous: ${{ steps.plan.outputs.previous }}
     steps:
       - name: Enforce release policy
         run: |
@@ -66,30 +66,45 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # A component is built when no image exists for the last commit that
-      # changed it — normally because this push changed it, or because the run
-      # that should have built it failed.
+      - name: Install cosign
+        run: |
+          set -euo pipefail
+          install -d "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/cosign" \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          echo "${COSIGN_SHA256}  $RUNNER_TEMP/bin/cosign" | sha256sum -c -
+          chmod 0755 "$RUNNER_TEMP/bin/cosign"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # The previous release is the newest signed manifest among this commit's
+      # first-parent ancestors, its signature checked against the signer its
+      # own commit declares. A component nothing of which changed since that
+      # release is carried over from it; every other component is built now.
+      # No image is ever taken on trust from a registry tag.
       - name: Decide what to build
         id: plan
         run: |
           set -euo pipefail
-          owner="$(python3 deploy/release-manifest.py trust owner)"
-          python3 deploy/release-manifest.py plan . "$GITHUB_SHA" > "$RUNNER_TEMP/plan.json"
+          previous="$(python3 deploy/release-manifest.py previous . "$GITHUB_SHA" "$RUNNER_TEMP/previous")"
+          previous_json=-
+          [[ -n "$previous" ]] && previous_json="$RUNNER_TEMP/previous/release.json"
+          python3 deploy/release-manifest.py plan . "$GITHUB_SHA" "$previous_json" > "$RUNNER_TEMP/plan.json"
           cat "$RUNNER_TEMP/plan.json"
-          exists() { docker buildx imagetools inspect "$1" >/dev/null 2>&1; }
-          last() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$RUNNER_TEMP/plan.json" "$1"; }
-          api=false; frontend=false; print_agent=false
-          exists "$REGISTRY/$owner/nubarca-api-openvino:$(last api)" && \
-            exists "$REGISTRY/$owner/nubarca-api:$(last api)" || api=true
-          exists "$REGISTRY/$owner/nubarca-frontend:$(last frontend)" || frontend=true
-          exists "$REGISTRY/$owner/nubarca-print-agent:$(last print-agent)-linux-x64" || print_agent=true
+          builds() {
+            python3 -c 'import json,sys; print(str(sys.argv[2] in json.load(open(sys.argv[1]))["build"]).lower())' \
+              "$RUNNER_TEMP/plan.json" "$1"
+          }
+          api="$(builds api)"; frontend="$(builds frontend)"; print_agent="$(builds print-agent)"
           {
             echo "api=$api"
             echo "frontend=$frontend"
             echo "print_agent=$print_agent"
+            echo "previous=$previous"
           } >> "$GITHUB_OUTPUT"
           {
             echo "## Release plan for \`$GITHUB_SHA\`"
+            echo
+            echo "Previous release: \`${previous:-none}\`"
             echo
             echo "| Component | Build now |"
             echo "| --- | --- |"
@@ -154,114 +169,123 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Each image is named by digest and checked to carry the commit the
-      # manifest says it was built from: an image is never trusted by its tag.
-      - name: Resolve component images
-        id: resolve
+      - name: Install cosign
+        run: |
+          set -euo pipefail
+          install -d "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/cosign" \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          echo "${COSIGN_SHA256}  $RUNNER_TEMP/bin/cosign" | sha256sum -c -
+          chmod 0755 "$RUNNER_TEMP/bin/cosign"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # Fresh images are named by the digests their build jobs pushed, and
+      # each must carry this commit; the rest come from the previous signed
+      # release, which is fetched and verified again here.
+      - name: Assemble the manifest
+        env:
+          PLANNED_PREVIOUS: ${{ needs.plan.outputs.previous }}
+          BUILD_API: ${{ needs.plan.outputs.api }}
+          BUILD_FRONTEND: ${{ needs.plan.outputs.frontend }}
+          BUILD_PRINT_AGENT: ${{ needs.plan.outputs.print_agent }}
+          RUNTIME_DIGEST: ${{ needs.images.outputs.runtime_digest }}
+          OPENVINO_DIGEST: ${{ needs.images.outputs.openvino_digest }}
+          FRONTEND_DIGEST: ${{ needs.images.outputs.frontend_digest }}
+          PRINT_AGENT_DIGEST: ${{ needs.print_agent.outputs.digest }}
         run: |
           set -euo pipefail
           owner="$(python3 deploy/release-manifest.py trust owner)"
-          python3 deploy/release-manifest.py plan . "$GITHUB_SHA" > "$RUNNER_TEMP/plan.json"
-          last() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$RUNNER_TEMP/plan.json" "$1"; }
-          # A component built in THIS run carries this commit, not its last change.
-          source_for() {
-            local component="$1" built="$2" candidate
-            candidate="$(last "$component")"
-            [[ "$built" == true ]] && candidate="$GITHUB_SHA"
-            printf '%s' "$candidate"
+          previous="$(python3 deploy/release-manifest.py previous . "$GITHUB_SHA" "$RUNNER_TEMP/previous")"
+          [[ "$previous" == "$PLANNED_PREVIOUS" ]] || {
+            echo "the previous release changed since the plan ('$PLANNED_PREVIOUS' -> '$previous')" >&2
+            exit 1
           }
-          digest() { docker buildx imagetools inspect "$1" --format '{{.Manifest.Digest}}'; }
-          revision_env() {
+          previous_json=-
+          [[ -n "$previous" ]] && previous_json="$RUNNER_TEMP/previous/release.json"
+          revision() {
             docker buildx imagetools inspect "$1" --format '{{json .Image}}' |
               python3 -c 'import json,sys
           image=json.load(sys.stdin); config=image.get("config") or {}
           env=dict(e.split("=",1) for e in config.get("Env") or [] if "=" in e)
           print(env.get("NUBARCA_GIT_SHA") or (config.get("Labels") or {}).get("org.opencontainers.image.revision",""))'
           }
-          api_sha="$(source_for api '${{ needs.plan.outputs.api }}')"
-          frontend_sha="$(source_for frontend '${{ needs.plan.outputs.frontend }}')"
-          agent_sha="$(source_for print-agent '${{ needs.plan.outputs.print_agent }}')"
-          refs=(
-            "api runtime $REGISTRY/$owner/nubarca-api $api_sha"
-            "api openvino $REGISTRY/$owner/nubarca-api-openvino $api_sha"
-            "frontend default $REGISTRY/$owner/nubarca-frontend $frontend_sha"
-            "print-agent linux-x64 $REGISTRY/$owner/nubarca-print-agent $agent_sha"
-          )
-          printf '' > "$RUNNER_TEMP/images.tsv"
-          for line in "${refs[@]}"; do
-            read -r component variant repository source <<< "$line"
-            tag="$source"
-            [[ "$component" == print-agent ]] && tag="$source-linux-x64"
-            image_digest="$(digest "$repository:$tag")"
-            revision="$(revision_env "$repository@$image_digest")"
-            [[ "$revision" == "$source" ]] || {
-              echo "$repository:$tag carries revision '$revision', expected $source" >&2
-              exit 1
-            }
-            printf '%s\t%s\t%s\t%s\n' "$component" "$variant" "$repository@$image_digest" "$source" >> "$RUNNER_TEMP/images.tsv"
+          rows=()
+          [[ "$BUILD_API" == true ]] && rows+=(
+            "api runtime $REGISTRY/$owner/nubarca-api@$RUNTIME_DIGEST"
+            "api openvino $REGISTRY/$owner/nubarca-api-openvino@$OPENVINO_DIGEST")
+          [[ "$BUILD_FRONTEND" == true ]] && rows+=("frontend default $REGISTRY/$owner/nubarca-frontend@$FRONTEND_DIGEST")
+          [[ "$BUILD_PRINT_AGENT" == true ]] && rows+=("print-agent linux-x64 $REGISTRY/$owner/nubarca-print-agent@$PRINT_AGENT_DIGEST")
+          printf '' > "$RUNNER_TEMP/built.tsv"
+          for row in "${rows[@]}"; do
+            read -r component variant image <<< "$row"
+            [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]] || { echo "$component/$variant: no digest from its build" >&2; exit 1; }
+            [[ "$(revision "$image")" == "$GITHUB_SHA" ]] || { echo "$image does not carry $GITHUB_SHA" >&2; exit 1; }
+            printf '%s\t%s\t%s\n' "$component" "$variant" "$image" >> "$RUNNER_TEMP/built.tsv"
           done
-          python3 - "$RUNNER_TEMP/images.tsv" "$RUNNER_TEMP/components.json" <<'PY'
-          import json, re, subprocess, sys
-          rows = [line.rstrip("\n").split("\t") for line in open(sys.argv[1]) if line.strip()]
-          def version(source, path):
-              text = subprocess.run(["git", "show", f"{source}:{path}"], capture_output=True, text=True, check=True).stdout
-              match = re.search(r"<Version>(\d+\.\d+\.\d+)</Version>", text)
-              return match.group(1) if match else None
-          result = {}
-          for component, variant, image, source in rows:
-              entry = result.setdefault(component, {"sourceSha": source, "images": {}})
-              entry["images"][variant] = image
-          result["api"]["version"] = version(result["api"]["sourceSha"], "src/NubArca.Api/NubArca.Api.csproj")
-          result["print-agent"]["version"] = version(result["print-agent"]["sourceSha"], "src/NubArca.PrintAgent/NubArca.PrintAgent.csproj")
-          json.dump(result, open(sys.argv[2], "w"), indent=2)
+          python3 - "$RUNNER_TEMP/built.tsv" "$RUNNER_TEMP/built.json" <<'PY'
+          import json, sys
+          built = {}
+          for line in open(sys.argv[1]):
+              if line.strip():
+                  component, variant, image = line.rstrip("\n").split("\t")
+                  built.setdefault(component, {})[variant] = image
+          json.dump(built, open(sys.argv[2], "w"), indent=2)
           PY
           version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/NubArca.Api/NubArca.Api.csproj)"
-          python3 deploy/release-manifest.py build "$GITHUB_SHA" "$version" "$RUNNER_TEMP/components.json" \
-            > "$RUNNER_TEMP/release.json"
+          python3 deploy/release-manifest.py assemble . "$GITHUB_SHA" "$version" "$RUNNER_TEMP/built.json" \
+            "$previous_json" > "$RUNNER_TEMP/release.json"
           cat "$RUNNER_TEMP/release.json"
 
-      - name: Install cosign
-        run: |
-          set -euo pipefail
-          curl -fsSL -o "$RUNNER_TEMP/cosign" \
-            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
-          echo "${COSIGN_SHA256}  $RUNNER_TEMP/cosign" | sha256sum -c -
-          chmod 0755 "$RUNNER_TEMP/cosign"
-
-      # Two ways to sign, chosen by the commit itself, so CI and every
-      # installation always agree:
-      # - keyless (default): Sigstore certifies this workflow on main. Nothing
-      #   to keep secret; the public transparency log records the repository
-      #   and workflow name.
-      # - own key: when deploy/release-signing.pub is committed, the manifest
-      #   is signed with the private key in the RELEASE_SIGNING_KEY repository
-      #   secret (cosign generate-key-pair), and nothing is published to the
-      #   transparency log (for a private repository).
+      # The signer is the one THIS commit declares: keyless by default, or
+      # NubArca's own key when deploy/release-signing.pub is committed (the
+      # private key in RELEASE_SIGNING_KEY, signed without a public
+      # transparency-log entry, for a private repository).
+      #
+      # When the signer differs from the previous release's, this release is
+      # a trust transition and is signed a second time, by the PREVIOUS
+      # signer (release.transition.sigstore.json): installations accept the
+      # new signer only because the one they hold authorized it. A rotation
+      # from one key to another needs the old private key once more, in
+      # RELEASE_SIGNING_KEY_PREVIOUS.
       - name: Sign the manifest
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
-          COSIGN_PASSWORD: ${{ secrets.RELEASE_SIGNING_KEY_PASSWORD }}
+          RELEASE_SIGNING_KEY_PASSWORD: ${{ secrets.RELEASE_SIGNING_KEY_PASSWORD }}
+          RELEASE_SIGNING_KEY_PREVIOUS: ${{ secrets.RELEASE_SIGNING_KEY_PREVIOUS }}
+          RELEASE_SIGNING_KEY_PREVIOUS_PASSWORD: ${{ secrets.RELEASE_SIGNING_KEY_PREVIOUS_PASSWORD }}
         run: |
           set -euo pipefail
-          if [[ -f deploy/release-signing.pub ]]; then
-            [[ -n "${RELEASE_SIGNING_KEY:-}" ]] || {
-              echo "deploy/release-signing.pub is committed but RELEASE_SIGNING_KEY is not set" >&2
+          release="$RUNNER_TEMP/release.json"
+          normalized() { tr -d '[:space:]' < "$1"; }
+          # sign_as <current|previous> <bundle>
+          sign_as() {
+            local role="$1" bundle="$2" mode slot key_var password_var
+            mode="$(python3 deploy/release-manifest.py signer "$release" "$role" "$RUNNER_TEMP/$role.pub")"
+            if [[ "$mode" == keyless ]]; then
+              cosign sign-blob --yes --bundle "$bundle" "$release"
+            else
+              for slot in '' _PREVIOUS; do
+                key_var="RELEASE_SIGNING_KEY$slot"; password_var="RELEASE_SIGNING_KEY${slot}_PASSWORD"
+                [[ -n "${!key_var:-}" ]] || continue
+                COSIGN_PASSWORD="${!password_var:-}" cosign public-key --key "env://$key_var" \
+                  --outfile "$RUNNER_TEMP/slot.pub"
+                if [[ "$(normalized "$RUNNER_TEMP/slot.pub")" == "$(normalized "$RUNNER_TEMP/$role.pub")" ]]; then
+                  COSIGN_PASSWORD="${!password_var:-}" cosign sign-blob --yes --key "env://$key_var" \
+                    --tlog-upload=false --bundle "$bundle" "$release"
+                  return 0
+                fi
+              done
+              echo "no RELEASE_SIGNING_KEY secret holds the $role signer's private key" >&2
               exit 1
-            }
-            "$RUNNER_TEMP/cosign" sign-blob --yes --key env://RELEASE_SIGNING_KEY --tlog-upload=false \
-              --bundle "$RUNNER_TEMP/release.sigstore.json" "$RUNNER_TEMP/release.json"
-            "$RUNNER_TEMP/cosign" verify-blob --key deploy/release-signing.pub --insecure-ignore-tlog=true \
-              --bundle "$RUNNER_TEMP/release.sigstore.json" "$RUNNER_TEMP/release.json"
-          else
-            "$RUNNER_TEMP/cosign" sign-blob --yes \
-              --bundle "$RUNNER_TEMP/release.sigstore.json" \
-              "$RUNNER_TEMP/release.json"
-            # Proved here exactly as an installation will prove it.
-            "$RUNNER_TEMP/cosign" verify-blob \
-              --bundle "$RUNNER_TEMP/release.sigstore.json" \
-              --certificate-identity "$(python3 deploy/release-manifest.py trust identity)" \
-              --certificate-oidc-issuer "$(python3 deploy/release-manifest.py trust issuer)" \
-              "$RUNNER_TEMP/release.json"
+            fi
+          }
+          sign_as current "$RUNNER_TEMP/release.sigstore.json"
+          # Proved here exactly as an installation will prove it.
+          python3 deploy/release-manifest.py check-signature "$RUNNER_TEMP/release.json" "$RUNNER_TEMP/release.sigstore.json" current
+          if [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["transition"] is not None)' "$release")" == True ]]; then
+            echo "This release hands signing trust to a new signer; the previous signer signs it too."
+            sign_as previous "$RUNNER_TEMP/release.transition.sigstore.json"
+            python3 deploy/release-manifest.py check-signature "$RUNNER_TEMP/release.json" "$RUNNER_TEMP/release.transition.sigstore.json" previous
           fi
 
       - name: Publish the release manifest image
@@ -271,12 +295,15 @@ jobs:
           context="$RUNNER_TEMP/release-context"
           install -d "$context"
           cp "$RUNNER_TEMP/release.json" "$RUNNER_TEMP/release.sigstore.json" "$context/"
-          printf 'FROM scratch\nCOPY release.json release.sigstore.json /release/\n' > "$context/Dockerfile"
+          if [[ -f "$RUNNER_TEMP/release.transition.sigstore.json" ]]; then
+            cp "$RUNNER_TEMP/release.transition.sigstore.json" "$context/"
+          fi
+          printf 'FROM scratch\nCOPY . /release/\n' > "$RUNNER_TEMP/release.Dockerfile"
           docker buildx build --push --provenance=false --sbom=false \
             --label org.opencontainers.image.revision="$GITHUB_SHA" \
             --label org.opencontainers.image.source="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
             --label io.nubarca.artifact=release \
-            -t "$image" "$context"
+            -f "$RUNNER_TEMP/release.Dockerfile" -t "$image" "$context"
           digest="$(docker buildx imagetools inspect "$image" --format '{{.Manifest.Digest}}')"
           {
             echo "## Release \`$GITHUB_SHA\`"

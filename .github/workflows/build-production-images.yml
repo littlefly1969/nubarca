@@ -25,6 +25,15 @@ on:
       frontend:
         type: boolean
         default: true
+    # The digests this run pushed: the Release workflow names fresh images by
+    # these, never by looking a tag up in the registry.
+    outputs:
+      runtime_digest:
+        value: ${{ jobs.backend.outputs.runtime_digest }}
+      openvino_digest:
+        value: ${{ jobs.backend.outputs.openvino_digest }}
+      frontend_digest:
+        value: ${{ jobs.frontend.outputs.frontend_digest }}
 
 permissions:
   contents: read
@@ -47,6 +56,9 @@ jobs:
     if: inputs.backend
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    outputs:
+      runtime_digest: ${{ steps.digests.outputs.runtime_digest }}
+      openvino_digest: ${{ steps.digests.outputs.openvino_digest }}
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -168,6 +180,8 @@ jobs:
     if: inputs.frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    outputs:
+      frontend_digest: ${{ steps.digest.outputs.frontend_digest }}
     steps:
       - name: Check out source
         uses: actions/checkout@v6

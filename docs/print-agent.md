@@ -412,20 +412,26 @@ administrator (**Administration › Updates**) asks. Nothing updates on its own.
 The steps of an update are these:
 
 1. **The agent asks, between prints.** It writes `update-request.json` into
-   its own state directory and takes no new job while the install may restart
-   it. It waits at most 15 minutes.
+   its own state directory. It takes no new job until the root service
+   starts, and then for as long as that service runs: the service keeps
+   `/run/nubarca-print-agent-update/in-progress` until it ends. If the service
+   does not start within 2 minutes, the agent takes the request back and
+   reports it failed.
 2. **Root fetches the bundle itself.** The path unit starts
    `linux/update-print-box.sh`. That script runs the installed agent's
    `self-update-fetch` with the station credential. Nothing the agent account
-   wrote decides what is installed. The bundle must match the size and SHA-256
-   the server names, and its binary must report the offered version.
+   wrote decides what is installed. The server offers only the bundle the
+   request pinned (version, SHA-256 and size). The download must match it, and
+   its binary must report the offered version.
 3. **The bundle is swapped and checked.** The script swaps the bundle in
    (`/opt/nubarca-print-agent.previous` keeps the old one), reinstalls the
    units, the CUPS backend and the polkit rule from it, and restarts the
    agent.
 4. **It keeps the new agent only once that agent reaches the server.** The
-   agent's `heartbeat-ok` file is the check, with a 3-minute limit. Otherwise
-   it restores the previous bundle.
+   agent's `heartbeat-ok` file is the check, with a 3-minute limit. From the
+   swap until that check passes, any other ending restores the previous
+   bundle and its system files: no heartbeat, a failed unit install or
+   `daemon-reload`, an error, or a stop signal.
 5. **The outcome is reported.** It is written as `update-result` and relayed
    on the next heartbeat. A failure ends that request; it is not retried until
    someone asks again.

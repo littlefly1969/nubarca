@@ -29,6 +29,10 @@ on:
       publish:
         type: boolean
         default: true
+    # The bundle image this run pushed, for the Release workflow's manifest.
+    outputs:
+      digest:
+        value: ${{ jobs.release.outputs.digest }}
 
 permissions:
   contents: read
@@ -43,6 +47,8 @@ jobs:
     name: Build and validate headless Print Agent
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      digest: ${{ steps.image.outputs.digest }}
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -181,6 +187,7 @@ jobs:
           docker push "$IMAGE"
           digest="$(docker buildx imagetools inspect "$IMAGE" --format '{{.Manifest.Digest}}')"
           repository="${IMAGE%:*}"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
           {
             echo "## Print Box bundle $VERSION"
             echo

@@ -109,8 +109,6 @@ TV_ENABLED="${TV_ENABLED:-true}"
 # Trust is fixed in deploy/release-manifest.py, never derived from the remote.
 GHCR_OWNER="$(python3 deploy/release-manifest.py trust owner)"
 RELEASE_IMAGE="$(python3 deploy/release-manifest.py trust release-image)"
-SIGNER_IDENTITY="$(python3 deploy/release-manifest.py trust identity)"
-SIGNER_ISSUER="$(python3 deploy/release-manifest.py trust issuer)"
 TRUSTED_REPOSITORY="$(python3 deploy/release-manifest.py trust repository)"
 remote="$(git remote get-url origin)"
 [[ "$remote" =~ github\.com[:/]([^/]+/[^/]+)$ ]] || fail "origin must be a GitHub repository"
@@ -273,9 +271,7 @@ component_paths() {
 # ---- The signed release manifest -------------------------------------------------
 NOT_DEPLOYABLE_REASON=""
 RELEASE_DIR="$(mktemp -d /tmp/nubarca-release.XXXXXXXX)"
-release_container=""
 cleanup_release() {
-    if [[ -n "$release_container" ]]; then docker rm -f "$release_container" >/dev/null 2>&1 || true; fi
     if [[ "$RELEASE_DIR" == /tmp/nubarca-release.* && -d "$RELEASE_DIR" ]]; then rm -rf -- "$RELEASE_DIR"; fi
 }
 trap cleanup_release EXIT
@@ -285,31 +281,14 @@ API_REPO=""; API_DIGEST=""; FRONTEND_REPO=""; FRONTEND_DIGEST=""; PRINT_AGENT_IM
 if ! docker manifest inspect "$RELEASE_IMAGE:$CANDIDATE_SHA" >/dev/null 2>&1; then
     NOT_DEPLOYABLE_REASON="release-not-published"
 else
-    docker pull --quiet "$RELEASE_IMAGE:$CANDIDATE_SHA" >/dev/null || fail "cannot pull the release manifest"
-    release_container="$(docker create "$RELEASE_IMAGE:$CANDIDATE_SHA" /bin/true)"
-    docker cp "$release_container:/release/." "$RELEASE_DIR" >/dev/null
-    docker rm -f "$release_container" >/dev/null
-    release_container=""
-    # The signature, then the content: the manifest is believed only once
-    # its signature proves NubArca's Release workflow on main wrote these bytes.
-    # The key mode is the one THIS checkout (the release already installed)
-    # declares: a new key takes effect only through a release the old one signed.
-    if [[ -f deploy/release-signing.pub ]]; then
-        cosign verify-blob \
-            --key deploy/release-signing.pub --insecure-ignore-tlog=true \
-            --bundle "$RELEASE_DIR/release.sigstore.json" \
-            "$RELEASE_DIR/release.json" >/dev/null 2>&1 || \
-            fail "the release manifest signature does not verify; nothing from it is installed"
-        log "release manifest signature verified (NubArca release key)"
-    else
-        cosign verify-blob \
-            --bundle "$RELEASE_DIR/release.sigstore.json" \
-            --certificate-identity "$SIGNER_IDENTITY" \
-            --certificate-oidc-issuer "$SIGNER_ISSUER" \
-            "$RELEASE_DIR/release.json" >/dev/null 2>&1 || \
-            fail "the release manifest signature does not verify; nothing from it is installed"
-        log "release manifest signature verified ($SIGNER_IDENTITY)"
-    fi
+    # The signature, then the content: the manifest is believed only once its
+    # signature is proved from the signer THIS checkout (the release already
+    # installed) holds. A new signer is accepted only through releases the
+    # previous one also signed (signed trust transitions), never because the
+    # candidate says so.
+    signature_note="$(python3 deploy/release-manifest.py fetch-verified "$CANDIDATE_SHA" "$REPO_ROOT" "$RELEASE_DIR")" || \
+        fail "the release manifest signature does not verify; nothing from it is installed"
+    log "release manifest $signature_note"
     release_lines="$(python3 deploy/release-manifest.py verify "$RELEASE_DIR/release.json" "$CANDIDATE_SHA" "$REPO_ROOT")" || \
         fail "the release manifest does not describe the candidate"
     RELEASE_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$RELEASE_DIR/release.json")"

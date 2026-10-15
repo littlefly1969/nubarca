@@ -112,8 +112,10 @@ The setup, the signing modes and the Print Box updates are described in
 `check` fetches `origin/main` and pulls that commit's **signed release
 manifest** (`ghcr.io/<owner>/nubarca-release:<sha>`, written by
 `.github/workflows/release.yml`). It verifies the manifest's `cosign`
-signature, either keyless against the Release workflow on `main` or against
-`deploy/release-signing.pub` when that file is committed. It verifies the
+signature with `deploy/release-manifest.py fetch-verified`, starting from the
+signer the installed checkout holds: keyless against the Release workflow on
+`main`, or `deploy/release-signing.pub` when that file is committed. A new
+signer is accepted only through releases the previous signer also signed. It verifies the
 content with `deploy/release-manifest.py verify`: only NubArca's GHCR
 repositories, by digest, and an image from an earlier commit only if none of
 its component's files changed since. A commit whose release is still building

@@ -33,7 +33,8 @@
         "runtime": "nubarca-api",
         "openvino": "nubarca-api-openvino"
       },
-      "tagSuffix": ""
+      "tagSuffix": "",
+      "versionFile": "src/NubArca.Api/NubArca.Api.csproj"
     },
     "frontend": {
       "description": "Web frontend image",
@@ -78,7 +79,8 @@
       "images": {
         "linux-x64": "nubarca-print-agent"
       },
-      "tagSuffix": "-linux-x64"
+      "tagSuffix": "-linux-x64",
+      "versionFile": "src/NubArca.PrintAgent/NubArca.PrintAgent.csproj"
     }
   }
 }

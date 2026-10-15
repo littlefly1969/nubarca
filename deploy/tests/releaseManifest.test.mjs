@@ -61,6 +61,10 @@ function manifest(source, components, overrides = {}) {
     repository: `${owner}/nubarca`,
     sourceSha: source,
     version: '0.3.0',
+    signer: { mode: 'keyless' },
+    trustSince: source,
+    previousRelease: null,
+    transition: null,
     components: {
       api: {
         sourceSha: components.api,
@@ -100,11 +104,60 @@ test('trust constants are fixed to NubArca and its Release workflow on main', ()
   assert.equal(run('trust', 'anything').status, 1);
 });
 
-test('plan names the last commit that changed each component', () => {
+test('plan carries over, from the previous signed release, only components that did not change', () => {
   const { cwd, base, frontend, head } = checkout();
-  const result = run('plan', cwd, head);
+  // The previous release was cut at `frontend`; `head` changed only a file no component is built from.
+  const previous = manifest(frontend, { api: base, frontend, agent: base });
+  const result = run('plan', cwd, head, write(previous));
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout), { api: base, frontend, 'print-agent': base });
+  const planned = JSON.parse(result.stdout);
+  assert.equal(planned.previousRelease, frontend);
+  assert.deepEqual(planned.build, []);
+  assert.deepEqual(planned.inherit.frontend, previous.components.frontend);
+
+  writeFileSync(join(cwd, 'frontend/file'), '3\n');
+  git(cwd, 'commit', '-qam', 'frontend again');
+  const next = git(cwd, 'rev-parse', 'HEAD');
+  assert.deepEqual(JSON.parse(run('plan', cwd, next, write(previous)).stdout).build, ['frontend']);
+});
+
+test('without a previous release everything is built: no registry tag is ever taken on trust', () => {
+  const { cwd, head } = checkout();
+  const planned = JSON.parse(run('plan', cwd, head, '-').stdout);
+  assert.deepEqual(planned.build, ['api', 'frontend', 'print-agent']);
+  assert.equal(planned.previousRelease, null);
+  // CI never resolves a component image by tag: fresh digests come from the
+  // build jobs' outputs, older ones from the previous signed manifest.
+  assert.doesNotMatch(releaseWorkflow, /imagetools inspect "\$REGISTRY/);
+  assert.doesNotMatch(releaseWorkflow, /\$\(last /);
+  assert.match(releaseWorkflow, /needs\.images\.outputs\.runtime_digest/);
+  assert.match(releaseWorkflow, /needs\.print_agent\.outputs\.digest/);
+});
+
+test('assemble takes fresh images from this run and the rest from the previous release', () => {
+  const { cwd, base, frontend, head } = checkout();
+  const previous = manifest(frontend, { api: base, frontend, agent: base });
+  writeFileSync(join(cwd, 'src/NubArca.Api/file'), '2\n');
+  git(cwd, 'commit', '-qam', 'api');
+  const next = git(cwd, 'rev-parse', 'HEAD');
+  const built = { api: {
+    runtime: `ghcr.io/${owner}/nubarca-api@${digest('e')}`,
+    openvino: `ghcr.io/${owner}/nubarca-api-openvino@${digest('f')}`,
+  } };
+  const result = run('assemble', cwd, next, '0.3.1', write(built), write(previous));
+  assert.equal(result.status, 0, result.stderr);
+  const release = JSON.parse(result.stdout);
+  assert.equal(release.components.api.sourceSha, next);
+  assert.equal(release.components.api.images.runtime, built.api.runtime);
+  assert.deepEqual(release.components.frontend, previous.components.frontend);
+  assert.equal(release.previousRelease, frontend);
+  assert.equal(release.trustSince, frontend, 'the same signer keeps its trust');
+  assert.equal(release.transition, null);
+  assert.equal(run('verify', write(release), next, cwd).status, 0);
+  // A run cannot slip in an image for a component the plan carries over.
+  const extra = { ...built, frontend: { default: `ghcr.io/${owner}/nubarca-frontend@${digest('9')}` } };
+  assert.match(run('assemble', cwd, next, '0.3.1', write(extra), write(previous)).stderr, /not exactly the components/);
+  assert.ok(head);
 });
 
 test('verify accepts older images whose component did not change, and prints one line per image', () => {
@@ -132,8 +185,9 @@ test('verify refuses an API image older than a documentation change its help cor
   git(cwd, 'add', '.');
   git(cwd, 'commit', '-qm', 'docs only');
   const docs = git(cwd, 'rev-parse', 'HEAD');
-  const plan = JSON.parse(run('plan', cwd, docs).stdout);
-  assert.equal(plan.api, docs, 'a docs-only commit rebuilds the API image');
+  const previous = manifest(head, { api: base, frontend, agent: base });
+  const planned = JSON.parse(run('plan', cwd, docs, write(previous)).stdout);
+  assert.deepEqual(planned.build, ['api'], 'a docs-only commit rebuilds the API image');
   const result = run('verify', write(manifest(docs, { api: base, frontend, agent: base })), docs, cwd);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /component api changed after/);
@@ -179,12 +233,10 @@ test('verify refuses a missing component or a foreign repository', () => {
 });
 
 test('the production updater installs only from a verified, signed manifest', () => {
-  assert.match(updater, /cosign verify-blob/);
-  assert.match(updater, /--certificate-identity "\$SIGNER_IDENTITY"/);
-  assert.match(updater, /--certificate-oidc-issuer "\$SIGNER_ISSUER"/);
+  assert.match(updater, /release-manifest\.py fetch-verified/);
   assert.match(updater, /release-manifest\.py verify/);
   // Signature first, content second, and both before any image is pulled.
-  const signature = updater.indexOf('cosign verify-blob');
+  const signature = updater.indexOf('release-manifest.py fetch-verified');
   const content = updater.indexOf('release-manifest.py verify');
   const pull = updater.indexOf('docker pull "$NEW_API_IMAGE"');
   assert.ok(signature > 0 && signature < content && content < pull);
@@ -211,7 +263,7 @@ test('the Release workflow signs keylessly from main with a pinned cosign', () =
   assert.match(releaseWorkflow, /id-token: write/);
   assert.match(releaseWorkflow, /COSIGN_SHA256: [0-9a-f]{64}/);
   assert.match(releaseWorkflow, /sha256sum -c -/);
-  assert.match(releaseWorkflow, /cosign" sign-blob --yes/);
+  assert.match(releaseWorkflow, /cosign sign-blob --yes --bundle/);
   assert.match(releaseWorkflow, /cancel-in-progress: false/);
 });
 

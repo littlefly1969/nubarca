@@ -17,10 +17,14 @@ themselves are unchanged and documented in
    changed (`deploy/release-components.json`): the API (both the OpenVINO and
    the lean runtime image), the frontend, and the Linux Print Agent bundle.
    It then writes a **release manifest**: for each component, the image by
-   digest and the commit it was built from. A component that did not change
-   keeps its earlier image. A server accepts that only after proving with
+   digest and the commit it was built from. A freshly built image is named by
+   the digest its build job pushed. A component that did not change keeps the
+   entry of the **previous signed release**, never an image found by its tag
+   in the registry. A server accepts an earlier image only after proving with
    `git diff` that none of the component's files changed since that commit
-   (`deploy/release-manifest.py verify`).
+   (`deploy/release-manifest.py verify`). The component's files are its whole
+   build input: a test checks them against its Dockerfile, project and
+   workflow.
 2. **The manifest is signed** with Sigstore `cosign` and published as the
    tiny image `ghcr.io/littlefly1969/nubarca-release:<commit>`.
 3. **The server checks** (`deploy/update-production.sh check`). It fetches
@@ -88,9 +92,33 @@ checkout declares.
   with that key, without a public transparency-log entry, and servers verify
   them against the committed public key. This suits a **private repository**.
 
-A new key takes effect only through a release that the previous mode signed. A
-server always verifies a candidate with the checkout it is running now, so
-nobody can swap the key in the same release they sign.
+### Changing the signer
+
+A server accepts a new signer only when the signer it already trusts
+authorized it. Every manifest names its signer, the release that introduced
+that signer, and the release before it. When a commit changes the signer
+(adds, replaces or removes `deploy/release-signing.pub`), its release is a
+**trust transition**: CI signs it twice, once with the new signer and once
+with the previous one (`release.transition.sigstore.json`). A server walks
+back from the candidate to the signer its installed checkout holds and then
+proves every hand-over forwards (`deploy/release-manifest.py fetch-verified`).
+A server many releases behind follows several transitions in one check. A
+signer nobody handed over is refused, and so is a release still signed by a
+key that was rotated out.
+
+To switch from keyless to a key, or from one key to another:
+
+1. Generate the key pair: `cosign generate-key-pair`.
+2. Set `RELEASE_SIGNING_KEY` and `RELEASE_SIGNING_KEY_PASSWORD` to the new
+   private key. For a rotation, first move the old private key and password
+   to `RELEASE_SIGNING_KEY_PREVIOUS` and `RELEASE_SIGNING_KEY_PREVIOUS_PASSWORD`.
+3. Commit the new public key as `deploy/release-signing.pub` and push it to
+   `main`. Check that its Release run signed the hand-over.
+4. After that release, the `_PREVIOUS` secrets can be deleted.
+
+To return to keyless, delete `deploy/release-signing.pub` while
+`RELEASE_SIGNING_KEY` still holds the current key, so it can sign the
+hand-over.
 
 ### If the repository becomes private
 
@@ -111,15 +139,26 @@ only when someone asks:
 - an administrator asks from **Updates › Print Boxes**, for one box or for all;
 - a box's owner asks from its printer page, with **Update to X now**.
 
+A request pins the exact bundle published at that moment: its version,
+SHA-256 and size. The box is offered that bundle and nothing else. If another
+bundle is published before the box installs, the request ends as
+*superseded* and someone asks again. A request counts as done only when the
+box reports exactly the pinned version.
+
 The agent, between prints, rings a root service on the box
-(`nubarca-print-agent-update.path`) and takes no new job while the install may
-restart it. That service fetches the offered bundle **itself**, with the
+(`nubarca-print-agent-update.path`). It takes no new job for as long as that
+service runs. That service fetches the pinned bundle **itself**, with the
 station's credential, and checks its size and SHA-256 against what the server
 names. It also checks that the new binary reports the offered version. It then
 swaps the bundle in and keeps it only once the restarted agent reaches the
-server again. Otherwise it puts the previous bundle back, and the page shows
-that the update failed. A failed update is not retried until someone asks
-again.
+server again. Any other ending after the swap puts the previous bundle back:
+no heartbeat, a failed unit install, an error or a stop signal. The page then
+shows that the update failed. A failed update is not retried until someone
+asks again.
+
+Every request from the page, for the server or for a Print Box, writes its
+audit record in the same transaction as the request. If the audit record
+cannot be written, the request is not made.
 
 Self-update arrives with **Print Agent 0.9.0**. Update each existing box by
 hand once, re-running `install-print-box.sh` from the 0.9.0 bundle as the
