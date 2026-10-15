@@ -142,7 +142,11 @@ and the effective-Compose gate, then recreates only affected application service
 image first, creates and validates a pre-migration PostgreSQL dump on the
 dedicated backup mount, applies the migration with that candidate image, and
 verifies every expected id in `__EFMigrationsHistory` before changing a release
-pin. It restores the previous pin if smoke checks fail; this rollback is allowed
+pin. Any failure after the fast-forward resets the checkout to the commit it
+came from. If smoke checks fail it restores, in order, that checkout, the
+previous pin and the previous containers, and waits for them to answer healthy;
+keeping the old Compose files is what makes the rollback the previous release
+rather than old images under new configuration. This rollback is allowed
 only because the tracked migration policy has declared the old application
 compatible with the new schema. A TV bundle is activated locally only when CI
 published one for that exact source SHA.
@@ -707,9 +711,11 @@ Verify that the worker claims the returned job ID. This command excludes
 ## 9. Rollback
 
 Keep the previous image references until smoke checks pass. To roll back,
-restore the previous pins in `docker-compose.release.local.yml` and recreate
-only the affected services with the same four-file Compose stack, again with
-`--no-build`.
+first return the checkout to the previous release commit (`git reset --keep
+<previous-sha>`), so its own Compose files are the ones used, then restore the
+previous pins in `docker-compose.release.local.yml` and recreate only the
+affected services with the same four-file Compose stack, again with
+`--no-build`. The guided `apply` does exactly this on its own.
 
 For the backend this is now a pin change and nothing else: **no recompilation**.
 The previous image is still in the local daemon, and the one being rolled back

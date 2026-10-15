@@ -244,6 +244,20 @@ CURRENT_FRONTEND_IMAGE="${CURRENT_IMAGES[2]}"
 [[ "$CURRENT_API_IMAGE" == "$CURRENT_WORKER_IMAGE" ]] || \
     fail "current api and worker image pins differ"
 
+application_healthy() {
+    local _
+    for _ in $(seq 1 60); do
+        if curl -fsS --max-time 3 http://127.0.0.1:8080/health/ready >/dev/null && \
+           curl -fsS --max-time 3 http://127.0.0.1:8081/ >/dev/null; then
+            return 0
+        fi
+        sleep 2
+    done
+    return 1
+}
+# shellcheck disable=SC2329  # run by the EXIT trap
+previous_healthy() { application_healthy; }
+
 container_source_env() {
     docker inspect "$1" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null |
         sed -n 's/^NUBARCA_GIT_SHA=//p' | tail -n 1
@@ -552,7 +566,23 @@ root_used_percent="$(df -Pk / | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
 [[ "$root_used_percent" -lt 90 && "$root_available_kb" -ge 10485760 ]] || \
     fail "root filesystem fails the production capacity gate"
 
+# From the fast-forward until the new release is healthy, any way this script
+# ends puts the checkout back on the release it came from: a failed install
+# must leave the previous application with ITS Compose files, scripts, trust
+# and updater, never the candidate's. Approved additive migrations stay
+# applied, as the migration policy allows.
+checkout_restore_needed=false
+rollback_needed=false
+restore_checkout() {
+    [[ "$checkout_restore_needed" == true ]] || return 0
+    checkout_restore_needed=false
+    log "restoring the checkout to the previous release $HEAD_SHA"
+    git reset --quiet --keep "$HEAD_SHA" || \
+        log "WARNING: the checkout could not be restored to $HEAD_SHA; restore it by hand before anything else"
+}
 if [[ "$HEAD_SHA" != "$CANDIDATE_SHA" ]]; then
+    checkout_restore_needed=true
+    trap 'restore_checkout; cleanup_release' EXIT
     git merge --ff-only origin/main
 fi
 [[ "$(git rev-parse HEAD)" == "$CANDIDATE_SHA" ]] || fail "checkout did not reach confirmed SHA"
@@ -577,7 +607,30 @@ pin_tmp="$(mktemp /tmp/nubarca-release-pin.XXXXXXXX.yml)"
 pin_previous="$(mktemp /tmp/nubarca-release-previous.XXXXXXXX.yml)"
 cp docker-compose.release.local.yml "$pin_previous"
 cleanup() { rm -f -- "$pin_tmp" "$pin_previous"; cleanup_release; }
-trap cleanup EXIT
+# The order matters: the checkout first, so the previous application is
+# started with its own Compose files, then its image pins, then the restart.
+# shellcheck disable=SC2329  # run by the EXIT trap
+on_apply_exit() {
+    if [[ "$rollback_needed" == true ]]; then
+        rollback_needed=false
+        log "the new release did not become healthy; restoring the previous release"
+        if [[ -n "$MIGRATION_BACKUP" ]]; then
+            log "approved migrations remain applied and are compatible with the previous application image"
+            log "verified pre-migration backup remains at $MIGRATION_BACKUP"
+        fi
+        restore_checkout
+        install -m 0644 "$pin_previous" docker-compose.release.local.yml
+        "${COMPOSE_BASE[@]}" up -d --no-build --no-deps "${AFFECTED[@]}" || true
+        if previous_healthy; then
+            log "the previous release is running and healthy again"
+        else
+            log "WARNING: the previous release did not become healthy either; check the server"
+        fi
+    fi
+    restore_checkout
+    cleanup
+}
+trap on_apply_exit EXIT
 printf 'services:\n  api:\n    image: "%s"\n  worker:\n    image: "%s"\n  frontend:\n    image: "%s"\n' \
     "$NEW_API_IMAGE" "$NEW_API_IMAGE" "$NEW_FRONTEND_IMAGE" > "$pin_tmp"
 
@@ -616,35 +669,12 @@ if [[ ${#AFFECTED[@]} -gt 0 ]]; then
             > "$history_dir/migration-$stamp.txt"
         chmod 0600 "$history_dir/migration-$stamp.txt"
     fi
+    rollback_needed=true
     install -m 0644 "$pin_tmp" docker-compose.release.local.yml.tmp
     mv -f docker-compose.release.local.yml.tmp docker-compose.release.local.yml
-
-    rollback_needed=true
-    rollback() {
-        if [[ "$rollback_needed" == true ]]; then
-            log "smoke check failed; restoring the previous image pins"
-            if [[ -n "$MIGRATION_BACKUP" ]]; then
-                log "approved migrations remain applied and are compatible with the previous application image"
-                log "verified pre-migration backup remains at $MIGRATION_BACKUP"
-            fi
-            install -m 0644 "$pin_previous" docker-compose.release.local.yml
-            "${COMPOSE_BASE[@]}" up -d --no-build --no-deps "${AFFECTED[@]}" || true
-        fi
-        cleanup
-    }
-    trap rollback EXIT
     "${COMPOSE_BASE[@]}" up -d --no-build --no-deps "${AFFECTED[@]}"
 
-    healthy=false
-    for _ in $(seq 1 60); do
-        if curl -fsS --max-time 3 http://127.0.0.1:8080/health/ready >/dev/null && \
-           curl -fsS --max-time 3 http://127.0.0.1:8081/ >/dev/null; then
-            healthy=true
-            break
-        fi
-        sleep 2
-    done
-    [[ "$healthy" == true ]] || fail "application smoke checks did not become healthy; the previous release was restored"
+    application_healthy || fail "application smoke checks did not become healthy; the previous release was restored"
     [[ "$BACKEND_CHANGED" != true || "$(container_source_env nubarca-api)" == "$API_SOURCE" ]] || \
         fail "running API provenance differs from the release manifest; the previous release was restored"
     if [[ "$FRONTEND_CHANGED" == true ]]; then
@@ -652,9 +682,11 @@ if [[ ${#AFFECTED[@]} -gt 0 ]]; then
         [[ "$running_frontend_sha" == "$FRONTEND_SOURCE" ]] || \
             fail "running frontend provenance differs from the release manifest; the previous release was restored"
     fi
-    rollback_needed=false
-    trap cleanup EXIT
 fi
+# The new release runs (or nothing needed restarting): it is the baseline now.
+rollback_needed=false
+checkout_restore_needed=false
+trap cleanup EXIT
 
 # The Print Box bundle follows the server, never precedes it: the server
 # serves every compatible older agent, so boxes update afterwards, each when

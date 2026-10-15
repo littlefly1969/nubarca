@@ -40,7 +40,11 @@ themselves are unchanged and documented in
    with *run check again*. CI publishes a commit's release once and never
    replaces it. The install runs with every
    existing gate. That covers the migration policy, a backup before any
-   migration, the image verifiers, smoke checks and the rollback of the pins.
+   migration, the image verifiers, smoke checks and the rollback. A failed
+   install puts the whole previous release back: the checkout returns to the
+   commit it came from (its Compose files, scripts and trust), then the image
+   pins, then the previous containers restart and must answer healthy again.
+   Approved additive migrations stay applied.
    It then publishes the new Print Agent bundle and, where enabled, the TV
    bundle.
 

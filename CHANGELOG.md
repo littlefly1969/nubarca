@@ -12,7 +12,9 @@ originating repository and is deliberately not reproduced here.
   shows what it would change on this server: components, database
   migrations and the commits included. **Install** installs it with every
   gate of the guided deploy: the migration policy, a backup before
-  migrations, smoke checks and rollback. The page follows the restart and
+  migrations, smoke checks and rollback. A failed install restores the
+  previous release whole (checkout and Compose files, image pins, containers)
+  and checks that it is healthy again. The page follows the restart and
   shows the outcome. The server also checks on its own every few hours, and
   never installs by itself.
 - **Every release is signed.** Each push to `main` publishes a release
