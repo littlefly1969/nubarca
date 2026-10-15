@@ -1,0 +1,11 @@
+[Unit]
+Description=NubArca Print Box update request
+
+# The agent, idle between jobs, writes this file when the server offers the
+# update someone asked for. The service it starts always removes it.
+[Path]
+PathExists=/var/lib/nubarca-print-agent/box/update-request.json
+Unit=nubarca-print-agent-update.service
+
+[Install]
+WantedBy=paths.target

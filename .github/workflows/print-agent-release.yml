@@ -102,6 +102,9 @@ jobs:
           test -f "$output/linux/nubarca-media-status.test"
           test -f "$output/linux/nubarca-sim"
           test -f "$output/linux/install-simulated-printer.sh"
+          test -f "$output/linux/update-print-box.sh"
+          test -f "$output/linux/nubarca-print-agent-update.path"
+          test -f "$output/linux/nubarca-print-agent-update.service"
 
       - name: Upload Print Agent bundle
         uses: actions/upload-artifact@v4

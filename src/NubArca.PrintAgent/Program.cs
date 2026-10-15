@@ -12,6 +12,13 @@ if (args.FirstOrDefault()?.Equals("setup-cups", StringComparison.OrdinalIgnoreCa
     return await SetupCupsAsync(args.Skip(1).ToArray());
 }
 
+// The three-part version, for the box's update service to check a staged bundle runs.
+if (args.FirstOrDefault()?.Equals("version", StringComparison.OrdinalIgnoreCase) == true)
+{
+    Console.WriteLine(NubArca.PrintAgent.Update.AgentSelfUpdate.ShortVersion(AgentBuildInfo.Version));
+    return 0;
+}
+
 var builder = Host.CreateApplicationBuilder(args);
 PrintAgentConfiguration.AddInstanceFile(builder.Configuration, args);
 var options = builder.Configuration.GetSection(PrintAgentOptions.SectionName).Get<PrintAgentOptions>()
@@ -21,6 +28,12 @@ options.NormalizeAndValidate();
 if (args.FirstOrDefault()?.Equals("enroll", StringComparison.OrdinalIgnoreCase) == true)
 {
     return await EnrollAsync(args.Skip(1).ToArray(), options);
+}
+
+// Run as root by the Print Box update service (linux/update-print-box.sh).
+if (args.FirstOrDefault()?.Equals("self-update-fetch", StringComparison.OrdinalIgnoreCase) == true)
+{
+    return await SelfUpdateFetchAsync(args.Skip(1).ToArray(), options);
 }
 
 if (!Uri.TryCreate(options.ServerOrigin, UriKind.Absolute, out var serverOrigin))
@@ -160,4 +173,34 @@ static async Task<int> EnrollAsync(string[] args, PrintAgentOptions options)
         .SaveAsync(response.StationCredential, CancellationToken.None);
     Console.WriteLine($"Print Station {response.StationId:D} enrolled. Credential stored in the platform credential store.");
     return 0;
+}
+
+static async Task<int> SelfUpdateFetchAsync(string[] args, PrintAgentOptions options)
+{
+    var index = Array.FindIndex(args, x => string.Equals(x, "--output", StringComparison.OrdinalIgnoreCase));
+    var output = index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+    if (output is null || !Path.IsPathFullyQualified(output)
+        || !Uri.TryCreate(options.ServerOrigin, UriKind.Absolute, out var origin))
+    {
+        Console.Error.WriteLine("Usage: NubArca.PrintAgent self-update-fetch --config <box.json> --output <absolute directory>");
+        return 2;
+    }
+    var credential = await PrintAgentPlatform.CreateCredentialStore(options.CredentialPath).LoadAsync(CancellationToken.None);
+    if (string.IsNullOrWhiteSpace(credential))
+    {
+        Console.Error.WriteLine("This box is not enrolled.");
+        return 2;
+    }
+    using var http = new HttpClient { BaseAddress = new Uri(origin.ToString().TrimEnd('/') + "/"), Timeout = TimeSpan.FromMinutes(10) };
+    var api = new PrintAgentApiClient(http);
+    api.SetCredential(credential);
+    try
+    {
+        return await NubArca.PrintAgent.Update.AgentSelfUpdate.FetchAsync(api, output, CancellationToken.None);
+    }
+    catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or IOException or TaskCanceledException)
+    {
+        Console.Error.WriteLine($"The update could not be fetched: {ex.Message}");
+        return 4;
+    }
 }
