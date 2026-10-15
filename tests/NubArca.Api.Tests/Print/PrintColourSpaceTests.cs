@@ -91,13 +91,26 @@ public sealed class PrintColourSpaceTests
         Assert.Equal(Rgba(Sample), truncated[1, 1]);
     }
 
+    /// <summary>
+    /// An 8×8 PNG of <see cref="Sample"/> exactly as FFmpeg writes a decoded
+    /// frame tagged Display P3 (FFmpeg 6.1, `-c:v png`, RGB24): cICP 0c 0d 00 01 —
+    /// primaries 12 (Display P3), transfer 13 (sRGB), matrix 0 (RGB), full range —
+    /// plus the cHRM and gAMA it adds beside it, and no ICC profile.
+    /// </summary>
+    private const string FfmpegDisplayP3Png =
+        "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAACXBIWXMAAAABAAAAAQBPJcTWAAAABGNJQ1AMDQABbgPj7wAAACBjSFJNAAB6JgAAgIQAAQmgAAB9AAAAZ4QAAQ2IAAA6mAAAF3Dx+MpXAAAABGdBTUEAALGPC/xhBQAAABFJREFUeJxj2BIVhRUxDC0JAEFVWgE0V45CAAAAAElFTkSuQmCC";
+
     [Fact]
-    public void A_Cicp_Display_P3_Frame_Is_Converted()
+    public void An_Ffmpeg_Display_P3_Frame_Is_Converted()
     {
-        // What FFmpeg writes for a decoded HEIC frame: a PNG with a cICP chunk
-        // (primaries 12 = Display P3, transfer 13 = sRGB) and no ICC profile.
-        using var image = Uniform(Sample);
-        image.Metadata.CicpProfile = new CicpProfile(12, 13, 1, true);
+        using var image = Image.Load<Rgba32>(Convert.FromBase64String(FfmpegDisplayP3Png));
+        Assert.Equal(Rgba(Sample), image[1, 1]);
+        Assert.NotNull(image.Metadata.CicpProfile);
+        Assert.Equal(CicpColorPrimaries.SmpteEg432_1, image.Metadata.CicpProfile!.ColorPrimaries);
+        Assert.Equal(CicpTransferCharacteristics.Iec61966_2_1, image.Metadata.CicpProfile.TransferCharacteristics);
+        Assert.Equal(CicpMatrixCoefficients.Identity, image.Metadata.CicpProfile.MatrixCoefficients);
+        Assert.True(image.Metadata.CicpProfile.FullRange);
+        Assert.Null(image.Metadata.IccProfile);
 
         Assert.True(PrintColourSpace.ToSrgb(image, image.Metadata));
         AssertNear(new Rgb24(193, 83, 87), image[1, 1], 1);
@@ -107,13 +120,59 @@ public sealed class PrintColourSpaceTests
     public void A_Cicp_Srgb_Or_Hdr_Frame_Changes_Nothing()
     {
         using var srgb = Uniform(Sample);
-        srgb.Metadata.CicpProfile = new CicpProfile(1, 13, 1, true);
+        srgb.Metadata.CicpProfile = new CicpProfile(1, 13, 0, true);
         Assert.False(PrintColourSpace.ToSrgb(srgb, srgb.Metadata));
 
         using var pq = Uniform(Sample);
-        pq.Metadata.CicpProfile = new CicpProfile(9, 16, 9, true);
+        pq.Metadata.CicpProfile = new CicpProfile(9, 16, 0, true);
         Assert.False(PrintColourSpace.ToSrgb(pq, pq.Metadata));
         Assert.Equal(Rgba(Sample), pq[1, 1]);
+    }
+
+    [Fact]
+    public void A_Cicp_Tag_It_Cannot_Follow_Changes_Nothing()
+    {
+        // Limited (video) range would need its levels remapped first, and an
+        // unspecified transfer is not sRGB: both are left exactly as they are.
+        foreach (var cicp in new[] { new CicpProfile(12, 13, 0, false), new CicpProfile(12, 2, 0, true) })
+        {
+            using var image = Uniform(Sample);
+            image.Metadata.CicpProfile = cicp;
+            Assert.False(PrintColourSpace.ToSrgb(image, image.Metadata));
+            Assert.Equal(Rgba(Sample), image[1, 1]);
+        }
+    }
+
+    [Fact]
+    public void A_Cicp_Tag_Outranks_The_Icc_Profile()
+    {
+        // Both present: the cICP decides, whatever the ICC says.
+        using var p3 = Uniform(Sample);
+        p3.Metadata.CicpProfile = new CicpProfile(12, 13, 0, true);
+        p3.Metadata.IccProfile = new IccProfile(Profile(AdobeRgb, GammaCurve(563 / 256.0)));
+        Assert.True(PrintColourSpace.ToSrgb(p3, p3.Metadata));
+        AssertNear(new Rgb24(193, 83, 87), p3[1, 1], 1);
+
+        // A cICP it declines (HDR) is not overruled by the ICC beside it.
+        using var pq = Uniform(Sample);
+        pq.Metadata.CicpProfile = new CicpProfile(9, 16, 0, true);
+        pq.Metadata.IccProfile = new IccProfile(Profile(DisplayP3, SrgbParametricCurve()));
+        Assert.False(PrintColourSpace.ToSrgb(pq, pq.Metadata));
+        Assert.Equal(Rgba(Sample), pq[1, 1]);
+    }
+
+    [Fact]
+    public void An_Oversized_Curve_Count_Is_Refused_Before_Anything_Is_Allocated()
+    {
+        // 0x80000000 entries: 12 + count * 2 wraps to 12 in 32 bits.
+        var curve = new byte[14];
+        WriteSignature(curve, 0, "curv");
+        BinaryPrimitives.WriteUInt32BigEndian(curve.AsSpan(8), 0x80000000);
+        using var image = Uniform(Sample);
+        image.Metadata.IccProfile = new IccProfile(Profile(DisplayP3, curve));
+
+        Assert.False(PrintColourSpace.ToSrgb(image, image.Metadata));
+        Assert.Equal(Rgba(Sample), image[1, 1]);
     }
 
     [Fact]

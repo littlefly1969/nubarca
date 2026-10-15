@@ -19,10 +19,11 @@ namespace NubArca.Api.Print;
 /// gamut clipped) from that to sRGB.
 ///
 /// It understands what photographs actually carry: an RGB matrix/TRC ICC
-/// profile (JPEG, PNG, and Apple's Display P3), and a PNG cICP tag (what FFmpeg
-/// writes for a decoded HEIC frame). Anything else — sRGB itself, LUT-based or
-/// non-RGB profiles, HDR transfer functions — is left exactly as it was: never
-/// worse than before.
+/// profile (JPEG, PNG, and Apple's Display P3), and a full-range PNG cICP tag
+/// (what FFmpeg writes for a decoded HEIC frame), which outranks an ICC profile
+/// beside it. Anything else — sRGB itself, LUT-based or non-RGB profiles,
+/// limited-range or unspecified cICP, HDR transfer functions — is left exactly
+/// as it was: never worse than before.
 /// </summary>
 public static class PrintColourSpace
 {
@@ -52,7 +53,10 @@ public static class PrintColourSpace
     /// </summary>
     public static bool ToSrgb(Image<Rgba32> image, ImageMetadata source)
     {
-        var conversion = FromCicp(source.CicpProfile) ?? FromIcc(source.IccProfile);
+        // A cICP tag outranks an ICC profile (the PNG spec, cICP chunk): when one is
+        // present it alone says what the numbers mean, and one this cannot
+        // follow leaves the pixels alone rather than falling back to the ICC.
+        var conversion = source.CicpProfile is { } cicp ? FromCicp(cicp) : FromIcc(source.IccProfile);
         if (conversion is not { } c || c.IsSrgb) return false;
 
         var (r, g, b) = c.Decode;
@@ -165,9 +169,11 @@ public static class PrintColourSpace
         {
             case 0x63757276: // 'curv'
             {
-                var count = BinaryPrimitives.ReadUInt32BigEndian(tag[8..]);
+                // The count comes from an uploaded file: bounded before any
+                // arithmetic or allocation, and in 64 bits so it cannot wrap.
+                long count = BinaryPrimitives.ReadUInt32BigEndian(tag[8..]);
                 if (count == 0) return BuildDecode(v => v);
-                if (12 + (count * 2) > tag.Length) return null;
+                if (count > MaxCurveEntries || 12 + (count * 2) > tag.Length) return null;
                 if (count == 1)
                 {
                     var gamma = BinaryPrimitives.ReadUInt16BigEndian(tag[12..]) / 256.0; // u8Fixed8
@@ -209,9 +215,14 @@ public static class PrintColourSpace
         return table[i] + ((table[i + 1] - table[i]) * (at - i));
     }
 
-    private static Conversion? FromCicp(CicpProfile? cicp)
+    /// <summary>The longest sampled curve followed: 16-bit input resolution, far beyond any real profile.</summary>
+    private const int MaxCurveEntries = 65536;
+
+    private static Conversion? FromCicp(CicpProfile cicp)
     {
-        if (cicp is null) return null;
+        // Full-range RGB only: limited (video) range needs its levels remapped
+        // first, which this does not do, so it is left exactly as it is.
+        if (cicp.FullRange != true) return null;
         Matrix3? toXyzD65 = cicp.ColorPrimaries switch
         {
             CicpColorPrimaries.ItuRBt709_6 => FromPrimaries(0.640, 0.330, 0.300, 0.600, 0.150, 0.060),
@@ -221,11 +232,11 @@ public static class PrintColourSpace
         };
         Func<double, double>? decode = cicp.TransferCharacteristics switch
         {
-            CicpTransferCharacteristics.Unspecified or CicpTransferCharacteristics.Iec61966_2_1 => SrgbToLinear,
+            CicpTransferCharacteristics.Iec61966_2_1 => SrgbToLinear,
             CicpTransferCharacteristics.ItuRBt709_6 or CicpTransferCharacteristics.ItuRBt601_7
                 or CicpTransferCharacteristics.ItuRBt2020_2_10bit or CicpTransferCharacteristics.ItuRBt2020_2_12bit
                 => Bt709ToLinear,
-            _ => null, // PQ, HLG and the rest: not a print's business here
+            _ => null, // Unspecified, PQ, HLG and the rest: not known, so not touched
         };
         if (toXyzD65 is not { } m || decode is null) return null;
         var curve = BuildDecode(decode);

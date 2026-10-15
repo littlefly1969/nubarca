@@ -13,6 +13,7 @@ originating repository and is deliberately not reproduced here.
   read as sRGB and came out dull and shifted; every print (owner photo, party
   sheet, strips) now converts it to sRGB from the profile it carries. sRGB
   photos and photos without a profile print exactly as before.
+
 ### Updates: install a new release from the administration page
 
 - **Administration › Updates** checks whether a newer release exists and
