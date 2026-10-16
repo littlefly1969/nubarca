@@ -12,6 +12,11 @@ originating repository and is deliberately not reproduced here.
   "Copy Subject" on an iPhone: a transparent PNG you can **copy**,
   **download**, or **save to NubArca** as a new file next to the photo. The
   original is never touched.
+- **The same ✂ in the mobile app viewer**: **Share** sends the PNG through the
+  system share sheet (to a chat, Google Photos or any other app), and
+  **Save to NubArca** files it beside the photo. It uses only modules the app
+  already ships, so it asks for no new permission; it reaches phones with the
+  next mobile build.
 - Runs on your own server with BiRefNet-lite (MIT), on request only. Off by
   default; the operator places the model and sets
   `Ai__SubjectCutout__Enabled=true` (see

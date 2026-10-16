@@ -259,8 +259,10 @@ is built is described by `ARCHITECTURE.md`.
   session factory (`OnnxModel.SubjectCutout`, own OpenVINO device). On request
   only, from the medium preview, one inference at a time; "save" files a
   `<name>-cutout.png` beside the photo through the owner ingest. Off by default
-  (`Ai__SubjectCutout__Enabled`, plus `Ai__Enabled`); not yet in the mobile app
-  or in print. See `docs/model-deployment/subject-cutout.md`
+  (`Ai__SubjectCutout__Enabled`, plus `Ai__Enabled`). The mobile viewer has the
+  same ✂ (`SubjectCutoutSheet`: Share via expo-sharing, Save to NubArca); no
+  clipboard or direct gallery save, since both would need a new native build.
+  Not yet in print. See `docs/model-deployment/subject-cutout.md`
 - Storage: local content-addressed blobs with database-owned logical paths
 - Interactive uploads: ONE engine (`frontend/src/uploads/engine`,
   `UploadManager`) mounted with the shell (`UploadProvider` in `Layout`), so

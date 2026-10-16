@@ -23,6 +23,7 @@ import { bulkAddAlbumItems, bulkRemoveAlbumItems, deleteAlbum } from './albums.t
 import { listAlbumMedia } from './media.ts';
 import { listImages } from './images.ts';
 import { listVideos } from './videos.ts';
+import { fetchSubjectCutout, saveSubjectCutout, subjectCutoutFailure } from './subjectCutout.ts';
 
 interface RecordedRequest {
   method: string;
@@ -183,4 +184,37 @@ test('gallery list endpoints hit the unified contracts', async () => {
   await apiPatch('/api/albums/a1', { name: 'N', description: null });
   assert.equal(lastRequest!.method, 'PATCH');
   assert.deepEqual(JSON.parse(lastRequest!.body!), { name: 'N', description: null });
+});
+
+test('subject cutout POSTs with the cookie and answers the PNG bytes', async () => {
+  nextResponse = () =>
+    new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+      status: 200,
+      headers: { 'content-type': 'image/png' },
+    });
+  const bytes = await fetchSubjectCutout('f1');
+  assert.equal(lastRequest!.method, 'POST');
+  assert.equal(lastRequest!.url, 'https://nubarca.example/api/files/f1/subject-cutout');
+  assert.equal(lastRequest!.headers.cookie, COOKIE);
+  assert.deepEqual([...new Uint8Array(bytes)], [0x89, 0x50, 0x4e, 0x47]);
+});
+
+test('subject cutout refuses a non-PNG success and maps refusals', async () => {
+  okBody({ available: true });
+  await assert.rejects(fetchSubjectCutout('f1'), (err: unknown) => subjectCutoutFailure(err) === 'failed');
+
+  nextResponse = () =>
+    new Response('{"code":"busy"}', { status: 503, headers: { 'retry-after': '5' } });
+  await assert.rejects(fetchSubjectCutout('f1'), (err: unknown) => subjectCutoutFailure(err) === 'busy');
+
+  nextResponse = () => new Response('{"code":"no_subject"}', { status: 422 });
+  await assert.rejects(fetchSubjectCutout('f1'), (err: unknown) => subjectCutoutFailure(err) === 'noSubject');
+});
+
+test('saving a cutout files it on the server', async () => {
+  nextResponse = () => new Response('{"id":"f9","name":"IMG-cutout.png"}', { status: 201 });
+  const saved = await saveSubjectCutout('f1');
+  assert.equal(lastRequest!.method, 'POST');
+  assert.equal(lastRequest!.url, 'https://nubarca.example/api/files/f1/subject-cutout/save');
+  assert.equal(saved.id, 'f9');
 });

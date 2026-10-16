@@ -31,6 +31,9 @@ import { ImageSlide } from '../../src/components/ImageSlide';
 import { forgetAllPositions } from '../../src/media/videoPosition';
 import { applySystemBars, systemBarsFor } from '../../src/media/immersiveViewer';
 import { VideoSlide } from '../../src/components/VideoSlide';
+import { SubjectCutoutSheet } from '../../src/components/SubjectCutoutSheet';
+import { canCutOutSlide } from '../../src/media/subjectCutout';
+import { useSubjectCutoutAvailable } from '../../src/media/useSubjectCutoutAvailable';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
 import type { ViewerSlide } from '../../src/media/viewerSequence';
@@ -169,6 +172,11 @@ export default function MediaRoute(): React.JSX.Element {
 
   const safeIndex = safeViewerIndex(index, slides.length);
   const current = slides[safeIndex];
+
+  // "Copy subject": the owner's own photos only, and only when the server runs
+  // the model. The sheet keeps the slide it opened for, whatever the pager does.
+  const cutoutAvailable = useSubjectCutoutAvailable();
+  const [cutoutFor, setCutoutFor] = useState<{ fileId: string; displayName: string } | null>(null);
 
   // Ask the originating gallery for its next page BEFORE the sequence runs
   // out, so swiping crosses a page boundary without the user noticing there
@@ -340,9 +348,30 @@ export default function MediaRoute(): React.JSX.Element {
                 {current.displayName}
               </Text>
               <Text style={styles.counter}>{`${safeIndex + 1} / ${slides.length}`}</Text>
+              {cutoutAvailable && canCutOutSlide(current) && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('subjectCutout.action')}
+                  onPress={() =>
+                    setCutoutFor({ fileId: current.key, displayName: current.displayName })
+                  }
+                  style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
+                  hitSlop={8}
+                >
+                  <Ionicons name="cut-outline" size={iconSizes.m} color={media.text} />
+                </Pressable>
+              )}
             </>
           )}
         </View>
+      )}
+
+      {cutoutFor !== null && (
+        <SubjectCutoutSheet
+          fileId={cutoutFor.fileId}
+          displayName={cutoutFor.displayName}
+          onClose={() => setCutoutFor(null)}
+        />
       )}
     </View>
   );
