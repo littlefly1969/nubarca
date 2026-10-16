@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import subprocess
 import sys
 from pathlib import Path
 
@@ -32,6 +33,17 @@ import torch
 # The sam2 code the export was validated against. The model graph is defined by
 # this code, so bump it only after re-running the opt-in model test.
 SAM2_COMMIT = "2b90b9f5ceec907a1c18123530e92e794ad901a4"
+# Meta's sam2.1_hiera_tiny.pt (Apache-2.0), as downloaded from
+# dl.fbaipublicfiles.com/segment_anything_2/092824/. Any other file is refused.
+CHECKPOINT_SHA256 = "3c1e81ca9b037dd39d70a014ddb9a813d6c4c4e12555420db7eaff31689bd4e3"
+# The two files this script wrote when the export was validated (torch 2.x CPU,
+# opset 17). ONNX serialisation is not bit-for-bit stable across torch
+# versions, so a different digest is reported, not refused: such a file must
+# pass the opt-in SubjectCutoutModelTests before it is deployed.
+VALIDATED_ONNX_SHA256 = {
+    "encoder.onnx": "a3905dc097ecbd53813427688f964489699c8a706b7491f72f751db19208da8f",
+    "decoder.onnx": "685ead2f9f1468354f5bee2a35bd4e0ed7e687b143bc3ccb87c95caa181ea8f6",
+}
 CONFIG = "configs/sam2.1/sam2.1_hiera_t.yaml"
 MODEL_DIR = "sam2.1-tiny"
 OPSET = 17
@@ -85,12 +97,45 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def verify_sources(sam2: Path, checkpoint: Path) -> str | None:
+    """Why the inputs are not the pinned ones, or None when they are."""
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(sam2), "rev-parse", "HEAD"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "-C", str(sam2), "status", "--porcelain", "--untracked-files=no"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return f"{sam2} is not a git checkout of facebookresearch/sam2"
+    if head != SAM2_COMMIT:
+        return f"sam2 checkout is at {head}, expected {SAM2_COMMIT}"
+    if dirty:
+        return "sam2 checkout has local changes to tracked files"
+    if not checkpoint.is_file():
+        return f"{checkpoint} does not exist"
+    actual = sha256(checkpoint)
+    if actual != CHECKPOINT_SHA256:
+        return f"checkpoint sha256 is {actual}, expected {CHECKPOINT_SHA256}"
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--sam2", required=True, type=Path, help="facebookresearch/sam2 checkout")
     parser.add_argument("--checkpoint", required=True, type=Path, help="sam2.1_hiera_tiny.pt")
     parser.add_argument("--output", required=True, type=Path, help="Ai:Onnx:ModelDir")
     args = parser.parse_args()
+
+    # The graph is defined by the code and the weights: both must be the ones
+    # the export was validated against, before anything is imported from them.
+    refused = verify_sources(args.sam2, args.checkpoint)
+    if refused is not None:
+        print(f"refused: {refused}", file=sys.stderr)
+        return 2
+    print(f"sam2 {SAM2_COMMIT} and checkpoint sha256 {CHECKPOINT_SHA256} verified")
 
     sys.path.insert(0, str(args.sam2.resolve()))
     from hydra import initialize_config_module
@@ -123,10 +168,12 @@ def main() -> int:
             opset_version=OPSET, dynamo=False,
         )
 
-    print(f"checkpoint sha256 {sha256(args.checkpoint)}")
     for name in ("encoder.onnx", "decoder.onnx"):
         path = out / name
-        print(f"{path} {path.stat().st_size} bytes sha256 {sha256(path)}")
+        digest = sha256(path)
+        verdict = ("matches the validated export" if digest == VALIDATED_ONNX_SHA256[name]
+                   else "DIFFERS from the validated export: run SubjectCutoutModelTests before deploying")
+        print(f"{path} {path.stat().st_size} bytes sha256 {digest} ({verdict})")
     return 0
 
 

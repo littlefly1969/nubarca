@@ -29,8 +29,11 @@ public class AiSubjectCutoutOptions
     // answers "busy" instead of piling requests up behind a multi-second model.
     public int QueueTimeoutSeconds { get; set; } = 20;
 
-    // Hard ceiling on one inference (0 disables it).
-    public int TimeoutSeconds { get; set; } = 120;
+    // Hard ceiling on one inference (0 disables it). Generous on purpose: the
+    // FIRST request after a restart also compiles the models for the device
+    // (OpenVINO), BiRefNet and both SAM files on a tap, which on a modest CPU
+    // has taken well past two minutes; a warm cutout takes seconds.
+    public int TimeoutSeconds { get; set; } = 240;
 
     // "Tap a subject" (Ai:SubjectCutout:PointSelection): keep only the subject
     // the owner touched. Needs the cutout itself enabled too.

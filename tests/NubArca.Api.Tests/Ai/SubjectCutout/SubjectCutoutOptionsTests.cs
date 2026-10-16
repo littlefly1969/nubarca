@@ -19,6 +19,8 @@ public sealed class SubjectCutoutOptionsTests
         Assert.False(o.SubjectCutout.PointSelection.Enabled);
         Assert.Equal("CPU", o.Onnx.OpenVino.DeviceFor(OnnxModel.SubjectPointEncoder));
         Assert.Equal(1024, o.SubjectCutout.InputSize);
+        // Room for the first request's model compilation, cold SAM included.
+        Assert.Equal(240, o.SubjectCutout.TimeoutSeconds);
         Assert.Equal("CPU", o.Onnx.OpenVino.DeviceFor(OnnxModel.SubjectCutout));
         Assert.True(Ok(o));
     }

@@ -127,8 +127,21 @@ curl -fLO https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_
   --sam2 sam2 --checkpoint sam2.1_hiera_tiny.pt --output out
 ```
 
-The script prints the checkpoint's and both files' SHA-256. Copy
-`out/sam2.1-tiny/` into the model directory, then in the production `.env`:
+Before importing anything, the script refuses a `sam2` checkout that is not at
+the pinned commit (or has local changes to tracked files) and a checkpoint
+whose SHA-256 is not Meta's:
+
+| File | SHA-256 |
+|---|---|
+| `sam2.1_hiera_tiny.pt` (input) | `3c1e81ca9b037dd39d70a014ddb9a813d6c4c4e12555420db7eaff31689bd4e3` |
+| `sam2.1-tiny/encoder.onnx` (validated, 109,384,644 bytes) | `a3905dc097ecbd53813427688f964489699c8a706b7491f72f751db19208da8f` |
+| `sam2.1-tiny/decoder.onnx` (validated, 16,557,981 bytes) | `685ead2f9f1468354f5bee2a35bd4e0ed7e687b143bc3ccb87c95caa181ea8f6` |
+
+It then prints both files' SHA-256 and whether they match the validated
+export. A different torch version can serialise the same graph differently:
+such a file is not refused, but it must pass the opt-in model test below
+before it is deployed. Copy `out/sam2.1-tiny/` into the model directory, then
+in the production `.env`:
 
 ```bash
 Ai__SubjectCutout__PointSelection__Enabled=true
@@ -149,7 +162,19 @@ Opt-in end-to-end test: add `NUBARCA_SUBJECT_POINT_ENCODER` and
 ## Behaviour and limits
 
 - On request only: no job, no backfill, nothing stored. The source is the
-  photo's medium preview (upright, any original format), never the original.
+  photo's medium preview (any original format), never the original. Medium
+  previews keep the original's EXIF orientation without turning their pixels,
+  so the service turns the preview upright before either model sees it: the
+  cutout, its region, a tapped point and a print's mask are all in the
+  upright photo's frame, the same as the AutoOriented original a print uses.
+- A tap selects the subject under the finger: on the cutout model's solid
+  foreground, on its soft fringe (hair, a semi-transparent edge, alpha ≥ 32)
+  or within 1.5 % of the long edge of that fringe. A tap anywhere else is
+  `no_subject`, even when SAM proposes the nearest person for it.
+- `Ai__SubjectCutout__TimeoutSeconds` (240) bounds one inference. The first
+  request after a restart also compiles the models for the device, BiRefNet
+  and, on a tap, both SAM files; on a modest CPU that has taken past two
+  minutes. A warm cutout takes seconds.
 - One cutout at a time per api process (a tapped one included). A second request waits up to
   `Ai__SubjectCutout__QueueTimeoutSeconds` (20) and then gets "busy" (503).
 - "Save to NubArca" stores an ordinary PNG `<name>-cutout.png` in the photo's
@@ -162,5 +187,11 @@ Opt-in end-to-end test: add `NUBARCA_SUBJECT_POINT_ENCODER` and
   the style is not offered and a request for it is refused with
   `subject_unavailable`; a photo with nothing to lift is refused with
   `no_subject`. A print through an album share cannot ask for it.
+- With point selection on, the owner can tap the one person who breaks out.
+  The request carries only that normalized point (`subject: {x, y}`); the
+  server lifts the subject again from it, with the same rules as a tapped
+  cutout, and never takes a mask from the browser. The point is part of the
+  print's idempotency fingerprint and its render specification. A tap on no
+  one is refused with `no_subject`.
 - Opt-in end-to-end test: `NUBARCA_SUBJECT_CUTOUT_MODEL=/path/model.onnx
   dotnet test --filter SubjectCutoutModelTests`.

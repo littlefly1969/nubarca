@@ -314,7 +314,7 @@ services:
       Ai__SubjectCutout__Enabled: ${Ai__SubjectCutout__Enabled:-false}
       Ai__SubjectCutout__ModelFile: ${Ai__SubjectCutout__ModelFile:-birefnet-lite/model.onnx}
       Ai__SubjectCutout__QueueTimeoutSeconds: ${Ai__SubjectCutout__QueueTimeoutSeconds:-20}
-      Ai__SubjectCutout__TimeoutSeconds: ${Ai__SubjectCutout__TimeoutSeconds:-120}
+      Ai__SubjectCutout__TimeoutSeconds: ${Ai__SubjectCutout__TimeoutSeconds:-240}
       Ai__SubjectCutout__PointSelection__Enabled: ${Ai__SubjectCutout__PointSelection__Enabled:-false}
       Ai__SubjectCutout__PointSelection__EncoderFile: ${Ai__SubjectCutout__PointSelection__EncoderFile:-sam2.1-tiny/encoder.onnx}
       Ai__SubjectCutout__PointSelection__DecoderFile: ${Ai__SubjectCutout__PointSelection__DecoderFile:-sam2.1-tiny/decoder.onnx}

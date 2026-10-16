@@ -33,6 +33,14 @@ public static class SubjectCutoutImaging
     // point model leaves out, too little to reach a neighbour's.
     internal const double GrowFraction = 0.02;
 
+    // A touch counts as ON a subject when it lands on the cutout model's
+    // foreground, or on its soft fringe (hair, a semi-transparent edge: alpha
+    // at least this) or within `TouchSlackFraction` of the long edge of that
+    // fringe — a fingertip is not a pixel. Anything else is the background,
+    // and touching the background selects nothing.
+    internal const byte TouchAlphaFloor = 32;
+    internal const double TouchSlackFraction = 0.015;
+
     // The photo stretched to the model's square (BiRefNet is trained on
     // stretched squares, not letterboxed ones), ImageNet-normalized, NCHW.
     public static float[] ToInputTensor(Image<Rgb24> photo, int size)
@@ -155,10 +163,11 @@ public static class SubjectCutoutImaging
     // the touched point (a shirt, the whole person, two people…), the subject is
     // the LARGEST one that lies within the cutout model's foreground. A
     // candidate mostly outside it is background the touch happened to hit.
-    // When the touch lands on a foreground region that stands apart from the
-    // others, the choice is also kept to that region: a promptable segmenter
-    // happily proposes "both people" for two similar subjects, and the
-    // touched one is what was asked for.
+    // The choice is always kept to the foreground region the touch is on: a
+    // promptable segmenter happily proposes "both people" for two similar
+    // subjects — or the nearest person for a touch on the wall behind — and
+    // the touched subject is what was asked for. A touch on no subject (see
+    // `TouchAlphaFloor`) selects nothing, whatever the candidates say.
     // Returns the chosen candidate at the photo's resolution (row-major), or
     // null when the touch hit no subject. `x`/`y` are normalized to the photo.
     public static bool[]? SelectSubject(Image<L8> alpha, float[] candidates, int count, int edge, float x, float y)
@@ -169,15 +178,23 @@ public static class SubjectCutoutImaging
         }
 
         var (width, height) = (alpha.Width, alpha.Height);
-        var foreground = new bool[width * height];
+        var values = new byte[width * height];
         alpha.ProcessPixelRows(accessor =>
         {
             for (var y = 0; y < accessor.Height; y++)
             {
                 var row = accessor.GetRowSpan(y);
-                for (var x = 0; x < row.Length; x++) foreground[y * width + x] = row[x].PackedValue >= 128;
+                for (var x = 0; x < row.Length; x++) values[y * width + x] = row[x].PackedValue;
             }
         });
+        var foreground = new bool[values.Length];
+        for (var i = 0; i < values.Length; i++) foreground[i] = values[i] >= 128;
+
+        var tapX = Math.Clamp((int)(x * width), 0, width - 1);
+        var tapY = Math.Clamp((int)(y * height), 0, height - 1);
+        var seed = TouchedSubject(values, width, height, tapX, tapY);
+        if (seed is not { } start) return null;
+        var region = RegionAt(foreground, width, height, start % width, start / width)!;
 
         bool[]? best = null;
         var bestArea = 0L;
@@ -209,10 +226,6 @@ public static class SubjectCutoutImaging
         }
         if (best is null) return null;
 
-        var tapX = Math.Clamp((int)(x * width), 0, width - 1);
-        var tapY = Math.Clamp((int)(y * height), 0, height - 1);
-        var region = RegionAt(foreground, width, height, tapX, tapY);
-        if (region is null) return best;
         var kept = 0L;
         for (var i = 0; i < best.Length; i++)
         {
@@ -220,6 +233,55 @@ public static class SubjectCutoutImaging
             if (best[i]) kept++;
         }
         return kept > 0 ? best : null;
+    }
+
+    // The foreground pixel (alpha >= 128) a touch at (x, y) belongs to, or null
+    // when it touched the background. A touch on the solid foreground is its
+    // own answer. Otherwise the nearest fringe pixel (alpha >=
+    // `TouchAlphaFloor`) within the slack is found, and the fringe is walked
+    // from there to the closest solid pixel it is attached to: a strand of hair
+    // leads to its head, a faint halo of nothing leads nowhere.
+    private static int? TouchedSubject(byte[] alpha, int width, int height, int x, int y)
+    {
+        var start = y * width + x;
+        if (alpha[start] >= 128) return start;
+
+        var slack = Math.Max(2, (int)Math.Round(Math.Max(width, height) * TouchSlackFraction));
+        int? nearest = null;
+        var nearestDistance = long.MaxValue;
+        for (var ny = Math.Max(0, y - slack); ny <= Math.Min(height - 1, y + slack); ny++)
+        for (var nx = Math.Max(0, x - slack); nx <= Math.Min(width - 1, x + slack); nx++)
+        {
+            var distance = (long)(nx - x) * (nx - x) + (long)(ny - y) * (ny - y);
+            if (distance > (long)slack * slack || distance >= nearestDistance) continue;
+            if (alpha[ny * width + nx] < TouchAlphaFloor) continue;
+            (nearest, nearestDistance) = (ny * width + nx, distance);
+        }
+        if (nearest is not { } first) return null;
+
+        // Breadth-first along the fringe: the first solid pixel reached is the
+        // one closest to the touch along it.
+        var seen = new bool[alpha.Length];
+        var pending = new Queue<int>();
+        seen[first] = true;
+        pending.Enqueue(first);
+        while (pending.Count > 0)
+        {
+            var index = pending.Dequeue();
+            if (alpha[index] >= 128) return index;
+            var (px, py) = (index % width, index / width);
+            for (var dy = -1; dy <= 1; dy++)
+            for (var dx = -1; dx <= 1; dx++)
+            {
+                var (qx, qy) = (px + dx, py + dy);
+                if (qx < 0 || qy < 0 || qx >= width || qy >= height) continue;
+                var next = qy * width + qx;
+                if (seen[next] || alpha[next] < TouchAlphaFloor) continue;
+                seen[next] = true;
+                pending.Enqueue(next);
+            }
+        }
+        return null;
     }
 
     // The 8-connected foreground region under (x, y), or null when that pixel

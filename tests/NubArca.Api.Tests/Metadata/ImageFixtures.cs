@@ -3,6 +3,8 @@ using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.Formats.Png.Chunks;
 using SixLabors.ImageSharp.Metadata.Profiles.Exif;
+using SixLabors.ImageSharp.Metadata.Profiles.Icc;
+using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.PixelFormats;
 
 namespace NubArca.Api.Tests.Metadata;
@@ -63,6 +65,25 @@ internal static class ImageFixtures
         image.Metadata.ExifProfile = exif;
         using var ms = new MemoryStream();
         image.SaveAsJpeg(ms);
+        return ms.ToArray();
+    }
+
+    // A JPEG that DISPLAYS as `upright` once turned by its EXIF `orientation`
+    // (1, 6 or 8), the way a phone stores a portrait: the stored pixels are
+    // turned the other way. Optionally tagged with an ICC profile.
+    public static byte[] OrientedJpeg(Image<Rgb24> upright, ushort orientation, byte[]? icc = null)
+    {
+        using var stored = upright.Clone(x =>
+        {
+            if (orientation == 6) x.Rotate(RotateMode.Rotate270);
+            else if (orientation == 8) x.Rotate(RotateMode.Rotate90);
+            else if (orientation != 1) throw new ArgumentOutOfRangeException(nameof(orientation));
+        });
+        stored.Metadata.ExifProfile = new ExifProfile();
+        stored.Metadata.ExifProfile.SetValue(ExifTag.Orientation, orientation);
+        if (icc is not null) stored.Metadata.IccProfile = new IccProfile(icc);
+        using var ms = new MemoryStream();
+        stored.Save(ms, new JpegEncoder { Quality = 95, ColorType = JpegEncodingColor.YCbCrRatio444 });
         return ms.ToArray();
     }
 

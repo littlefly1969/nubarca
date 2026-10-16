@@ -256,6 +256,57 @@ public sealed class SubjectCutoutEndpointTests : IDisposable
         Assert.Contains("no_subject", await response.Content.ReadAsStringAsync());
     }
 
+    [Fact]
+    public async Task A_tap_on_the_background_is_a_422_even_when_the_point_model_proposes_a_person()
+    {
+        var (owner, client) = await _factory.CreateAuthenticatedClientAsync();
+        var file = await UploadAsync(owner, ImageFixtures.PlainPng(400, 200), "p.png", "image/png");
+        _model.TwoSubjects = true;
+        _pointModel.ProposeNearestPerson = true;
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/files/{file.Id}/subject-cutout", new { point = new { x = 0.5, y = 0.5 } });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Contains("no_subject", await response.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData((ushort)6)]
+    [InlineData((ushort)8)]
+    public async Task A_photo_stored_turned_is_cut_out_upright(ushort orientation)
+    {
+        // Displayed: a standing 400x600 photo, a person standing in the right
+        // part of it (x 0.55..0.85), full height. Stored: turned on its side,
+        // with the EXIF tag that turns it back — as a phone saves a portrait.
+        var (owner, client) = await _factory.CreateAuthenticatedClientAsync();
+        using var upright = new Image<Rgb24>(400, 600, new Rgb24(30, 60, 200));
+        for (var y = 0; y < 600; y++)
+        for (var x = 220; x < 340; x++)
+            upright[x, y] = new Rgb24(210, 30, 30);
+        var file = await UploadAsync(owner, ImageFixtures.OrientedJpeg(upright, orientation), "p.jpg", "image/jpeg");
+        _model.ByColour = true;
+
+        var response = await client.PostAsync($"/api/files/{file.Id}/subject-cutout", null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var png = Image.Load<Rgba32>(await response.Content.ReadAsByteArrayAsync());
+        // Standing: tall and narrow, not lying on its side.
+        Assert.InRange(png.Width, 120, 136);
+        Assert.InRange(png.Height, 594, 600);
+        var region = response.Headers.GetValues(SubjectCutoutEndpoints.RegionHeader).Single()
+            .Split(',').Select(v => double.Parse(v, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        // On the right, where the upright photo has the person.
+        Assert.InRange(region[0], 0.52, 0.56);
+        Assert.InRange(region[2], 0.3, 0.34);
+        Assert.InRange(region[3], 0.99, 1);
+
+        // And a tap on the person, in the upright photo's terms, finds them.
+        var tapped = await client.PostAsJsonAsync(
+            $"/api/files/{file.Id}/subject-cutout", new { point = new { x = 0.7, y = 0.5 } });
+        Assert.Equal(HttpStatusCode.OK, tapped.StatusCode);
+    }
+
     [Theory]
     [InlineData(-0.1, 0.5)]
     [InlineData(0.5, 1.5)]
@@ -319,6 +370,8 @@ public sealed class SubjectCutoutEndpointTests : IDisposable
         public volatile bool Subject = true;
         // Two people side by side: the left and the right 40% of the photo.
         public volatile bool TwoSubjects;
+        // Whatever is red in the photo the model is given (RedLogits).
+        public volatile bool ByColour;
         private int _runs;
 
         public int Runs => _runs;
@@ -329,6 +382,7 @@ public sealed class SubjectCutoutEndpointTests : IDisposable
         {
             Interlocked.Increment(ref _runs);
             var quarter = size / 4;
+            if (ByColour) return SubjectCutoutImagingTests.RedLogits(input, size);
             if (TwoSubjects)
             {
                 return SubjectCutoutImagingTests.Square(size, (x, _) =>
@@ -345,6 +399,9 @@ public sealed class SubjectCutoutEndpointTests : IDisposable
     {
         public volatile bool Available = true;
         public (float X, float Y) LastPoint;
+        // Touched between the two people, it proposes the nearer one anyway —
+        // as SAM does for a touch on the wall beside someone.
+        public volatile bool ProposeNearestPerson;
         private int _runs;
 
         public int Runs => _runs;
@@ -360,7 +417,7 @@ public sealed class SubjectCutoutEndpointTests : IDisposable
             Func<int, int, bool> patch = (cx, cy) => Math.Abs(cx - px) < 8 && Math.Abs(cy - py) < 8;
             // Between the two people there is no person to propose.
             Func<int, int, bool> person = x < 0.4f ? (cx, _) => cx < edge * 2 / 5
-                : x >= 0.6f ? (cx, _) => cx >= edge * 3 / 5
+                : x >= 0.6f || ProposeNearestPerson ? (cx, _) => cx >= edge * 3 / 5
                 : patch;
             count = 3;
             return SubjectCutoutImagingTests.Candidates(edge, patch, person, (_, _) => true);

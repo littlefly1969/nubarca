@@ -124,6 +124,44 @@ public sealed class SubjectCutoutImagingTests
     }
 
     [Fact]
+    public void A_tap_on_the_background_selects_nothing_even_when_a_candidate_is_a_whole_person()
+    {
+        // The point model, touched on the wall, proposes the nearest person —
+        // a mask that lies entirely within the foreground. Still nothing.
+        using var alpha = Mask(100, 100, (x, _) => x < 40 ? (byte)255 : (byte)0);
+        var candidates = Candidates(20, (x, _) => x < 8);
+
+        Assert.Null(SubjectCutoutImaging.SelectSubject(alpha, candidates, 1, 20, 0.7f, 0.5f));
+    }
+
+    [Theory]
+    [InlineData(0.47f)] // on the hair: the soft fringe, alpha 60
+    [InlineData(0.41f)] // on the very edge, where the solid foreground ends
+    public void A_tap_on_hair_or_a_soft_edge_selects_its_subject(float x)
+    {
+        // A person (x < 40) with a soft fringe of hair beside it (40..49),
+        // which the cutout model leaves semi-transparent.
+        using var alpha = Mask(100, 100, (px, _) => px < 40 ? (byte)255 : px < 50 ? (byte)60 : (byte)0);
+        var candidates = Candidates(20, (cx, _) => cx < 8);
+
+        var chosen = SubjectCutoutImaging.SelectSubject(alpha, candidates, 1, 20, x, 0.5f);
+
+        Assert.NotNull(chosen);
+        Assert.True(chosen![50 * 100 + 10]);
+    }
+
+    [Fact]
+    public void A_tap_on_a_faint_halo_attached_to_nothing_selects_nothing()
+    {
+        // A soft smudge on the background, nowhere near a solid subject.
+        using var alpha = Mask(100, 100, (x, y) =>
+            x < 30 ? (byte)255 : x is >= 70 and < 80 && y is >= 40 and < 60 ? (byte)60 : (byte)0);
+        var candidates = Candidates(20, (x, _) => x < 6);
+
+        Assert.Null(SubjectCutoutImaging.SelectSubject(alpha, candidates, 1, 20, 0.75f, 0.5f));
+    }
+
+    [Fact]
     public void Restricting_keeps_the_chosen_subject_and_its_edge_and_clears_the_other()
     {
         using var photo = new Image<Rgb24>(100, 100);
@@ -153,6 +191,27 @@ public sealed class SubjectCutoutImagingTests
 
         Assert.Throws<ArgumentException>(() => SubjectCutoutImaging.SelectSubject(alpha, new float[10], 1, 20, 0.5f, 0.5f));
         Assert.Throws<ArgumentException>(() => SubjectCutoutImaging.RestrictTo(alpha, new bool[5]));
+    }
+
+    // A stand-in for the cutout model that SEES the photo: its subject is
+    // whatever is clearly red, wherever the input tensor (ImageNet-normalized,
+    // NCHW) has it — so a photo that reaches the model turned the wrong way
+    // gives a mask turned the wrong way, as the real model would.
+    internal static float[] RedLogits(float[] input, int size)
+    {
+        var plane = size * size;
+        var logits = new float[plane];
+        for (var i = 0; i < plane; i++) logits[i] = input[i] > input[2 * plane + i] + 0.5f ? 12f : -12f;
+        return logits;
+    }
+
+    internal static Image<L8> Mask(int width, int height, Func<int, int, byte> alpha)
+    {
+        var mask = new Image<L8>(width, height);
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+            mask[x, y] = new L8(alpha(x, y));
+        return mask;
     }
 
     internal static float[] Candidates(int edge, params Func<int, int, bool>[] masks)

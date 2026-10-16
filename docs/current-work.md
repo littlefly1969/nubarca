@@ -273,6 +273,11 @@ is built is described by `ARCHITECTURE.md`.
   taking a sheet, and `PartyPrintComposer.DrawPopOut` redraws the original's
   pixels above the slot where the mask says subject, with a shadow. The web
   studio previews it and proposes the framing (`frontend/src/print/popOut.ts`).
+  `SubjectCutoutService` AutoOrients the medium preview (derivatives keep EXIF
+  and do not rotate). `SelectSubject` fails closed: a tap off the foreground
+  and its soft fringe (`TouchAlphaFloor`/`TouchSlackFraction`) is no_subject.
+  Owner print `subject {x,y}` (popOut only) goes into `SheetFingerprint` and
+  the render spec, and `CreateMaskAsync` re-lifts from that point.
   See `docs/model-deployment/subject-cutout.md`
 - Storage: local content-addressed blobs with database-owned logical paths
 - Interactive uploads: ONE engine (`frontend/src/uploads/engine`,

@@ -335,6 +335,11 @@ export interface OwnerPhotoPrintRequest {
   caption?: string;
   /** The NubArca wordmark in a framed sheet's band. */
   brand?: boolean;
+  /**
+   * `popOut` only: the person the owner touched, normalized to the upright
+   * photograph. Absent: every subject breaks out. The server lifts it again.
+   */
+  subject?: { x: number; y: number };
   includeDate: boolean;
   /** With the date: the language its format follows, and the zone "today" is read in. */
   dateLocale?: 'it' | 'en' | 'es' | 'de';

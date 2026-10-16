@@ -43,7 +43,19 @@ public sealed record OwnerPhotoPrintSubmitRequest(
     /// <summary>One line of the owner's own in a framed sheet's band (OwnerPrintText).</summary>
     string? Caption = null,
     /// <summary>The NubArca wordmark in a framed sheet's band. Off unless asked for.</summary>
-    bool Brand = false);
+    bool Brand = false,
+    /// <summary>
+    /// "Esce dalla foto" only: the subject the owner touched, normalized to the
+    /// upright photograph. Absent: every subject breaks out. The server lifts
+    /// it again from this point — a mask is never taken from the browser.
+    /// </summary>
+    OwnerPrintSubjectRequest? Subject = null);
+
+/// <summary>A touched point, normalized to the upright photograph: (0,0) top-left, (1,1) bottom-right.</summary>
+public sealed record OwnerPrintSubjectRequest(double X, double Y)
+{
+    public bool IsValid => double.IsFinite(X) && double.IsFinite(Y) && X is >= 0 and <= 1 && Y is >= 0 and <= 1;
+}
 
 /// <summary>
 /// A print the owner did not ask for in person: one sent through a verified,
@@ -122,7 +134,7 @@ public static class OwnerPhotoPrintErrors
     public const string InvalidTimezone = "invalid_timezone";
     public const string IdempotencyConflict = "idempotency_conflict";
     public const string RenderFailed = "render_failed";
-    /// <summary>"Esce dalla foto": the photograph has no subject to lift.</summary>
+    /// <summary>"Esce dalla foto": the photograph has no subject to lift, or the touch was on none.</summary>
     public const string NoSubject = "no_subject";
     /// <summary>"Esce dalla foto": subject cutout is off, or its model cannot run here.</summary>
     public const string SubjectUnavailable = "subject_unavailable";

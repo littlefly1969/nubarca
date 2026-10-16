@@ -8,6 +8,7 @@ using NubArca.Api.Uploads;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 
 namespace NubArca.Api.Ai.SubjectCutout;
 
@@ -81,13 +82,16 @@ public sealed class SubjectCutoutGate : IDisposable
 // draws with it (the "Esce dalla foto" print). The seam tests replace.
 public interface ISubjectMaskSource
 {
-    Task<SubjectMaskResult> CreateMaskAsync(Guid fileItemId, Guid ownerUserId, CancellationToken cancellationToken);
+    // With `point`, only the subject the owner touched; a touch on the
+    // background is NoSubject, never "the nearest subject".
+    Task<SubjectMaskResult> CreateMaskAsync(
+        Guid fileItemId, Guid ownerUserId, SubjectPoint? point, CancellationToken cancellationToken);
 }
 
 // "Copy subject" for the owner's own photographs.
 //
-// The source is the photo's MEDIUM preview, never the original: it is upright,
-// decodable whatever the original format (HEIC included), already at a size a
+// The source is the photo's MEDIUM preview, never the original (turned upright
+// from its EXIF orientation on load): it is decodable whatever the original format (HEIC included), already at a size a
 // clipboard or a sticker wants, and it is the same derivative the viewer is
 // showing. A cutout is computed on request and not stored; keeping one is an
 // explicit "save", which files it as a new ordinary PNG next to the photo —
@@ -155,9 +159,9 @@ public sealed class SubjectCutoutService : ISubjectMaskSource
     // preview's resolution), for a renderer that draws the original's own
     // pixels through it — a print, never a response. The caller disposes it.
     public async Task<SubjectMaskResult> CreateMaskAsync(
-        Guid fileItemId, Guid ownerUserId, CancellationToken cancellationToken)
+        Guid fileItemId, Guid ownerUserId, SubjectPoint? point, CancellationToken cancellationToken)
     {
-        var lifted = await LiftAsync(fileItemId, ownerUserId, point: null, cancellationToken);
+        var lifted = await LiftAsync(fileItemId, ownerUserId, point, cancellationToken);
         if (lifted.Status != SubjectCutoutStatus.Ok || SubjectCutoutImaging.SubjectBounds(lifted.Alpha!) is null)
         {
             var status = lifted.Status == SubjectCutoutStatus.Ok ? SubjectCutoutStatus.NoSubject : lifted.Status;
@@ -190,6 +194,11 @@ public sealed class SubjectCutoutService : ISubjectMaskSource
         {
             photo = await Image.LoadAsync<Rgb24>(preview.Content, cancellationToken);
         }
+        // Derivatives keep the original's EXIF orientation and do NOT rotate
+        // their pixels, so the photo is turned upright here, before either
+        // model sees it: the cutout, its region, a tapped point and a print's
+        // mask all live in the same upright frame as the AutoOriented original.
+        photo.Mutate(x => x.AutoOrient());
 
         var keep = false;
         try

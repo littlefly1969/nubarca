@@ -432,6 +432,89 @@ describe('OwnerPrintPage — Esce dalla foto', () => {
     expect(body.photos[0].placement.zoom).toBeGreaterThan(1);
   });
 
+  it('lets the owner tap the one person who breaks out, and prints that touch', async () => {
+    const user = userEvent.setup();
+    const RIGHT = { x: 0.55, y: 0.1, width: 0.2, height: 0.8 };
+    let lifts = 0;
+    const mock = mount(`/print?album=${ALBUM}&files=f2`, {
+      extra: {
+        'GET /api/subject-cutout': () => jsonResponse({ available: true, pointSelection: true }),
+        'POST /api/files/f2/subject-cutout': () => {
+          lifts += 1;
+          if (lifts !== 2) return cutout();
+          return new Response(new Uint8Array([137, 80, 78, 71]), {
+            status: 200,
+            headers: {
+              'content-type': 'image/png',
+              'X-Subject-Cutout-Region': `${RIGHT.x},${RIGHT.y},${RIGHT.width},${RIGHT.height}`,
+            },
+          });
+        },
+      },
+    });
+    await toPreview(user);
+    await user.click(await screen.findByRole('radio', { name: 'Esce dalla foto' }));
+
+    // Every subject first; a touch on the right of the cutout picks that person.
+    const image = await screen.findByTestId('owner-print-subject-pick-image');
+    Object.defineProperty(image, 'getBoundingClientRect', {
+      value: () => ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) }),
+    });
+    fireEvent.click(image, { clientX: 80, clientY: 50 });
+
+    await waitFor(() => expect(lifts).toBe(2));
+    const touch = [...mock.calls].reverse().find((c) => c.url.endsWith('/api/files/f2/subject-cutout'));
+    const point = JSON.parse(touch!.body ?? '{}').point;
+    expect(point.x).toBeCloseTo(0.25 + 0.8 * 0.5);
+    expect(point.y).toBeCloseTo(0.1 + 0.5 * 0.8);
+    expect(await screen.findByText(/Esce solo la persona che hai toccato/)).toBeInTheDocument();
+
+    // The framing follows the person, and the print carries the same touch.
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(printPost(mock.calls)).not.toBeNull());
+    const body = printPost(mock.calls);
+    expect(body.subject.x).toBeCloseTo(point.x);
+    expect(body.subject.y).toBeCloseTo(point.y);
+    expect(body.photos[0].placement.centerX).toBeCloseTo(popOutPlacement(3000 / 4000, '10x15', true, RIGHT).centerX);
+  });
+
+  it('goes back to every subject, and prints none of the touch', async () => {
+    const user = userEvent.setup();
+    const mock = mount(`/print?album=${ALBUM}&files=f2`, {
+      extra: {
+        'GET /api/subject-cutout': () => jsonResponse({ available: true, pointSelection: true }),
+        'POST /api/files/f2/subject-cutout': cutout,
+      },
+    });
+    await toPreview(user);
+    await user.click(await screen.findByRole('radio', { name: 'Esce dalla foto' }));
+    const image = await screen.findByTestId('owner-print-subject-pick-image');
+    Object.defineProperty(image, 'getBoundingClientRect', {
+      value: () => ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) }),
+    });
+    fireEvent.click(image, { clientX: 20, clientY: 50 });
+    await user.click(await screen.findByRole('button', { name: 'Tutte le persone' }));
+    await screen.findByText(/Tocca qui chi deve uscire/);
+
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(printPost(mock.calls)).not.toBeNull());
+    expect(printPost(mock.calls).subject).toBeUndefined();
+  });
+
+  it('offers no touch where the server cannot select one person', async () => {
+    const user = userEvent.setup();
+    mount(`/print?album=${ALBUM}&files=f2`, {
+      extra: {
+        'GET /api/subject-cutout': () => jsonResponse({ available: true, pointSelection: false }),
+        'POST /api/files/f2/subject-cutout': cutout,
+      },
+    });
+    await toPreview(user);
+    await user.click(await screen.findByRole('radio', { name: 'Esce dalla foto' }));
+    await screen.findByTestId('print-popout-layer');
+    expect(screen.queryByTestId('owner-print-subject-pick')).toBeNull();
+  });
+
   it('says so, and will not print, when the photograph has no subject', async () => {
     const user = userEvent.setup();
     mount(`/print?album=${ALBUM}&files=f2`, {

@@ -163,7 +163,7 @@ public sealed class OwnerPhotoPrintRacePostgresTests : IAsyncLifetime
 
     private sealed class NoSubjects : NubArca.Api.Ai.SubjectCutout.ISubjectMaskSource
     {
-        public Task<NubArca.Api.Ai.SubjectCutout.SubjectMaskResult> CreateMaskAsync(Guid f, Guid o, CancellationToken c) =>
+        public Task<NubArca.Api.Ai.SubjectCutout.SubjectMaskResult> CreateMaskAsync(Guid f, Guid o, NubArca.Api.Ai.SubjectCutout.SubjectPoint? p, CancellationToken c) =>
             Task.FromResult(new NubArca.Api.Ai.SubjectCutout.SubjectMaskResult(
                 NubArca.Api.Ai.SubjectCutout.SubjectCutoutStatus.Unavailable));
     }

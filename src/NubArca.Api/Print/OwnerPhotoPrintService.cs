@@ -98,6 +98,12 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         // "Esce dalla foto" lifts the subject with the owner's own private AI:
         // the owner's request only, never one through a share.
         if (style == PrintLayouts.PopOut && origin is not null) return Refuse(OwnerPhotoPrintErrors.InvalidLayout);
+        // The touched subject belongs to "Esce dalla foto" and nothing else.
+        if (request.Subject is { } touched && (style != PrintLayouts.PopOut || !touched.IsValid))
+            return Refuse(OwnerPhotoPrintErrors.InvalidRequest);
+        var subjectPoint = request.Subject is { } chosen
+            ? new SubjectPoint((float)chosen.X, (float)chosen.Y)
+            : (SubjectPoint?)null;
 
         // The photographs, in the order they were arranged: as many as the format
         // takes — a twin strip four (the same strip twice) or eight — and each a
@@ -153,7 +159,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 request.IncludeDate ? zone!.Id : null)
             : SheetFingerprint(layout, style, fileIds, placements, stationId, deviceId, paper, portrait,
                 caption, request.Brand, request.IncludeDate, request.IncludeDate ? request.DateLocale : null,
-                request.IncludeDate ? zone!.Id : null);
+                request.IncludeDate ? zone!.Id : null, subjectPoint);
         if (await RepeatAsync(ownerUserId, keyHash, fingerprint, cancellationToken) is { } repeat) return repeat;
 
         // 3. The photographs: the caller's own, in their library, and photographs
@@ -232,7 +238,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         // takes seconds, and a photograph with nothing to lift is refused
         // without touching a loan.
         using var subject = style == PrintLayouts.PopOut
-            ? await _subjects.CreateMaskAsync(fileIds[0], ownerUserId, cancellationToken)
+            ? await _subjects.CreateMaskAsync(fileIds[0], ownerUserId, subjectPoint, cancellationToken)
             : null;
         switch (subject?.Status)
         {
@@ -362,6 +368,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                         style,
                         orientation = portrait ? "portrait" : "landscape",
                         placements = placements.Select(p => new { centerX = p.CenterX, centerY = p.CenterY, zoom = p.Zoom }),
+                        subject = subjectPoint is { } sp ? new { x = sp.X, y = sp.Y } : null,
                         caption,
                         brand = request.Brand,
                         includeDate = request.IncludeDate,
@@ -489,7 +496,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
     internal static string SheetFingerprint(
         string layout, string style, IReadOnlyList<Guid> fileIds, IReadOnlyList<PhotoPlacement> placements,
         Guid stationId, Guid deviceId, string paper, bool portrait, string? caption, bool brand,
-        bool includeDate, string? dateLocale, string? zone)
+        bool includeDate, string? dateLocale, string? zone, SubjectPoint? subject = null)
     {
         static string N(double v) => Math.Round(v, 6).ToString("R", CultureInfo.InvariantCulture);
         var photos = fileIds.Select((id, i) =>
@@ -498,6 +505,9 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
             "sheet", layout, style, string.Join(',', photos), stationId.ToString("N"), deviceId.ToString("N"),
             paper, portrait ? "portrait" : "landscape", caption ?? "", brand ? "brand" : "nobrand",
             includeDate ? "date" : "nodate", dateLocale ?? "", zone ?? "");
+        // The touched subject changes which subject breaks out. Appended only
+        // when there is one, so every other composition keeps its digest.
+        if (subject is { } point) canonical += $"|subject:{N(point.X)}:{N(point.Y)}";
         return Hash(canonical);
     }
 

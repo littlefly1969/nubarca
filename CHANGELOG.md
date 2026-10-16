@@ -32,6 +32,15 @@ originating repository and is deliberately not reproduced here.
   subject uses the original's own pixels, so it continues across the edge
   without a seam. Owner's own prints only: never through an album share or a
   party.
+  With tap-a-subject on, **tap the one person who should pop out**: the
+  print sends only that point and the server lifts the same person again.
+- Photos a phone stored turned (EXIF orientation 6/8) are cut out upright, and
+  their pop-out lines up with the printed photo. A tap on the background now
+  selects nothing, even when the model proposes a nearby person; a tap on
+  hair or a soft edge still selects its subject. The first cutout after a
+  restart gets 240 s (`Ai__SubjectCutout__TimeoutSeconds`) to compile the
+  models. The SAM export script refuses an unpinned `sam2` checkout or a
+  checkpoint whose SHA-256 is not Meta's.
 - Runs on your own server with BiRefNet-lite (MIT), on request only. Off by
   default; the operator places the model and sets
   `Ai__SubjectCutout__Enabled=true` (see
