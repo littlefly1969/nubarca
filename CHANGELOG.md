@@ -58,6 +58,11 @@ originating repository and is deliberately not reproduced here.
   comes with Print Agent 0.9.1: a box already on 0.9.1 or later keeps it on
   every update, an older box gets it by running the printer page's
   **Update instructions** once.
+- **A Print Box whose Wi-Fi stops carrying anything reconnects by itself.** A
+  Wi-Fi can stay connected while nothing gets through it, not even to the
+  router. When the server has not answered for 90 seconds over Wi-Fi, the box
+  joins its network again, at most every 5 minutes. Over a cable nothing
+  changes.
 
 ### Printing: photographs print in their own colours
 

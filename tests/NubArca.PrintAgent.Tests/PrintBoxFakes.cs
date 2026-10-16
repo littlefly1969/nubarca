@@ -179,6 +179,18 @@ public sealed class FakeNetworkManager : INetworkManager
     }
 
     public string? LastForgotten;
+
+    public int Rejoins;
+
+    /// <summary>False: the Wi-Fi cannot be activated again.</summary>
+    public bool RejoinWorks { get; set; } = true;
+
+    public Task<bool> RejoinWifiAsync(string wifiInterface, CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref Rejoins);
+        Events.Enqueue($"wifi-rejoin {wifiInterface}");
+        return Task.FromResult(RejoinWorks);
+    }
 }
 
 /// <summary>The port-80 redirect, as a record of what was asked of it.</summary>

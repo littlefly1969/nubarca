@@ -551,6 +551,15 @@ one uncut sheet, the same on `NubArca-RX1HS-STRIP` two strips.
   opens. While the setup network is up and nobody is on the page, the box
   pauses it now and then (after 3 minutes, doubling up to 30) so a router that
   was merely late is found again without a phone.
+- **A Wi-Fi that carries nothing** (from agent 0.9.1): a Wi-Fi can stay joined
+  to its access point while nothing gets through, not even to the router, and
+  NetworkManager still calls it connected. When the Wi-Fi is the way out and
+  the agent has not reached its server for 90 seconds, the box activates the
+  same connection again (`nmcli connection up uuid …`), which leaves the
+  access point and joins it again. It does so at most every 5 minutes, so a
+  server that is simply down costs a few seconds of Wi-Fi now and then. Over
+  Ethernet the Wi-Fi is never touched. The journal says
+  `Wi-Fi … is connected, but no server has answered`.
 
 Security notes: set a setup password for every real installation. The page
 accepts a connection request only in setup mode or over Ethernet, and only as JSON, never logs a

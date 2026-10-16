@@ -433,4 +433,71 @@ public sealed class NetworkProvisioningTests
         await Eventually.TrueAsync(() => logs.All.Contains("is OPEN"));
         await service.StopAsync(default);
     }
+
+    // --- A Wi-Fi joined but carrying nothing ---------------------------------------------
+
+    private static NetworkProvisioningService Watched(FakeNetworkManager network, AgentConnectionState connection) =>
+        new(network, new NetworkProvisioningOptions { Enabled = true },
+            NullLogger<NetworkProvisioningService>.Instance,
+            Fast() with { WifiStall = TimeSpan.FromMilliseconds(150), WifiRejoinInterval = TimeSpan.FromHours(1) },
+            boxSuffix: "A7F3", connection: connection);
+
+    [Fact]
+    public async Task A_Wifi_Over_Which_No_Server_Answers_Is_Joined_Again_And_Then_Left_Alone()
+    {
+        var network = new FakeNetworkManager { Uplink = HomeWifi };
+        var service = Watched(network, new AgentConnectionState());
+        await service.BootAsync(default);
+
+        // A fresh connection gets the whole stall period first.
+        await service.TickAsync(default);
+        Assert.Equal(0, network.Rejoins);
+
+        await Task.Delay(200);
+        await service.TickAsync(default);
+        Assert.Equal(1, network.Rejoins);
+        Assert.Contains("wifi-rejoin wlan0", network.Events);
+
+        // Still silent: not again before the rejoin interval.
+        await Task.Delay(200);
+        await service.TickAsync(default);
+        Assert.Equal(1, network.Rejoins);
+        Assert.Equal(ProvisioningMode.Connected, service.State.Mode);
+        Assert.Equal(0, network.AccessPointStarts);
+    }
+
+    [Fact]
+    public async Task A_Wifi_Over_Which_The_Server_Answers_Is_Never_Touched()
+    {
+        var network = new FakeNetworkManager { Uplink = HomeWifi };
+        var connection = new AgentConnectionState();
+        var service = Watched(network, connection);
+        await service.BootAsync(default);
+        for (var i = 0; i < 5; i++)
+        {
+            await Task.Delay(60);
+            connection.MarkContact(DateTimeOffset.UtcNow);
+            await service.TickAsync(default);
+        }
+        Assert.Equal(0, network.Rejoins);
+    }
+
+    [Fact]
+    public async Task Over_Ethernet_The_Wifi_Is_Never_Joined_Again()
+    {
+        var network = new FakeNetworkManager { Uplink = Ethernet };
+        var service = Watched(network, new AgentConnectionState());
+        await service.BootAsync(default);
+        await Task.Delay(200);
+        await service.TickAsync(default);
+        Assert.Equal(0, network.Rejoins);
+
+        // The cable comes out and the Wi-Fi takes over: its own stall period starts then.
+        network.Uplink = HomeWifi;
+        await service.TickAsync(default);
+        Assert.Equal(0, network.Rejoins);
+        await Task.Delay(200);
+        await service.TickAsync(default);
+        Assert.Equal(1, network.Rejoins);
+    }
 }
