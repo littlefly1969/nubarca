@@ -28,7 +28,7 @@ rm -f "/etc/nubarca-print-agent/$instance.json"
 # What install-print-box.sh adds for the Print Box instance.
 rm -rf "/etc/systemd/system/$unit.d"
 if [[ "$instance" == box ]]; then
-  rm -f /etc/polkit-1/rules.d/49-nubarca-print-box.rules
+  rm -f /etc/polkit-1/rules.d/49-nubarca-print-box.rules /etc/NetworkManager/conf.d/zz-nubarca-wifi-powersave.conf
   systemctl disable --now nubarca-print-agent-update.path 2>/dev/null || true
   rm -f /etc/systemd/system/nubarca-print-agent-update.path /etc/systemd/system/nubarca-print-agent-update.service \
     /etc/nubarca-print-agent/self-update

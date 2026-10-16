@@ -18,6 +18,7 @@ public sealed class AgentExecutionCoordinator
         _api = api; _adapter = adapter; _journal = journal; _options = options; _logger = logger;
     }
 
+    /// <summary>At start: whatever the previous process left in the journal.</summary>
     public async Task RecoverAsync(CancellationToken cancellationToken)
     {
         foreach (var entry in await _journal.LoadPendingAsync(cancellationToken))
@@ -35,16 +36,36 @@ public sealed class AgentExecutionCoordinator
                     FailureCode = "agent_restart_during_submit",
                 }, cancellationToken);
             }
-            else if (entry.State is LocalExecutionStates.Completed or LocalExecutionStates.Failed
+        }
+        await ResumeAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Every cycle, before a new claim: finishes what a failed request left
+    /// half done. A job claimed but never submitted is submitted with the claim
+    /// already held, seconds after the network is back, instead of waiting on
+    /// the server's lease; an outcome the server has not acknowledged is sent
+    /// again. True when a held job was taken care of; an outcome still waiting
+    /// for its acknowledgement does not hold up new claims.
+    /// </summary>
+    public async Task<bool> ResumeAsync(CancellationToken cancellationToken)
+    {
+        var handled = false;
+        foreach (var entry in await _journal.LoadPendingAsync(cancellationToken))
+        {
+            if (entry.State is LocalExecutionStates.Completed or LocalExecutionStates.Failed
                 or LocalExecutionStates.DeliveryUnknown)
             {
                 await AcknowledgeAsync(entry, cancellationToken);
             }
-            else if (entry.State == LocalExecutionStates.Claimed && File.Exists(entry.ArtifactPath))
+            else if (entry.State == LocalExecutionStates.Claimed)
             {
-                await SubmitAsync(entry, cancellationToken);
+                if (File.Exists(entry.ArtifactPath)) await SubmitAsync(entry, cancellationToken);
+                else await DropUnsubmittedAsync(entry, cancellationToken);
+                handled = true;
             }
         }
+        return handled;
     }
 
     public async Task ExecuteAsync(AgentClaim claim, CancellationToken cancellationToken)
@@ -63,7 +84,11 @@ public sealed class AgentExecutionCoordinator
 
     private async Task SubmitAsync(JournalEntry entry, CancellationToken cancellationToken)
     {
-        await _api.MarkSubmittingAsync(entry.JobId, entry.ClaimToken, cancellationToken);
+        if (!await _api.MarkSubmittingAsync(entry.JobId, entry.ClaimToken, cancellationToken))
+        {
+            await DropUnsubmittedAsync(entry, cancellationToken);
+            return;
+        }
         await _journal.MarkSubmittingAsync(entry, cancellationToken);
         JournalEntry resultEntry;
         try
@@ -101,8 +126,9 @@ public sealed class AgentExecutionCoordinator
         };
         try
         {
-            await _api.ReportAsync(entry.JobId, entry.ClaimToken, outcome, entry.FailureCode,
-                entry.SpoolReference, cancellationToken);
+            if (!await _api.ReportAsync(entry.JobId, entry.ClaimToken, outcome, entry.FailureCode,
+                    entry.SpoolReference, cancellationToken))
+                _logger.LogWarning("The server no longer knows job {JobId}; its outcome is not sent again.", entry.JobId);
             await _journal.MarkAcknowledgedAsync(entry.JobId, cancellationToken);
             if (File.Exists(entry.ArtifactPath)) File.Delete(entry.ArtifactPath);
         }
@@ -111,6 +137,19 @@ public sealed class AgentExecutionCoordinator
             // Keep the terminal row and artifact. Recovery retries only this ACK.
             _logger.LogWarning("Print result ACK will be retried ({ExceptionType}).", ex.GetType().Name);
         }
+    }
+
+    /// <summary>
+    /// A claim the server no longer holds for us, or whose artifact is gone,
+    /// and that never reached the printer: nothing was printed, so it is
+    /// forgotten here and the server hands the job out again.
+    /// </summary>
+    private async Task DropUnsubmittedAsync(JournalEntry entry, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Job {JobId} was not submitted and its claim is no longer held; the server hands it out again.",
+            entry.JobId);
+        await _journal.MarkAcknowledgedAsync(entry.JobId, cancellationToken);
+        if (File.Exists(entry.ArtifactPath)) File.Delete(entry.ArtifactPath);
     }
 
     private async Task EnforceTemporaryBoundAsync(CancellationToken cancellationToken)

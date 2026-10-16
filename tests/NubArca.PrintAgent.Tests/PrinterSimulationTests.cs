@@ -336,8 +336,15 @@ public sealed class PrinterSimulationTests : IDisposable
         info.Environment["PRINTER"] = queue;
         info.Environment["SIM_SPOOL_ROOT"] = spool;
         using var process = Process.Start(info)!;
-        process.StandardInput.Write("RASTER-FROM-GUTENPRINT");
-        process.StandardInput.Close();
+        try
+        {
+            process.StandardInput.Write("RASTER-FROM-GUTENPRINT");
+            process.StandardInput.Close();
+        }
+        catch (IOException)
+        {
+            // A backend that refuses the job may exit before reading it; its exit code is the answer.
+        }
         var errors = process.StandardError.ReadToEnd();
         process.WaitForExit();
         return (process.ExitCode, errors);

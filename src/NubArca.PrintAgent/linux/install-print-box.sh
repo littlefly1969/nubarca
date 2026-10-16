@@ -109,6 +109,7 @@ config_path="$config_dir/$instance.json"
 unit="nubarca-print-agent@$instance.service"
 dropin_dir="/etc/systemd/system/$unit.d"
 polkit_rule='/etc/polkit-1/rules.d/49-nubarca-print-box.rules'
+wifi_powersave='/etc/NetworkManager/conf.d/zz-nubarca-wifi-powersave.conf'
 
 # --- 1. Packages ---------------------------------------------------------------
 if [[ "$skip_packages" == false ]]; then
@@ -203,8 +204,22 @@ install -d -o lp -g "$user" -m 2770 /var/spool/nubarca-sim
 if [[ "$provisioning" == true ]]; then
   install -d -m 0755 /etc/polkit-1/rules.d
   install -m 0644 "$script_dir/nubarca-print-box.rules" "$polkit_rule"
+  # Wi-Fi power save off (nubarca-wifi-powersave.conf). NetworkManager applies
+  # it each time a Wi-Fi connection comes up; iw turns it off now on the radio
+  # that is already up, without dropping its connection.
+  install -d -m 0755 /etc/NetworkManager/conf.d
+  install -m 0644 "$script_dir/nubarca-wifi-powersave.conf" "$wifi_powersave"
+  systemctl reload NetworkManager 2>/dev/null || true
+  if command -v iw >/dev/null 2>&1; then
+    for wireless in /sys/class/net/*/wireless; do
+      [[ -d "$wireless" ]] || continue
+      interface="$(basename "$(dirname "$wireless")")"
+      iw dev "$interface" set power_save off 2>/dev/null \
+        || echo "Wi-Fi power save on $interface stays as it is until it reconnects." >&2
+    done
+  fi
 else
-  rm -f "$polkit_rule"
+  rm -f "$polkit_rule" "$wifi_powersave"
 fi
 
 # --- 3. Configuration -------------------------------------------------------------

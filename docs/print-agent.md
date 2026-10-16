@@ -133,6 +133,14 @@ second copy. If the process dies or the adapter throws after that boundary, it
 reports `delivery-unknown`; an owner must decide what to do next. It never
 automatically retries an ambiguous physical submission.
 
+A network failure before that boundary leaves the job held in the journal, and
+from agent 0.9.1 the agent tries it again at its next cycle, before claiming
+anything new, with the same claim. If the server no longer knows that claim, it
+answers 404 and the agent drops its copy unprinted. A claim whose response never
+reached the agent goes back to the queue once its lease runs out
+(`Print:ClaimLeaseSeconds`, 30 seconds); a slow download is not cut short,
+because the claim token stays valid until the job is handed out again.
+
 Temporary artifacts are size bounded. Files required by an unacknowledged
 journal entry are retained; older unreferenced files are reclaimed. Operational
 messages contain job short identifiers and error classes, not credentials,
@@ -371,6 +379,7 @@ Three commands and two answers; nothing else is done by hand.
      `avahi-daemon`, `polkitd`, `iw`, ICU and CA certificates;
    - finds the DNP on USB and creates both print queues (next section);
    - names the machine `nubarca-print` (`--hostname`, `--keep-hostname`);
+   - turns Wi-Fi power save off (from agent 0.9.1, next section);
    - installs `nubarca-print-agent@box` under its own account
      `nubarca-print-box`, with the polkit rule below;
    - on Ubuntu Server, hands every network interface from systemd-networkd to
@@ -399,6 +408,17 @@ From agent **0.6** the box's own instance also holds one ambient capability,
 so it can redirect port 80 on the setup network with `nft` (next sections);
 the shared unit — and so every simulator instance — has none.
 Printing needs no privilege at all: any local account may submit to CUPS.
+
+**Wi-Fi power save is off** (from agent 0.9.1). With it on, the radio dozes
+between packets, and the box's requests to the server stall or fail: DNS
+timeouts, *No route to host*, a print's download at a few KB/s. The installer
+adds `/etc/NetworkManager/conf.d/zz-nubarca-wifi-powersave.conf`
+(`wifi.powersave = 2`; named to sort after Ubuntu's
+`default-wifi-powersave-on.conf`, because the last file wins) and turns it off
+at once with `iw` on the radio that is up. An update keeps the file in place;
+a box updated from 0.9.0 gets it from the next update or by re-running the
+installer. `iw dev <interface> get power_save` shows it. A box installed with
+`--no-network-provisioning` does not get it.
 
 ### Updates on request (agent 0.9.0 and later)
 

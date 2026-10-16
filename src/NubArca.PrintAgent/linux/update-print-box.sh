@@ -51,6 +51,7 @@ in_progress="$run_dir/in-progress"
 systemd_dir="$root/etc/systemd/system"
 cups_backend="$root/usr/lib/cups/backend/nubarca-sim"
 polkit_rule="$root/etc/polkit-1/rules.d/49-nubarca-print-box.rules"
+wifi_powersave="$root/etc/NetworkManager/conf.d/zz-nubarca-wifi-powersave.conf"
 request="$state_dir/update-request.json"
 claimed="$state_dir/update-request.claimed"
 result_name='update-result'
@@ -86,7 +87,8 @@ report() {
   log "$outcome $version"
 }
 
-# The units, CUPS backend and polkit rule of whichever bundle is in place.
+# The units, CUPS backend, polkit rule and Wi-Fi setting of whichever bundle is
+# in place.
 install_system_files() {
   local linux="$install_dir/linux" name
   install -m 0644 "$linux/nubarca-print-agent@.service" "$systemd_dir/nubarca-print-agent@.service"
@@ -94,8 +96,15 @@ install_system_files() {
     if [[ -f "$linux/$name" ]]; then install -m 0644 "$linux/$name" "$systemd_dir/$name"; fi
   done
   install -m 0755 "$linux/nubarca-sim" "$cups_backend"
+  # Only on a box whose network the installer manages (the polkit rule is its
+  # mark). Bundles before 0.9.1 carry no Wi-Fi setting; going back to one
+  # leaves the setting in place. It applies from the next Wi-Fi connection.
   if [[ -f "$polkit_rule" ]]; then
     install -m 0644 "$linux/nubarca-print-box.rules" "$polkit_rule"
+    if [[ -f "$linux/nubarca-wifi-powersave.conf" ]]; then
+      install -d -m 0755 "$(dirname "$wifi_powersave")"
+      install -m 0644 "$linux/nubarca-wifi-powersave.conf" "$wifi_powersave"
+    fi
   fi
   chmod 0755 "$install_dir/NubArca.PrintAgent" "$linux"/*.sh "$linux/nubarca-sim"
   systemctl daemon-reload

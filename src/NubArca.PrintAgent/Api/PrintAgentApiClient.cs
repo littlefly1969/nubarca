@@ -138,24 +138,30 @@ public sealed class PrintAgentApiClient
         await target.FlushAsync(cancellationToken);
     }
 
-    public async Task MarkSubmittingAsync(AgentClaim claim, CancellationToken cancellationToken)
+    /// <summary>
+    /// False when the server no longer knows this claim (404): it handed the
+    /// job out again after the lease, or it ended. A network failure throws.
+    /// </summary>
+    public async Task<bool> MarkSubmittingAsync(Guid jobId, string claimToken, CancellationToken cancellationToken)
     {
-        using var request = Json(HttpMethod.Post, $"api/print-agent/jobs/{claim.JobId:D}/submitting",
-            new { claimToken = claim.ClaimToken });
+        using var request = Json(HttpMethod.Post, $"api/print-agent/jobs/{jobId:D}/submitting",
+            new { claimToken });
         using var response = await _http.SendAsync(request, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound) return false;
         response.EnsureSuccessStatusCode();
+        return true;
     }
 
-    public Task MarkSubmittingAsync(Guid jobId, string claimToken, CancellationToken cancellationToken) =>
-        MarkSubmittingAsync(new AgentClaim(jobId, claimToken, "", "", "", 0, "", ""), cancellationToken);
-
-    public async Task ReportAsync(Guid jobId, string claimToken, string outcome,
+    /// <summary>False when the server no longer knows this claim (404); a network failure throws.</summary>
+    public async Task<bool> ReportAsync(Guid jobId, string claimToken, string outcome,
         string? failureCode, string? spoolReference, CancellationToken cancellationToken)
     {
         using var request = Json(HttpMethod.Post, $"api/print-agent/jobs/{jobId:D}/result",
             new { claimToken, outcome, failureCode, spoolReference });
         using var response = await _http.SendAsync(request, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound) return false;
         response.EnsureSuccessStatusCode();
+        return true;
     }
 
     private HttpRequestMessage Json(HttpMethod method, string url, object body)
