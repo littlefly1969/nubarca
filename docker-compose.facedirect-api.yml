@@ -14,6 +14,7 @@
 # Per-model device placement (CPU | GPU), FP32 everywhere for output
 # equivalence with the persisted embeddings:
 #   api    detector=GPU recognizer=CPU photoText=CPU   (validated face combo)
+#          subjectCutout=CPU (on-request "copy subject", only when enabled)
 #   worker detector=GPU recognizer=GPU photoImage=CPU  (CPU imaging matched the
 #          2026-07 SigLIP2 benchmark: whole-graph GPU was SLOWER than CPU)
 # The model volume (/models/ai) comes from docker-compose.prod.local.yml.
@@ -36,6 +37,7 @@ services:
       Ai__Onnx__OpenVino__FaceDetectorDevice: "${NUBARCA_FACE_DETECTOR_DEVICE:-GPU}"
       Ai__Onnx__OpenVino__FaceRecognizerDevice: "${NUBARCA_FACE_RECOGNIZER_DEVICE:-CPU}"
       Ai__Onnx__OpenVino__PhotoTextDevice: "${NUBARCA_PHOTO_TEXT_DEVICE:-CPU}"
+      Ai__Onnx__OpenVino__SubjectCutoutDevice: "${NUBARCA_SUBJECT_CUTOUT_DEVICE:-CPU}"
 
     devices:
       - "/dev/dri:/dev/dri"

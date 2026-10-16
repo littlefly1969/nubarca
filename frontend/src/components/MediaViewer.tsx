@@ -8,6 +8,8 @@ import { useCast } from '../cast/useCast';
 import { resolveViewerSummary } from './mediaViewerSummary';
 import { ZoomableImage } from '../mediaView/ZoomableImage';
 import { useIdleChrome, useSwipe, useViewerKeys } from '../mediaView/viewerControls';
+import { SubjectCutoutDialog } from '../subjectCutout/SubjectCutoutDialog';
+import { useSubjectCutoutAvailable } from '../subjectCutout/useSubjectCutoutAvailable';
 
 // Slice 86: a reusable, clean full-screen media viewer for images and videos.
 // The media is centered on a dark backdrop with minimal chrome that auto-hides
@@ -72,12 +74,16 @@ export interface MediaViewerCapabilities {
   // Offer the immutable original. For a shared album this is additionally
   // per-item — the item's own `downloadUrl` is the real gate.
   download: boolean;
+  // "Copy subject" on a photo. Owner-only: the cutout is computed from the
+  // caller's own file, and the installation must also offer it (the viewer
+  // asks once; the server refuses independently).
+  subjectCutout: boolean;
 }
 
 // Everything: the owner looking at their own library, which is what every
 // existing call site means.
 export const OWNER_VIEWER_CAPABILITIES: MediaViewerCapabilities = {
-  metadata: true, cast: true, download: true,
+  metadata: true, cast: true, download: true, subjectCutout: true,
 };
 
 // Album Play driven through this viewer.
@@ -161,6 +167,10 @@ export function MediaViewer({
   const hasNext = index < items.length - 1;
 
   const [detailsOpen, setDetailsOpen] = useState(false);
+  // The photo whose subject is being cut out, if any. Tied to an id so that
+  // navigating to another item never shows the previous photo's cutout.
+  const [cutoutFor, setCutoutFor] = useState<string | null>(null);
+  const cutoutAvailable = useSubjectCutoutAvailable(capabilities.subjectCutout);
   // Per-image "preview failed to load" flag; reset whenever we navigate.
   const [imageFailed, setImageFailed] = useState(false);
   // Metadata for the current item (summary line + drawer body).
@@ -384,6 +394,11 @@ export function MediaViewer({
             {/* No drawer at all when there is nothing a caller may put in it:
                 a recipient has no metadata document and no owner actions, so an
                 empty ⓘ would advertise a surface that does not exist. */}
+            {cutoutAvailable && item.kind === 'image' && item.sources.kind === 'ownerFile' && (
+              <button type="button" aria-label={t('subjectCutout.action')} title={t('subjectCutout.action')}
+                data-testid="viewer-subject-cutout"
+                onClick={() => setCutoutFor(item.id)}>✂</button>
+            )}
             {(capabilities.metadata || renderDetails !== undefined) && (
               <button type="button" aria-label={t('mediaViewer.details')} aria-pressed={detailsOpen}
                 data-testid="viewer-details-toggle"
@@ -397,6 +412,10 @@ export function MediaViewer({
         <button type="button" className="media-viewer-nav media-viewer-next"
           aria-label={t('mediaViewer.next')} disabled={!hasNext} onClick={goNext}>›</button>
       </div>
+
+      {cutoutFor === item.id && (
+        <SubjectCutoutDialog fileId={item.id} fileName={item.name} onClose={() => setCutoutFor(null)} />
+      )}
 
       {detailsOpen && (
         <aside className="media-viewer-drawer" aria-label={t('mediaViewer.details')}>

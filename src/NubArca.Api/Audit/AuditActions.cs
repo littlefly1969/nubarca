@@ -24,6 +24,9 @@ public static class AuditActions
     public const string FileMetadataStripEmbedded = "file.metadata_strip_embedded";
     public const string FileMetadataWriteDateTaken = "file.metadata_write_datetaken";
     public const string FileDownloadPrivacySafe = "file.download_privacy_safe";
+    // A subject cutout of the owner's photo was handed to them (copy / download).
+    // Keeping one as a new file is audited as that file's own upload.
+    public const string FileSubjectCutout = "file.subject_cutout";
     public const string ShareCreate = "share.create";
     public const string ShareRevoke = "share.revoke";
     public const string SharePublicDownload = "share.public_download";

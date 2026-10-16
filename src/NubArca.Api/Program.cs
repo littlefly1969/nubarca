@@ -1734,6 +1734,7 @@ app.MapAdminJobsEndpoints();
 // same two calls; the route templates don't overlap so registration order
 // doesn't matter.)
 app.MapFileEndpoints();
+app.MapSubjectCutoutEndpoints();
 app.MapFolderTrashEndpoints();
 
 // NUBARCA-GOOGLE-CAST-01: Google Cast grant lifecycle (cookie-authenticated,

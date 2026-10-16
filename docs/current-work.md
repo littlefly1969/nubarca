@@ -254,6 +254,13 @@ is built is described by `ARCHITECTURE.md`.
   Production pulls verified application/APK/OTA artifacts by digest; the guided
   `deploy/update-production.sh check|apply` path can back up and apply explicitly
   confirmed, policy-approved additive migrations and never builds on the server
+- Copy subject (`Ai/SubjectCutout`): the owner viewer's ✂ lifts a photo's
+  subject off its background with BiRefNet-lite (MIT) on the shared ONNX
+  session factory (`OnnxModel.SubjectCutout`, own OpenVINO device). On request
+  only, from the medium preview, one inference at a time; "save" files a
+  `<name>-cutout.png` beside the photo through the owner ingest. Off by default
+  (`Ai__SubjectCutout__Enabled`, plus `Ai__Enabled`); not yet in the mobile app
+  or in print. See `docs/model-deployment/subject-cutout.md`
 - Storage: local content-addressed blobs with database-owned logical paths
 - Interactive uploads: ONE engine (`frontend/src/uploads/engine`,
   `UploadManager`) mounted with the shell (`UploadProvider` in `Layout`), so

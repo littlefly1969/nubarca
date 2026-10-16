@@ -6,6 +6,17 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Copy subject: lift a photo's subject off its background
+
+- **✂ in the photo viewer** cuts the subject out of one of your photos, like
+  "Copy Subject" on an iPhone: a transparent PNG you can **copy**,
+  **download**, or **save to NubArca** as a new file next to the photo. The
+  original is never touched.
+- Runs on your own server with BiRefNet-lite (MIT), on request only. Off by
+  default; the operator places the model and sets
+  `Ai__SubjectCutout__Enabled=true` (see
+  `docs/model-deployment/subject-cutout.md`).
+
 ### Updates: install a new release from the administration page
 
 - **Administration › Updates** checks whether a newer release exists and
