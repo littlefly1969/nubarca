@@ -200,7 +200,8 @@ public class AiOnnxOpenVinoOptions
     // the photo text tower and this one share nothing but a modality.
     public string RagTextDevice { get; set; } = "CPU";
 
-    // The subject-cutout segmentation model (Ai:SubjectCutout).
+    // The subject-cutout models (Ai:SubjectCutout): the segmentation model and
+    // the tap-to-select encoder/decoder.
     public string SubjectCutoutDevice { get; set; } = "CPU";
 
     // GPU inference precision. MUST be FP32 for output-equivalence with the CPU
@@ -215,6 +216,8 @@ public class AiOnnxOpenVinoOptions
         OnnxModel.FaceRecognizer => FaceRecognizerDevice,
         OnnxModel.RagText => RagTextDevice,
         OnnxModel.SubjectCutout => SubjectCutoutDevice,
+        OnnxModel.SubjectPointEncoder => SubjectCutoutDevice,
+        OnnxModel.SubjectPointDecoder => SubjectCutoutDevice,
         _ => "CPU",
     };
 }

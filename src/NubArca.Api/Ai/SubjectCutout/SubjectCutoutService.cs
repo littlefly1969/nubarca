@@ -26,7 +26,17 @@ public enum SubjectCutoutStatus
     NoSubject,
 }
 
-public sealed record SubjectCutoutImage(byte[] Png, int Width, int Height);
+// Region: where the cutout sits in the photo, normalized (0..1), so a client can
+// map a tap on the cutout back onto the photo.
+public sealed record SubjectCutoutImage(byte[] Png, int Width, int Height, SubjectCutoutRegion Region);
+
+public readonly record struct SubjectCutoutRegion(float X, float Y, float Width, float Height);
+
+// A touched point, normalized to the photo: (0,0) top-left, (1,1) bottom-right.
+public readonly record struct SubjectPoint(float X, float Y)
+{
+    public bool IsValid => float.IsFinite(X) && float.IsFinite(Y) && X is >= 0 and <= 1 && Y is >= 0 and <= 1;
+}
 
 public sealed record SubjectCutoutResult(SubjectCutoutStatus Status, SubjectCutoutImage? Image = null)
 {
@@ -74,6 +84,7 @@ public sealed class SubjectCutoutService
     private readonly IFileThumbnailService _thumbnails;
     private readonly IOwnerUploadIngestion _ingestion;
     private readonly ISubjectMaskModel _model;
+    private readonly ISubjectPointModel _pointModel;
     private readonly SubjectCutoutGate _gate;
     private readonly IOptions<AiOptions> _options;
     private readonly ILogger<SubjectCutoutService> _logger;
@@ -83,6 +94,7 @@ public sealed class SubjectCutoutService
         IFileThumbnailService thumbnails,
         IOwnerUploadIngestion ingestion,
         ISubjectMaskModel model,
+        ISubjectPointModel pointModel,
         SubjectCutoutGate gate,
         IOptions<AiOptions> options,
         ILogger<SubjectCutoutService> logger)
@@ -91,6 +103,7 @@ public sealed class SubjectCutoutService
         _thumbnails = thumbnails;
         _ingestion = ingestion;
         _model = model;
+        _pointModel = pointModel;
         _gate = gate;
         _options = options;
         _logger = logger;
@@ -98,10 +111,14 @@ public sealed class SubjectCutoutService
 
     public bool IsAvailable() => _model.UnavailableReason() is null;
 
+    // "Tap a subject" needs the cutout AND the point model.
+    public bool IsPointSelectionAvailable() => IsAvailable() && _pointModel.UnavailableReason() is null;
+
+    // The whole subject, or — with `point` — only the subject the owner touched.
     public async Task<SubjectCutoutResult> CreateAsync(
-        Guid fileItemId, Guid ownerUserId, CancellationToken cancellationToken)
+        Guid fileItemId, Guid ownerUserId, SubjectPoint? point, CancellationToken cancellationToken)
     {
-        var reason = _model.UnavailableReason();
+        var reason = _model.UnavailableReason() ?? (point is null ? null : _pointModel.UnavailableReason());
         if (reason is not null)
         {
             _logger.LogInformation("Subject cutout unavailable: {Reason}", reason);
@@ -129,18 +146,27 @@ public sealed class SubjectCutoutService
             var size = settings.InputSize;
             var started = System.Diagnostics.Stopwatch.GetTimestamp();
             var input = SubjectCutoutImaging.ToInputTensor(photo, size);
+            var pointInput = point is null ? null
+                : size == SubjectPointModelShape.InputEdge ? input
+                : SubjectCutoutImaging.ToInputTensor(photo, SubjectPointModelShape.InputEdge);
             // A started inference cannot be interrupted, so the slot is held until
             // it really ends — even when this request stops waiting for it.
-            var work = Task.Run(() => _model.PredictLogits(input, size), CancellationToken.None);
+            var work = Task.Run(() =>
+            {
+                var logits = _model.PredictLogits(input, size);
+                if (point is not { } p) return new Prediction(logits, null, 0);
+                var candidates = _pointModel.PredictCandidates(pointInput!, p.X, p.Y, out var count);
+                return new Prediction(logits, candidates, count);
+            }, CancellationToken.None);
             _ = work.ContinueWith(done =>
             {
                 _ = done.Exception; // observed here when nobody is waiting any more
                 slot.Dispose();
             }, TaskScheduler.Default);
-            float[] logits;
+            Prediction prediction;
             try
             {
-                logits = settings.TimeoutSeconds > 0
+                prediction = settings.TimeoutSeconds > 0
                     ? await work.WaitAsync(TimeSpan.FromSeconds(settings.TimeoutSeconds), cancellationToken)
                     : await work.WaitAsync(cancellationToken);
             }
@@ -161,17 +187,30 @@ public sealed class SubjectCutoutService
                 return SubjectCutoutResult.Busy;
             }
 
-            using var cutout = SubjectCutoutImaging.ToCutout(photo, logits, size);
+            using var alpha = SubjectCutoutImaging.ToAlphaMask(photo, prediction.Logits, size);
+            if (prediction.Candidates is { } candidates)
+            {
+                var chosen = SubjectCutoutImaging.SelectSubject(
+                    alpha, candidates, prediction.CandidateCount, SubjectPointModelShape.CandidateEdge,
+                    point!.Value.X, point.Value.Y);
+                if (chosen is null) return SubjectCutoutResult.NoSubject;
+                SubjectCutoutImaging.RestrictTo(alpha, chosen);
+            }
+
+            using var cutout = SubjectCutoutImaging.Trim(photo, alpha, out var box);
             if (cutout is null) return SubjectCutoutResult.NoSubject;
 
             using var png = new MemoryStream();
             await cutout.SaveAsync(png, new PngEncoder { ColorType = PngColorType.RgbWithAlpha }, cancellationToken);
             _logger.LogInformation(
-                "Subject cutout {Width}x{Height} in {ElapsedMs} ms",
-                cutout.Width, cutout.Height,
+                "Subject cutout {Width}x{Height} (point: {Point}) in {ElapsedMs} ms",
+                cutout.Width, cutout.Height, point is not null,
                 (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
             return new SubjectCutoutResult(
-                SubjectCutoutStatus.Ok, new SubjectCutoutImage(png.ToArray(), cutout.Width, cutout.Height));
+                SubjectCutoutStatus.Ok,
+                new SubjectCutoutImage(png.ToArray(), cutout.Width, cutout.Height, new SubjectCutoutRegion(
+                    (float)box.X / photo.Width, (float)box.Y / photo.Height,
+                    (float)box.Width / photo.Width, (float)box.Height / photo.Height)));
         }
     }
 
@@ -180,7 +219,8 @@ public sealed class SubjectCutoutService
     // already taken gets the usual " (2)" suffix. Ingest failures (quota, size)
     // propagate exactly as they do for an upload.
     public async Task<SubjectCutoutSaveResult> SaveAsync(
-        Guid fileItemId, Guid ownerUserId, string? ipAddress, CancellationToken cancellationToken)
+        Guid fileItemId, Guid ownerUserId, SubjectPoint? point, string? ipAddress,
+        CancellationToken cancellationToken)
     {
         var source = await _db.FileItems.AsNoTracking()
             .Where(f => f.Id == fileItemId && f.OwnerUserId == ownerUserId && f.DeletedAt == null)
@@ -188,7 +228,7 @@ public sealed class SubjectCutoutService
             .FirstOrDefaultAsync(cancellationToken);
         if (source is null) return new SubjectCutoutSaveResult(SubjectCutoutStatus.NotFound);
 
-        var result = await CreateAsync(fileItemId, ownerUserId, cancellationToken);
+        var result = await CreateAsync(fileItemId, ownerUserId, point, cancellationToken);
         if (result.Status != SubjectCutoutStatus.Ok) return new SubjectCutoutSaveResult(result.Status);
 
         using var content = new MemoryStream(result.Image!.Png, writable: false);
@@ -201,6 +241,8 @@ public sealed class SubjectCutoutService
             cancellationToken);
         return new SubjectCutoutSaveResult(SubjectCutoutStatus.Ok, created);
     }
+
+    private sealed record Prediction(float[] Logits, float[]? Candidates, int CandidateCount);
 
     // "IMG_0001.HEIC" → "IMG_0001-cutout.png".
     internal static string CutoutFileName(string sourceName)

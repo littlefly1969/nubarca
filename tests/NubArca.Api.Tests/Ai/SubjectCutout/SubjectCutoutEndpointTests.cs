@@ -22,6 +22,7 @@ public sealed class SubjectCutoutEndpointTests : IDisposable
 {
     private readonly SqliteWebApplicationFactory _factory;
     private readonly FakeSubjectMaskModel _model = new();
+    private readonly FakeSubjectPointModel _pointModel = new();
 
     public SubjectCutoutEndpointTests()
     {
@@ -33,7 +34,10 @@ public sealed class SubjectCutoutEndpointTests : IDisposable
             ["Ai:SubjectCutout:QueueTimeoutSeconds"] = "0",
         });
         _factory.ConfigureExtraServices = services =>
+        {
             services.Replace(ServiceDescriptor.Singleton<ISubjectMaskModel>(_model));
+            services.Replace(ServiceDescriptor.Singleton<ISubjectPointModel>(_pointModel));
+        };
         _factory.EnsureDatabaseCreated();
     }
 
@@ -70,11 +74,16 @@ public sealed class SubjectCutoutEndpointTests : IDisposable
         var (_, client) = await _factory.CreateAuthenticatedClientAsync();
 
         var on = await client.GetFromJsonAsync<SubjectCutoutAvailability>("/api/subject-cutout");
+        _pointModel.Available = false;
+        var noPoint = await client.GetFromJsonAsync<SubjectCutoutAvailability>("/api/subject-cutout");
+        _pointModel.Available = true;
         _model.Available = false;
         var off = await client.GetFromJsonAsync<SubjectCutoutAvailability>("/api/subject-cutout");
 
-        Assert.True(on!.Available);
-        Assert.False(off!.Available);
+        Assert.Equal(new SubjectCutoutAvailability(true, true), on);
+        Assert.Equal(new SubjectCutoutAvailability(true, false), noPoint);
+        // No tapping without the cutout model that draws the edges.
+        Assert.Equal(new SubjectCutoutAvailability(false, false), off);
     }
 
     [Fact]
@@ -206,6 +215,98 @@ public sealed class SubjectCutoutEndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task A_tap_keeps_only_the_touched_subject()
+    {
+        var (owner, client) = await _factory.CreateAuthenticatedClientAsync();
+        var file = await UploadAsync(owner, ImageFixtures.PlainPng(400, 200), "p.png", "image/png");
+        _model.TwoSubjects = true;
+
+        var both = await client.PostAsync($"/api/files/{file.Id}/subject-cutout", null);
+        var right = await client.PostAsJsonAsync($"/api/files/{file.Id}/subject-cutout", new { point = new { x = 0.8, y = 0.5 } });
+
+        using var bothPng = Image.Load<Rgba32>(await both.Content.ReadAsByteArrayAsync());
+        Assert.Equal(HttpStatusCode.OK, right.StatusCode);
+        using var rightPng = Image.Load<Rgba32>(await right.Content.ReadAsByteArrayAsync());
+        // Both people span the whole width; the touched one is the right 40%.
+        Assert.InRange(bothPng.Width, 390, 400);
+        Assert.InRange(rightPng.Width, 160, 176);
+        Assert.Equal((0.8f, 0.5f), _pointModel.LastPoint);
+        // The right person sits in the right 40% of the photo, full height.
+        var region = right.Headers.GetValues(SubjectCutoutEndpoints.RegionHeader).Single()
+            .Split(',').Select(v => double.Parse(v, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        Assert.Equal(4, region.Length);
+        Assert.InRange(region[0], 0.57, 0.6);
+        Assert.Equal(0, region[1]);
+        Assert.InRange(region[2], 0.4, 0.43);
+        Assert.Equal(1, region[3]);
+        Assert.Equal(1, _pointModel.Runs);
+    }
+
+    [Fact]
+    public async Task A_tap_on_the_background_is_a_422()
+    {
+        var (owner, client) = await _factory.CreateAuthenticatedClientAsync();
+        var file = await UploadAsync(owner, ImageFixtures.PlainPng(400, 200), "p.png", "image/png");
+        _model.TwoSubjects = true;
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/files/{file.Id}/subject-cutout", new { point = new { x = 0.5, y = 0.5 } });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Contains("no_subject", await response.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData(-0.1, 0.5)]
+    [InlineData(0.5, 1.5)]
+    public async Task A_point_off_the_photo_is_a_400_and_runs_nothing(double x, double y)
+    {
+        var (owner, client) = await _factory.CreateAuthenticatedClientAsync();
+        var file = await UploadAsync(owner, ImageFixtures.PlainPng(64, 64), "p.png", "image/png");
+
+        var create = await client.PostAsJsonAsync($"/api/files/{file.Id}/subject-cutout", new { point = new { x, y } });
+        var save = await client.PostAsJsonAsync($"/api/files/{file.Id}/subject-cutout/save", new { point = new { x, y } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, create.StatusCode);
+        Assert.Contains("invalid_point", await create.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
+        Assert.Equal(0, _model.Runs);
+    }
+
+    [Fact]
+    public async Task A_tap_without_the_point_model_is_a_503_while_the_whole_subject_still_works()
+    {
+        var (owner, client) = await _factory.CreateAuthenticatedClientAsync();
+        var file = await UploadAsync(owner, ImageFixtures.PlainPng(64, 64), "p.png", "image/png");
+        _pointModel.Available = false;
+
+        var tapped = await client.PostAsJsonAsync(
+            $"/api/files/{file.Id}/subject-cutout", new { point = new { x = 0.5, y = 0.5 } });
+        var whole = await client.PostAsync($"/api/files/{file.Id}/subject-cutout", null);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, tapped.StatusCode);
+        Assert.Contains("\"unavailable\"", await tapped.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, whole.StatusCode);
+        Assert.Equal(0, _pointModel.Runs);
+    }
+
+    [Fact]
+    public async Task Saving_a_tap_files_only_the_touched_subject()
+    {
+        var (owner, client) = await _factory.CreateAuthenticatedClientAsync();
+        var photo = await UploadAsync(owner, ImageFixtures.PlainPng(400, 200), "IMG_0002.png", "image/png");
+        _model.TwoSubjects = true;
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/files/{photo.Id}/subject-cutout/save", new { point = new { x = 0.2, y = 0.5 } });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var saved = await response.Content.ReadFromJsonAsync<FileSummary>();
+        Assert.Equal("IMG_0002-cutout.png", saved!.Name);
+        Assert.InRange(saved.Width ?? 0, 160, 176);
+    }
+
+    [Fact]
     public void Cutout_names_follow_the_photo()
     {
         Assert.Equal("IMG_0001-cutout.png", SubjectCutoutService.CutoutFileName("IMG_0001.HEIC"));
@@ -216,6 +317,8 @@ public sealed class SubjectCutoutEndpointTests : IDisposable
     {
         public volatile bool Available = true;
         public volatile bool Subject = true;
+        // Two people side by side: the left and the right 40% of the photo.
+        public volatile bool TwoSubjects;
         private int _runs;
 
         public int Runs => _runs;
@@ -226,8 +329,41 @@ public sealed class SubjectCutoutEndpointTests : IDisposable
         {
             Interlocked.Increment(ref _runs);
             var quarter = size / 4;
+            if (TwoSubjects)
+            {
+                return SubjectCutoutImagingTests.Square(size, (x, _) =>
+                    x < size * 2 / 5 || x >= size * 3 / 5 ? 12f : -12f);
+            }
             return SubjectCutoutImagingTests.Square(size, (x, y) =>
                 Subject && x >= quarter && x < size - quarter && y >= quarter && y < size - quarter ? 12f : -12f);
+        }
+    }
+
+    // Around the touched point it proposes what SAM does: a small patch, the
+    // whole person touched, and the whole photo.
+    private sealed class FakeSubjectPointModel : ISubjectPointModel
+    {
+        public volatile bool Available = true;
+        public (float X, float Y) LastPoint;
+        private int _runs;
+
+        public int Runs => _runs;
+
+        public string? UnavailableReason() => Available ? null : "subject-point-disabled";
+
+        public float[] PredictCandidates(float[] input, float x, float y, out int count)
+        {
+            Interlocked.Increment(ref _runs);
+            LastPoint = (x, y);
+            const int edge = SubjectPointModelShape.CandidateEdge;
+            var (px, py) = ((int)(x * edge), (int)(y * edge));
+            Func<int, int, bool> patch = (cx, cy) => Math.Abs(cx - px) < 8 && Math.Abs(cy - py) < 8;
+            // Between the two people there is no person to propose.
+            Func<int, int, bool> person = x < 0.4f ? (cx, _) => cx < edge * 2 / 5
+                : x >= 0.6f ? (cx, _) => cx >= edge * 3 / 5
+                : patch;
+            count = 3;
+            return SubjectCutoutImagingTests.Candidates(edge, patch, person, (_, _) => true);
         }
     }
 }

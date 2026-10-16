@@ -16,6 +16,8 @@ public sealed class SubjectCutoutOptionsTests
         var o = new AiOptions();
 
         Assert.False(o.SubjectCutout.Enabled);
+        Assert.False(o.SubjectCutout.PointSelection.Enabled);
+        Assert.Equal("CPU", o.Onnx.OpenVino.DeviceFor(OnnxModel.SubjectPointEncoder));
         Assert.Equal(1024, o.SubjectCutout.InputSize);
         Assert.Equal("CPU", o.Onnx.OpenVino.DeviceFor(OnnxModel.SubjectCutout));
         Assert.True(Ok(o));
@@ -47,6 +49,9 @@ public sealed class SubjectCutoutOptionsTests
         o.Onnx.OpenVino.SubjectCutoutDevice = "GPU";
         Assert.True(Ok(o));
         Assert.Equal("GPU", o.Onnx.OpenVino.DeviceFor(OnnxModel.SubjectCutout));
+        // Tapping a subject runs on the same device as the cutout.
+        Assert.Equal("GPU", o.Onnx.OpenVino.DeviceFor(OnnxModel.SubjectPointEncoder));
+        Assert.Equal("GPU", o.Onnx.OpenVino.DeviceFor(OnnxModel.SubjectPointDecoder));
     }
 
     [Fact]
@@ -68,5 +73,27 @@ public sealed class SubjectCutoutOptionsTests
 
         ai.Onnx.ModelDir = dir;
         Assert.Equal(OnnxInferenceSessionFactory.ReasonModelNotFound, model.UnavailableReason());
+    }
+
+    [Fact]
+    public void Point_selection_is_unavailable_until_the_cutout_the_option_and_both_files_are_there()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"nubarca-point-{Guid.NewGuid():N}");
+        var ai = new AiOptions { Enabled = true };
+        var model = new OnnxSubjectPointModel(
+            Options.Create(ai),
+            new OnnxInferenceSessionFactory(Options.Create(ai), NullLogger<OnnxInferenceSessionFactory>.Instance));
+
+        ai.SubjectCutout.PointSelection.Enabled = true;
+        Assert.Equal(OnnxSubjectPointModel.ReasonDisabled, model.UnavailableReason());
+
+        ai.SubjectCutout.Enabled = true;
+        Assert.Equal(OnnxSubjectMaskModel.ReasonModelDirMissing, model.UnavailableReason());
+
+        ai.Onnx.ModelDir = dir;
+        Assert.Equal(OnnxInferenceSessionFactory.ReasonModelNotFound, model.UnavailableReason());
+
+        ai.SubjectCutout.PointSelection.Enabled = false;
+        Assert.Equal(OnnxSubjectPointModel.ReasonDisabled, model.UnavailableReason());
     }
 }

@@ -64,6 +64,7 @@ public static class AiServiceRegistration
         // Owner-private "copy subject" (Ai:SubjectCutout): on-request only, no
         // job and no backfill. The gate keeps one inference in flight.
         services.AddSingleton<ISubjectMaskModel, OnnxSubjectMaskModel>();
+        services.AddSingleton<ISubjectPointModel, OnnxSubjectPointModel>();
         services.AddSingleton<SubjectCutoutGate>();
         services.AddScoped<SubjectCutoutService>();
         services.AddSingleton<IAiBackend>(sp => sp.GetRequiredService<OnnxFaceBackend>());
