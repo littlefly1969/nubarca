@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using NubArca.Api.Ai.Onnx;
+using NubArca.Api.Ai.SubjectCutout;
 
 namespace NubArca.Api.Ai;
 
@@ -75,6 +76,11 @@ public class AiOptions
     // cloud. Bound from "Ai:NaturalGallerySearch:*" (env
     // Ai__NaturalGallerySearch__*). Auto-binds — no extra Configure<> call.
     public AiNaturalGallerySearchOptions NaturalGallerySearch { get; set; } = new();
+
+    // Owner-private "copy subject": lifts a photo's subject off its background
+    // on request. OFF by default. Bound from "Ai:SubjectCutout:*" (env
+    // Ai__SubjectCutout__*). Auto-binds — no extra Configure<> call.
+    public AiSubjectCutoutOptions SubjectCutout { get; set; } = new();
 }
 
 // TV natural-language gallery command interpreter + semantic-search tunables.
@@ -194,6 +200,10 @@ public class AiOnnxOpenVinoOptions
     // the photo text tower and this one share nothing but a modality.
     public string RagTextDevice { get; set; } = "CPU";
 
+    // The subject-cutout models (Ai:SubjectCutout): the segmentation model and
+    // the tap-to-select encoder/decoder.
+    public string SubjectCutoutDevice { get; set; } = "CPU";
+
     // GPU inference precision. MUST be FP32 for output-equivalence with the CPU
     // reference / sidecar (FP16, the OpenVINO GPU default, measurably diverges).
     public string GpuPrecision { get; set; } = "FP32";
@@ -205,6 +215,9 @@ public class AiOnnxOpenVinoOptions
         OnnxModel.FaceDetector => FaceDetectorDevice,
         OnnxModel.FaceRecognizer => FaceRecognizerDevice,
         OnnxModel.RagText => RagTextDevice,
+        OnnxModel.SubjectCutout => SubjectCutoutDevice,
+        OnnxModel.SubjectPointEncoder => SubjectCutoutDevice,
+        OnnxModel.SubjectPointDecoder => SubjectCutoutDevice,
         _ => "CPU",
     };
 }
@@ -241,6 +254,7 @@ public sealed class AiOnnxOptionsValidator : IValidateOptions<AiOptions>
                 ("FaceDetectorDevice", ov.FaceDetectorDevice, false),
                 ("FaceRecognizerDevice", ov.FaceRecognizerDevice, false),
                 ("RagTextDevice", ov.RagTextDevice, false),
+                ("SubjectCutoutDevice", ov.SubjectCutoutDevice, false),
             })
             {
                 if (!IsValidDevice(device) && !(allowDual && OnnxDevice.IsDual(device)))
@@ -255,6 +269,14 @@ public sealed class AiOnnxOptionsValidator : IValidateOptions<AiOptions>
                 return ValidateOptionsResult.Fail(
                     "Ai:Onnx:OpenVino:GpuPrecision must be 'FP32' (required for output-equivalence).");
             }
+        }
+
+        var cutout = options.SubjectCutout;
+        if (cutout.InputSize is < AiSubjectCutoutLimits.MinInputSize or > AiSubjectCutoutLimits.MaxInputSize
+            || cutout.InputSize % 32 != 0)
+        {
+            return ValidateOptionsResult.Fail(
+                "Ai:SubjectCutout:InputSize must be a multiple of 32 between 256 and 2048.");
         }
 
         return ValidateOptionsResult.Success;

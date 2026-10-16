@@ -6,6 +6,46 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Copy subject: lift a photo's subject off its background
+
+- **✂ in the photo viewer** cuts the subject out of one of your photos, like
+  "Copy Subject" on an iPhone: a transparent PNG you can **copy**,
+  **download**, or **save to NubArca** as a new file next to the photo. The
+  original is never touched.
+- **The same ✂ in the mobile app viewer**: **Share** sends the PNG through the
+  system share sheet (to a chat, Google Photos or any other app), and
+  **Save to NubArca** files it beside the photo. It uses only modules the app
+  already ships, so it asks for no new permission; it reaches phones with the
+  next mobile build.
+- **Tap a subject to keep only that one**, on the web and in the app: with
+  two people in the cutout, tap one and the other goes. **All subjects**
+  goes back, and copy, share and save act on what is shown. It uses SAM 2.1
+  tiny (Apache-2.0) to tell which subject was tapped, while the edges stay
+  BiRefNet's. It is a separate opt-in
+  (`Ai__SubjectCutout__PointSelection__Enabled=true`, model exported with
+  `scripts/export-sam2-point-onnx.py`).
+- **Print "Esce dalla foto" (Pop out)**: a new style for a single photo in
+  the owner's print studio. The photo sits in a frame with deep paper above
+  it, and the subject breaks out over the frame's top edge with a soft
+  shadow. NubArca proposes the framing that makes it break out, the owner can
+  retouch it, and the preview shows the sheet as it will print. The printed
+  subject uses the original's own pixels, so it continues across the edge
+  without a seam. Owner's own prints only: never through an album share or a
+  party.
+  With tap-a-subject on, **tap the one person who should pop out**: the
+  print sends only that point and the server lifts the same person again.
+- Photos a phone stored turned (EXIF orientation 6/8) are cut out upright, and
+  their pop-out lines up with the printed photo. A tap on the background now
+  selects nothing, even when the model proposes a nearby person; a tap on
+  hair or a soft edge still selects its subject. The first cutout after a
+  restart gets 240 s (`Ai__SubjectCutout__TimeoutSeconds`) to compile the
+  models. The SAM export script refuses an unpinned `sam2` checkout or a
+  checkpoint whose SHA-256 is not Meta's.
+- Runs on your own server with BiRefNet-lite (MIT), on request only. Off by
+  default; the operator places the model and sets
+  `Ai__SubjectCutout__Enabled=true` (see
+  `docs/model-deployment/subject-cutout.md`).
+
 ### Printing: photographs print in their own colours
 
 - **Photos shot in a wide colour space print as they were shot.** A Display P3

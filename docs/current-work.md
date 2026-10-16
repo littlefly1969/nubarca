@@ -254,6 +254,31 @@ is built is described by `ARCHITECTURE.md`.
   Production pulls verified application/APK/OTA artifacts by digest; the guided
   `deploy/update-production.sh check|apply` path can back up and apply explicitly
   confirmed, policy-approved additive migrations and never builds on the server
+- Copy subject (`Ai/SubjectCutout`): the owner viewer's ✂ lifts a photo's
+  subject off its background with BiRefNet-lite (MIT) on the shared ONNX
+  session factory (`OnnxModel.SubjectCutout`, own OpenVINO device). On request
+  only, from the medium preview, one inference at a time; "save" files a
+  `<name>-cutout.png` beside the photo through the owner ingest. Off by default
+  (`Ai__SubjectCutout__Enabled`, plus `Ai__Enabled`). The mobile viewer has the
+  same ✂ (`SubjectCutoutSheet`: Share via expo-sharing, Save to NubArca); no
+  clipboard or direct gallery save, since both would need a new native build.
+  Tap a subject (`Ai:SubjectCutout:PointSelection`, off by default): SAM 2.1
+  tiny (`OnnxModel.SubjectPointEncoder/Decoder`, same device) picks the touched
+  subject among BiRefNet's foreground; the PNG answer's
+  `X-Subject-Cutout-Region` maps taps on the cutout back onto the photo.
+  Print style `popOut` ("Esce dalla foto", `PrintLayouts.PopOut`, single owner
+  photo only, refused for album-share origin): deep top paper
+  (`PopOutSlot`/`PopOutArea`, mirrored in `packages/contracts`), the owner
+  print lifts the subject mask (`ISubjectMaskSource.CreateMaskAsync`) before
+  taking a sheet, and `PartyPrintComposer.DrawPopOut` redraws the original's
+  pixels above the slot where the mask says subject, with a shadow. The web
+  studio previews it and proposes the framing (`frontend/src/print/popOut.ts`).
+  `SubjectCutoutService` AutoOrients the medium preview (derivatives keep EXIF
+  and do not rotate). `SelectSubject` fails closed: a tap off the foreground
+  and its soft fringe (`TouchAlphaFloor`/`TouchSlackFraction`) is no_subject.
+  Owner print `subject {x,y}` (popOut only) goes into `SheetFingerprint` and
+  the render spec, and `CreateMaskAsync` re-lifts from that point.
+  See `docs/model-deployment/subject-cutout.md`
 - Storage: local content-addressed blobs with database-owned logical paths
 - Interactive uploads: ONE engine (`frontend/src/uploads/engine`,
   `UploadManager`) mounted with the shell (`UploadProvider` in `Layout`), so

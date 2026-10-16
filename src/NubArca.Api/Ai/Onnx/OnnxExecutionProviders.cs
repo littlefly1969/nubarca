@@ -54,4 +54,15 @@ public enum OnnxModel
     // placement is configured independently of the photo text tower — they are
     // different models in different vector spaces that happen to both read text.
     RagText,
+
+    // Subject cutout ("copy subject"): the salient-object segmentation model
+    // that lifts a photo's subject off its background. Its own logical model so
+    // its device placement is configured independently of every embedder.
+    SubjectCutout,
+
+    // "Tap a subject": the promptable segmenter that picks WHICH subject the
+    // owner touched. Image encoder and prompt decoder are two ONNX files; both
+    // run on the subject-cutout device.
+    SubjectPointEncoder,
+    SubjectPointDecoder,
 }

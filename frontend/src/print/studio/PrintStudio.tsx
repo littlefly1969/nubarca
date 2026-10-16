@@ -2,7 +2,7 @@ import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode,
 } from 'react';
 import {
-  effectiveZoom, placePhoto, visiblePhotoRect, type PhotoPlacement, type PrintLayout, type PrintStyle,
+  effectiveZoom, placePhoto, popOutArea, visiblePhotoRect, type PhotoPlacement, type PrintLayout, type PrintStyle,
 } from '@nubarca/contracts';
 import { useI18n, type MessageKey } from '../../i18n';
 import { PRODUCT_NAME } from '../../brand/brand';
@@ -14,6 +14,7 @@ import {
   type CropView, type PaperSize, gridLayout, gridPortrait, gridSlotAspect, overlaySlotAspect, photoLayout,
   photoSlotAspect, sheet, stripFooter, stripSlot, stripSlotAspect,
 } from '../../pages/partyPrintGeometry';
+import { popOutCutoutRect, popOutPlacement, type SubjectRegion } from '../popOut';
 import '../../pages/PartyPrintPage.css';
 
 /* THE PRINT STUDIO — one path to a printed sheet, for a party's guest and for
@@ -59,6 +60,12 @@ export interface StudioBand {
 }
 
 export interface StudioSlot { itemId: string; placement: PhotoPlacement }
+
+/**
+ * "Esce dalla foto": the subject of the photograph being printed, lifted off
+ * its background (a transparent image), and where it sits in the photograph.
+ */
+export interface StudioPopOut { photoId: string; url: string; region: SubjectRegion }
 
 export type StudioSubmission = {
   slots: StudioSlot[];
@@ -241,6 +248,36 @@ interface SheetProps {
   onAspect: (id: string, width: number, height: number) => void;
   orientation: 'portrait' | 'landscape' | null;
   paper: PaperSize;
+  popOut?: StudioPopOut | null;
+}
+
+/**
+ * The subject breaking out over the frame's top edge, as the renderer draws
+ * it: the cutout laid over the photograph exactly, and shown only on the paper
+ * above the slot — the area clips it, as the server draws nowhere else.
+ */
+function PopOutLayer({ popOut, aspect, paper, portrait, view }: {
+  popOut: StudioPopOut;
+  aspect: number;
+  paper: PaperSize;
+  portrait: boolean;
+  view: CropView;
+}) {
+  const area = popOutArea(paper, portrait);
+  const rect = popOutCutoutRect(aspect, paper, portrait, view, popOut.region);
+  return (
+    <div
+      className="party-print-popout"
+      data-testid="print-popout-layer"
+      style={{ left: pct(area.x), top: pct(area.y), width: pct(area.width), height: pct(area.height) }}
+    >
+      <img
+        src={popOut.url}
+        alt=""
+        style={{ left: pct(rect.x), top: pct(rect.y), width: pct(rect.width), height: pct(rect.height) }}
+      />
+    </div>
+  );
 }
 
 function SheetPreview(props: SheetProps) {
@@ -286,8 +323,10 @@ function SheetPreview(props: SheetProps) {
     // The sheet follows the photograph unless it was turned — exactly the
     // decision the renderer makes, made here from the same inputs.
     const portrait = orientation === null ? aspect <= 1 : orientation === 'portrait';
-    const { sheetWidth, sheetHeight, slot, footer } = photoLayout(portrait, paper);
-    const slotAspect = photoSlotAspect(portrait, paper);
+    const framedStyle = photoStyle === 'popOut' ? 'popOut' : 'framed';
+    const { sheetWidth, sheetHeight, slot, footer } = photoLayout(portrait, paper, framedStyle);
+    const slotAspect = photoSlotAspect(portrait, paper, framedStyle);
+    const popOut = photoStyle === 'popOut' && props.popOut?.photoId === id && aspect > 0 ? props.popOut : null;
     return (
       <div
         className="party-print-sheet"
@@ -309,6 +348,7 @@ function SheetPreview(props: SheetProps) {
             onAspect={(w, h) => onAspect(id, w, h)}
           />
         </div>
+        {popOut && <PopOutLayer popOut={popOut} aspect={aspect} paper={paper} portrait={portrait} view={viewOf(id)} />}
         <div
           className="party-print-footer-band"
           style={{
@@ -475,6 +515,8 @@ export interface PrintStudioProps {
   onFormatChange?: () => void;
   /** Changed by the page to start over from the format step. */
   resetSignal?: number;
+  /** "Esce dalla foto": the subject of the single photograph, once it is lifted. */
+  popOut?: StudioPopOut | null;
 }
 
 export function PrintStudio(props: PrintStudioProps) {
@@ -554,8 +596,25 @@ export function PrintStudio(props: PrintStudioProps) {
         ? gridSlotAspect(paper)
         : photoStyle === 'fullBleed'
           ? overlaySlotAspect(portraitFor(id), paper)
-          : photoSlotAspect(portraitFor(id), paper)
+          : photoSlotAspect(portraitFor(id), paper, photoStyle)
   ), [layout, paper, photoStyle, portraitFor]);
+
+  // "Esce dalla foto": once the subject is known, NubArca proposes the framing
+  // that makes it break out — once per photograph and way up, so a framing
+  // retouched afterwards is kept.
+  const { popOut } = props;
+  const proposedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = chosen[0];
+    if (layout !== 'photo' || photoStyle !== 'popOut' || !popOut || popOut.photoId !== id) return;
+    const aspect = aspectOf(id);
+    if (aspect <= 0) return;
+    const portrait = portraitFor(id);
+    const key = JSON.stringify([id, portrait, paper, popOut.region]);
+    if (proposedRef.current === key) return;
+    proposedRef.current = key;
+    setViews((prev) => ({ ...prev, [id]: popOutPlacement(aspect, paper, portrait, popOut.region) }));
+  }, [layout, photoStyle, popOut, chosen, aspectOf, portraitFor, paper]);
 
   const shownOrientation = portraitFor(chosen[0]) ? 'portrait' : 'landscape';
 
@@ -571,7 +630,7 @@ export function PrintStudio(props: PrintStudioProps) {
     // focal point and the displayed zoom, clamped to what the new frame allows.
     const nextAspect = photoStyle === 'fullBleed'
       ? overlaySlotAspect(next === 'portrait', paper)
-      : photoSlotAspect(next === 'portrait', paper);
+      : photoSlotAspect(next === 'portrait', paper, photoStyle);
     const zoom = effectiveZoom(aspect, nextAspect,
       effectiveZoom(aspect, slotAspectFor(id), view.zoom));
     setViews((prev) => ({ ...prev, [id]: { ...view, zoom } }));
@@ -966,6 +1025,7 @@ export function PrintStudio(props: PrintStudioProps) {
             onAspect={noteAspect}
             orientation={layout === 'photo' ? shownOrientation : null}
             paper={paper}
+            popOut={popOut}
           />
           <p className="party-print-hint">{t('partyPrint.previewHelp', { paper: PAPER_LABEL[paper] })}</p>
           {layout === 'twinStrip4' && (

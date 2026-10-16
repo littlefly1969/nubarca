@@ -4895,6 +4895,89 @@ video.lightbox-image {
 .media-viewer-meta dd { margin: 0; word-break: break-word; }
 .media-viewer-download { display: inline-block; margin-top: 1rem; }
 
+/* "Copy subject": a modal over the viewer. The cutout sits on a checkerboard
+   so its transparency reads as transparency, not as black or white. */
+.subject-cutout-dialog {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 60%);
+  z-index: 5;
+}
+.subject-cutout-dialog:focus { outline: none; }
+.subject-cutout-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: min(640px, 100%);
+  max-height: 100%;
+  padding: 1rem;
+  border-radius: 10px;
+  background: var(--surface, #1a1a1a);
+  color: var(--text, #eee);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 50%);
+}
+.subject-cutout-head { display: flex; align-items: center; justify-content: space-between; }
+.subject-cutout-head h3 { margin: 0; }
+.subject-cutout-head button {
+  background: none;
+  color: inherit;
+  border: none;
+  font-size: 1.25rem;
+  min-width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.subject-cutout-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  max-height: 60vh;
+  border-radius: 6px;
+  background-color: #ddd;
+  background-image:
+    linear-gradient(45deg, #bbb 25%, transparent 25%),
+    linear-gradient(-45deg, #bbb 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #bbb 75%),
+    linear-gradient(-45deg, transparent 75%, #bbb 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  overflow: hidden;
+}
+.subject-cutout-stage img { max-width: 100%; max-height: 60vh; object-fit: contain; }
+.subject-cutout-working,
+.subject-cutout-error {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 70%);
+  color: #fff;
+  text-align: center;
+}
+.subject-cutout-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.subject-cutout-actions button,
+.subject-cutout-actions a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 1rem;
+  border-radius: 6px;
+  border: 1px solid currentColor;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.subject-cutout-actions button:disabled { opacity: 0.5; cursor: default; }
+.subject-cutout-notice { margin: 0; }
+.subject-cutout-stage img.subject-cutout-tappable { cursor: crosshair; }
+.subject-cutout-hint { margin: 0; opacity: 0.8; font-size: 0.9rem; }
+
 /* The image gallery injects its full metadata panel(s) into the drawer via
    renderDetails. Let those sections flow with the drawer's own scroll instead
    of each opening a nested 30vh scroll region. */

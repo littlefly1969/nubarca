@@ -22,7 +22,12 @@
 export const PRINT_LAYOUTS = ['photo', 'grid4', 'twinStrip4'] as const;
 export type PrintLayout = (typeof PRINT_LAYOUTS)[number];
 
-export type PrintStyle = 'framed' | 'fullBleed';
+/**
+ * `popOut` ("Esce dalla foto"): a framed photograph with deep paper above it,
+ * where the subject breaks out over the frame's top edge. A single photograph
+ * only, and the owner's own.
+ */
+export type PrintStyle = 'framed' | 'fullBleed' | 'popOut';
 
 /**
  * The papers a printer can have loaded: DNP's 4x6, 5x7 and 6x8 inch media under
@@ -88,7 +93,7 @@ export function layoutPhotoCounts(layout: PrintLayout): readonly number[] {
 
 /** A style is a single photograph's choice; four and the strips are always framed. */
 export function layoutSupportsStyle(layout: PrintLayout, style: PrintStyle): boolean {
-  return style === 'framed' || layout === 'photo';
+  return style === 'framed' || ((style === 'fullBleed' || style === 'popOut') && layout === 'photo');
 }
 
 /** A single photograph's sheet stands as it is placed; four as the paper is named; strips always stand. */
@@ -123,6 +128,9 @@ export function arrangeSheet(
   if (style === 'fullBleed') {
     return { width, height, slots: [{ x: 0, y: 0, width: 1, height: 1 }], bands: [] };
   }
+  if (style === 'popOut') {
+    return { width, height, slots: [popOutSlot(paper, standing)], bands: [popOutFooter(paper, standing)] };
+  }
   return { width, height, slots: [photoSlot(paper, standing)], bands: [photoFooter(paper, standing)] };
 }
 
@@ -156,6 +164,42 @@ export function photoFooter(paper: PrintPaper, portrait: boolean): PrintRect {
   const [w, h] = printSheet(paper, portrait);
   const slot = photoSlot(paper, portrait);
   return { x: slot.x, y: slot.y + slot.height, width: slot.width, height: (PHOTO_FOOTER_FRACTION * Math.min(w, h)) / h };
+}
+
+// --- One photograph that its subject breaks out of ------------------------------
+
+/** Short-edge fractions: deep paper above, a little more border beside, the framed band and border below. */
+export const POP_OUT_TOP_FRACTION = 0.22;
+export const POP_OUT_SIDE_FRACTION = 0.08;
+export const POP_OUT_BOTTOM_FRACTION = PHOTO_MARGIN_FRACTION;
+/** How close to the sheet's edge the subject may reach: printers do not print to the very edge reliably. */
+export const POP_OUT_EDGE_FRACTION = 0.02;
+
+export function popOutSlot(paper: PrintPaper, portrait: boolean): PrintRect {
+  const [w, h] = printSheet(paper, portrait);
+  const shortEdge = Math.min(w, h);
+  const side = POP_OUT_SIDE_FRACTION * shortEdge;
+  const top = POP_OUT_TOP_FRACTION * shortEdge;
+  const bottom = POP_OUT_BOTTOM_FRACTION * shortEdge;
+  const footer = PHOTO_FOOTER_FRACTION * shortEdge;
+  return { x: side / w, y: top / h, width: (w - 2 * side) / w, height: (h - top - footer - bottom) / h };
+}
+
+export function popOutFooter(paper: PrintPaper, portrait: boolean): PrintRect {
+  const [w, h] = printSheet(paper, portrait);
+  const slot = popOutSlot(paper, portrait);
+  return { x: slot.x, y: slot.y + slot.height, width: slot.width, height: (PHOTO_FOOTER_FRACTION * Math.min(w, h)) / h };
+}
+
+/**
+ * Where the subject may break out: the paper above the photograph, edge to
+ * edge but for the printer's safe edge. Never beside or below it.
+ */
+export function popOutArea(paper: PrintPaper, portrait: boolean): PrintRect {
+  const [w, h] = printSheet(paper, portrait);
+  const edge = POP_OUT_EDGE_FRACTION * Math.min(w, h);
+  const slot = popOutSlot(paper, portrait);
+  return { x: edge / w, y: edge / h, width: (w - 2 * edge) / w, height: slot.y - edge / h };
 }
 
 // --- Four photographs, two by two ---------------------------------------------

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using NubArca.Api.Ai.SubjectCutout;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Domain.Print;
@@ -49,13 +50,15 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
     private readonly PrintArtifactRenderer _renderer;
     private readonly PartyPrintComposer _composer;
     private readonly IDerivedBlobStorage _artifacts;
+    private readonly ISubjectMaskSource _subjects;
     private readonly TimeProvider _clock;
     private readonly PrintOptions _options;
     private readonly ILogger<OwnerPhotoPrintService> _logger;
 
     public OwnerPhotoPrintService(
         AppDbContext db, IPrinterAccess printers, IPrintPhotoSourceReader sources,
-        PrintArtifactRenderer renderer, PartyPrintComposer composer, IDerivedBlobStorage artifacts, TimeProvider clock,
+        PrintArtifactRenderer renderer, PartyPrintComposer composer, IDerivedBlobStorage artifacts,
+        ISubjectMaskSource subjects, TimeProvider clock,
         IOptions<PrintOptions> options, ILogger<OwnerPhotoPrintService> logger)
     {
         _db = db;
@@ -64,6 +67,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         _renderer = renderer;
         _composer = composer;
         _artifacts = artifacts;
+        _subjects = subjects;
         _clock = clock;
         _options = options.Value;
         _logger = logger;
@@ -91,6 +95,15 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         if (!PrintLayouts.IsKnown(layout)) return Refuse(OwnerPhotoPrintErrors.InvalidLayout);
         var style = request.Style ?? (layout == PrintLayouts.Photo ? PrintLayouts.FullBleed : PrintLayouts.Framed);
         if (!PrintLayouts.SupportsStyle(layout, style)) return Refuse(OwnerPhotoPrintErrors.InvalidLayout);
+        // "Esce dalla foto" lifts the subject with the owner's own private AI:
+        // the owner's request only, never one through a share.
+        if (style == PrintLayouts.PopOut && origin is not null) return Refuse(OwnerPhotoPrintErrors.InvalidLayout);
+        // The touched subject belongs to "Esce dalla foto" and nothing else.
+        if (request.Subject is { } touched && (style != PrintLayouts.PopOut || !touched.IsValid))
+            return Refuse(OwnerPhotoPrintErrors.InvalidRequest);
+        var subjectPoint = request.Subject is { } chosen
+            ? new SubjectPoint((float)chosen.X, (float)chosen.Y)
+            : (SubjectPoint?)null;
 
         // The photographs, in the order they were arranged: as many as the format
         // takes — a twin strip four (the same strip twice) or eight — and each a
@@ -146,7 +159,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 request.IncludeDate ? zone!.Id : null)
             : SheetFingerprint(layout, style, fileIds, placements, stationId, deviceId, paper, portrait,
                 caption, request.Brand, request.IncludeDate, request.IncludeDate ? request.DateLocale : null,
-                request.IncludeDate ? zone!.Id : null);
+                request.IncludeDate ? zone!.Id : null, subjectPoint);
         if (await RepeatAsync(ownerUserId, keyHash, fingerprint, cancellationToken) is { } repeat) return repeat;
 
         // 3. The photographs: the caller's own, in their library, and photographs
@@ -221,7 +234,22 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
             : (default(DateOnly?), OwnerPhotoPrintDates.SourceNone);
         var dateText = date is DateOnly d ? OwnerPhotoPrintDates.Format(d, request.DateLocale!) : null;
 
-        // 8. On a lent printer, one sheet of the loan, taken with the proof it is live.
+        // 8. "Esce dalla foto": the subject, lifted before a sheet is taken — it
+        // takes seconds, and a photograph with nothing to lift is refused
+        // without touching a loan.
+        using var subject = style == PrintLayouts.PopOut
+            ? await _subjects.CreateMaskAsync(fileIds[0], ownerUserId, subjectPoint, cancellationToken)
+            : null;
+        switch (subject?.Status)
+        {
+            case null or SubjectCutoutStatus.Ok: break;
+            case SubjectCutoutStatus.NotFound: return Refuse(OwnerPhotoPrintErrors.NotFound);
+            case SubjectCutoutStatus.NoSubject: return Refuse(OwnerPhotoPrintErrors.NoSubject);
+            case SubjectCutoutStatus.Busy: return Refuse(OwnerPhotoPrintErrors.SubjectBusy);
+            default: return Refuse(OwnerPhotoPrintErrors.SubjectUnavailable);
+        }
+
+        // 9. On a lent printer, one sheet of the loan, taken with the proof it is live.
         var sheet = await _printers.TryTakeSheetAsync(use.ShareId, cancellationToken);
         if (sheet != PrinterSheetResult.Taken)
         {
@@ -246,7 +274,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
 
         try
         {
-            // 9. The originals, read inside the server.
+            // 10. The originals, read inside the server.
             // Held until the sheet is drawn: a HEIC frame keeps its decode slot.
             await using var sources = await _sources.OpenAsync(ownerUserId, fileIds, cancellationToken);
             if (sources is null || sources.Photos.Any(p => p is null))
@@ -272,7 +300,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 }
             }
 
-            // 10. Rendered at 300dpi from them: Piena by the owner's own renderer,
+            // 11. Rendered at 300dpi from them: Piena by the owner's own renderer,
             // a framed sheet by the composer every framed print is drawn with,
             // in white, with the owner's words in its band.
             byte[] artifact;
@@ -291,7 +319,8 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                         Orientation: portrait ? PartyPrintOrientation.Portrait : PartyPrintOrientation.Landscape,
                         Calibration: PrintCalibration.Of(device),
                         Paper: paper,
-                        Words: new PrintSheetWords(caption, null, dateText, request.Brand)),
+                        Words: new PrintSheetWords(caption, null, dateText, request.Brand),
+                        PopOutMask: subject?.Mask),
                         cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -302,7 +331,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 return Refuse(OwnerPhotoPrintErrors.RenderFailed);
             }
 
-            // 11. Published and recorded together: the artifact is owned only by
+            // 12. Published and recorded together: the artifact is owned only by
             // the job's storage key, so the bytes and the row become durable as one.
             await using var stream = new MemoryStream(artifact, writable: false);
             var staged = await _artifacts.StageAsync(stream, cancellationToken);
@@ -339,6 +368,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                         style,
                         orientation = portrait ? "portrait" : "landscape",
                         placements = placements.Select(p => new { centerX = p.CenterX, centerY = p.CenterY, zoom = p.Zoom }),
+                        subject = subjectPoint is { } sp ? new { x = sp.X, y = sp.Y } : null,
                         caption,
                         brand = request.Brand,
                         includeDate = request.IncludeDate,
@@ -466,7 +496,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
     internal static string SheetFingerprint(
         string layout, string style, IReadOnlyList<Guid> fileIds, IReadOnlyList<PhotoPlacement> placements,
         Guid stationId, Guid deviceId, string paper, bool portrait, string? caption, bool brand,
-        bool includeDate, string? dateLocale, string? zone)
+        bool includeDate, string? dateLocale, string? zone, SubjectPoint? subject = null)
     {
         static string N(double v) => Math.Round(v, 6).ToString("R", CultureInfo.InvariantCulture);
         var photos = fileIds.Select((id, i) =>
@@ -475,6 +505,9 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
             "sheet", layout, style, string.Join(',', photos), stationId.ToString("N"), deviceId.ToString("N"),
             paper, portrait ? "portrait" : "landscape", caption ?? "", brand ? "brand" : "nobrand",
             includeDate ? "date" : "nodate", dateLocale ?? "", zone ?? "");
+        // The touched subject changes which subject breaks out. Appended only
+        // when there is one, so every other composition keeps its digest.
+        if (subject is { } point) canonical += $"|subject:{N(point.X)}:{N(point.Y)}";
         return Hash(canonical);
     }
 

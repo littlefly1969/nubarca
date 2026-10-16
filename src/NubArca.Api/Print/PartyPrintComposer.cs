@@ -95,7 +95,14 @@ public sealed record PartyPrintComposition(
     /// party composition is drawn exactly as it always was; an owner's print
     /// passes its own line, its date and whether the mark is wanted.
     /// </summary>
-    PrintSheetWords? Words = null);
+    PrintSheetWords? Words = null,
+    /// <summary>
+    /// "Esce dalla foto": the subject's alpha over the whole photograph
+    /// (upright, at any resolution — it is scaled onto the photograph). Set,
+    /// a single photograph is laid out as <see cref="PrintLayouts.PopOut"/> and
+    /// the subject breaks out over its frame's top edge. Owned by the caller.
+    /// </summary>
+    Image<L8>? PopOutMask = null);
 
 /// <summary>
 /// The words in a framed sheet's band: a title line (a party's name, or an
@@ -228,11 +235,19 @@ public sealed class PartyPrintComposer
 
         // Short edge, not height: see PhotoFooterFraction. The sheet turns; the
         // strip of paper under the photograph must not.
-        DrawFramed(sheet, source, photo,
-            ToPixels(PrintLayouts.PhotoSlot(composition.Paper, portrait), w, h),
-            composition.Theme, palette);
-        DrawFooter(sheet, composition, palette,
-            ToPixels(PrintLayouts.PhotoFooter(composition.Paper, portrait), w, h));
+        var popOut = composition.PopOutMask;
+        var slot = ToPixels(popOut is null
+            ? PrintLayouts.PhotoSlot(composition.Paper, portrait)
+            : PrintLayouts.PopOutSlot(composition.Paper, portrait), w, h);
+        DrawFramed(sheet, source, photo, slot, composition.Theme, palette);
+        if (popOut is not null && photo.Placement is PhotoPlacement placement)
+        {
+            DrawPopOut(sheet, source, popOut, placement, slot,
+                ToPixels(PrintLayouts.PopOutArea(composition.Paper, portrait), w, h));
+        }
+        DrawFooter(sheet, composition, palette, ToPixels(popOut is null
+            ? PrintLayouts.PhotoFooter(composition.Paper, portrait)
+            : PrintLayouts.PopOutFooter(composition.Paper, portrait), w, h));
         return sheet;
     }
 
@@ -699,6 +714,81 @@ public sealed class PartyPrintComposer
         using var drawn = source.Clone(x => x.Crop(from).Resize(to.Width, to.Height));
         PrintColourSpace.ToSrgb(drawn, source.Metadata);
         target.Mutate(x => x.DrawImage(drawn, new Point(to.X, to.Y), 1f));
+    }
+
+    /// <summary>Opacity of the shadow a broken-out subject casts on the paper.</summary>
+    internal const float PopOutShadowOpacity = 0.45f;
+
+    /// <summary>
+    /// "Esce dalla foto": the part of the photograph that the frame cut off
+    /// ABOVE the slot is drawn back onto the paper — but only where the
+    /// subject is, so the subject steps out over the frame's top edge while
+    /// the background stays inside. The pixels are the original's own, the
+    /// same ones the slot shows, so the subject continues across the edge
+    /// without a seam; the mask only says which of them belong to it. A soft
+    /// shadow under it lifts it off the paper. Nothing is drawn outside
+    /// <paramref name="area"/> (the paper above the slot), and a framing that
+    /// leaves nothing of the photograph above the slot draws nothing at all.
+    /// </summary>
+    internal static void DrawPopOut(
+        Image<Rgba32> sheet, Image<Rgba32> source, Image<L8> mask, PhotoPlacement placement,
+        Rectangle slot, Rectangle area)
+    {
+        var placed = PhotoPlacementGeometry.Place(
+            (double)source.Width / source.Height, (double)slot.Width / slot.Height, placement);
+        // The whole photograph as the slot's framing lays it out, in sheet pixels.
+        var (px, py) = (slot.X + (placed.Left * slot.Width), slot.Y + (placed.Top * slot.Height));
+        var (pw, ph) = (placed.Width * slot.Width, placed.Height * slot.Height);
+        var photo = Rectangle.FromLTRB(
+            (int)Math.Ceiling(px), (int)Math.Ceiling(py), (int)Math.Floor(px + pw), (int)Math.Floor(py + ph));
+        var above = Rectangle.Intersect(Rectangle.Intersect(photo, area), sheet.Bounds);
+        above = Rectangle.FromLTRB(above.Left, above.Top, above.Right, Math.Min(above.Bottom, slot.Top));
+        if (above.Width <= 0 || above.Height <= 0) return;
+
+        // The same piece of the photograph, and of its mask, as fractions of it.
+        var (fx, fy) = ((above.X - px) / pw, (above.Y - py) / ph);
+        var (fw, fh) = (above.Width / pw, above.Height / ph);
+        Rectangle Of(int width, int height) => Rectangle.Intersect(new Rectangle(
+            (int)Math.Floor(fx * width), (int)Math.Floor(fy * height),
+            Math.Max(1, (int)Math.Ceiling(fw * width)), Math.Max(1, (int)Math.Ceiling(fh * height))),
+            new Rectangle(0, 0, width, height));
+
+        using var piece = source.Clone(x => x.Crop(Of(source.Width, source.Height)).Resize(above.Width, above.Height));
+        PrintColourSpace.ToSrgb(piece, source.Metadata);
+        using var alpha = mask.Clone(x => x.Crop(Of(mask.Width, mask.Height))
+            .Resize(above.Width, above.Height, KnownResamplers.Triangle));
+        piece.ProcessPixelRows(alpha, (colour, cover) =>
+        {
+            for (var y = 0; y < colour.Height; y++)
+            {
+                var row = colour.GetRowSpan(y);
+                var a = cover.GetRowSpan(y);
+                for (var x = 0; x < row.Length; x++) row[x].A = a[x].PackedValue;
+            }
+        });
+
+        // The shadow: the subject's shape, softened and dropped a little down
+        // and right, on the paper only — never across the photograph.
+        var shortEdge = Math.Min(sheet.Width, sheet.Height);
+        var (dx, dy) = ((int)Math.Round(0.007 * shortEdge), (int)Math.Round(0.010 * shortEdge));
+        using (var shadow = new Image<Rgba32>(area.Width, area.Height, new Rgba32(0, 0, 0, 0)))
+        {
+            using var shape = new Image<Rgba32>(above.Width, above.Height);
+            shape.ProcessPixelRows(alpha, (target, cover) =>
+            {
+                for (var y = 0; y < target.Height; y++)
+                {
+                    var row = target.GetRowSpan(y);
+                    var a = cover.GetRowSpan(y);
+                    for (var x = 0; x < row.Length; x++) row[x] = new Rgba32(0, 0, 0, a[x].PackedValue);
+                }
+            });
+            shadow.Mutate(x => x
+                .DrawImage(shape, new Point(above.X - area.X + dx, above.Y - area.Y + dy), 1f)
+                .GaussianBlur((float)(0.006 * shortEdge)));
+            sheet.Mutate(x => x.DrawImage(shadow, new Point(area.X, area.Y), PopOutShadowOpacity));
+        }
+        sheet.Mutate(x => x.DrawImage(piece, new Point(above.X, above.Y), 1f));
     }
 
     /// <summary>A job from before placements: its crop, filled edge to edge, as it always printed.</summary>

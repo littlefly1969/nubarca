@@ -495,6 +495,7 @@ public sealed class OwnerPhotoPrintTests : IDisposable
             provider.GetRequiredService<PrintArtifactRenderer>(),
             provider.GetRequiredService<PartyPrintComposer>(),
             artifacts ?? provider.GetRequiredService<NubArca.Api.Storage.IDerivedBlobStorage>(),
+            provider.GetRequiredService<NubArca.Api.Ai.SubjectCutout.ISubjectMaskSource>(),
             TimeProvider.System, provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<PrintOptions>>(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<OwnerPhotoPrintService>.Instance);
         var request = JsonSerializer.Deserialize<OwnerPhotoPrintSubmitRequest>(

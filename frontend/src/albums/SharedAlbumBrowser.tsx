@@ -268,7 +268,7 @@ export function SharedAlbumBrowser({
           onNearEnd={wall.loadMore}
           // A recipient has no metadata document and casts nothing: those
           // controls do not exist here rather than being disabled.
-          capabilities={{ metadata: false, cast: false, download: capabilities.download }}
+          capabilities={{ metadata: false, cast: false, download: capabilities.download, subjectCutout: false }}
           renderActions={(viewerItem) => {
             const item = items.find((i) => i.fileItemId === viewerItem.id);
             if (item === undefined) return null;

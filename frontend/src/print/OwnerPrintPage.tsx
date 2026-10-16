@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import {
   ApiError,
@@ -14,6 +14,10 @@ import {
   listSharedPrinters,
   submitAlbumSharePrint,
   submitOwnerPhotoPrint,
+  createSubjectCutout,
+  subjectPointOnPhoto,
+  SubjectCutoutError,
+  type SubjectPoint,
   type AlbumSharePrintRequest,
   type OwnerPhotoPrintDate,
 } from '@nubarca/api-client';
@@ -25,9 +29,10 @@ import { PRODUCT_NAME } from '../brand/brand';
 import { mediumPreviewUrl, smallThumbnailUrl } from '../components/files/types';
 import { mediaRemainingLine } from '../cloud/PrinterMediaRemaining';
 import { initialTarget, printTargets, type PrintTarget } from '../media/workspace/ownerPhotoPrintTargets';
+import { useSubjectCutoutSupport } from '../subjectCutout/useSubjectCutoutAvailable';
 import {
   PAPER_LABEL, PrintStudio,
-  type FullBleedSheet, type StudioFormat, type StudioPhoto, type StudioSubmission,
+  type FullBleedSheet, type StudioFormat, type StudioPhoto, type StudioPopOut, type StudioSubmission,
 } from './studio/PrintStudio';
 import './OwnerPrintPage.css';
 
@@ -88,6 +93,9 @@ const ERROR_KEYS: Record<string, MessageKey> = {
   invalid_source: 'ownerPrint.error.photo',
   invalid_caption: 'ownerPrint.error.caption',
   render_failed: 'ownerPrint.error.render',
+  no_subject: 'ownerPrint.popOut.noSubject',
+  subject_unavailable: 'ownerPrint.popOut.unavailable',
+  subject_busy: 'ownerPrint.popOut.busy',
   print_not_allowed: 'sharePrint.error.notAllowed',
 };
 
@@ -124,6 +132,24 @@ function PrintedDate({ text, sheet }: { text: string; sheet: FullBleedSheet }) {
     </span>
   );
 }
+
+type PrintStyleChoice = 'fullBleed' | 'framed' | 'popOut';
+
+/** Where the subject of "Esce dalla foto" stands: being lifted, lifted, or why not. */
+type PopOutState =
+  | { kind: 'working'; photoId: string; point: SubjectPoint | null }
+  | { kind: 'ready'; layer: StudioPopOut; point: SubjectPoint | null }
+  | { kind: 'failed'; photoId: string; point: SubjectPoint | null; message: MessageKey };
+
+const samePoint = (a: SubjectPoint | null, b: SubjectPoint | null) =>
+  a === b || (a !== null && b !== null && a.x === b.x && a.y === b.y);
+
+const POP_OUT_FAILURES: Record<string, MessageKey> = {
+  noSubject: 'ownerPrint.popOut.noSubject',
+  busy: 'ownerPrint.popOut.busy',
+  unavailable: 'ownerPrint.popOut.unavailable',
+  notFound: 'ownerPrint.error.photo',
+};
 
 type Photos =
   | { kind: 'loading' }
@@ -186,9 +212,13 @@ export function OwnerPrintPage() {
       }, key),
     };
   }, [albumId, files]);
+  // "Esce dalla foto" uses the owner's own subject cutout: the owner's page only.
+  const { available: popOut, pointSelection } = useSubjectCutoutSupport(true);
   return (
     <PrintPage
       source={source}
+      popOut={popOut}
+      popOutPick={pointSelection}
       note={Number.isInteger(videos) && videos > 0 ? (
         <p className="party-print-hint" data-testid="owner-print-videos-skipped">
           {tn(videos, 'ownerPrint.videosSkipped')}
@@ -250,8 +280,12 @@ export function SharePrintPage() {
   return <PrintPage source={source} back={<Link to=".." relative="path">{t('sharePrint.backToAlbum')}</Link>} />;
 }
 
-function PrintPage({ source: from, back, noPrinters, note }: {
+function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOutPick = false }: {
   source: PrintSource;
+  /** Whether "Esce dalla foto" is offered: the owner's own print, with subject cutout on. */
+  popOut?: boolean;
+  /** Whether, in "Esce dalla foto", the owner may tap the one person who breaks out. */
+  popOutPick?: boolean;
   back: ReactNode;
   /** Said at the top of the format step (videos left out of the selection). */
   note?: ReactNode;
@@ -302,7 +336,7 @@ function PrintPage({ source: from, back, noPrinters, note }: {
   const photoById = useMemo(() => new Map(photos.map((p) => [p.id, p] as const)), [photos]);
 
   // --- the owner's choices ------------------------------------------------------
-  const [style, setStyle] = useState<'fullBleed' | 'framed'>('fullBleed');
+  const [style, setStyle] = useState<PrintStyleChoice>('fullBleed');
   const [caption, setCaption] = useState('');
   const [brand, setBrand] = useState(false);
   const [includeDate, setIncludeDate] = useState(false);
@@ -334,6 +368,59 @@ function PrintPage({ source: from, back, noPrinters, note }: {
   // `date` is what this effect writes: reading it here must not re-run it.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [includeDate, first, from]);
+  // "Esce dalla foto": the first photograph's subject, lifted once it is
+  // asked for, for the preview and the framing NubArca proposes — every
+  // subject, or the one person the owner touched. The print itself lifts it
+  // again on the server, from the same photograph and the same touch.
+  const [touched, setTouched] = useState<{ photoId: string; point: SubjectPoint } | null>(null);
+  const subjectPoint = popOutPick && touched?.photoId === first ? touched.point : null;
+  const [lifted, setLifted] = useState<PopOutState | null>(null);
+  useEffect(() => {
+    if (style !== 'popOut' || !first) return undefined;
+    if (lifted && lifted.kind !== 'failed' && samePoint(lifted.point, subjectPoint)
+      && (lifted.kind === 'ready' ? lifted.layer.photoId : lifted.photoId) === first) {
+      return undefined;
+    }
+    const controller = new AbortController();
+    const point = subjectPoint;
+    setLifted({ kind: 'working', photoId: first, point });
+    createSubjectCutout(first, { point, signal: controller.signal })
+      .then(({ png, region }) => {
+        if (!region) {
+          setLifted({ kind: 'failed', photoId: first, point, message: 'ownerPrint.popOut.unavailable' });
+          return;
+        }
+        setLifted({ kind: 'ready', layer: { photoId: first, url: URL.createObjectURL(png), region }, point });
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        const reason = err instanceof SubjectCutoutError ? err.reason : 'failed';
+        const message = point !== null && reason === 'noSubject'
+          ? 'ownerPrint.popOut.noSubjectHere'
+          : POP_OUT_FAILURES[reason] ?? 'ownerPrint.popOut.failed';
+        setLifted({ kind: 'failed', photoId: first, point, message });
+      });
+    return () => controller.abort();
+  // `lifted` is what this effect writes: reading it here must not re-run it.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [style, first, subjectPoint]);
+  const liftedUrl = lifted?.kind === 'ready' ? lifted.layer.url : null;
+  useEffect(() => () => { if (liftedUrl) URL.revokeObjectURL(liftedUrl); }, [liftedUrl]);
+  const popOutLayer = style === 'popOut' && lifted?.kind === 'ready' && lifted.layer.photoId === first
+    && samePoint(lifted.point, subjectPoint)
+    ? lifted.layer : null;
+  // A touch on the cutout of every subject, mapped back onto the photograph.
+  const pickSubject = (event: ReactMouseEvent<HTMLImageElement>) => {
+    if (!popOutLayer || !first || subjectPoint !== null) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    if (box.width <= 0 || box.height <= 0) return;
+    setTouched({
+      photoId: first,
+      point: subjectPointOnPhoto(
+        popOutLayer.region, (event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height),
+    });
+  };
+
   const dateText = includeDate && date && typeof date === 'object' && date.id === first
     ? formatOwnerPrintDate(date.value.date, lang)
     : null;
@@ -348,7 +435,7 @@ function PrintPage({ source: from, back, noPrinters, note }: {
 
   const submit = async (composition: StudioSubmission) => {
     if (!target) return;
-    const framed = composition.layout !== 'photo' || style === 'framed';
+    const framed = composition.layout !== 'photo' || style !== 'fullBleed';
     const line = caption.replace(/\s+/g, ' ').trim();
     setSubmitting(true);
     setError(null);
@@ -357,8 +444,9 @@ function PrintPage({ source: from, back, noPrinters, note }: {
       const accepted = await from.submit(target, {
         expectedPaperSize: target.paper,
         layout: composition.layout,
-        style: framed ? 'framed' : 'fullBleed',
+        style: composition.layout === 'photo' ? style : 'framed',
         photos: composition.slots.map((slot) => ({ fileItemId: slot.itemId, placement: slot.placement })),
+        ...(composition.layout === 'photo' && style === 'popOut' && subjectPoint ? { subject: subjectPoint } : {}),
         ...(composition.layout === 'photo'
           ? { orientation: composition.orientation }
           : {}),
@@ -452,7 +540,8 @@ function PrintPage({ source: from, back, noPrinters, note }: {
     );
   }
 
-  const framedFor = (layout: PrintLayout) => layout !== 'photo' || style === 'framed';
+  const framedFor = (layout: PrintLayout) => layout !== 'photo' || style !== 'fullBleed';
+  const styles: PrintStyleChoice[] = popOut ? ['fullBleed', 'framed', 'popOut'] : ['fullBleed', 'framed'];
 
   return (
     <OwnerPrintShell title={title} back={back}>
@@ -511,11 +600,13 @@ function PrintPage({ source: from, back, noPrinters, note }: {
         paperColor={(layout) => (framedFor(layout) ? FRAMED_PAPER : FULL_BLEED_PAPER)}
         band={{ title: caption.replace(/\s+/g, ' ').trim() || null, line: null, mark: dateText, brand }}
         fullBleedWords={dateText ? (sheet) => <PrintedDate text={dateText} sheet={sheet} /> : undefined}
-        compositionKey={JSON.stringify([target?.key, style, caption, brand, includeDate, lang])}
+        compositionKey={JSON.stringify([target?.key, style, caption, brand, includeDate, lang, subjectPoint])}
         submitError={error ? t(error) : null}
         submitting={submitting}
         canSubmit={target !== null && target.unavailable === null && !captionInvalid
-          && (!includeDate || dateText !== null)}
+          && (!includeDate || dateText !== null)
+          && (style !== 'popOut' || popOutLayer !== null)}
+        popOut={popOutLayer}
         onChosenChange={onChosenChange}
         onFormatChange={resetChoices}
         resetSignal={resetSignal}
@@ -525,7 +616,7 @@ function PrintPage({ source: from, back, noPrinters, note }: {
             {layout === 'photo' && (
               <fieldset className="party-print-themes" data-testid="owner-print-style">
                 <legend>{t('ownerPrint.style')}</legend>
-                {(['fullBleed', 'framed'] as const).map((option) => (
+                {styles.map((option) => (
                   <label key={option} className="party-print-theme">
                     <input
                       type="radio"
@@ -537,6 +628,34 @@ function PrintPage({ source: from, back, noPrinters, note }: {
                     <span>{t(`ownerPrint.style.${option}`)}</span>
                   </label>
                 ))}
+                {style === 'popOut' && (
+                  <p className="party-print-hint" data-testid="owner-print-popout-note" role="status">
+                    {lifted === null || lifted.kind === 'working'
+                      ? t('ownerPrint.popOut.working')
+                      : lifted.kind === 'failed' ? t(lifted.message) : t('ownerPrint.popOut.help')}
+                  </p>
+                )}
+                {style === 'popOut' && popOutPick && (popOutLayer || subjectPoint !== null) && (
+                  <div className="owner-print-subject-pick" data-testid="owner-print-subject-pick">
+                    {popOutLayer && (
+                      <img
+                        src={popOutLayer.url}
+                        alt={t('ownerPrint.popOut.pickAlt')}
+                        data-testid="owner-print-subject-pick-image"
+                        className={subjectPoint === null ? 'owner-print-subject-pick-tappable' : undefined}
+                        onClick={subjectPoint === null ? pickSubject : undefined}
+                      />
+                    )}
+                    <p className="party-print-hint">
+                      {t(subjectPoint === null ? 'ownerPrint.popOut.pick' : 'ownerPrint.popOut.picked')}
+                    </p>
+                    {subjectPoint !== null && (
+                      <button type="button" className="party-print-secondary" onClick={() => setTouched(null)}>
+                        {t('ownerPrint.popOut.all')}
+                      </button>
+                    )}
+                  </div>
+                )}
               </fieldset>
             )}
             {framedFor(layout) && (

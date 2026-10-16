@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  PRINT_LAYOUTS, arrangeSheet, layoutAllowed, layoutPhotoCounts, layoutSupportsStyle, slotAspect,
+  PRINT_LAYOUTS, arrangeSheet, layoutAllowed, layoutPhotoCounts, layoutSupportsStyle, popOutArea, popOutSlot, slotAspect,
   type PrintLayout, type PrintPaper, type PrintRect, type PrintStyle,
 } from './printLayouts.ts';
 
@@ -23,6 +23,7 @@ const table = JSON.parse(readFileSync(
   photoCounts: Record<PrintLayout, number[]>;
   allowed: { layout: PrintLayout; paper: PrintPaper; allowed: boolean }[];
   styles: { layout: PrintLayout; style: PrintStyle; supported: boolean }[];
+  popOutAreas: { paper: PrintPaper; portrait: boolean; area: PrintRect }[];
 };
 
 const close = (actual: number, expected: number, what: string) =>
@@ -53,4 +54,14 @@ test('which paper makes what, how many photographs, and which style', () => {
   for (const row of table.styles) assert.equal(layoutSupportsStyle(row.layout, row.style), row.supported);
   assert.deepEqual(Object.keys(table.photoCounts), [...PRINT_LAYOUTS]);
   for (const layout of PRINT_LAYOUTS) assert.deepEqual([...layoutPhotoCounts(layout)], table.photoCounts[layout]);
+});
+
+test('where a subject may break out of its frame', () => {
+  assert.equal(table.popOutAreas.length, 6);
+  for (const row of table.popOutAreas) {
+    const id = `${row.paper}/${row.portrait ? 'portrait' : 'landscape'}`;
+    const area = popOutArea(row.paper, row.portrait);
+    sameRects([area], [row.area], `${id} popOutArea`);
+    close(area.y + area.height, popOutSlot(row.paper, row.portrait).y, `${id} area meets the photograph`);
+  }
 });

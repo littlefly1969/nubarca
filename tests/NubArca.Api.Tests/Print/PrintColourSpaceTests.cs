@@ -20,7 +20,7 @@ namespace NubArca.Api.Tests.Print;
 public sealed class PrintColourSpaceTests
 {
     // Colorants as Apple's "Display P3" and Adobe's "Adobe RGB (1998)" profiles store them (D50).
-    private static readonly double[][] DisplayP3 = [[0.5151, 0.2412, -0.0011], [0.2920, 0.6922, 0.0419], [0.1571, 0.0666, 0.7841]];
+    internal static readonly double[][] DisplayP3 = [[0.5151, 0.2412, -0.0011], [0.2920, 0.6922, 0.0419], [0.1571, 0.0666, 0.7841]];
     private static readonly double[][] AdobeRgb = [[0.6097, 0.3111, 0.0195], [0.2053, 0.6257, 0.0609], [0.1492, 0.0632, 0.7446]];
     private static readonly double[][] Srgb = [[0.4361, 0.2225, 0.0139], [0.3851, 0.7169, 0.0971], [0.1431, 0.0606, 0.7141]];
 
@@ -228,7 +228,7 @@ public sealed class PrintColourSpaceTests
             $"expected {expected} ± {tolerance}, got {actual}");
 
     /// <summary>'para' type 3 with the sRGB constants, as Apple's Display P3 profile stores its curves.</summary>
-    private static byte[] SrgbParametricCurve()
+    internal static byte[] SrgbParametricCurve()
     {
         var tag = new byte[12 + (5 * 4)];
         WriteSignature(tag, 0, "para");
@@ -264,7 +264,7 @@ public sealed class PrintColourSpaceTests
     }
 
     /// <summary>A display RGB → XYZ matrix/TRC profile with one curve shared by the three channels.</summary>
-    private static byte[] Profile(double[][] colorants, byte[] curve)
+    internal static byte[] Profile(double[][] colorants, byte[] curve)
     {
         var tags = new List<(string Signature, byte[] Data)>();
         foreach (var (name, xyz) in new[] { ("rXYZ", colorants[0]), ("gXYZ", colorants[1]), ("bXYZ", colorants[2]) })

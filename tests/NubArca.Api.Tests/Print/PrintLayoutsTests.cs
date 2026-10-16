@@ -80,4 +80,21 @@ public sealed class PrintLayoutsTests
         }
         Assert.Equal(PrintLayouts.All, table.GetProperty("photoCounts").EnumerateObject().Select(p => p.Name).ToList());
     }
+
+    [Fact]
+    public void Where_A_Subject_May_Break_Out_Of_Its_Frame()
+    {
+        var areas = Table().GetProperty("popOutAreas").EnumerateArray().ToList();
+        Assert.Equal(6, areas.Count);
+        foreach (var row in areas)
+        {
+            var paper = row.GetProperty("paper").GetString()!;
+            var portrait = row.GetProperty("portrait").GetBoolean();
+            var area = PrintLayouts.PopOutArea(paper, portrait);
+            SameRects(JsonDocument.Parse($"[{row.GetProperty("area").GetRawText()}]").RootElement, [area],
+                $"{paper}/{(portrait ? "portrait" : "landscape")} popOutArea");
+            // The paper above the photograph, ending exactly where it starts.
+            Close(PrintLayouts.PopOutSlot(paper, portrait).Y, area.Y + area.Height, "area meets the photograph");
+        }
+    }
 }

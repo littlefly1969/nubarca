@@ -160,39 +160,7 @@ async function request<T>(
 
     if (res.status === 204) return undefined as T;
 
-    if (!res.ok) {
-      // Retry-After is read BEFORE body parsing so sync can honor it even
-      // when the error body is opaque. Capped by the caller's policy later.
-      let retryAfterAtMs: number | null = null;
-      const retryAfterRaw = res.headers.get('retry-after');
-      if (retryAfterRaw && (res.status === 429 || res.status === 503)) {
-        const seconds = Number.parseInt(retryAfterRaw.trim(), 10);
-        if (/^\d+$/.test(retryAfterRaw.trim()) && Number.isFinite(seconds) && seconds >= 0) {
-          retryAfterAtMs = Date.now() + seconds * 1000;
-        } else {
-          const httpDate = Date.parse(retryAfterRaw);
-          if (!Number.isNaN(httpDate)) retryAfterAtMs = httpDate;
-        }
-      }
-
-      const text = await res.text();
-      let parsed: unknown = null;
-      try {
-        parsed = text ? (JSON.parse(text) as unknown) : null;
-      } catch {
-        parsed = text;
-      }
-
-      if (res.status === 401 && !allow401 && unauthorizedHandler) {
-        unauthorizedHandler();
-      }
-      throw new ApiError(
-        res.status,
-        `${method} ${path} → ${res.status}`,
-        parsed,
-        retryAfterAtMs,
-      );
-    }
+    if (!res.ok) throw await toApiError(res, method, path, allow401);
 
     const text = await res.text();
     let parsed: unknown = null;
@@ -202,6 +170,80 @@ async function request<T>(
       parsed = text;
     }
     return parsed as T;
+  } finally {
+    linked.cleanup();
+  }
+}
+
+// The ApiError for a failed response, with its Retry-After hint and parsed
+// body; also runs the global 401 handler exactly as every request does.
+async function toApiError(
+  res: Response,
+  method: string,
+  path: string,
+  allow401: boolean,
+): Promise<ApiError> {
+  // Retry-After is read BEFORE body parsing so sync can honor it even
+  // when the error body is opaque. Capped by the caller's policy later.
+  let retryAfterAtMs: number | null = null;
+  const retryAfterRaw = res.headers.get('retry-after');
+  if (retryAfterRaw && (res.status === 429 || res.status === 503)) {
+    const seconds = Number.parseInt(retryAfterRaw.trim(), 10);
+    if (/^\d+$/.test(retryAfterRaw.trim()) && Number.isFinite(seconds) && seconds >= 0) {
+      retryAfterAtMs = Date.now() + seconds * 1000;
+    } else {
+      const httpDate = Date.parse(retryAfterRaw);
+      if (!Number.isNaN(httpDate)) retryAfterAtMs = httpDate;
+    }
+  }
+
+  const text = await res.text();
+  let parsed: unknown = null;
+  try {
+    parsed = text ? (JSON.parse(text) as unknown) : null;
+  } catch {
+    parsed = text;
+  }
+
+  if (res.status === 401 && !allow401 && unauthorizedHandler) {
+    unauthorizedHandler();
+  }
+  return new ApiError(
+    res.status,
+    `${method} ${path} → ${res.status}`,
+    parsed,
+    retryAfterAtMs,
+  );
+}
+
+// A POST whose answer is BINARY (an image the server just computed), with the
+// same session, timeout and error rules as every other request. An optional
+// JSON body goes up as usual. Returns the raw bytes and a header reader; never
+// parses the body.
+export async function apiPostForBytes(
+  path: string,
+  options: Pick<RequestOptions, 'signal' | 'timeoutMs' | 'json'> = {},
+): Promise<{ bytes: ArrayBuffer; contentType: string | null; header: (name: string) => string | null }> {
+  const linked = linkSignals(options.signal, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const session = sessionCookieSource().snapshot();
+  const headers: Record<string, string> = {};
+  if (session.cookie) headers['cookie'] = session.cookie;
+  if (options.json !== undefined) headers['content-type'] = 'application/json';
+  try {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers,
+      body: options.json !== undefined ? JSON.stringify(options.json) : undefined,
+      signal: linked.controller.signal,
+      credentials: 'include',
+    });
+    void sessionCookieSource().captureIfCurrent(res.headers.get('set-cookie'), session.generation);
+    if (!res.ok) throw await toApiError(res, 'POST', path, false);
+    return {
+      bytes: await res.arrayBuffer(),
+      contentType: res.headers.get('content-type'),
+      header: (name) => res.headers.get(name),
+    };
   } finally {
     linked.cleanup();
   }

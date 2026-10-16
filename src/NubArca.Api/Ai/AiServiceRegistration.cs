@@ -8,6 +8,7 @@ using NubArca.Api.Ai.Onnx;
 using NubArca.Api.Ai.Onnx.Face;
 using NubArca.Api.Ai.Photos;
 using NubArca.Api.Ai.Resolution;
+using NubArca.Api.Ai.SubjectCutout;
 using NubArca.Api.Jobs;
 
 namespace NubArca.Api.Ai;
@@ -59,6 +60,14 @@ public static class AiServiceRegistration
         // are present. Exposed as IAiBackend so the resolver can hand it out.
         services.AddSingleton<OnnxFacePreprocessor>();
         services.AddSingleton<OnnxFaceBackend>();
+
+        // Owner-private "copy subject" (Ai:SubjectCutout): on-request only, no
+        // job and no backfill. The gate keeps one inference in flight.
+        services.AddSingleton<ISubjectMaskModel, OnnxSubjectMaskModel>();
+        services.AddSingleton<ISubjectPointModel, OnnxSubjectPointModel>();
+        services.AddSingleton<SubjectCutoutGate>();
+        services.AddScoped<SubjectCutoutService>();
+        services.AddScoped<ISubjectMaskSource>(sp => sp.GetRequiredService<SubjectCutoutService>());
         services.AddSingleton<IAiBackend>(sp => sp.GetRequiredService<OnnxFaceBackend>());
 
         // Scoped services (use AppDbContext).

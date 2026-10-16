@@ -436,6 +436,21 @@
   overflow: hidden;
 }
 
+/* "Esce dalla foto": the paper above the slot, where the subject breaks out.
+   It clips the cutout exactly as the renderer draws nowhere else; the shadow
+   is the renderer's soft drop, down and to the right. */
+.party-print-popout {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.party-print-popout img {
+  position: absolute;
+  max-width: none;
+  filter: drop-shadow(0.6cqw 0.9cqw 0.6cqw rgb(0 0 0 / 45%));
+}
+
 /* A hairline mount where a photograph meets dark paper — one thin edge per
    picture, exactly as the renderer draws it. */
 .party-print-sheet[data-theme='midnight'] .party-print-slot {

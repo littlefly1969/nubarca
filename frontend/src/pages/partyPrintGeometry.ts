@@ -15,7 +15,7 @@ import {
   DEFAULT_PHOTO_PLACEMENT, MAX_PLACEMENT_ZOOM, PORTRAIT_HEIGHT, PORTRAIT_WIDTH,
   STRIP_FOOTER_FRACTION, STRIP_GUTTER_FRACTION, STRIP_MARGIN_FRACTION, STRIP_SLOT_GAP_FRACTION,
   arrangeSheet, slotAspect, stripWidthFraction,
-  type PhotoPlacement, type PrintPaper, type PrintRect,
+  type PhotoPlacement, type PrintPaper, type PrintRect, type PrintStyle,
 } from '@nubarca/contracts';
 
 // WHERE photographs and bands sit is the shared print catalogue's
@@ -44,17 +44,20 @@ export type Rect = PrintRect;
  * fractions — and how big that sheet is. THE SHEET FOLLOWS THE PHOTOGRAPH,
  * exactly as the renderer decides it.
  */
-export function photoLayout(portrait: boolean, paper: PaperSize = '10x15'): {
+export function photoLayout(portrait: boolean, paper: PaperSize = '10x15', style: FramedStyle = 'framed'): {
   sheetWidth: number; sheetHeight: number; slot: Rect; footer: Rect;
 } {
-  const sheet = arrangeSheet('photo', 'framed', paper, portrait);
+  const sheet = arrangeSheet('photo', style, paper, portrait);
   return { sheetWidth: sheet.width, sheetHeight: sheet.height, slot: sheet.slots[0], footer: sheet.bands[0] };
 }
 
 /** Aspect ratio the single-photo crop is locked to. */
-export function photoSlotAspect(portrait: boolean, paper: PaperSize = '10x15'): number {
-  return slotAspect('photo', 'framed', paper, portrait);
+export function photoSlotAspect(portrait: boolean, paper: PaperSize = '10x15', style: FramedStyle = 'framed'): number {
+  return slotAspect('photo', style, paper, portrait);
 }
+
+/** The single-photograph styles with a frame and a band: Cornice, and "Esce dalla foto". */
+export type FramedStyle = Exclude<PrintStyle, 'fullBleed'>;
 
 // --- Four photographs, two by two -------------------------------------------
 

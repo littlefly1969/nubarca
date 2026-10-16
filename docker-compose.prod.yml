@@ -308,6 +308,16 @@ services:
       # evaluation.md). Unset by default; face processing stays disabled.
       Ai__FaceProfileKey: ${Ai__FaceProfileKey:-}
       Ai__Onnx__ModelDir: ${Ai__Onnx__ModelDir:-}
+      # Owner-private "copy subject" (BiRefNet-lite under Ai__Onnx__ModelDir).
+      # Off by default and also needs Ai__Enabled=true. API only: it runs on
+      # request, never as a job. See docs/model-deployment/subject-cutout.md.
+      Ai__SubjectCutout__Enabled: ${Ai__SubjectCutout__Enabled:-false}
+      Ai__SubjectCutout__ModelFile: ${Ai__SubjectCutout__ModelFile:-birefnet-lite/model.onnx}
+      Ai__SubjectCutout__QueueTimeoutSeconds: ${Ai__SubjectCutout__QueueTimeoutSeconds:-20}
+      Ai__SubjectCutout__TimeoutSeconds: ${Ai__SubjectCutout__TimeoutSeconds:-240}
+      Ai__SubjectCutout__PointSelection__Enabled: ${Ai__SubjectCutout__PointSelection__Enabled:-false}
+      Ai__SubjectCutout__PointSelection__EncoderFile: ${Ai__SubjectCutout__PointSelection__EncoderFile:-sam2.1-tiny/encoder.onnx}
+      Ai__SubjectCutout__PointSelection__DecoderFile: ${Ai__SubjectCutout__PointSelection__DecoderFile:-sam2.1-tiny/decoder.onnx}
       # CPU-safety: cap ONNX Runtime intra-op threads for face inference. The eval
       # host power-cut once under an uncapped full-throttle benchmark; keep this
       # conservative (e.g. 4) before any real face backfill.
