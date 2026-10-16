@@ -156,5 +156,11 @@ Opt-in end-to-end test: add `NUBARCA_SUBJECT_POINT_ENCODER` and
   folder through the normal upload path (quota, dedup, audit). The original is
   never touched.
 - Owner-only. No public share, shared album or party route reaches it.
+- The owner print's "Esce dalla foto" style (`popOut`) uses the same cutout
+  model, on the same gate, once per print: the subject's mask is drawn over
+  the original's own pixels and never leaves the server. Without the model
+  the style is not offered and a request for it is refused with
+  `subject_unavailable`; a photo with nothing to lift is refused with
+  `no_subject`. A print through an album share cannot ask for it.
 - Opt-in end-to-end test: `NUBARCA_SUBJECT_CUTOUT_MODEL=/path/model.onnx
   dotnet test --filter SubjectCutoutModelTests`.

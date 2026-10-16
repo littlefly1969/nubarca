@@ -85,18 +85,11 @@ public static class SubjectCutoutImaging
         return mask;
     }
 
-    // The photo under `mask`, trimmed to the subject, or null when the mask
-    // holds no subject at all. `region` is where the cutout sits in the photo,
-    // so a tap on the cutout can be mapped back onto the photo.
-    public static Image<Rgba32>? Trim(Image<Rgb24> photo, Image<L8> mask, out Rectangle region)
+    // The tight box around the mask's subject, or null when it holds none worth
+    // lifting (nothing, or a speck below MinSubjectFraction of the photo).
+    public static Rectangle? SubjectBounds(Image<L8> mask)
     {
-        region = default;
-        if (mask.Width != photo.Width || mask.Height != photo.Height)
-        {
-            throw new ArgumentException("Mask does not match the photo.", nameof(mask));
-        }
-
-        var (minX, minY, maxX, maxY, subjectPixels) = (photo.Width, photo.Height, -1, -1, 0L);
+        var (minX, minY, maxX, maxY, subjectPixels) = (mask.Width, mask.Height, -1, -1, 0L);
         mask.ProcessPixelRows(accessor =>
         {
             for (var y = 0; y < accessor.Height; y++)
@@ -113,10 +106,24 @@ public static class SubjectCutoutImaging
                 }
             }
         });
-        if (maxX < 0 || subjectPixels < (long)photo.Width * photo.Height * MinSubjectFraction)
+        return maxX < 0 || subjectPixels < (long)mask.Width * mask.Height * MinSubjectFraction
+            ? null
+            : new Rectangle(minX, minY, maxX - minX + 1, maxY - minY + 1);
+    }
+
+    // The photo under `mask`, trimmed to the subject, or null when the mask
+    // holds no subject at all. `region` is where the cutout sits in the photo,
+    // so a tap on the cutout can be mapped back onto the photo.
+    public static Image<Rgba32>? Trim(Image<Rgb24> photo, Image<L8> mask, out Rectangle region)
+    {
+        region = default;
+        if (mask.Width != photo.Width || mask.Height != photo.Height)
         {
-            return null;
+            throw new ArgumentException("Mask does not match the photo.", nameof(mask));
         }
+
+        if (SubjectBounds(mask) is not { } bounds) return null;
+        var (minX, minY, maxX, maxY) = (bounds.Left, bounds.Top, bounds.Right - 1, bounds.Bottom - 1);
 
         var pad = (int)Math.Round(Math.Max(photo.Width, photo.Height) * PaddingFraction);
         var left = Math.Max(0, minX - pad);

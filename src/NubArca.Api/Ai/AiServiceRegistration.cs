@@ -67,6 +67,7 @@ public static class AiServiceRegistration
         services.AddSingleton<ISubjectPointModel, OnnxSubjectPointModel>();
         services.AddSingleton<SubjectCutoutGate>();
         services.AddScoped<SubjectCutoutService>();
+        services.AddScoped<ISubjectMaskSource>(sp => sp.GetRequiredService<SubjectCutoutService>());
         services.AddSingleton<IAiBackend>(sp => sp.GetRequiredService<OnnxFaceBackend>());
 
         // Scoped services (use AppDbContext).

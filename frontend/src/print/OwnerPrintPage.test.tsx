@@ -1,9 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { AuthedWrapper, installFetchMock, jsonResponse } from '../test-utils';
 import { OwnerPrintPage } from './OwnerPrintPage';
+import { popOutPlacement } from './popOut';
+import { resetSubjectCutoutAvailabilityForTests } from '../subjectCutout/useSubjectCutoutAvailable';
 
 // PRINTING FROM AN ALBUM through the party's own studio: the same steps, with
 // the owner's printer, Piena or Cornice, their own line, the date and the mark.
@@ -364,5 +366,94 @@ describe('OwnerPrintPage', () => {
     mount(`/print?album=${ALBUM}`, { stations: [] });
     expect(await screen.findByTestId('owner-print-empty')).toHaveTextContent('Nessuna stampante disponibile');
     expect(screen.queryByTestId('party-print-format-photo')).toBeNull();
+  });
+});
+
+describe('OwnerPrintPage — Esce dalla foto', () => {
+  const REGION = { x: 0.25, y: 0.1, width: 0.5, height: 0.8 };
+
+  beforeEach(() => {
+    resetSubjectCutoutAvailabilityForTests();
+    vi.stubGlobal('URL', Object.assign(URL, {
+      createObjectURL: vi.fn(() => 'blob:subject'),
+      revokeObjectURL: vi.fn(),
+    }));
+  });
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  const cutout = () => new Response(new Uint8Array([137, 80, 78, 71]), {
+    status: 200,
+    headers: {
+      'content-type': 'image/png',
+      'X-Subject-Cutout-Region': `${REGION.x},${REGION.y},${REGION.width},${REGION.height}`,
+    },
+  });
+
+  function printPost(calls: { url: string; method: string; body: string | null }[]) {
+    const post = [...calls].reverse().find((c) => c.method === 'POST' && c.url.endsWith('/api/print/photo-jobs'));
+    return post ? JSON.parse(post.body ?? '{}') : null;
+  }
+
+  async function toPreview(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByTestId('party-print-format-photo'));
+    await user.click(next());
+    const img = screen.getByTestId('party-print-crop').querySelector('img')!;
+    Object.defineProperties(img, { naturalWidth: { value: 3000 }, naturalHeight: { value: 4000 } });
+    fireEvent.load(img);
+    await user.click(next());
+  }
+
+  it('lifts the subject, proposes the framing that breaks it out, and sends exactly that', async () => {
+    const user = userEvent.setup();
+    const mock = mount(`/print?album=${ALBUM}&files=f2`, {
+      extra: {
+        'GET /api/subject-cutout': () => jsonResponse({ available: true }),
+        'POST /api/files/f2/subject-cutout': cutout,
+      },
+    });
+    await toPreview(user);
+    await user.click(await screen.findByRole('radio', { name: 'Esce dalla foto' }));
+
+    // The subject, laid over the photograph and shown above the frame.
+    const layer = await screen.findByTestId('print-popout-layer');
+    expect(layer.querySelector('img')).toHaveAttribute('src', 'blob:subject');
+    expect(screen.getByTestId('owner-print-popout-note')).toHaveTextContent('esce dal bordo superiore');
+    // Words go in its band, as on a framed sheet.
+    expect(screen.getByTestId('owner-print-caption')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(printPost(mock.calls)).not.toBeNull());
+    const body = printPost(mock.calls);
+    expect(body).toMatchObject({ layout: 'photo', style: 'popOut', orientation: 'portrait' });
+    const proposed = popOutPlacement(3000 / 4000, '10x15', true, REGION);
+    expect(body.photos[0].placement.zoom).toBeCloseTo(proposed.zoom);
+    expect(body.photos[0].placement.centerY).toBeCloseTo(proposed.centerY);
+    expect(body.photos[0].placement.zoom).toBeGreaterThan(1);
+  });
+
+  it('says so, and will not print, when the photograph has no subject', async () => {
+    const user = userEvent.setup();
+    mount(`/print?album=${ALBUM}&files=f2`, {
+      extra: {
+        'GET /api/subject-cutout': () => jsonResponse({ available: true }),
+        'POST /api/files/f2/subject-cutout': () => jsonResponse({ code: 'no_subject' }, 422),
+      },
+    });
+    await toPreview(user);
+    await user.click(await screen.findByRole('radio', { name: 'Esce dalla foto' }));
+    expect(await screen.findByTestId('owner-print-popout-note')).toHaveTextContent('non trovo un soggetto');
+    expect(screen.getByRole('button', { name: 'Stampa' })).toBeDisabled();
+    expect(screen.queryByTestId('print-popout-layer')).toBeNull();
+  });
+
+  it('is not offered where subject cutout is off', async () => {
+    const user = userEvent.setup();
+    mount(`/print?album=${ALBUM}&files=f2`, {
+      extra: { 'GET /api/subject-cutout': () => jsonResponse({ available: false }) },
+    });
+    await toPreview(user);
+    expect(screen.getByRole('radio', { name: 'Cornice' })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Esce dalla foto' })).toBeNull();
   });
 });

@@ -24,6 +24,14 @@ originating repository and is deliberately not reproduced here.
   BiRefNet's. It is a separate opt-in
   (`Ai__SubjectCutout__PointSelection__Enabled=true`, model exported with
   `scripts/export-sam2-point-onnx.py`).
+- **Print "Esce dalla foto" (Pop out)**: a new style for a single photo in
+  the owner's print studio. The photo sits in a frame with deep paper above
+  it, and the subject breaks out over the frame's top edge with a soft
+  shadow. NubArca proposes the framing that makes it break out, the owner can
+  retouch it, and the preview shows the sheet as it will print. The printed
+  subject uses the original's own pixels, so it continues across the edge
+  without a seam. Owner's own prints only: never through an album share or a
+  party.
 - Runs on your own server with BiRefNet-lite (MIT), on request only. Off by
   default; the operator places the model and sets
   `Ai__SubjectCutout__Enabled=true` (see

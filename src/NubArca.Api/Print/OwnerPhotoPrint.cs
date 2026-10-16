@@ -28,8 +28,10 @@ public sealed record OwnerPhotoPrintSubmitRequest(
     string? Layout = null,
     /// <summary>
     /// "fullBleed" (Piena: the photograph to the edges, the date on it — the
-    /// default for one photograph) or "framed" (Cornice: a border and a band).
-    /// Four photographs and the strips are always framed.
+    /// default for one photograph), "framed" (Cornice: a border and a band) or
+    /// "popOut" (Esce dalla foto: framed, the subject breaking out over the
+    /// top edge — the owner's own request only). Four photographs and the
+    /// strips are always framed.
     /// </summary>
     string? Style = null,
     /// <summary>
@@ -120,6 +122,12 @@ public static class OwnerPhotoPrintErrors
     public const string InvalidTimezone = "invalid_timezone";
     public const string IdempotencyConflict = "idempotency_conflict";
     public const string RenderFailed = "render_failed";
+    /// <summary>"Esce dalla foto": the photograph has no subject to lift.</summary>
+    public const string NoSubject = "no_subject";
+    /// <summary>"Esce dalla foto": subject cutout is off, or its model cannot run here.</summary>
+    public const string SubjectUnavailable = "subject_unavailable";
+    /// <summary>"Esce dalla foto": another cutout is running; try again in a moment.</summary>
+    public const string SubjectBusy = "subject_busy";
 }
 
 public sealed record OwnerPhotoPrintResult(OwnerPhotoPrintAccepted? Accepted, string? Error)

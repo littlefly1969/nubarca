@@ -46,6 +46,13 @@ public sealed record SubjectCutoutResult(SubjectCutoutStatus Status, SubjectCuto
     public static readonly SubjectCutoutResult NoSubject = new(SubjectCutoutStatus.NoSubject);
 }
 
+// The subject's alpha over the whole photo; whoever holds an Ok result owns
+// and disposes the mask.
+public sealed record SubjectMaskResult(SubjectCutoutStatus Status, Image<L8>? Mask = null) : IDisposable
+{
+    public void Dispose() => Mask?.Dispose();
+}
+
 public sealed record SubjectCutoutSaveResult(SubjectCutoutStatus Status, FileItem? File = null);
 
 // One cutout at a time per process: the model takes seconds and gigabytes, and
@@ -70,6 +77,13 @@ public sealed class SubjectCutoutGate : IDisposable
     }
 }
 
+// The subject of one of the owner's photographs as a mask, for a feature that
+// draws with it (the "Esce dalla foto" print). The seam tests replace.
+public interface ISubjectMaskSource
+{
+    Task<SubjectMaskResult> CreateMaskAsync(Guid fileItemId, Guid ownerUserId, CancellationToken cancellationToken);
+}
+
 // "Copy subject" for the owner's own photographs.
 //
 // The source is the photo's MEDIUM preview, never the original: it is upright,
@@ -78,7 +92,7 @@ public sealed class SubjectCutoutGate : IDisposable
 // showing. A cutout is computed on request and not stored; keeping one is an
 // explicit "save", which files it as a new ordinary PNG next to the photo —
 // the original blob is never touched.
-public sealed class SubjectCutoutService
+public sealed class SubjectCutoutService : ISubjectMaskSource
 {
     private readonly AppDbContext _db;
     private readonly IFileThumbnailService _thumbnails;
@@ -118,17 +132,58 @@ public sealed class SubjectCutoutService
     public async Task<SubjectCutoutResult> CreateAsync(
         Guid fileItemId, Guid ownerUserId, SubjectPoint? point, CancellationToken cancellationToken)
     {
+        using var lifted = await LiftAsync(fileItemId, ownerUserId, point, cancellationToken);
+        if (lifted.Status != SubjectCutoutStatus.Ok) return new SubjectCutoutResult(lifted.Status);
+        var (photo, alpha) = (lifted.Photo!, lifted.Alpha!);
+
+        using var cutout = SubjectCutoutImaging.Trim(photo, alpha, out var box);
+        if (cutout is null) return SubjectCutoutResult.NoSubject;
+
+        using var png = new MemoryStream();
+        await cutout.SaveAsync(png, new PngEncoder { ColorType = PngColorType.RgbWithAlpha }, cancellationToken);
+        _logger.LogInformation(
+            "Subject cutout {Width}x{Height} (point: {Point}) in {ElapsedMs} ms",
+            cutout.Width, cutout.Height, point is not null, lifted.ElapsedMs);
+        return new SubjectCutoutResult(
+            SubjectCutoutStatus.Ok,
+            new SubjectCutoutImage(png.ToArray(), cutout.Width, cutout.Height, new SubjectCutoutRegion(
+                (float)box.X / photo.Width, (float)box.Y / photo.Height,
+                (float)box.Width / photo.Width, (float)box.Height / photo.Height)));
+    }
+
+    // The subject as an alpha mask over the WHOLE photo (upright, at the medium
+    // preview's resolution), for a renderer that draws the original's own
+    // pixels through it — a print, never a response. The caller disposes it.
+    public async Task<SubjectMaskResult> CreateMaskAsync(
+        Guid fileItemId, Guid ownerUserId, CancellationToken cancellationToken)
+    {
+        var lifted = await LiftAsync(fileItemId, ownerUserId, point: null, cancellationToken);
+        if (lifted.Status != SubjectCutoutStatus.Ok || SubjectCutoutImaging.SubjectBounds(lifted.Alpha!) is null)
+        {
+            var status = lifted.Status == SubjectCutoutStatus.Ok ? SubjectCutoutStatus.NoSubject : lifted.Status;
+            lifted.Dispose();
+            return new SubjectMaskResult(status);
+        }
+        lifted.Photo!.Dispose();
+        return new SubjectMaskResult(SubjectCutoutStatus.Ok, lifted.Alpha);
+    }
+
+    // The medium preview and the subject's alpha over it, by the one gated
+    // inference every cutout runs.
+    private async Task<Lifted> LiftAsync(
+        Guid fileItemId, Guid ownerUserId, SubjectPoint? point, CancellationToken cancellationToken)
+    {
         var reason = _model.UnavailableReason() ?? (point is null ? null : _pointModel.UnavailableReason());
         if (reason is not null)
         {
             _logger.LogInformation("Subject cutout unavailable: {Reason}", reason);
-            return SubjectCutoutResult.Unavailable;
+            return new Lifted(SubjectCutoutStatus.Unavailable);
         }
 
         // Owner-scoped, trash- and vault-aware, images only: null otherwise.
         var preview = await _thumbnails.EnsureAsync(
             fileItemId, ownerUserId, ThumbnailSizes.Medium, cancellationToken);
-        if (preview is null) return SubjectCutoutResult.NotFound;
+        if (preview is null) return new Lifted(SubjectCutoutStatus.NotFound);
 
         Image<Rgb24> photo;
         await using (preview.Content)
@@ -136,12 +191,13 @@ public sealed class SubjectCutoutService
             photo = await Image.LoadAsync<Rgb24>(preview.Content, cancellationToken);
         }
 
-        using (photo)
+        var keep = false;
+        try
         {
             var settings = _options.Value.SubjectCutout;
             var slot = await _gate.TryEnterAsync(
                 TimeSpan.FromSeconds(Math.Max(0, settings.QueueTimeoutSeconds)), cancellationToken);
-            if (slot is null) return SubjectCutoutResult.Busy;
+            if (slot is null) return new Lifted(SubjectCutoutStatus.Busy);
 
             var size = settings.InputSize;
             var started = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -173,44 +229,41 @@ public sealed class SubjectCutoutService
             catch (OnnxSessionUnavailableException ex)
             {
                 _logger.LogWarning("Subject cutout model could not run: {Reason}", ex.ReasonCode);
-                return SubjectCutoutResult.Unavailable;
+                return new Lifted(SubjectCutoutStatus.Unavailable);
             }
             catch (Microsoft.ML.OnnxRuntime.OnnxRuntimeException)
             {
                 // Native text can carry paths; only a fixed token is logged.
                 _logger.LogWarning("Subject cutout model could not run: {Reason}", "onnx-run-failed");
-                return SubjectCutoutResult.Unavailable;
+                return new Lifted(SubjectCutoutStatus.Unavailable);
             }
             catch (TimeoutException)
             {
                 _logger.LogWarning("Subject cutout timed out after {Seconds}s", settings.TimeoutSeconds);
-                return SubjectCutoutResult.Busy;
+                return new Lifted(SubjectCutoutStatus.Busy);
             }
 
-            using var alpha = SubjectCutoutImaging.ToAlphaMask(photo, prediction.Logits, size);
+            var alpha = SubjectCutoutImaging.ToAlphaMask(photo, prediction.Logits, size);
             if (prediction.Candidates is { } candidates)
             {
                 var chosen = SubjectCutoutImaging.SelectSubject(
                     alpha, candidates, prediction.CandidateCount, SubjectPointModelShape.CandidateEdge,
                     point!.Value.X, point.Value.Y);
-                if (chosen is null) return SubjectCutoutResult.NoSubject;
+                if (chosen is null)
+                {
+                    alpha.Dispose();
+                    return new Lifted(SubjectCutoutStatus.NoSubject);
+                }
                 SubjectCutoutImaging.RestrictTo(alpha, chosen);
             }
 
-            using var cutout = SubjectCutoutImaging.Trim(photo, alpha, out var box);
-            if (cutout is null) return SubjectCutoutResult.NoSubject;
-
-            using var png = new MemoryStream();
-            await cutout.SaveAsync(png, new PngEncoder { ColorType = PngColorType.RgbWithAlpha }, cancellationToken);
-            _logger.LogInformation(
-                "Subject cutout {Width}x{Height} (point: {Point}) in {ElapsedMs} ms",
-                cutout.Width, cutout.Height, point is not null,
+            keep = true;
+            return new Lifted(SubjectCutoutStatus.Ok, photo, alpha,
                 (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
-            return new SubjectCutoutResult(
-                SubjectCutoutStatus.Ok,
-                new SubjectCutoutImage(png.ToArray(), cutout.Width, cutout.Height, new SubjectCutoutRegion(
-                    (float)box.X / photo.Width, (float)box.Y / photo.Height,
-                    (float)box.Width / photo.Width, (float)box.Height / photo.Height)));
+        }
+        finally
+        {
+            if (!keep) photo.Dispose();
         }
     }
 
@@ -243,6 +296,17 @@ public sealed class SubjectCutoutService
     }
 
     private sealed record Prediction(float[] Logits, float[]? Candidates, int CandidateCount);
+
+    private sealed record Lifted(
+        SubjectCutoutStatus Status, Image<Rgb24>? Photo = null, Image<L8>? Alpha = null, long ElapsedMs = 0)
+        : IDisposable
+    {
+        public void Dispose()
+        {
+            Photo?.Dispose();
+            Alpha?.Dispose();
+        }
+    }
 
     // "IMG_0001.HEIC" → "IMG_0001-cutout.png".
     internal static string CutoutFileName(string sourceName)

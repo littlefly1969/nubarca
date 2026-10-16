@@ -322,8 +322,11 @@ export interface OwnerPhotoPrintRequest {
   expectedPaperSize: PrintPaperSize;
   /** A format of the shared print catalogue. */
   layout: 'photo' | 'grid4' | 'twinStrip4';
-  /** One photograph: Piena (`fullBleed`) or Cornice (`framed`). Four and the strips are framed. */
-  style: 'fullBleed' | 'framed';
+  /**
+   * One photograph: Piena (`fullBleed`), Cornice (`framed`) or Esce dalla foto
+   * (`popOut`, the owner's own print only). Four and the strips are framed.
+   */
+  style: 'fullBleed' | 'framed' | 'popOut';
   /** The photographs in the order they were arranged, each placed in its slot (the shared PhotoPlacement). */
   photos: { fileItemId: string; placement: { centerX: number; centerY: number; zoom: number } }[];
   /** Which way a single photograph's sheet stands; absent for four and the strips. */

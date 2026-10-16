@@ -265,8 +265,15 @@ is built is described by `ARCHITECTURE.md`.
   Tap a subject (`Ai:SubjectCutout:PointSelection`, off by default): SAM 2.1
   tiny (`OnnxModel.SubjectPointEncoder/Decoder`, same device) picks the touched
   subject among BiRefNet's foreground; the PNG answer's
-  `X-Subject-Cutout-Region` maps taps on the cutout back onto the photo. Not
-  yet in print. See `docs/model-deployment/subject-cutout.md`
+  `X-Subject-Cutout-Region` maps taps on the cutout back onto the photo.
+  Print style `popOut` ("Esce dalla foto", `PrintLayouts.PopOut`, single owner
+  photo only, refused for album-share origin): deep top paper
+  (`PopOutSlot`/`PopOutArea`, mirrored in `packages/contracts`), the owner
+  print lifts the subject mask (`ISubjectMaskSource.CreateMaskAsync`) before
+  taking a sheet, and `PartyPrintComposer.DrawPopOut` redraws the original's
+  pixels above the slot where the mask says subject, with a shadow. The web
+  studio previews it and proposes the framing (`frontend/src/print/popOut.ts`).
+  See `docs/model-deployment/subject-cutout.md`
 - Storage: local content-addressed blobs with database-owned logical paths
 - Interactive uploads: ONE engine (`frontend/src/uploads/engine`,
   `UploadManager`) mounted with the shell (`UploadProvider` in `Layout`), so

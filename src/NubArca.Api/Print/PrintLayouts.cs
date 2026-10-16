@@ -40,6 +40,12 @@ public static class PrintLayouts
     public const string Framed = "framed";
     /// <summary>The photograph to the edges of the sheet. A single photograph only.</summary>
     public const string FullBleed = "fullBleed";
+    /// <summary>
+    /// "Esce dalla foto": a framed photograph with deep paper above it, where
+    /// the subject — lifted off its background — breaks out over the frame's
+    /// top edge. A single photograph only, and the owner's own.
+    /// </summary>
+    public const string PopOut = "popOut";
 
     public static bool IsKnown(string layout) => layout is Photo or Grid4 or TwinStrip4;
 
@@ -72,7 +78,7 @@ public static class PrintLayouts
 
     /// <summary>A style is a single photograph's choice; four and the strips are always framed.</summary>
     public static bool SupportsStyle(string layout, string style) =>
-        style == Framed ? IsKnown(layout) : style == FullBleed && layout == Photo;
+        style == Framed ? IsKnown(layout) : style is (FullBleed or PopOut) && layout == Photo;
 
     /// <summary>
     /// Which way the sheet stands: a single photograph's as it is placed; four
@@ -102,6 +108,7 @@ public static class PrintLayouts
                     Enumerable.Range(0, SlotsPerStrip).Select(slot => StripSlot(strip, slot)))],
                 [.. Enumerable.Range(0, StripsPerSheet).Select(StripFooter)]),
             _ when style == FullBleed => new(w, h, [(0, 0, 1, 1)], []),
+            _ when style == PopOut => new(w, h, [PopOutSlot(paper, sheetPortrait)], [PopOutFooter(paper, sheetPortrait)]),
             _ => new(w, h, [PhotoSlot(paper, sheetPortrait)], [PhotoFooter(paper, sheetPortrait)]),
         };
     }
@@ -160,6 +167,57 @@ public static class PrintLayouts
         var (w, h) = Sheet(paper, portrait);
         var (x, y, width, height) = PhotoSlot(paper, portrait);
         return (x, y + height, width, PhotoFooterFraction * Math.Min(w, h) / h);
+    }
+
+    // --- One photograph that its subject breaks out of ---------------------------
+
+    /// <summary>Paper above the photograph for the subject to break out into, short-edge fraction.</summary>
+    public const double PopOutTopFraction = 0.22;
+
+    /// <summary>Border beside the photograph, short-edge fraction: a little wider than a framed one's.</summary>
+    public const double PopOutSideFraction = 0.08;
+
+    /// <summary>Paper under the band, short-edge fraction: the framed border.</summary>
+    public const double PopOutBottomFraction = PhotoMarginFraction;
+
+    /// <summary>
+    /// How close to the sheet's edge the subject may reach, short-edge
+    /// fraction: printers do not print to the very edge reliably.
+    /// </summary>
+    public const double PopOutEdgeFraction = 0.02;
+
+    /// <summary>Where the photograph sits on a pop-out sheet, in sheet fractions.</summary>
+    public static (double X, double Y, double Width, double Height) PopOutSlot(string paper, bool portrait)
+    {
+        var (w, h) = Sheet(paper, portrait);
+        var shortEdge = Math.Min(w, h);
+        var side = PopOutSideFraction * shortEdge;
+        var top = PopOutTopFraction * shortEdge;
+        var bottom = PopOutBottomFraction * shortEdge;
+        var footer = PhotoFooterFraction * shortEdge;
+        return (side / w, top / h, (w - (2 * side)) / w, (h - top - footer - bottom) / h);
+    }
+
+    /// <summary>The band under it for words: as tall as a framed sheet's.</summary>
+    public static (double X, double Y, double Width, double Height) PopOutFooter(string paper, bool portrait)
+    {
+        var (w, h) = Sheet(paper, portrait);
+        var (x, y, width, height) = PopOutSlot(paper, portrait);
+        return (x, y + height, width, PhotoFooterFraction * Math.Min(w, h) / h);
+    }
+
+    /// <summary>
+    /// Where the subject may break out, in sheet fractions: the paper above the
+    /// photograph, edge to edge but for the printer's safe edge. Never beside
+    /// or below the photograph — a subject reads as stepping OUT of a frame
+    /// only over its top.
+    /// </summary>
+    public static (double X, double Y, double Width, double Height) PopOutArea(string paper, bool portrait)
+    {
+        var (w, h) = Sheet(paper, portrait);
+        var edge = PopOutEdgeFraction * Math.Min(w, h);
+        var (_, slotY, _, _) = PopOutSlot(paper, portrait);
+        return (edge / w, edge / h, (w - (2 * edge)) / w, slotY - (edge / h));
     }
 
     // --- Four photographs, two by two ----------------------------------------
