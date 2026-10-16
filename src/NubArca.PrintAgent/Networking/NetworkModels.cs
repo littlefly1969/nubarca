@@ -57,4 +57,11 @@ public interface INetworkManager
 
     /// <summary>Removes this box's client profile for <paramref name="ssid"/>, so a wrong password is not retried at every boot.</summary>
     Task ForgetAsync(string ssid, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Activates again the connection <paramref name="wifiInterface"/> is on: the
+    /// radio leaves its access point and joins it again. False when the
+    /// interface is on no connection or the activation failed.
+    /// </summary>
+    Task<bool> RejoinWifiAsync(string wifiInterface, CancellationToken cancellationToken);
 }

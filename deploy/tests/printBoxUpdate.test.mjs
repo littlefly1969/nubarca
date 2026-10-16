@@ -32,12 +32,14 @@ esac
 `;
 }
 
-function bundle(dir, version) {
+// Bundles before 0.9.1 carry no Wi-Fi setting.
+function bundle(dir, version, { wifi = true } = {}) {
   mkdirSync(join(dir, 'linux'), { recursive: true });
   writeFileSync(join(dir, 'NubArca.PrintAgent'), agentScript(version));
   chmodSync(join(dir, 'NubArca.PrintAgent'), 0o755);
   for (const name of ['nubarca-print-agent@.service', 'nubarca-print-agent-update.path',
-    'nubarca-print-agent-update.service', 'nubarca-sim', 'nubarca-print-box.rules']) {
+    'nubarca-print-agent-update.service', 'nubarca-sim', 'nubarca-print-box.rules',
+    ...(wifi ? ['nubarca-wifi-powersave.conf'] : [])]) {
     writeFileSync(join(dir, 'linux', name), `${name} ${version}\n`);
   }
   writeFileSync(join(dir, 'linux', 'update-print-box.sh'), '#!/usr/bin/env bash\n');
@@ -64,7 +66,9 @@ shift 3
 exec "$@"
 `;
 
-function box({ healthy = true, failReload = false, stagedVersion = '0.9.0', request = { version: '0.9.0', requestId: REQUEST_ID } } = {}) {
+// provisioned: the installer manages this box's network (it has the polkit rule).
+function box({ healthy = true, failReload = false, stagedVersion = '0.9.0', provisioned = false,
+  request = { version: '0.9.0', requestId: REQUEST_ID } } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'nubarca-print-box-update-'));
   const bin = join(root, 'fakebin');
   mkdirSync(bin);
@@ -72,7 +76,11 @@ function box({ healthy = true, failReload = false, stagedVersion = '0.9.0', requ
   writeFileSync(join(bin, 'runuser'), RUNUSER);
   chmodSync(join(bin, 'systemctl'), 0o755);
   chmodSync(join(bin, 'runuser'), 0o755);
-  bundle(join(root, 'opt/nubarca-print-agent'), '0.8.0');
+  bundle(join(root, 'opt/nubarca-print-agent'), '0.8.0', { wifi: false });
+  if (provisioned) {
+    mkdirSync(join(root, 'etc/polkit-1/rules.d'), { recursive: true });
+    writeFileSync(join(root, 'etc/polkit-1/rules.d/49-nubarca-print-box.rules'), 'nubarca-print-box.rules 0.8.0\n');
+  }
   const state = join(root, 'var/lib/nubarca-print-agent/box');
   mkdirSync(state, { recursive: true });
   if (request) writeFileSync(join(state, 'update-request.json'), JSON.stringify(request));
@@ -140,6 +148,33 @@ test('a new agent that reaches the server stays, and the outcome is ok', () => {
   assert.equal(spawnSync(join(root, 'opt/nubarca-print-agent.previous/NubArca.PrintAgent'), ['version'],
     { encoding: 'utf8' }).stdout.trim(), '0.8.0', 'the previous bundle is kept for a manual rollback');
   assertFinished(root, state);
+});
+
+const WIFI_SETTING = 'etc/NetworkManager/conf.d/zz-nubarca-wifi-powersave.conf';
+
+test('a box whose network the installer manages gets the Wi-Fi setting with the update', () => {
+  const { root, state, env } = box({ provisioned: true });
+  const run = spawnSync('bash', [script], { env, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.equal(readFileSync(join(root, WIFI_SETTING), 'utf8').trim(), 'nubarca-wifi-powersave.conf 0.9.0');
+  assert.equal(readFileSync(join(root, 'etc/polkit-1/rules.d/49-nubarca-print-box.rules'), 'utf8').trim(),
+    'nubarca-print-box.rules 0.9.0');
+  assert.equal(result(state), `ok 0.9.0 ${REQUEST_ID}`);
+});
+
+test('a box that manages its own network gets no Wi-Fi setting', () => {
+  const { root, env } = box();
+  const run = spawnSync('bash', [script], { env, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.equal(existsSync(join(root, WIFI_SETTING)), false);
+});
+
+test('going back to a bundle with no Wi-Fi setting leaves the setting in place', () => {
+  const { root, state, env } = box({ provisioned: true, healthy: false });
+  const run = spawnSync('bash', [script], { env, encoding: 'utf8' });
+  assert.equal(run.status, 1);
+  assertRestored(root, state);
+  assert.equal(readFileSync(join(root, WIFI_SETTING), 'utf8').trim(), 'nubarca-wifi-powersave.conf 0.9.0');
 });
 
 test('a new agent that never reaches the server is replaced by the previous one', () => {

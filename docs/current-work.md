@@ -24,7 +24,7 @@ is built is described by `ARCHITECTURE.md`.
   bundle on request (root path unit, server-named SHA-256, rollback on no
   heartbeat). See `docs/system-updates.md`
 - Print foundation: server-owned stations/devices/jobs plus a separately
-  packaged headless Print Agent `0.9.0`: a Windows service (spooler), a Linux
+  packaged headless Print Agent `0.9.1`: a Windows service (spooler), a Linux
   fake simulator (systemd instances, protocol acceptance) and a headless Linux
   Print Box on Ubuntu Server 24.04+ or Debian 12+ (`cups` adapter over
   CUPS/Gutenprint with queues created by the installer, NetworkManager Wi-Fi

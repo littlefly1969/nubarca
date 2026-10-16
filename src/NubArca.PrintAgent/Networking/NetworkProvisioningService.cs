@@ -46,6 +46,15 @@ public sealed record ProvisioningTimings(
     TimeSpan MaxRetry,
     TimeSpan UserQuiet)
 {
+    /// <summary>
+    /// How long the Wi-Fi may be the way out while the agent reaches no server
+    /// before it joins its network again.
+    /// </summary>
+    public TimeSpan WifiStall { get; init; } = TimeSpan.FromSeconds(90);
+
+    /// <summary>The least time between two such rejoins.</summary>
+    public TimeSpan WifiRejoinInterval { get; init; } = TimeSpan.FromMinutes(5);
+
     public static ProvisioningTimings From(NetworkProvisioningOptions options) => new(
         Grace: TimeSpan.FromSeconds(options.ConnectionGraceSeconds),
         Poll: TimeSpan.FromSeconds(3),
@@ -80,6 +89,8 @@ public sealed record ProvisioningTimings(
 /// - While the setup network is up and nobody is using it, known networks are
 ///   retried now and then with a growing interval, so a router that was merely
 ///   late does not strand the box — and the retries cannot oscillate.
+/// - A Wi-Fi that stays joined while nothing gets through it is joined again
+///   (<see cref="ProvisioningTimings.WifiStall"/>).
 /// </summary>
 public sealed class NetworkProvisioningService : BackgroundService
 {
@@ -88,6 +99,7 @@ public sealed class NetworkProvisioningService : BackgroundService
     private readonly ProvisioningTimings _timings;
     private readonly string? _accessPointPassword;
     private readonly ICaptivePortalRedirect _captive;
+    private readonly AgentConnectionState? _connection;
     private readonly int _webPort;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateLock = new();
@@ -103,17 +115,20 @@ public sealed class NetworkProvisioningService : BackgroundService
     private bool _unavailableLogged;
     private Task _pendingConnect = Task.CompletedTask;
     private long _lastScanTicks;
+    private DateTimeOffset? _wifiUplinkSince;
+    private DateTimeOffset _lastWifiRejoin = DateTimeOffset.MinValue;
 
     /// <summary>A scan costs the radio a moment; a page reloaded in a loop must not.</summary>
     private static readonly TimeSpan MinScanInterval = TimeSpan.FromSeconds(10);
 
     public NetworkProvisioningService(INetworkManager network, NetworkProvisioningOptions options,
         ILogger<NetworkProvisioningService> logger, ProvisioningTimings? timings = null,
-        string? boxSuffix = null, ICaptivePortalRedirect? captive = null)
+        string? boxSuffix = null, ICaptivePortalRedirect? captive = null, AgentConnectionState? connection = null)
     {
         _network = network;
         _logger = logger;
         _captive = captive ?? NoCaptivePortalRedirect.Instance;
+        _connection = connection;
         _webPort = options.WebPort;
         _timings = timings ?? ProvisioningTimings.From(options);
         _retryInterval = _timings.FirstRetry;
@@ -273,6 +288,7 @@ public sealed class NetworkProvisioningService : BackgroundService
                     {
                         if (_lostSince is not null) _logger.LogInformation("Network connected again.");
                         MarkConnected(snapshot.Uplink!);
+                        await RejoinStalledWifiAsync(snapshot.Uplink!, now, ct);
                     }
                     else
                     {
@@ -421,6 +437,34 @@ public sealed class NetworkProvisioningService : BackgroundService
         finally { _gate.Release(); }
     }
 
+    /// <summary>
+    /// A Wi-Fi can stay joined to its access point while nothing gets through
+    /// it, not even to the router. NetworkManager still reports it connected, so
+    /// nothing else notices, and leaving and joining again is what clears it.
+    /// So when the Wi-Fi is the way out and the agent has reached no server for
+    /// <see cref="ProvisioningTimings.WifiStall"/>, it joins again — at most once
+    /// per <see cref="ProvisioningTimings.WifiRejoinInterval"/>: a server that is
+    /// simply down costs a few seconds of Wi-Fi now and then, nothing more.
+    /// </summary>
+    private async Task RejoinStalledWifiAsync(NetworkUplink uplink, DateTimeOffset now, CancellationToken ct)
+    {
+        if (_connection is null || uplink.Type != "wifi")
+        {
+            _wifiUplinkSince = null;
+            return;
+        }
+        _wifiUplinkSince ??= now;
+        var heardFrom = _connection.LastContact is { } contact && contact > _wifiUplinkSince.Value
+            ? contact
+            : _wifiUplinkSince.Value;
+        if (now - heardFrom < _timings.WifiStall || now - _lastWifiRejoin < _timings.WifiRejoinInterval) return;
+        _lastWifiRejoin = now;
+        _logger.LogWarning("Wi-Fi {Name} is connected, but no server has answered for {Seconds}s; joining it again.",
+            uplink.Name ?? uplink.Device, (int)(now - heardFrom).TotalSeconds);
+        if (await _network.RejoinWifiAsync(uplink.Device, ct)) _logger.LogInformation("Wi-Fi joined again.");
+        else _logger.LogWarning("Joining the Wi-Fi again failed; NetworkManager goes on with the known networks.");
+    }
+
     private async Task RetryKnownNetworksAsync(NetworkSnapshot snapshot, CancellationToken ct)
     {
         _logger.LogInformation("Setup network pausing so NetworkManager can try the known networks.");
@@ -555,6 +599,8 @@ public sealed class NetworkProvisioningService : BackgroundService
     private void MarkConnected(NetworkUplink uplink)
     {
         var wasConnected = State.Mode == ProvisioningMode.Connected;
+        // A fresh connection gets the whole stall period before it is judged.
+        if (!wasConnected) _wifiUplinkSince = null;
         _lostSince = null;
         _retryInterval = _timings.FirstRetry;
         _nextRetry = DateTimeOffset.MaxValue;

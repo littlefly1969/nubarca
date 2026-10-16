@@ -108,4 +108,25 @@ public sealed class PrintBoxPlatformTests
         Assert.Contains("NoNewPrivileges=true", unit, StringComparison.Ordinal);
         Assert.Contains("User=nubarca-print-%i", unit, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void The_Box_Keeps_Its_Wi_Fi_Awake()
+    {
+        var linux = Path.Combine(AppContext.BaseDirectory, "linux");
+        var setting = File.ReadAllText(Path.Combine(linux, "nubarca-wifi-powersave.conf"));
+        const string installed = "/etc/NetworkManager/conf.d/zz-nubarca-wifi-powersave.conf";
+
+        // 2 = disabled, as a default for every connection.
+        Assert.Matches(@"(?m)^\[connection\]\nwifi\.powersave = 2$", setting.ReplaceLineEndings("\n"));
+        // NetworkManager reads conf.d in name order and the last file wins:
+        // the name sorts after Ubuntu's default-wifi-powersave-on.conf.
+        Assert.True(string.CompareOrdinal(Path.GetFileName(installed), "default-wifi-powersave-on.conf") > 0);
+
+        var installer = File.ReadAllText(Path.Combine(linux, "install-print-box.sh"));
+        Assert.Contains($"wifi_powersave='{installed}'", installer, StringComparison.Ordinal);
+        Assert.Contains("set power_save off", installer, StringComparison.Ordinal);
+        Assert.Contains($"wifi_powersave=\"$root{installed}\"", File.ReadAllText(Path.Combine(linux, "update-print-box.sh")),
+            StringComparison.Ordinal);
+        Assert.Contains(installed, File.ReadAllText(Path.Combine(linux, "uninstall-instance.sh")), StringComparison.Ordinal);
+    }
 }

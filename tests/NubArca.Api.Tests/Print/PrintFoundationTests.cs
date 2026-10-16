@@ -291,6 +291,46 @@ public sealed class PrintFoundationTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Claim_Lost_To_The_Network_Is_Handed_Out_Again_After_A_Short_Lease()
+    {
+        // The agent's Wi-Fi drops after the server granted a claim: the agent
+        // never learns its token. Once the lease runs out the same job goes
+        // to the station again, under a new claim, and the lost one is void.
+        Assert.True(new PrintOptions().ClaimLeaseSeconds <= 30);
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var station = await EnrolledStationAsync(owner, "Flaky Wi-Fi");
+        (await HeartbeatAsync(station.Credential)).EnsureSuccessStatusCode();
+        var listed = (await owner.GetFromJsonAsync<JsonElement[]>("/api/print/stations"))!.Single();
+        var printerId = listed.GetProperty("devices")[0].GetProperty("id").GetGuid();
+        (await owner.PostAsJsonAsync($"/api/print/stations/{station.Id}/test-jobs",
+            new { printerDeviceId = printerId })).EnsureSuccessStatusCode();
+
+        var lost = await (await ClaimAsync(station.Credential)).Content.ReadFromJsonAsync<JsonElement>();
+        var jobId = lost.GetProperty("jobId").GetGuid();
+        Assert.Equal(HttpStatusCode.NoContent, (await ClaimAsync(station.Credential)).StatusCode);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var job = await db.PrintJobs.SingleAsync(x => x.Id == jobId);
+            job.LeaseUntil = DateTime.UtcNow.AddSeconds(-1);
+            await db.SaveChangesAsync();
+        }
+
+        var again = await ClaimAsync(station.Credential);
+        again.EnsureSuccessStatusCode();
+        var renewed = await again.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(jobId, renewed.GetProperty("jobId").GetGuid());
+        Assert.NotEqual(lost.GetProperty("claimToken").GetString(), renewed.GetProperty("claimToken").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await _factory.CreateClient().SendAsync(AgentRequest(HttpMethod.Post,
+            $"/api/print-agent/jobs/{jobId}/submitting", station.Credential,
+            new { claimToken = lost.GetProperty("claimToken").GetString() }))).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await _factory.CreateClient().SendAsync(AgentRequest(HttpMethod.Post,
+            $"/api/print-agent/jobs/{jobId}/submitting", station.Credential,
+            new { claimToken = renewed.GetProperty("claimToken").GetString() }))).StatusCode);
+    }
+
+    [Fact]
     public async Task Queued_Job_Can_Be_Cancelled_And_Is_Never_Claimed()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync();

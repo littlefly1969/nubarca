@@ -57,6 +57,14 @@ public sealed class PrintAgentWorker : BackgroundService
                 _selfUpdate.Handle(heartbeat.AgentUpdate, now);
                 if (heartbeat.DesiredState == "running" && !_selfUpdate.Pending(now))
                 {
+                    // A job this agent already holds goes before a new one. A
+                    // failure here fails the cycle, so it is retried after the
+                    // usual backoff, never in a tight loop.
+                    if (await _coordinator.ResumeAsync(stoppingToken))
+                    {
+                        backoff = 1;
+                        continue;
+                    }
                     var claim = await _api.ClaimAsync(_adapter.Kind, _adapter.SupportsSimulation, stoppingToken);
                     if (claim is not null)
                     {

@@ -223,4 +223,21 @@ public sealed class NetworkManagerCliTests
         Assert.NotEqual(suffix, BoxIdentity.Suffix("0" + machineId[1..]));
         Assert.DoesNotContain(suffix.ToLowerInvariant(), machineId[^4..]);
     }
+
+    [Fact]
+    public async Task Rejoining_Activates_The_Interface_s_Own_Connection_Again_By_Uuid()
+    {
+        var runner = new FakeProcessRunner((_, args) => args.Contains("show")
+            ? FakeProcessRunner.Ok("GENERAL.CON-UUID:d658d97f-1f85-35f3-b3c2-f4bc306d9478\n")
+            : FakeProcessRunner.Ok());
+        Assert.True(await new NetworkManagerCli(runner).RejoinWifiAsync("wlan0", default));
+        Assert.Equal(
+            ["--wait", "45", "connection", "up", "uuid", "d658d97f-1f85-35f3-b3c2-f4bc306d9478"],
+            runner.Calls.Last().Args);
+
+        // On no connection there is nothing to join again, and nothing is run.
+        var idle = new FakeProcessRunner((_, args) => FakeProcessRunner.Ok(args.Contains("show") ? "GENERAL.CON-UUID:--\n" : ""));
+        Assert.False(await new NetworkManagerCli(idle).RejoinWifiAsync("wlan0", default));
+        Assert.DoesNotContain(idle.Calls, call => call.Args.Contains("up"));
+    }
 }

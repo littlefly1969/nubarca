@@ -46,6 +46,24 @@ originating repository and is deliberately not reproduced here.
   `Ai__SubjectCutout__Enabled=true` (see
   `docs/model-deployment/subject-cutout.md`).
 
+### Printing: a print held up by the network goes out in seconds
+
+- **A queue no longer stalls for two minutes** when the Print Box loses the
+  network for a moment. A print it had already taken is tried again a few
+  seconds later, before any other, and still prints once. A print whose
+  hand-over to the box was lost goes back to the queue after 30 seconds
+  instead of 2 minutes.
+- **The Print Box keeps its Wi-Fi awake.** The installer turns Wi-Fi power
+  save off, which made the box's requests to the server stall or fail. It
+  comes with Print Agent 0.9.1: a box already on 0.9.1 or later keeps it on
+  every update, an older box gets it by running the printer page's
+  **Update instructions** once.
+- **A Print Box whose Wi-Fi stops carrying anything reconnects by itself.** A
+  Wi-Fi can stay connected while nothing gets through it, not even to the
+  router. When the server has not answered for 90 seconds over Wi-Fi, the box
+  joins its network again, at most every 5 minutes. Over a cable nothing
+  changes.
+
 ### Printing: photographs print in their own colours
 
 - **Photos shot in a wide colour space print as they were shot.** A Display P3

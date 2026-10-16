@@ -16,7 +16,12 @@ public static class PrintAgentServiceRegistration
         services.AddSingleton(options);
         services.AddSingleton<INetworkManager, NetworkManagerCli>();
         services.AddSingleton<ICaptivePortalRedirect, NftCaptivePortalRedirect>();
-        services.AddSingleton<NetworkProvisioningService>();
+        // Explicit, so the agent's server contact always reaches the stalled Wi-Fi check.
+        services.AddSingleton(sp => new NetworkProvisioningService(
+            sp.GetRequiredService<INetworkManager>(), options,
+            sp.GetRequiredService<ILogger<NetworkProvisioningService>>(),
+            captive: sp.GetRequiredService<ICaptivePortalRedirect>(),
+            connection: sp.GetRequiredService<AgentConnectionState>()));
         services.AddHostedService(sp => sp.GetRequiredService<NetworkProvisioningService>());
         services.AddSingleton<PrintBoxStatusService>();
         services.AddHostedService<SetupWebHost>();

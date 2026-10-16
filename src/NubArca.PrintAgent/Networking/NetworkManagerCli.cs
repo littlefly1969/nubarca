@@ -140,6 +140,21 @@ public sealed class NetworkManagerCli : INetworkManager
     public async Task ForgetAsync(string ssid, CancellationToken cancellationToken) =>
         await RunAsync(["connection", "delete", "id", ClientConnectionPrefix + ssid], QueryTimeout, cancellationToken);
 
+    public async Task<bool> RejoinWifiAsync(string wifiInterface, CancellationToken cancellationToken)
+    {
+        var show = await RunAsync(["-t", "-f", "GENERAL.CON-UUID", "device", "show", wifiInterface],
+            QueryTimeout, cancellationToken);
+        var uuid = show.Succeeded ? NmcliTerse.Value(show.StdOut, "GENERAL.CON-UUID") : null;
+        if (uuid is null) return false;
+        // "up" on the connection that is already active activates it again,
+        // by its uuid so no other profile of the same name is picked. Unlike a
+        // device disconnect, it never leaves the Wi-Fi switched off.
+        return (await RunAsync(
+            ["--wait", ActivationWaitSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
+             "connection", "up", "uuid", uuid],
+            ActivationTimeout, cancellationToken)).Succeeded;
+    }
+
     private async Task<(string? Address, bool HasDefaultRoute)> AddressingAsync(string device,
         CancellationToken cancellationToken)
     {
@@ -226,6 +241,19 @@ public static class NmcliTerse
                 gateway = true;
         }
         return new WifiClientState(connected, connection, address, gateway);
+    }
+
+    /// <summary>The value of <paramref name="key"/> in multiline terse output, or null when it has none.</summary>
+    public static string? Value(string output, string key)
+    {
+        foreach (var raw in output.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (!line.StartsWith(key + ":", StringComparison.Ordinal)) continue;
+            var value = line[(key.Length + 1)..].Trim();
+            return value is "" or "--" ? null : value;
+        }
+        return null;
     }
 
     /// <summary>The first IPv4 address (without prefix length), and whether any default gateway exists.</summary>

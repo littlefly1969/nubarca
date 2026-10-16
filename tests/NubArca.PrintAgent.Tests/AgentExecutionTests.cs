@@ -95,6 +95,77 @@ public sealed class AgentExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Network_Failure_Before_Submit_Is_Resumed_With_The_Same_Claim_And_Prints_Once()
+    {
+        // The box's Wi-Fi drops right after a claim: the "submitting" call
+        // fails. The next cycle submits the job it already holds, seconds
+        // later, rather than leaving it to the server's lease.
+        var handler = new RecordingHandler { FailSubmittingTimes = 1 };
+        var (coordinator, journal, adapter, _) = await BuildAsync(handler);
+        var claim = new AgentClaim(Guid.NewGuid(), "held-claim", "owner-photo", "10x15",
+            "/artifact", 4, "image/png", "fake-10x15");
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => coordinator.ExecuteAsync(claim, default));
+        Assert.Equal(0, adapter.SubmissionCount);
+        Assert.Equal(LocalExecutionStates.Claimed, (await journal.LoadPendingAsync(default)).Single().State);
+
+        Assert.True(await coordinator.ResumeAsync(default));
+        Assert.Equal(1, adapter.SubmissionCount);
+        Assert.Equal(["held-claim", "held-claim"], handler.SubmittingClaims);
+        Assert.Equal("completed", handler.LastOutcome);
+        Assert.Empty(await journal.LoadPendingAsync(default));
+        Assert.False(await coordinator.ResumeAsync(default));
+    }
+
+    [Fact]
+    public async Task A_Held_Job_Whose_Claim_The_Server_No_Longer_Knows_Is_Dropped_Unprinted()
+    {
+        var handler = new RecordingHandler { FailSubmittingTimes = 1 };
+        var (coordinator, journal, adapter, _) = await BuildAsync(handler);
+        var claim = new AgentClaim(Guid.NewGuid(), "lapsed-claim", "owner-photo", "10x15",
+            "/artifact", 4, "image/png", "fake-10x15");
+        await Assert.ThrowsAsync<HttpRequestException>(() => coordinator.ExecuteAsync(claim, default));
+        var artifact = (await journal.LoadPendingAsync(default)).Single().ArtifactPath;
+        Assert.True(File.Exists(artifact));
+
+        handler.SubmittingNotFound = true;
+        Assert.True(await coordinator.ResumeAsync(default));
+
+        Assert.Equal(0, adapter.SubmissionCount);
+        Assert.Equal(0, handler.ResultCalls);
+        Assert.Empty(await journal.LoadPendingAsync(default));
+        Assert.False(File.Exists(artifact));
+    }
+
+    [Fact]
+    public async Task An_Outcome_The_Server_No_Longer_Knows_Is_Not_Sent_Forever()
+    {
+        var handler = new RecordingHandler { ResultNotFound = true };
+        var (coordinator, journal, adapter, _) = await BuildAsync(handler);
+        await coordinator.ExecuteAsync(new AgentClaim(Guid.NewGuid(), "claim", "owner-photo", "10x15",
+            "/artifact", 4, "image/png", "fake-10x15"), default);
+        Assert.Equal(1, adapter.SubmissionCount);
+        Assert.Empty(await journal.LoadPendingAsync(default));
+        await coordinator.ResumeAsync(default);
+        Assert.Equal(1, handler.ResultCalls);
+    }
+
+    [Fact]
+    public async Task An_Unacknowledged_Outcome_Is_Retried_Each_Cycle_Without_Holding_Up_Claims()
+    {
+        var handler = new RecordingHandler { FailFirstResult = true };
+        var (coordinator, journal, adapter, _) = await BuildAsync(handler);
+        await coordinator.ExecuteAsync(new AgentClaim(Guid.NewGuid(), "claim", "owner-photo", "10x15",
+            "/artifact", 4, "image/png", "fake-10x15"), default);
+        Assert.Equal(LocalExecutionStates.Completed, (await journal.LoadPendingAsync(default)).Single().State);
+
+        Assert.False(await coordinator.ResumeAsync(default));
+        Assert.Equal(1, adapter.SubmissionCount);
+        Assert.Equal(2, handler.ResultCalls);
+        Assert.Empty(await journal.LoadPendingAsync(default));
+    }
+
+    [Fact]
     public async Task Linux_Credential_Store_Uses_OwnerOnly_Mode_And_Refuses_Weaker_Mode()
     {
         if (!OperatingSystem.IsLinux()) return;
@@ -135,6 +206,10 @@ public sealed class AgentExecutionTests : IDisposable
     private sealed class RecordingHandler : HttpMessageHandler
     {
         public bool FailFirstResult { get; set; }
+        public bool ResultNotFound { get; set; }
+        public int FailSubmittingTimes { get; set; }
+        public bool SubmittingNotFound { get; set; }
+        public List<string> SubmittingClaims { get; } = [];
         public int ResultCalls { get; private set; }
         public string? LastOutcome { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
@@ -142,6 +217,14 @@ public sealed class AgentExecutionTests : IDisposable
         {
             if (request.Method == HttpMethod.Get)
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) };
+            if (request.RequestUri!.AbsolutePath.EndsWith("/submitting", StringComparison.Ordinal))
+            {
+                var json = await request.Content!.ReadAsStringAsync(cancellationToken);
+                SubmittingClaims.Add(System.Text.Json.JsonDocument.Parse(json).RootElement
+                    .GetProperty("claimToken").GetString()!);
+                if (FailSubmittingTimes-- > 0) throw new HttpRequestException("The response ended prematurely.");
+                if (SubmittingNotFound) return new(HttpStatusCode.NotFound);
+            }
             if (request.RequestUri!.AbsolutePath.EndsWith("/result", StringComparison.Ordinal))
             {
                 ResultCalls++;
@@ -149,6 +232,7 @@ public sealed class AgentExecutionTests : IDisposable
                 LastOutcome = System.Text.Json.JsonDocument.Parse(json).RootElement
                     .GetProperty("outcome").GetString();
                 if (FailFirstResult && ResultCalls == 1) return new(HttpStatusCode.InternalServerError);
+                if (ResultNotFound) return new(HttpStatusCode.NotFound);
             }
             return new HttpResponseMessage(HttpStatusCode.NoContent);
         }
