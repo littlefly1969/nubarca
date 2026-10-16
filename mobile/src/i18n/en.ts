@@ -49,6 +49,10 @@ const en: Partial<Record<MobileMessageKey, string>> = {
   'subjectCutout.error.unavailable': "Copy subject isn't available on this server.",
   'subjectCutout.error.notFound': 'This photo is no longer available.',
   'subjectCutout.error.failed': "Couldn't lift the subject. Try again.",
+  'subjectCutout.tapHint': 'Tap a subject to keep only that one.',
+  'subjectCutout.tapAgainHint': 'Tap elsewhere to pick another subject.',
+  'subjectCutout.allSubjects': 'All subjects',
+  'subjectCutout.error.noSubjectHere': 'There is no subject there. Try tapping one.',
 
   'player.retry': 'Retry playback',
   'player.playbackError': 'Playback failed.',

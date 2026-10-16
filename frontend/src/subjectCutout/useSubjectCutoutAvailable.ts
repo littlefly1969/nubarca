@@ -1,32 +1,44 @@
 import { useEffect, useState } from 'react';
 import { getSubjectCutoutAvailability } from '@nubarca/api-client';
 
-// Whether this installation offers "copy subject". Asked once per page load
-// and shared by every viewer; a failed request is not remembered, so the next
+// What this installation offers for "copy subject": the cutout at all, and
+// tapping one subject to keep only that one. Asked once per page load and
+// shared by every viewer; a failed request is not remembered, so the next
 // viewer that opens asks again.
-let pending: Promise<boolean> | null = null;
+export interface SubjectCutoutSupport {
+  available: boolean;
+  pointSelection: boolean;
+}
 
-function loadAvailability(): Promise<boolean> {
+const NONE: SubjectCutoutSupport = { available: false, pointSelection: false };
+
+let pending: Promise<SubjectCutoutSupport> | null = null;
+
+function loadSupport(): Promise<SubjectCutoutSupport> {
   if (pending === null) {
     pending = getSubjectCutoutAvailability()
-      .then((r) => r.available === true)
+      .then((r) => ({ available: r.available === true, pointSelection: r.available === true && r.pointSelection === true }))
       .catch(() => {
         pending = null;
-        return false;
+        return NONE;
       });
   }
   return pending;
 }
 
-export function useSubjectCutoutAvailable(enabled: boolean): boolean {
-  const [available, setAvailable] = useState(false);
+export function useSubjectCutoutSupport(enabled: boolean): SubjectCutoutSupport {
+  const [support, setSupport] = useState<SubjectCutoutSupport>(NONE);
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    void loadAvailability().then((value) => { if (live) setAvailable(value); });
+    void loadSupport().then((value) => { if (live) setSupport(value); });
     return () => { live = false; };
   }, [enabled]);
-  return enabled && available;
+  return enabled ? support : NONE;
+}
+
+export function useSubjectCutoutAvailable(enabled: boolean): boolean {
+  return useSubjectCutoutSupport(enabled).available;
 }
 
 export function resetSubjectCutoutAvailabilityForTests(): void {

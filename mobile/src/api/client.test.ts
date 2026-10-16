@@ -190,13 +190,28 @@ test('subject cutout POSTs with the cookie and answers the PNG bytes', async () 
   nextResponse = () =>
     new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
       status: 200,
-      headers: { 'content-type': 'image/png' },
+      headers: { 'content-type': 'image/png', 'x-subject-cutout-region': '0.5,0,0.5,1' },
     });
-  const bytes = await fetchSubjectCutout('f1');
+  const { bytes, region } = await fetchSubjectCutout('f1');
   assert.equal(lastRequest!.method, 'POST');
   assert.equal(lastRequest!.url, 'https://nubarca.example/api/files/f1/subject-cutout');
   assert.equal(lastRequest!.headers.cookie, COOKIE);
+  assert.equal(lastRequest!.body, undefined);
   assert.deepEqual([...new Uint8Array(bytes)], [0x89, 0x50, 0x4e, 0x47]);
+  assert.deepEqual(region, { x: 0.5, y: 0, width: 0.5, height: 1 });
+});
+
+test('a tapped cutout sends the point as JSON, and saving sends it too', async () => {
+  nextResponse = () =>
+    new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { status: 200, headers: { 'content-type': 'image/png' } });
+  const { region } = await fetchSubjectCutout('f1', { point: { x: 0.75, y: 0.5 } });
+  assert.equal(lastRequest!.headers['content-type'], 'application/json');
+  assert.deepEqual(JSON.parse(lastRequest!.body!), { point: { x: 0.75, y: 0.5 } });
+  assert.equal(region, null);
+
+  nextResponse = () => new Response('{"id":"f9","name":"IMG-cutout.png"}', { status: 201 });
+  await saveSubjectCutout('f1', { x: 0.75, y: 0.5 });
+  assert.deepEqual(JSON.parse(lastRequest!.body!), { point: { x: 0.75, y: 0.5 } });
 });
 
 test('subject cutout refuses a non-PNG success and maps refusals', async () => {

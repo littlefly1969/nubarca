@@ -66,6 +66,10 @@ const it = {
   'subjectCutout.error.unavailable': 'Lo scontorno non è disponibile su questo server.',
   'subjectCutout.error.notFound': 'Questa foto non è più disponibile.',
   'subjectCutout.error.failed': 'Scontorno non riuscito. Riprova.',
+  'subjectCutout.tapHint': 'Tocca un soggetto per tenere solo quello.',
+  'subjectCutout.tapAgainHint': 'Tocca un altro punto per cambiare soggetto.',
+  'subjectCutout.allSubjects': 'Tutti i soggetti',
+  'subjectCutout.error.noSubjectHere': "In quel punto non c'è un soggetto. Prova a toccarne uno.",
 
   // Video player
   'player.retry': 'Riprova la riproduzione',

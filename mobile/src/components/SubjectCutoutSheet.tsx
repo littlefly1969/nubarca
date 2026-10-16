@@ -3,14 +3,17 @@
 // in ONE app-cache file for as long as it is open, so the preview and the
 // share sheet read the same bytes, and deletes that file when it closes.
 //
-// No new native module: sharing goes through expo-sharing (the system share
-// sheet also offers "save to gallery"), and "Save to NubArca" files the PNG on
-// the server next to the original photo.
+// No new native module: sharing goes through expo-sharing, and "Save to
+// NubArca" files the PNG on the server next to the original photo. When the
+// server offers it, tapping a subject in the preview keeps only that one (the
+// tap is mapped back onto the photo through the cutout's region).
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  type GestureResponderEvent,
   Image,
+  type LayoutChangeEvent,
   Modal,
   Pressable,
   StyleSheet,
@@ -24,9 +27,12 @@ import {
   fetchSubjectCutout,
   saveSubjectCutout,
   subjectCutoutFailure,
+  subjectPointOnPhoto,
   type SubjectCutoutFailure,
+  type SubjectCutoutRegion,
+  type SubjectPoint,
 } from '../api/subjectCutout.ts';
-import { cutoutFileName } from '../media/subjectCutout.ts';
+import { containFraction, cutoutFileName, pngSize } from '../media/subjectCutout.ts';
 import { iconSizes, radius, spacing, touch, typography } from '../ui/tokens';
 import { media } from '../ui/palette.ts';
 import { useI18n } from '../i18n';
@@ -34,12 +40,19 @@ import { useI18n } from '../i18n';
 export interface SubjectCutoutSheetProps {
   fileId: string;
   displayName: string;
+  /** The server can keep only a tapped subject. */
+  pointSelection: boolean;
   onClose: () => void;
 }
 
 type Phase =
   | { kind: 'working' }
-  | { kind: 'ready'; uri: string }
+  | {
+      kind: 'ready';
+      uri: string;
+      region: SubjectCutoutRegion | null;
+      size: { width: number; height: number } | null;
+    }
   | { kind: 'failed'; reason: SubjectCutoutFailure };
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
@@ -59,11 +72,15 @@ function deleteQuietly(file: File | null): void {
 export function SubjectCutoutSheet({
   fileId,
   displayName,
+  pointSelection,
   onClose,
 }: SubjectCutoutSheetProps): React.JSX.Element {
   const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>({ kind: 'working' });
   const [attempt, setAttempt] = useState(0);
+  // The touched point on the photo, or null for every subject.
+  const [point, setPoint] = useState<SubjectPoint | null>(null);
+  const [stage, setStage] = useState<{ width: number; height: number } | null>(null);
   const [save, setSave] = useState<SaveState>('idle');
   const [shareFailed, setShareFailed] = useState(false);
   const fileRef = useRef<File | null>(null);
@@ -71,8 +88,10 @@ export function SubjectCutoutSheet({
   useEffect(() => {
     const controller = new AbortController();
     setPhase({ kind: 'working' });
-    void fetchSubjectCutout(fileId, controller.signal).then(
-      (bytes) => {
+    setSave('idle');
+    setShareFailed(false);
+    void fetchSubjectCutout(fileId, { point, signal: controller.signal }).then(
+      ({ bytes, region }) => {
         if (controller.signal.aborted) return;
         try {
           // A fresh name per attempt: the preview must never show a stale file.
@@ -83,7 +102,7 @@ export function SubjectCutoutSheet({
           file.write(new Uint8Array(bytes));
           deleteQuietly(fileRef.current);
           fileRef.current = file;
-          setPhase({ kind: 'ready', uri: file.uri });
+          setPhase({ kind: 'ready', uri: file.uri, region, size: pngSize(bytes) });
         } catch {
           setPhase({ kind: 'failed', reason: 'failed' });
         }
@@ -94,7 +113,7 @@ export function SubjectCutoutSheet({
       },
     );
     return () => controller.abort();
-  }, [fileId, attempt]);
+  }, [fileId, attempt, point]);
 
   useEffect(() => () => deleteQuietly(fileRef.current), []);
 
@@ -116,12 +135,35 @@ export function SubjectCutoutSheet({
     if (save === 'saving' || save === 'saved') return;
     setSave('saving');
     try {
-      await saveSubjectCutout(fileId);
+      await saveSubjectCutout(fileId, point);
       setSave('saved');
     } catch {
       setSave('failed');
     }
-  }, [fileId, save]);
+  }, [fileId, point, save]);
+
+  const canTap = pointSelection && phase.kind === 'ready' && phase.region !== null && phase.size !== null;
+
+  const onStageLayout = useCallback((event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    setStage({ width, height });
+  }, []);
+
+  const tap = useCallback(
+    (event: GestureResponderEvent) => {
+      if (!canTap || phase.kind !== 'ready' || phase.region === null || phase.size === null || stage === null) {
+        return;
+      }
+      const hit = containFraction(event.nativeEvent.locationX, event.nativeEvent.locationY, stage, phase.size);
+      if (hit !== null) setPoint(subjectPointOnPhoto(phase.region, hit.fx, hit.fy));
+    },
+    [canTap, phase, stage],
+  );
+
+  const failureText = (reason: SubjectCutoutFailure): string =>
+    point !== null && reason === 'noSubject'
+      ? t('subjectCutout.error.noSubjectHere')
+      : t(`subjectCutout.error.${reason}`);
 
   return (
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
@@ -141,7 +183,7 @@ export function SubjectCutoutSheet({
           </Pressable>
         </View>
 
-        <View style={styles.stage}>
+        <View style={styles.stage} onLayout={onStageLayout}>
           {phase.kind === 'working' && (
             <View style={styles.centered}>
               <ActivityIndicator color={media.text} />
@@ -149,17 +191,19 @@ export function SubjectCutoutSheet({
             </View>
           )}
           {phase.kind === 'ready' && (
-            <Image
-              source={{ uri: phase.uri }}
-              style={styles.preview}
-              resizeMode="contain"
-              accessibilityLabel={t('subjectCutout.previewAlt')}
-            />
+            <Pressable style={styles.preview} onPress={canTap ? tap : undefined} disabled={!canTap}>
+              <Image
+                source={{ uri: phase.uri }}
+                style={styles.preview}
+                resizeMode="contain"
+                accessibilityLabel={t('subjectCutout.previewAlt')}
+              />
+            </Pressable>
           )}
           {phase.kind === 'failed' && (
             <View style={styles.centered}>
-              <Text style={styles.message}>{t(`subjectCutout.error.${phase.reason}`)}</Text>
-              {!FINAL_FAILURES.has(phase.reason) && (
+              <Text style={styles.message}>{failureText(phase.reason)}</Text>
+              {!FINAL_FAILURES.has(phase.reason) && !(point !== null && phase.reason === 'noSubject') && (
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => setAttempt((n) => n + 1)}
@@ -171,6 +215,25 @@ export function SubjectCutoutSheet({
             </View>
           )}
         </View>
+
+        {canTap && (
+          <Text style={styles.hint}>
+            {point === null ? t('subjectCutout.tapHint') : t('subjectCutout.tapAgainHint')}
+          </Text>
+        )}
+
+        {point !== null && phase.kind !== 'working' && (
+          <View style={styles.backRow}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setPoint(null)}
+              style={({ pressed }) => [styles.button, pressed && styles.pressed]}
+            >
+              <Ionicons name="people-outline" size={iconSizes.s} color={media.text} />
+              <Text style={styles.buttonText}>{t('subjectCutout.allSubjects')}</Text>
+            </Pressable>
+          </View>
+        )}
 
         {phase.kind === 'ready' && (
           <View style={styles.actions}>
@@ -253,6 +316,14 @@ const styles = StyleSheet.create({
   actions: { paddingHorizontal: spacing.m, paddingBottom: spacing.xl, gap: spacing.s },
   actionRow: { flexDirection: 'row', gap: spacing.m },
   note: { ...typography.secondary, color: media.textSecondary, textAlign: 'center' },
+  hint: {
+    ...typography.secondary,
+    color: media.textSecondary,
+    textAlign: 'center',
+    paddingHorizontal: spacing.m,
+    paddingBottom: spacing.s,
+  },
+  backRow: { alignItems: 'center', paddingBottom: spacing.s },
   button: {
     minHeight: touch.minSize,
     flexDirection: 'row',

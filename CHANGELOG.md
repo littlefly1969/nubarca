@@ -17,6 +17,13 @@ originating repository and is deliberately not reproduced here.
   **Save to NubArca** files it beside the photo. It uses only modules the app
   already ships, so it asks for no new permission; it reaches phones with the
   next mobile build.
+- **Tap a subject to keep only that one**, on the web and in the app: with
+  two people in the cutout, tap one and the other goes. **All subjects**
+  goes back, and copy, share and save act on what is shown. It uses SAM 2.1
+  tiny (Apache-2.0) to tell which subject was tapped, while the edges stay
+  BiRefNet's. It is a separate opt-in
+  (`Ai__SubjectCutout__PointSelection__Enabled=true`, model exported with
+  `scripts/export-sam2-point-onnx.py`).
 - Runs on your own server with BiRefNet-lite (MIT), on request only. Off by
   default; the operator places the model and sets
   `Ai__SubjectCutout__Enabled=true` (see

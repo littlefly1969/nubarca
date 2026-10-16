@@ -262,7 +262,11 @@ is built is described by `ARCHITECTURE.md`.
   (`Ai__SubjectCutout__Enabled`, plus `Ai__Enabled`). The mobile viewer has the
   same ✂ (`SubjectCutoutSheet`: Share via expo-sharing, Save to NubArca); no
   clipboard or direct gallery save, since both would need a new native build.
-  Not yet in print. See `docs/model-deployment/subject-cutout.md`
+  Tap a subject (`Ai:SubjectCutout:PointSelection`, off by default): SAM 2.1
+  tiny (`OnnxModel.SubjectPointEncoder/Decoder`, same device) picks the touched
+  subject among BiRefNet's foreground; the PNG answer's
+  `X-Subject-Cutout-Region` maps taps on the cutout back onto the photo. Not
+  yet in print. See `docs/model-deployment/subject-cutout.md`
 - Storage: local content-addressed blobs with database-owned logical paths
 - Interactive uploads: ONE engine (`frontend/src/uploads/engine`,
   `UploadManager`) mounted with the shell (`UploadProvider` in `Layout`), so

@@ -4975,6 +4975,8 @@ video.lightbox-image {
 }
 .subject-cutout-actions button:disabled { opacity: 0.5; cursor: default; }
 .subject-cutout-notice { margin: 0; }
+.subject-cutout-stage img.subject-cutout-tappable { cursor: crosshair; }
+.subject-cutout-hint { margin: 0; opacity: 0.8; font-size: 0.9rem; }
 
 /* The image gallery injects its full metadata panel(s) into the drawer via
    renderDetails. Let those sections flow with the drawer's own scroll instead

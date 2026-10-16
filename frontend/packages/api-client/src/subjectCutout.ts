@@ -8,7 +8,31 @@ import type { FileSummary } from './folders';
 
 export interface SubjectCutoutAvailability {
   available: boolean;
+  // The owner can tap one subject to keep only that one.
+  pointSelection?: boolean;
 }
+
+// A point on the photo, normalized: (0,0) top-left, (1,1) bottom-right.
+export interface SubjectPoint {
+  x: number;
+  y: number;
+}
+
+// Where a cutout sits in its photo, normalized like SubjectPoint.
+export interface SubjectCutoutRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface SubjectCutout {
+  png: Blob;
+  // Null when the server did not say (an older server): taps are then off.
+  region: SubjectCutoutRegion | null;
+}
+
+export const SUBJECT_CUTOUT_REGION_HEADER = 'X-Subject-Cutout-Region';
 
 // Why a cutout was not produced. `notFound` covers a foreign, missing or
 // non-photo file alike; `unavailable` is the installation, never the photo.
@@ -28,28 +52,53 @@ export function getSubjectCutoutAvailability(signal?: AbortSignal): Promise<Subj
   return api<SubjectCutoutAvailability>('/api/subject-cutout', { signal });
 }
 
-export async function createSubjectCutout(fileId: string, signal?: AbortSignal): Promise<Blob> {
+// The whole subject, or with `point` only the subject touched there.
+export async function createSubjectCutout(
+  fileId: string,
+  options: { point?: SubjectPoint | null; signal?: AbortSignal } = {},
+): Promise<SubjectCutout> {
+  const { point, signal } = options;
   const response = await fetch(`/api/files/${fileId}/subject-cutout`, {
     method: 'POST',
     credentials: 'include',
     signal,
+    ...(point ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ point }) } : {}),
   });
   if (!response.ok) throw new SubjectCutoutError(await failureOf(response));
   if (!(response.headers.get('content-type') ?? '').startsWith('image/png')) {
     throw new SubjectCutoutError('failed');
   }
+  const region = parseSubjectCutoutRegion(response.headers.get(SUBJECT_CUTOUT_REGION_HEADER));
   // Typed explicitly: the clipboard needs an image/png Blob whatever the
   // runtime inferred.
-  return new Blob([await response.arrayBuffer()], { type: 'image/png' });
+  return { png: new Blob([await response.arrayBuffer()], { type: 'image/png' }), region };
 }
 
-export async function saveSubjectCutout(fileId: string): Promise<FileSummary> {
+export async function saveSubjectCutout(fileId: string, point?: SubjectPoint | null): Promise<FileSummary> {
   try {
-    return await api<FileSummary>(`/api/files/${fileId}/subject-cutout/save`, { method: 'POST' });
+    return await api<FileSummary>(`/api/files/${fileId}/subject-cutout/save`, {
+      method: 'POST',
+      ...(point ? { json: { point } } : {}),
+    });
   } catch (e) {
     if (e instanceof ApiError) throw new SubjectCutoutError(failureFrom(e.status, e.body));
     throw e;
   }
+}
+
+// "x,y,width,height", each 0..1; anything else is no region.
+export function parseSubjectCutoutRegion(header: string | null): SubjectCutoutRegion | null {
+  if (header === null) return null;
+  const parts = header.split(',').map((v) => Number(v.trim()));
+  if (parts.length !== 4 || parts.some((v) => !Number.isFinite(v) || v < 0 || v > 1)) return null;
+  const [x, y, width, height] = parts;
+  return width > 0 && height > 0 ? { x, y, width, height } : null;
+}
+
+// A tap at (fx, fy) — fractions of the shown cutout — as a point on the photo.
+export function subjectPointOnPhoto(region: SubjectCutoutRegion, fx: number, fy: number): SubjectPoint {
+  const clamp = (v: number) => Math.min(1, Math.max(0, v));
+  return { x: clamp(region.x + clamp(fx) * region.width), y: clamp(region.y + clamp(fy) * region.height) };
 }
 
 async function failureOf(response: Response): Promise<SubjectCutoutFailure> {

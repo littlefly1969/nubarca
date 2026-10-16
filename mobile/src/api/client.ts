@@ -217,26 +217,33 @@ async function toApiError(
 }
 
 // A POST whose answer is BINARY (an image the server just computed), with the
-// same session, timeout and error rules as every other request. Returns the
-// raw bytes and the declared content type; never parses the body.
+// same session, timeout and error rules as every other request. An optional
+// JSON body goes up as usual. Returns the raw bytes and a header reader; never
+// parses the body.
 export async function apiPostForBytes(
   path: string,
-  options: Pick<RequestOptions, 'signal' | 'timeoutMs'> = {},
-): Promise<{ bytes: ArrayBuffer; contentType: string | null }> {
+  options: Pick<RequestOptions, 'signal' | 'timeoutMs' | 'json'> = {},
+): Promise<{ bytes: ArrayBuffer; contentType: string | null; header: (name: string) => string | null }> {
   const linked = linkSignals(options.signal, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const session = sessionCookieSource().snapshot();
   const headers: Record<string, string> = {};
   if (session.cookie) headers['cookie'] = session.cookie;
+  if (options.json !== undefined) headers['content-type'] = 'application/json';
   try {
     const res = await fetch(`${baseUrl}${path}`, {
       method: 'POST',
       headers,
+      body: options.json !== undefined ? JSON.stringify(options.json) : undefined,
       signal: linked.controller.signal,
       credentials: 'include',
     });
     void sessionCookieSource().captureIfCurrent(res.headers.get('set-cookie'), session.generation);
     if (!res.ok) throw await toApiError(res, 'POST', path, false);
-    return { bytes: await res.arrayBuffer(), contentType: res.headers.get('content-type') };
+    return {
+      bytes: await res.arrayBuffer(),
+      contentType: res.headers.get('content-type'),
+      header: (name) => res.headers.get(name),
+    };
   } finally {
     linked.cleanup();
   }

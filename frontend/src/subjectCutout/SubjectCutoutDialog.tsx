@@ -1,20 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  createSubjectCutout, saveSubjectCutout, SubjectCutoutError, type SubjectCutoutFailure,
+  createSubjectCutout, saveSubjectCutout, subjectPointOnPhoto, SubjectCutoutError,
+  type SubjectCutoutFailure, type SubjectCutoutRegion, type SubjectPoint,
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
 import type { MessageKey } from '../i18n/it';
+import { useSubjectCutoutSupport } from './useSubjectCutoutAvailable';
 
 // "Copy subject" for one of the owner's photos: the server lifts the subject
 // off its background, and this dialog shows the result on a checkerboard and
 // offers to copy it, download it, or keep it as a new file next to the photo.
+//
+// When the server offers it, tapping a subject in the cutout keeps only that
+// subject (the tap is mapped back onto the photo through the cutout's region),
+// and "All subjects" goes back. Copy, download and save act on what is shown.
 //
 // The dialog is a modal ON TOP of the media viewer, so it owns the keyboard
 // while open (see keyboardOwnership): Escape closes the dialog, not the viewer.
 
 type Phase =
   | { kind: 'working' }
-  | { kind: 'ready'; blob: Blob; url: string }
+  | { kind: 'ready'; blob: Blob; url: string; region: SubjectCutoutRegion | null }
   | { kind: 'failed'; reason: SubjectCutoutFailure };
 
 type Notice =
@@ -44,6 +50,9 @@ export function SubjectCutoutDialog({ fileId, fileName, onClose }: SubjectCutout
   const [phase, setPhase] = useState<Phase>({ kind: 'working' });
   const [notice, setNotice] = useState<Notice | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // The touched point on the photo, or null for every subject.
+  const [point, setPoint] = useState<SubjectPoint | null>(null);
+  const { pointSelection } = useSubjectCutoutSupport(true);
   const dialogRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -51,11 +60,11 @@ export function SubjectCutoutDialog({ fileId, fileName, onClose }: SubjectCutout
     let url: string | null = null;
     setPhase({ kind: 'working' });
     setNotice(null);
-    createSubjectCutout(fileId, controller.signal)
-      .then((blob) => {
+    createSubjectCutout(fileId, { point, signal: controller.signal })
+      .then(({ png, region }) => {
         if (controller.signal.aborted) return;
-        url = URL.createObjectURL(blob);
-        setPhase({ kind: 'ready', blob, url });
+        url = URL.createObjectURL(png);
+        setPhase({ kind: 'ready', blob: png, url, region });
       })
       .catch((e: unknown) => {
         if (controller.signal.aborted) return;
@@ -65,7 +74,7 @@ export function SubjectCutoutDialog({ fileId, fileName, onClose }: SubjectCutout
       controller.abort();
       if (url !== null) URL.revokeObjectURL(url);
     };
-  }, [fileId, attempt]);
+  }, [fileId, attempt, point]);
 
   useEffect(() => { dialogRef.current?.focus(); }, []);
 
@@ -90,15 +99,25 @@ export function SubjectCutoutDialog({ fileId, fileName, onClose }: SubjectCutout
     }
   }, [phase]);
 
+  const canTap = pointSelection && phase.kind === 'ready' && phase.region !== null;
+
+  const tap = useCallback((event: React.MouseEvent<HTMLImageElement>) => {
+    if (!canTap || phase.kind !== 'ready' || phase.region === null) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    if (box.width <= 0 || box.height <= 0) return;
+    setPoint(subjectPointOnPhoto(
+      phase.region, (event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height));
+  }, [canTap, phase]);
+
   const save = useCallback(async () => {
     setNotice({ kind: 'saving' });
     try {
-      const saved = await saveSubjectCutout(fileId);
+      const saved = await saveSubjectCutout(fileId, point);
       setNotice({ kind: 'saved', name: saved.name });
     } catch (e) {
       setNotice({ kind: 'saveFailed', reason: e instanceof SubjectCutoutError ? e.reason : null });
     }
-  }, [fileId]);
+  }, [fileId, point]);
 
   return (
     <div
@@ -122,14 +141,33 @@ export function SubjectCutoutDialog({ fileId, fileName, onClose }: SubjectCutout
             <p className="subject-cutout-working" role="status">{t('subjectCutout.working')}</p>
           )}
           {phase.kind === 'ready' && (
-            <img src={phase.url} alt={t('subjectCutout.previewAlt')} data-testid="subject-cutout-image" />
+            <img
+              src={phase.url}
+              alt={t('subjectCutout.previewAlt')}
+              data-testid="subject-cutout-image"
+              className={canTap ? 'subject-cutout-tappable' : undefined}
+              onClick={canTap ? tap : undefined}
+            />
           )}
           {phase.kind === 'failed' && (
-            <p className="subject-cutout-error" role="alert">{t(FAILURE_KEYS[phase.reason])}</p>
+            <p className="subject-cutout-error" role="alert">
+              {point !== null && phase.reason === 'noSubject'
+                ? t('subjectCutout.error.noSubjectHere')
+                : t(FAILURE_KEYS[phase.reason])}
+            </p>
           )}
         </div>
 
+        {canTap && (
+          <p className="subject-cutout-hint" data-testid="subject-cutout-hint">
+            {point === null ? t('subjectCutout.tapHint') : t('subjectCutout.tapAgainHint')}
+          </p>
+        )}
+
         <div className="subject-cutout-actions">
+          {point !== null && (phase.kind !== 'working') && (
+            <button type="button" onClick={() => setPoint(null)}>{t('subjectCutout.allSubjects')}</button>
+          )}
           {phase.kind === 'ready' && (
             <>
               {canCopy && (
@@ -145,7 +183,8 @@ export function SubjectCutoutDialog({ fileId, fileName, onClose }: SubjectCutout
               </button>
             </>
           )}
-          {phase.kind === 'failed' && phase.reason !== 'notFound' && phase.reason !== 'unavailable' && (
+          {phase.kind === 'failed' && phase.reason !== 'notFound' && phase.reason !== 'unavailable'
+            && !(point !== null && phase.reason === 'noSubject') && (
             <button type="button" onClick={() => setAttempt((n) => n + 1)}>{t('common.retry')}</button>
           )}
         </div>
