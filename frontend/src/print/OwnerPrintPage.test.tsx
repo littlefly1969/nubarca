@@ -191,7 +191,7 @@ describe('OwnerPrintPage', () => {
     expect(screen.queryByTestId('party-print-format-quadStrip4-4')).toBeNull();
   });
 
-  it('sends two 10×15 in the order chosen, framed, turned the way the preview shows them', async () => {
+  it('sends two 10×15 in the order chosen, to the edges like a 10×15, turned the way the preview shows them', async () => {
     const user = userEvent.setup();
     const mock = mount(`/print?album=${ALBUM}`, { stations: [station(false, '20x15', ['4x6x2'])] });
     await user.click(await screen.findByTestId('party-print-format-photo2'));
@@ -213,12 +213,15 @@ describe('OwnerPrintPage', () => {
     // Two lying 10×15, one above the other: the sheet stands.
     expect(sheet).toHaveAttribute('data-orientation', 'portrait');
     expect(sheet.querySelectorAll('.party-print-slot')).toHaveLength(2);
+    // To the edges by default, as a single 10×15: no frame, no band.
+    expect(screen.getByTestId('owner-print-style')).toBeInTheDocument();
+    expect(sheet.querySelectorAll('.party-print-footer-band')).toHaveLength(0);
     expect(screen.getByText('La stampante taglia il foglio in due foto 10×15.')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Stampa' }));
     await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
     const body = lastPost(mock.calls);
-    expect(body).toMatchObject({ expectedPaperSize: '20x15', layout: 'photo2', style: 'framed', orientation: 'landscape' });
+    expect(body).toMatchObject({ expectedPaperSize: '20x15', layout: 'photo2', style: 'fullBleed', orientation: 'landscape' });
     expect(body.photos.map((p: { fileItemId: string }) => p.fileItemId)).toEqual(['f3', 'f1']);
   });
 

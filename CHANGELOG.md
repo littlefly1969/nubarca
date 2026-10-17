@@ -6,6 +6,13 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Printing: two 10x15 on 20x15 go to the edges, like a 10x15
+
+- **Two 10x15 photos are no longer always framed.** Each one takes the style
+  a single 10x15 takes: to the edges (the default, with the date on the photo
+  when asked) or framed. To the edges, each half of the sheet is exactly the
+  10x15 a single photo prints, and the printer cuts and prints it the same way.
+
 ### Printing: two 10x15 and four strips on 20x15 paper
 
 - **With 20x15 in the printer, the owner's print studio offers two more

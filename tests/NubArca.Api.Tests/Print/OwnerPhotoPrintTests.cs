@@ -793,6 +793,26 @@ public sealed class OwnerPhotoPrintTests : IDisposable
             Assert.Equal((width, height), (sheet.Width, sheet.Height));
         }
 
+        // To the edges, each half is the 10x15 a single photograph prints: no
+        // border, the photograph from corner to corner of its half.
+        foreach (var (orientation, width, height) in new[] { ("portrait", 2400, 1800), ("landscape", 1800, 2400) })
+        {
+            Assert.Equal(HttpStatusCode.Accepted, (await Submit(people.Owner, SheetBody(printer, "photo2", "fullBleed",
+                photos.Take(2), orientation: orientation, paper: "20x15"))).StatusCode);
+            var job = await Db(db => db.PrintJobs.OrderByDescending(j => j.CreatedAt).FirstAsync());
+            Assert.Equal(PrintJobKinds.OwnerPhoto2, job.Kind);
+            Assert.Equal(PrintFormats.Photo4x6Pair, job.Format);
+            Assert.Equal("fullBleed", JsonDocument.Parse(job.RenderSpecificationJson).RootElement
+                .GetProperty("style").GetString());
+            using var sheet = await PrintedSheetAsync(printer);
+            Assert.Equal((width, height), (sheet.Width, sheet.Height));
+            foreach (var (x, y) in new[] { (2, 2), (width - 3, height - 3), (width / 2 - 3, height / 2 - 3), (width / 2 + 2, height / 2 + 2) })
+            {
+                var pixel = sheet[x, y];
+                Assert.True(pixel.R > 150 && pixel.G < 90, $"({x},{y}) is paper, not photograph: {pixel}");
+            }
+        }
+
         // Four photographs are the same strip four times; sixteen are four strips.
         foreach (var count in new[] { 4, 16 })
         {
@@ -811,7 +831,7 @@ public sealed class OwnerPhotoPrintTests : IDisposable
         {
             (SheetBody(printer, "photo2", "framed", photos.Take(2), paper: "20x15"), "invalid_orientation"),
             (SheetBody(printer, "photo2", "framed", photos.Take(3), orientation: "portrait", paper: "20x15"), "invalid_layout"),
-            (SheetBody(printer, "photo2", "fullBleed", photos.Take(2), orientation: "portrait", paper: "20x15"), "invalid_layout"),
+            (SheetBody(printer, "photo2", "popOut", photos.Take(2), orientation: "portrait", paper: "20x15"), "invalid_layout"),
             (SheetBody(printer, "quadStrip4", "framed", photos.Take(8), paper: "20x15"), "invalid_layout"),
         })
         {

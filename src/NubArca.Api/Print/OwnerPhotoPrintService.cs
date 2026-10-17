@@ -90,10 +90,11 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         var paper = request.ExpectedPaperSize!;
 
         // The format and its style, from the catalogue every print shares. One
-        // photograph is to the edges unless framed; four and the strips are framed.
+        // photograph, and each of two 10x15, is to the edges unless framed;
+        // four and the strips are framed.
         var layout = request.Layout ?? PrintLayouts.Photo;
         if (!PrintLayouts.IsKnown(layout)) return Refuse(OwnerPhotoPrintErrors.InvalidLayout);
-        var style = request.Style ?? (layout == PrintLayouts.Photo ? PrintLayouts.FullBleed : PrintLayouts.Framed);
+        var style = request.Style ?? (layout is PrintLayouts.Photo or PrintLayouts.Photo2 ? PrintLayouts.FullBleed : PrintLayouts.Framed);
         if (!PrintLayouts.SupportsStyle(layout, style)) return Refuse(OwnerPhotoPrintErrors.InvalidLayout);
         // "Esce dalla foto" lifts the subject with the owner's own private AI:
         // the owner's request only, never one through a share.
@@ -302,13 +303,18 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 }
             }
 
-            // 11. Rendered at 300dpi from them: Piena by the owner's own renderer,
-            // a framed sheet by the composer every framed print is drawn with,
-            // in white, with the owner's words in its band.
+            // 11. Rendered at 300dpi from them: Piena by the owner's own renderer
+            // (two 10x15 to the edges are two of its prints, side by side), a
+            // framed sheet by the composer every framed print is drawn with, in
+            // white, with the owner's words in its band.
             byte[] artifact;
             try
             {
-                artifact = style == PrintLayouts.FullBleed
+                artifact = style == PrintLayouts.FullBleed && layout == PrintLayouts.Photo2
+                    ? await _renderer.RenderOwnerPhotoPairAsync(
+                        [.. sources.Photos.Select((bytes, i) => (bytes!, placements[i]))],
+                        paper, photoPortrait, dateText, PrintCalibration.Of(device), cancellationToken)
+                    : style == PrintLayouts.FullBleed
                     ? await _renderer.RenderOwnerPhotoAsync(new OwnerPhotoComposition(
                         sources.Photos[0]!, paper, portrait, placements[0], dateText, PrintCalibration.Of(device)),
                         cancellationToken)

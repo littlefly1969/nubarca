@@ -434,9 +434,17 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
   const [resetSignal, setResetSignal] = useState(0);
   const [sent, setSent] = useState<{ shortCode: string; queueAhead: number } | null>(null);
 
+  // One photograph takes the chosen style, and each of two 10x15 takes it as
+  // a 10x15 would (to the edges or framed, never "Esce dalla foto"); four and
+  // the strips are framed.
+  const styleFor = (layout: PrintLayout): PrintStyleChoice => (
+    layout === 'photo' ? style : layout === 'photo2' && style === 'fullBleed' ? 'fullBleed' : 'framed'
+  );
+  const framedFor = (layout: PrintLayout) => styleFor(layout) !== 'fullBleed';
+
   const submit = async (composition: StudioSubmission) => {
     if (!target) return;
-    const framed = composition.layout !== 'photo' || style !== 'fullBleed';
+    const framed = framedFor(composition.layout);
     const line = caption.replace(/\s+/g, ' ').trim();
     setSubmitting(true);
     setError(null);
@@ -445,7 +453,7 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
       const accepted = await from.submit(target, {
         expectedPaperSize: target.paper,
         layout: composition.layout,
-        style: composition.layout === 'photo' ? style : 'framed',
+        style: styleFor(composition.layout),
         photos: composition.slots.map((slot) => ({ fileItemId: slot.itemId, placement: slot.placement })),
         ...(composition.layout === 'photo' && style === 'popOut' && subjectPoint ? { subject: subjectPoint } : {}),
         ...(composition.orientation ? { orientation: composition.orientation } : {}),
@@ -559,8 +567,9 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
     );
   }
 
-  const framedFor = (layout: PrintLayout) => layout !== 'photo' || style !== 'fullBleed';
-  const styles: PrintStyleChoice[] = popOut ? ['fullBleed', 'framed', 'popOut'] : ['fullBleed', 'framed'];
+  const stylesFor = (layout: PrintLayout): PrintStyleChoice[] => (
+    layout === 'photo' && popOut ? ['fullBleed', 'framed', 'popOut'] : ['fullBleed', 'framed']
+  );
 
   return (
     <OwnerPrintShell title={title} back={back}>
@@ -632,10 +641,10 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
         onSubmit={(composition) => { void submit(composition); }}
         options={(layout) => (
           <>
-            {layout === 'photo' && (
+            {(layout === 'photo' || layout === 'photo2') && (
               <fieldset className="party-print-themes" data-testid="owner-print-style">
                 <legend>{t('ownerPrint.style')}</legend>
-                {styles.map((option) => (
+                {stylesFor(layout).map((option) => (
                   <label key={option} className="party-print-theme">
                     <input
                       type="radio"
