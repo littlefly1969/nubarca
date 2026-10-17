@@ -54,9 +54,11 @@ public sealed record AlbumSharePrintSubmitRequest(
 
 /// <summary>
 /// The owner's printer as a visitor's studio sees it: whether it can print now,
-/// the paper that is in, and whether it cuts the twin strip. No name, no id.
+/// the paper that is in, and whether it cuts the twin strip — and which cut
+/// sheets it makes. No name, no id.
 /// </summary>
-public sealed record AlbumSharePrintDto(bool Available, string Paper, bool CutsStrips);
+public sealed record AlbumSharePrintDto(bool Available, string Paper, bool CutsStrips,
+    IReadOnlyList<string>? CutFormats = null);
 
 /// <summary>An accepted print, as a visitor sees it: its short code and its place in the queue.</summary>
 public sealed record AlbumSharePrintAccepted(string ShortCode, string State, int QueueAhead);
@@ -68,7 +70,8 @@ public static class AlbumSharePrintErrors
 }
 
 /// <summary>The owner's printer a share prints on, as resolved now.</summary>
-public sealed record AlbumSharePrinter(Guid StationId, Guid DeviceId, string Paper, bool CutsStrips, bool Online);
+public sealed record AlbumSharePrinter(Guid StationId, Guid DeviceId, string Paper, bool CutsStrips, bool Online,
+    IReadOnlyList<string> CutFormats);
 
 public sealed class AlbumSharePrintService : IAlbumSharePrintService
 {
@@ -95,7 +98,7 @@ public sealed class AlbumSharePrintService : IAlbumSharePrintService
         var printer = await ResolvePrinterAsync(access.OwnerUserId, cancellationToken);
         return printer is null
             ? new AlbumSharePrintDto(false, PrintPapers.Photo10x15, false)
-            : new AlbumSharePrintDto(printer.Online, printer.Paper, printer.CutsStrips);
+            : new AlbumSharePrintDto(printer.Online, printer.Paper, printer.CutsStrips, printer.CutFormats);
     }
 
     public async Task<OwnerPhotoPrintDate?> ResolveDateAsync(
@@ -115,7 +118,7 @@ public sealed class AlbumSharePrintService : IAlbumSharePrintService
         CancellationToken cancellationToken)
     {
         if (!access.CanPrint) return OwnerPhotoPrintResult.Refuse(AlbumSharePrintErrors.NotAllowed);
-        if (request.Photos is not { Count: > 0 and <= 8 } photos || photos.Any(p => p.FileItemId is null))
+        if (request.Photos is not { Count: > 0 } photos || photos.Count > PrintLayouts.MostPhotos || photos.Any(p => p.FileItemId is null))
             return OwnerPhotoPrintResult.Refuse(OwnerPhotoPrintErrors.InvalidRequest);
 
         // The photographs must be THIS album's, visible to its share — the
@@ -175,7 +178,7 @@ public sealed class AlbumSharePrintService : IAlbumSharePrintService
             .FirstOrDefaultAsync(cancellationToken);
         // Only the destination matters here: the owner print answers the repeat
         // from its record (or refuses a different composition under the key).
-        return job is null ? null : new AlbumSharePrinter(job.PrintStationId, job.PrinterDeviceId, string.Empty, false, true);
+        return job is null ? null : new AlbumSharePrinter(job.PrintStationId, job.PrinterDeviceId, string.Empty, false, true, []);
     }
 
     /// <summary>
@@ -209,7 +212,7 @@ public sealed class AlbumSharePrintService : IAlbumSharePrintService
                 {
                     Printer = new AlbumSharePrinter(station.Id, device.Id, paper,
                         PrintCapabilityMatcher.SupportsFormat(device.CapabilitiesJson, PrintFormats.Strip2x6Pair),
-                        online),
+                        online, PrintCapabilityMatcher.CutFormats(device.CapabilitiesJson)),
                     Prints = PrintCapabilityMatcher.SupportsFormat(device.CapabilitiesJson, paper),
                     station.CreatedAt,
                 };

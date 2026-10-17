@@ -27,7 +27,7 @@ import { PrintAgentBundleCard } from './PrintAgentBundleCard';
 import { PrintAgentSetupGuide } from './PrintAgentSetupGuide';
 import { PrinterCalibrationControls } from './PrinterCalibrationControls';
 import { isPrinterOffline, PrinterMediaRemaining } from './PrinterMediaRemaining';
-import { paperLabel, PrinterPaperControl } from './PrinterPaperControl';
+import { formatLabel, paperLabel, PrinterPaperControl } from './PrinterPaperControl';
 import { PrinterSharingControls } from './PrinterSharingControls';
 import { PrinterSimulationControls } from './PrinterSimulationControls';
 import { PrinterUsageSummary } from './PrinterUsageSummary';
@@ -45,6 +45,8 @@ const KIND_KEYS: Record<string, MessageKey> = {
   'owner-photo': 'print.kind.ownerPhoto',
   'owner-grid4': 'print.kind.ownerGrid4',
   'owner-strip4': 'print.kind.ownerStrip4',
+  'owner-photo2': 'print.kind.ownerPhoto2',
+  'owner-quad-strip4': 'print.kind.ownerQuadStrip4',
   'party-photo': 'print.kind.partyPhoto',
   'party-grid4': 'print.kind.partyGrid4',
   'party-strip4': 'print.kind.partyStrip4',
@@ -516,7 +518,7 @@ function PrintQueueList({ jobs, busy, onCancel }: {
             <code>{job.shortCode}</code>
             <span>
               {KIND_KEYS[job.kind] ? t(KIND_KEYS[job.kind]) : job.kind}
-              {' · '}{job.format === '2x6x2' ? '2×6' : paperLabel(job.format)}
+              {' · '}{formatLabel(job.format)}
               {job.ownerName && <span className="muted">{' · '}{t('print.job.from', { name: job.ownerName })}</span>}
               {job.simulated && <span className="print-sim-badge">{t('print.sim.badge')}</span>}
             </span>

@@ -93,7 +93,7 @@ public sealed class CupsPrinterAdapterTests
 
     /// <summary>The Gutenprint DS-RX1 page sizes as <c>lpoptions -l</c> prints them.</summary>
     private const string RxOptions = """
-        PageSize/Media Size: *w288h432 w288h432-div2 w360h504 w432h576 w432h576-div2 Custom.WIDTHxHEIGHT
+        PageSize/Media Size: *w288h432 w288h432-div2 w360h504 w432h576 w432h576-div4 w432h576-div2 Custom.WIDTHxHEIGHT
         Resolution/Resolution: *300x300dpi
         """;
 
@@ -115,7 +115,7 @@ public sealed class CupsPrinterAdapterTests
     {
         // 5x7 and 6x8 in the driver: 13x18 and 20x15, beside 10x15 and its cut.
         var (rx, _) = WithOptions(RxOptions);
-        Assert.Equal(["10x15", "13x18", "20x15", "2x6x2"],
+        Assert.Equal(["10x15", "13x18", "20x15", "2x6x2", "4x6x2", "2x6x4"],
             (await rx.GetCapabilitiesAsync(Device(), default)).Formats);
 
         // A driver without them is a 10x15 printer, as it always was.
@@ -125,6 +125,89 @@ public sealed class CupsPrinterAdapterTests
         // And one that cannot be asked at all is, too.
         var (silent, _) = WithOptions(null);
         Assert.Equal(["10x15", "2x6x2"], (await silent.GetCapabilitiesAsync(Device(), default)).Formats);
+    }
+
+    [Fact]
+    public async Task A_20x15_In_Two_Or_In_Four_Strips_Is_Offered_Only_Where_The_DNP_Driver_Cuts_It()
+    {
+        // The DNP's cut 6x8 sizes are the sign: two photographs with "4x6*2",
+        // four strips with "2x6*4" — and the strips only beside the strip queue.
+        var (twoOnly, _) = WithOptions("PageSize/Media Size: *w288h432 w288h432-div2 w432h576 w432h576-div2\n");
+        Assert.Equal(["10x15", "20x15", "2x6x2", "4x6x2"],
+            (await twoOnly.GetCapabilitiesAsync(Device(), default)).Formats);
+
+        var runner = new FakeProcessRunner((file, args) => file switch
+        {
+            "lpstat" when args.SequenceEqual(["-r"]) => FakeProcessRunner.Ok("scheduler is running\n"),
+            "lpstat" => FakeProcessRunner.Ok(BothIdle),
+            "lpoptions" => FakeProcessRunner.Ok(RxOptions),
+            _ => ProcessResult.Missing(file),
+        });
+        var noStrip = new CupsPrinterAdapter(Photo, null, runner, NullLogger<CupsPrinterAdapter>.Instance);
+        Assert.Equal(["10x15", "13x18", "20x15", "4x6x2"],
+            (await noStrip.GetCapabilitiesAsync(Device(), default)).Formats);
+
+        // Without 6x8 at all, nothing of it.
+        var (no6x8, _) = WithOptions("PageSize/Media Size: *w288h432 w288h432-div2 w432h576-div2 w432h576-div4\n");
+        Assert.Equal(["10x15", "2x6x2"], (await no6x8.GetCapabilitiesAsync(Device(), default)).Formats);
+    }
+
+    /// <summary>The header of a 2400x1800 (or turned) RGB JPEG: all a sheet's halves are cut by.</summary>
+    internal static byte[] SheetJpeg(int width, int height) =>
+    [
+        0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08,
+        (byte)(height >> 8), (byte)height, (byte)(width >> 8), (byte)width, 0x03,
+        0x01, 0x11, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01,
+        0xFF, 0xD9,
+    ];
+
+    [Theory]
+    [InlineData("4x6x2", Photo)]
+    [InlineData("2x6x4", Strip)]
+    public async Task A_20x15_Goes_As_One_Job_Of_Its_Two_10x15_Halves(string format, string queue)
+    {
+        string? sent = null;
+        byte[]? pdf = null;
+        var runner = new FakeProcessRunner((file, args) =>
+        {
+            if (file != "lp") return file == "lpstat" ? FakeProcessRunner.Ok(BothIdle) : ProcessResult.Missing(file);
+            sent = args[^1];
+            pdf = File.ReadAllBytes(sent);
+            return FakeProcessRunner.Ok("request id is NubArca-RX1HS-42 (1 file(s))\n");
+        });
+        var adapter = new CupsPrinterAdapter(Photo, Strip, runner, NullLogger<CupsPrinterAdapter>.Instance);
+        var artifact = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllBytesAsync(artifact, SheetJpeg(2400, 1800));
+            var jobId = Guid.Parse("0d99a1b2-0000-0000-0000-000000000000");
+            var result = await adapter.SubmitAsync(new PrintSubmission(jobId, Photo, artifact, "image/jpeg", format), default);
+
+            Assert.True(result.Accepted);
+            var lp = Assert.Single(runner.Calls, c => c.File == "lp");
+            // The queue's own 10x15 page: the driver joins the two on the 6x8.
+            Assert.Equal(["-d", queue, "-t", "NubArca-0d99a1b2", "-o", "fit-to-page", artifact + ".halves.pdf"], lp.Args);
+            Assert.Contains("/Count 2", System.Text.Encoding.ASCII.GetString(pdf!));
+            // Spooled, then gone.
+            Assert.False(File.Exists(sent));
+        }
+        finally { File.Delete(artifact); }
+    }
+
+    [Fact]
+    public async Task A_20x15_That_Is_Not_Two_10x15_Is_Refused_Before_CUPS_Is_Asked()
+    {
+        var (adapter, runner) = Adapter(BothIdle);
+        var artifact = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllBytesAsync(artifact, [0x89, 0x50, 0x4E, 0x47]);
+            var result = await adapter.SubmitAsync(
+                new PrintSubmission(Guid.NewGuid(), Photo, artifact, "image/jpeg", "4x6x2"), default);
+            Assert.Equal("artifact_invalid", result.FailureCode);
+            Assert.DoesNotContain(runner.Calls, c => c.File == "lp");
+        }
+        finally { File.Delete(artifact); }
     }
 
     [Fact]

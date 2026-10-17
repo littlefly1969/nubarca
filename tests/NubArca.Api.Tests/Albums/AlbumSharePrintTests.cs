@@ -161,6 +161,52 @@ public sealed class AlbumSharePrintTests : IDisposable
         Assert.Equal(1, await Db(db => db.PrintJobs.CountAsync(j => j.PrinterDeviceId == second.DeviceId)));
     }
 
+    [Fact]
+    public async Task On_20x15_a_visitor_prints_four_different_strips_of_sixteen_photos()
+    {
+        var shared = await SharedAlbumAsync(secondFactor: true, allowPrint: true);
+        var photos = new List<Guid> { shared.Photo };
+        for (var i = 1; i < 17; i++)
+        {
+            var photo = await PhotoAsync(shared.Owner);
+            (await shared.Owner.PostAsJsonAsync($"/api/albums/{shared.Album}/items", new { fileItemId = photo }))
+                .EnsureSuccessStatusCode();
+            photos.Add(photo);
+        }
+        (await HeartbeatAsync(shared.Printer.Credential, "ready", "2x6x2", "4x6x2", "2x6x4")).EnsureSuccessStatusCode();
+        (await shared.Owner.PutAsJsonAsync(
+            $"/api/print/stations/{shared.Printer.StationId}/devices/{shared.Printer.DeviceId}/paper",
+            new { paperSize = "20x15" })).EnsureSuccessStatusCode();
+        var visitor = await VerifiedVisitorAsync(shared.Token);
+
+        // The studio is told the sheet can be cut into four strips.
+        var manifest = await visitor.GetFromJsonAsync<JsonElement>($"/api/album-share/{shared.Token}/print");
+        Assert.Equal("20x15", manifest.GetProperty("paper").GetString());
+        Assert.Contains("2x6x4", manifest.GetProperty("cutFormats").EnumerateArray().Select(f => f.GetString()));
+
+        object Strips(IEnumerable<Guid> chosen) => new Dictionary<string, object?>
+        {
+            ["expectedPaperSize"] = "20x15",
+            ["layout"] = "quadStrip4",
+            ["style"] = "framed",
+            ["photos"] = chosen.Select(p => new { fileItemId = p, placement = new { centerX = 0.5, centerY = 0.5, zoom = 1 } }).ToArray(),
+            ["includeDate"] = false,
+        };
+
+        // Sixteen photographs, four different strips: as many as the owner's own print takes.
+        var response = await SubmitAsync(visitor, shared.Token, Strips(photos.Take(16)));
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        var job = await Db(db => db.PrintJobs.SingleAsync());
+        Assert.Equal(PrintJobKinds.OwnerQuadStrip4, job.Kind);
+        Assert.Equal(PrintFormats.Strip2x6Quad, job.Format);
+        Assert.Equal(16, await Db(db => db.PrintJobSources.CountAsync(s => s.PrintJobId == job.Id)));
+
+        // One more than any sheet takes is refused before anything is looked up.
+        var tooMany = await SubmitAsync(visitor, shared.Token, Strips(photos));
+        Assert.Equal(HttpStatusCode.BadRequest, tooMany.StatusCode);
+        Assert.Equal(1, await CountJobsAsync());
+    }
+
     // --- what else the rule implies ----------------------------------------
 
     [Fact]
@@ -322,7 +368,7 @@ public sealed class AlbumSharePrintTests : IDisposable
         return new Printer(stationId, deviceId, credential);
     }
 
-    private Task<HttpResponseMessage> HeartbeatAsync(string credential, string state)
+    private Task<HttpResponseMessage> HeartbeatAsync(string credential, string state, params string[] cuts)
     {
         var heartbeat = new HttpRequestMessage(HttpMethod.Post, "/api/print-agent/heartbeat")
         {
@@ -335,7 +381,7 @@ public sealed class AlbumSharePrintTests : IDisposable
                     {
                         deviceKey = "dnp", displayName = "DNP DS-RX1HS", manufacturer = "DNP", model = "DS-RX1HS",
                         adapterKind = "cups",
-                        capabilities = new { formats = new[] { "10x15", "13x18", "20x15" }, color = true },
+                        capabilities = new { formats = new[] { "10x15", "13x18", "20x15" }.Concat(cuts).ToArray(), color = true },
                         observedState = state,
                     },
                 },

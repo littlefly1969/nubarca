@@ -1,4 +1,4 @@
-import type { PrintPaperSize, PrintStation, SharedPrinter } from '@nubarca/api-client';
+import type { PrintCutFormat, PrintPaperSize, PrintStation, SharedPrinter } from '@nubarca/api-client';
 import type { MessageKey } from '../../i18n';
 import { isPrinterOffline } from '../../cloud/PrinterMediaRemaining';
 
@@ -27,6 +27,8 @@ export interface PrintTarget {
   sheetsLeft?: number | null;
   /** The printer cuts a 10x15 into the twin strip's two strips. */
   cutsStrips: boolean;
+  /** Every cut sheet the printer makes itself: the twin strip, a 20x15 in two or in four strips. */
+  cutFormats: readonly PrintCutFormat[];
   /** Its prints go to a file, not to paper: said wherever it is chosen. */
   simulated: boolean;
 }
@@ -60,6 +62,7 @@ export function printTargets(stations: readonly PrintStation[], shared: readonly
         mediaObservedAt: device.mediaRemainingObservedAt ?? null,
         offline,
         cutsStrips: device.cutsStrips === true,
+        cutFormats: device.cutFormats ?? [],
         simulated: device.simulated === true,
       };
     }));
@@ -83,6 +86,7 @@ export function printTargets(stations: readonly PrintStation[], shared: readonly
       offline,
       sheetsLeft,
       cutsStrips: printer.cutsStrips === true,
+      cutFormats: printer.cutFormats ?? [],
       simulated: printer.simulated === true,
     };
   });

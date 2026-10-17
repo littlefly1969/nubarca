@@ -45,6 +45,24 @@ public sealed class SpoolerQueueRoutingTests
     }
 
     [Fact]
+    public void A_20x15_In_Two_Goes_To_The_Photo_Queue_And_In_Four_Strips_To_The_Strip_Queue()
+    {
+        Assert.Equal(Printer, SpoolerQueueRouting.TargetQueue("4x6x2", Printer, Printer, StripQueue));
+        Assert.Equal(StripQueue, SpoolerQueueRouting.TargetQueue("2x6x4", Printer, Printer, StripQueue));
+        // Four strips need the 2-inch cut: never as two uncut 10x15.
+        Assert.Null(SpoolerQueueRouting.TargetQueue("2x6x4", Printer, Printer, null));
+        Assert.Null(SpoolerQueueRouting.TargetQueue("2x6x4", "Office Inkjet", Printer, StripQueue));
+
+        // Reported only beside 20x15, and the strips only beside the twin strip.
+        Assert.Equal(["10x15", "20x15", "2x6x2", "4x6x2", "2x6x4"],
+            SpoolerQueueRouting.Formats(Printer, ["10x15", "20x15", "4x6x2", "2x6x4"], Printer, StripQueue, true));
+        Assert.Equal(["10x15", "20x15", "4x6x2"],
+            SpoolerQueueRouting.Formats(Printer, ["10x15", "20x15", "4x6x2", "2x6x4"], Printer, null, false));
+        Assert.Equal(["10x15", "2x6x2"],
+            SpoolerQueueRouting.Formats(Printer, ["10x15", "4x6x2", "2x6x4"], Printer, StripQueue, true));
+    }
+
+    [Fact]
     public void A_Sheet_This_Printer_Cannot_Cut_Is_Refused_Not_Printed_Uncut()
     {
         // A 2x6x2 job sent to a printer without its cutting queue would come out

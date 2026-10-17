@@ -8,7 +8,7 @@ import {
   type SimulatedPrint,
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
-import { paperLabel } from './PrinterPaperControl';
+import { formatLabel } from './PrinterPaperControl';
 
 /**
  * A printer's simulated twin, for its owner: the switch between paper and the
@@ -108,7 +108,7 @@ export function PrinterSimulationControls({ stationId, device, onChanged }: {
                 <span className="print-simulated-text">
                   <code>{print.shortCode}</code>
                   <span className="muted">
-                    {[print.format === '2x6x2' ? '2×6' : paperLabel(print.format), formatDate(print.createdAt),
+                    {[formatLabel(print.format), formatDate(print.createdAt),
                       ...(print.ownerName ? [print.ownerName] : [])].join(' · ')}
                   </span>
                 </span>

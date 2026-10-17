@@ -92,7 +92,9 @@ public sealed record PrintDeviceDto(
     /// <summary>The agent can run a simulated job right now: the owner may switch on, and simulated jobs can print.</summary>
     bool SimulationAvailable = false,
     /// <summary>Nothing but the twin: always simulated.</summary>
-    bool SimulationOnly = false);
+    bool SimulationOnly = false,
+    /// <summary>The cut sheets the printer makes itself (2x6x2, 4x6x2, 2x6x4), as the Print Agent reports them.</summary>
+    IReadOnlyList<string>? CutFormats = null);
 /// <summary>A live loan of a printer, as its owner sees it.</summary>
 public sealed record PrinterShareDto(
     Guid Id, string GranteeName, string GranteeEmail, int? MaxSheets, int UsedSheets, DateTime CreatedAt);
@@ -112,7 +114,9 @@ public sealed record SharedPrinterDto(
     /// <summary>Prints physically left on the media (the printer's count, not the loan's).</summary>
     int? MediaRemainingPrints = null, DateTime? MediaRemainingObservedAt = null,
     /// <summary>Its prints go to a file, not to paper.</summary>
-    bool Simulated = false);
+    bool Simulated = false,
+    /// <summary>The cut sheets the printer makes itself (2x6x2, 4x6x2, 2x6x4).</summary>
+    IReadOnlyList<string>? CutFormats = null);
 public sealed record SharePrinterRequest(string? Email, int? MaxSheets);
 /// <summary>
 /// A loan's new ceiling. <c>maxSheets</c> must be present: null removes the

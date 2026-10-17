@@ -1,6 +1,8 @@
 import { api } from './client';
 
 export type PrintDesiredState = 'running' | 'paused' | 'disabled';
+/** A cut sheet a printer makes itself: the twin strip's 10x15, a 20x15 in two 10x15 or in four strips. */
+export type PrintCutFormat = '2x6x2' | '4x6x2' | '2x6x4';
 export type PrintStationStatus = 'online' | 'degraded' | 'offline' | 'revoked';
 
 export interface PrintDevice {
@@ -14,6 +16,8 @@ export interface PrintDevice {
   supportsPhoto10x15: boolean;
   /** The printer cuts a strip sheet into two 2x6 strips itself. */
   cutsStrips?: boolean;
+  /** Every cut sheet the printer makes itself. */
+  cutFormats?: PrintCutFormat[] | null;
   /** The owner's tone compensation for this printer; every factor 1 when neutral. */
   calibration?: PrintCalibration;
   /** The paper the operator says is loaded; guests are offered what it can make. */
@@ -82,6 +86,8 @@ export interface SharedPrinter {
   papers: PrintPaperSize[];
   supportsPhoto10x15: boolean;
   cutsStrips: boolean;
+  /** Every cut sheet the printer makes itself. */
+  cutFormats?: PrintCutFormat[] | null;
   loadedPaperChangedBy: string | null;
   loadedPaperChangedAt: string | null;
   maxSheets: number | null;
@@ -321,7 +327,7 @@ export interface OwnerPhotoPrintRequest {
   /** The paper the composition was made for: refused as paper_changed if another is loaded. */
   expectedPaperSize: PrintPaperSize;
   /** A format of the shared print catalogue. */
-  layout: 'photo' | 'grid4' | 'twinStrip4';
+  layout: 'photo' | 'grid4' | 'twinStrip4' | 'photo2' | 'quadStrip4';
   /**
    * One photograph: Piena (`fullBleed`), Cornice (`framed`) or Esce dalla foto
    * (`popOut`, the owner's own print only). Four and the strips are framed.
@@ -329,7 +335,7 @@ export interface OwnerPhotoPrintRequest {
   style: 'fullBleed' | 'framed' | 'popOut';
   /** The photographs in the order they were arranged, each placed in its slot (the shared PhotoPlacement). */
   photos: { fileItemId: string; placement: { centerX: number; centerY: number; zoom: number } }[];
-  /** Which way a single photograph's sheet stands; absent for four and the strips. */
+  /** Which way a single photograph (or two 10x15) stands; absent for four and the strips. */
   orientation?: 'portrait' | 'landscape';
   /** One line of the owner's own in a framed sheet's band. */
   caption?: string;

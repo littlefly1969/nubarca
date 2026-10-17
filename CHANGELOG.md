@@ -6,6 +6,21 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Printing: two 10x15 and four strips on 20x15 paper
+
+- **With 20x15 in the printer, the owner's print studio offers two more
+  formats.** **Two 10x15 photos** puts two photos on one sheet, which comes
+  out as two 10x15. **Four strips** puts four photo strips on one sheet: four
+  different strips (16 photos) or the same strip four times (4 photos). Both
+  are framed like a 10x15, and the preview shows the whole sheet.
+- **It is the DNP DS-RX1HS's own way of doing it.** The Print Box sends the
+  sheet as one print job of two 10x15 pages. With 6x8 media loaded,
+  Gutenprint's DNP driver joins the two pages on one sheet and the printer
+  cuts it in two, or, through the strip queue's 2-inch cut, into four strips.
+- **Needs Print Agent 0.10.0 on CUPS.** A box offers these formats only when
+  its driver has the DNP's cut 6x8 sizes. A Windows agent and an older box
+  never report them, so the studio does not offer them there.
+
 ### Copy subject: lift a photo's subject off its background
 
 - **✂ in the photo viewer** cuts the subject out of one of your photos, like

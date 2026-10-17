@@ -9,6 +9,16 @@ export function paperLabel(paper: string): string {
   return paper.replace('x', '\u00d7');
 }
 
+/** A job's sheet as the trade says it: a paper, or the prints a cut sheet becomes. */
+export function formatLabel(format: string): string {
+  switch (format) {
+    case '2x6x2': return '2\u00d76';
+    case '4x6x2': return '2 \u00d7 10\u00d715';
+    case '2x6x4': return '4 \u00d7 2\u00d76';
+    default: return paperLabel(format);
+  }
+}
+
 /** What the control reads of a printer: the owner's own, or one lent to the reader. */
 export type PaperPrinter = Pick<PrintDevice,
   'id' | 'supportsPhoto10x15' | 'loadedPaperSize' | 'papers' | 'loadedPaperChangedBy' | 'loadedPaperChangedAt'>;

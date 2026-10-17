@@ -19,7 +19,7 @@
 
 // --- Formats, styles, papers -------------------------------------------------
 
-export const PRINT_LAYOUTS = ['photo', 'grid4', 'twinStrip4'] as const;
+export const PRINT_LAYOUTS = ['photo', 'grid4', 'twinStrip4', 'photo2', 'quadStrip4'] as const;
 export type PrintLayout = (typeof PRINT_LAYOUTS)[number];
 
 /**
@@ -73,20 +73,41 @@ export const PORTRAIT_HEIGHT = 1800;
 export const LANDSCAPE_WIDTH = 1800;
 export const LANDSCAPE_HEIGHT = 1200;
 
-/** A photo and four photos on any paper; the twin strip only on 10x15, the sheet the printer cuts. */
+/**
+ * A photo and four photos on any paper; the twin strip only on 10x15, the sheet
+ * the printer cuts; two photographs and four strips only on 20x15, which it
+ * cuts into two 10x15 or four 2x6.
+ */
 export function layoutAllowed(paper: PrintPaper, layout: PrintLayout): boolean {
   if (layout === 'twinStrip4') return paper === '10x15';
+  if (layout === 'photo2' || layout === 'quadStrip4') return paper === '20x15';
   return paper in PAPER_INCHES;
+}
+
+/** The cut sheets a printer may make itself: the twin strip's 10x15, a 20x15 in two or in four strips. */
+export type PrintCutFormat = '2x6x2' | '4x6x2' | '2x6x4';
+
+/** The cut a format needs the printer to make, or null for a sheet that is printed whole. */
+export function layoutCut(layout: PrintLayout): PrintCutFormat | null {
+  switch (layout) {
+    case 'twinStrip4': return '2x6x2';
+    case 'photo2': return '4x6x2';
+    case 'quadStrip4': return '2x6x4';
+    default: return null;
+  }
 }
 
 /**
  * How many DIFFERENT photographs a format takes. The twin strip takes four —
  * the same strip twice, one to keep and one to give — or eight, two strips.
+ * The four strips take four, the same strip four times, or sixteen.
  */
 export function layoutPhotoCounts(layout: PrintLayout): readonly number[] {
   switch (layout) {
     case 'grid4': return [4];
     case 'twinStrip4': return [SLOTS_PER_STRIP, SLOTS_PER_STRIP * STRIPS_PER_SHEET];
+    case 'photo2': return [HALVES_PER_SHEET];
+    case 'quadStrip4': return [SLOTS_PER_STRIP, SLOTS_PER_STRIP * STRIPS_PER_SHEET * HALVES_PER_SHEET];
     default: return [1];
   }
 }
@@ -96,10 +117,16 @@ export function layoutSupportsStyle(layout: PrintLayout, style: PrintStyle): boo
   return style === 'framed' || ((style === 'fullBleed' || style === 'popOut') && layout === 'photo');
 }
 
-/** A single photograph's sheet stands as it is placed; four as the paper is named; strips always stand. */
+/**
+ * A single photograph's sheet stands as it is placed; four as the paper is
+ * named; the twin strip always stands. A halved 20x15 lies when its halves
+ * stand (two standing photographs, the four strips) and stands when they lie.
+ */
 export function sheetPortrait(layout: PrintLayout, paper: PrintPaper, photoPortrait: boolean): boolean {
   if (layout === 'grid4') return gridPortrait(paper);
   if (layout === 'twinStrip4') return true;
+  if (layout === 'photo2') return !photoPortrait;
+  if (layout === 'quadStrip4') return false;
   return photoPortrait;
 }
 
@@ -112,6 +139,7 @@ export function arrangeSheet(
 ): PrintSheetLayout {
   const standing = sheetPortrait(layout, paper, portrait);
   const [width, height] = printSheet(paper, standing);
+  if (layout === 'photo2' || layout === 'quadStrip4') return halves(layout, width, height, portrait);
   if (layout === 'grid4') {
     return { width, height, slots: [0, 1, 2, 3].map((i) => gridSlot(paper, i)), bands: [gridFooter(paper)] };
   }
@@ -200,6 +228,36 @@ export function popOutArea(paper: PrintPaper, portrait: boolean): PrintRect {
   const edge = POP_OUT_EDGE_FRACTION * Math.min(w, h);
   const slot = popOutSlot(paper, portrait);
   return { x: edge / w, y: edge / h, width: (w - 2 * edge) / w, height: slot.y - edge / h };
+}
+
+// --- A 20x15 cut in two ----------------------------------------------------------
+
+/** A 20x15 is two 10x15 (6x8 inches is two 4x6): each half is laid out as that sheet would be. */
+export const HALVES_PER_SHEET = 2;
+
+/** What each half of a halved 20x15 is: one framed 10x15 photograph, or the twin strip. */
+export function halfLayout(layout: PrintLayout): PrintLayout {
+  return layout === 'quadStrip4' ? 'twinStrip4' : 'photo';
+}
+
+/**
+ * Both halves, each the 10x15 sheet of its half layout placed in its half: side
+ * by side on a lying sheet, one above the other on a standing one — the first
+ * half's slots, then the second's.
+ */
+function halves(layout: PrintLayout, width: number, height: number, portrait: boolean): PrintSheetLayout {
+  const half = arrangeSheet(halfLayout(layout), 'framed', '10x15', portrait);
+  const sideBySide = width > height;
+  const place = (r: PrintRect, index: number): PrintRect => (sideBySide
+    ? { x: (index + r.x) / HALVES_PER_SHEET, y: r.y, width: r.width / HALVES_PER_SHEET, height: r.height }
+    : { x: r.x, y: (index + r.y) / HALVES_PER_SHEET, width: r.width, height: r.height / HALVES_PER_SHEET });
+  const indices = Array.from({ length: HALVES_PER_SHEET }, (_, i) => i);
+  return {
+    width,
+    height,
+    slots: indices.flatMap((i) => half.slots.map((r) => place(r, i))),
+    bands: indices.flatMap((i) => half.bands.map((r) => place(r, i))),
+  };
 }
 
 // --- Four photographs, two by two ---------------------------------------------

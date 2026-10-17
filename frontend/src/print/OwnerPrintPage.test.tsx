@@ -14,7 +14,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const ALBUM = 'A1';
 
-function station(cutsStrips = false, paper: '10x15' | '13x18' = '10x15') {
+function station(cutsStrips = false, paper: '10x15' | '13x18' | '20x15' = '10x15', cutFormats: string[] = []) {
   return {
     id: 's1', name: 'Sala', enabled: true, desiredState: 'running', status: 'online', lastSeenAt: null,
     agentVersion: '0.5.0', createdAt: '2026-01-01T00:00:00Z', revokedAt: null, queueCount: 0, currentJob: null,
@@ -22,7 +22,7 @@ function station(cutsStrips = false, paper: '10x15' | '13x18' = '10x15') {
     devices: [{
       id: 'd1', displayName: 'DNP DS-RX1HS', manufacturer: 'DNP', model: 'DS-RX1HS', adapterKind: 'cups',
       observedState: 'ready', lastSeenAt: '2026-01-01T00:00:00Z', supportsPhoto10x15: true, cutsStrips,
-      loadedPaperSize: paper, papers: ['10x15', '13x18', '20x15'], mediaRemainingPrints: 120,
+      loadedPaperSize: paper, papers: ['10x15', '13x18', '20x15'], mediaRemainingPrints: 120, cutFormats,
     }],
   };
 }
@@ -167,6 +167,84 @@ describe('OwnerPrintPage', () => {
     mount(`/print?album=${ALBUM}`, { stations: [station(true)] });
     expect(await screen.findByTestId('party-print-format-twinStrip4')).toHaveTextContent('Due strisce diverse');
     expect(screen.getByTestId('party-print-format-twinStrip4-4')).toHaveTextContent('Due strisce uguali');
+  });
+
+  it('offers two 10×15 and four strips on 20×15, only from a printer that joins and cuts them', async () => {
+    mount(`/print?album=${ALBUM}`, { stations: [station(true, '20x15', ['2x6x2', '4x6x2', '2x6x4'])] });
+    expect(await screen.findByTestId('party-print-format-photo2')).toHaveTextContent('Due foto 10×15');
+    expect(screen.getByTestId('party-print-format-quadStrip4')).toHaveTextContent('Quattro strisce diverse');
+    expect(screen.getByTestId('party-print-format-quadStrip4')).toHaveTextContent('Servono 16 foto, ne hai 5');
+    expect(screen.getByTestId('party-print-format-quadStrip4-4')).toHaveTextContent('Quattro strisce uguali');
+    // The twin strip is a 10×15's.
+    expect(screen.queryByTestId('party-print-format-twinStrip4')).toBeNull();
+    cleanup();
+
+    // A printer that cuts nothing on 20×15, and the same cuts with 10×15 in.
+    mount(`/print?album=${ALBUM}`, { stations: [station(true, '20x15', ['2x6x2'])] });
+    expect(await screen.findByTestId('party-print-format-grid4')).toBeInTheDocument();
+    expect(screen.queryByTestId('party-print-format-photo2')).toBeNull();
+    expect(screen.queryByTestId('party-print-format-quadStrip4')).toBeNull();
+    cleanup();
+    mount(`/print?album=${ALBUM}`, { stations: [station(true, '10x15', ['2x6x2', '4x6x2', '2x6x4'])] });
+    expect(await screen.findByTestId('party-print-format-twinStrip4')).toBeInTheDocument();
+    expect(screen.queryByTestId('party-print-format-photo2')).toBeNull();
+    expect(screen.queryByTestId('party-print-format-quadStrip4-4')).toBeNull();
+  });
+
+  it('sends two 10×15 in the order chosen, framed, turned the way the preview shows them', async () => {
+    const user = userEvent.setup();
+    const mock = mount(`/print?album=${ALBUM}`, { stations: [station(false, '20x15', ['4x6x2'])] });
+    await user.click(await screen.findByTestId('party-print-format-photo2'));
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('Scegli 2 foto diverse');
+    const picks = screen.getAllByRole('button', { name: /Scegli questa foto/ });
+    await user.click(picks[2]);
+    await user.click(picks[0]);
+    await user.click(next());
+    expect(screen.getByText(/la prima su una metà, la seconda sull’altra/)).toBeInTheDocument();
+    await user.click(next());
+    // Both are framed on the sheet's one way up, chosen where they are framed.
+    expect(screen.getByRole('radio', { name: 'Orizzontale' })).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Orizzontale' }));
+    await user.click(next());
+    await user.click(next());
+
+    const sheet = screen.getByTestId('party-print-sheet');
+    expect(sheet).toHaveAttribute('data-layout', 'photo2');
+    // Two lying 10×15, one above the other: the sheet stands.
+    expect(sheet).toHaveAttribute('data-orientation', 'portrait');
+    expect(sheet.querySelectorAll('.party-print-slot')).toHaveLength(2);
+    expect(screen.getByText('La stampante taglia il foglio in due foto 10×15.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    const body = lastPost(mock.calls);
+    expect(body).toMatchObject({ expectedPaperSize: '20x15', layout: 'photo2', style: 'framed', orientation: 'landscape' });
+    expect(body.photos.map((p: { fileItemId: string }) => p.fileItemId)).toEqual(['f3', 'f1']);
+  });
+
+  it('prints four photographs as the same strip four times on 20×15', async () => {
+    const user = userEvent.setup();
+    const mock = mount(`/print?album=${ALBUM}`, { stations: [station(true, '20x15', ['2x6x2', '2x6x4'])] });
+    await user.click(await screen.findByTestId('party-print-format-quadStrip4-4'));
+    const picks = screen.getAllByRole('button', { name: /Scegli questa foto/ });
+    for (const i of [0, 1, 2, 3]) await user.click(picks[i]);
+    await user.click(next());
+    expect(screen.getByTestId('party-print-order-strip-same')).toHaveTextContent('La striscia, stampata quattro volte');
+    await user.click(next());
+    for (let i = 0; i < 4; i += 1) await user.click(next());
+
+    const sheet = screen.getByTestId('party-print-sheet');
+    expect(sheet).toHaveAttribute('data-layout', 'quadStrip4');
+    expect(sheet).toHaveAttribute('data-orientation', 'landscape');
+    expect(sheet.querySelectorAll('.party-print-slot')).toHaveLength(16);
+    expect(sheet.querySelectorAll('.party-print-footer-band')).toHaveLength(4);
+
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    const body = lastPost(mock.calls);
+    expect(body).toMatchObject({ expectedPaperSize: '20x15', layout: 'quadStrip4', style: 'framed' });
+    expect(body).not.toHaveProperty('orientation');
+    expect(body.photos).toHaveLength(4);
   });
 
   it('frames one photograph in Cornice, with the owner\'s line, the date and the mark, and sends exactly that', async () => {

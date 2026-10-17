@@ -661,7 +661,7 @@ public sealed class OwnerPhotoPrintTests : IDisposable
     };
 
     /// <summary>The printer reports the twin strip's cut: a second queue with the driver's "2inch cut".</summary>
-    private Task<HttpResponseMessage> HeartbeatCutting(string credential) =>
+    private Task<HttpResponseMessage> HeartbeatCutting(string credential, params string[] extra) =>
         Agent(HttpMethod.Post, "/api/print-agent/heartbeat", credential, new
         {
             agentVersion = "0.5.0",
@@ -671,7 +671,7 @@ public sealed class OwnerPhotoPrintTests : IDisposable
                 {
                     deviceKey = "dnp", displayName = "DNP DS-RX1HS", manufacturer = "DNP", model = "DS-RX1HS",
                     adapterKind = "cups",
-                    capabilities = new { formats = new[] { "10x15", "13x18", "20x15", "2x6x2" }, color = true },
+                    capabilities = new { formats = new[] { "10x15", "13x18", "20x15", "2x6x2" }.Concat(extra).ToArray(), color = true },
                     observedState = "ready",
                     mediaRemaining = new { available = true, remainingPrints = 187, ageSeconds = 0 },
                 },
@@ -750,6 +750,74 @@ public sealed class OwnerPhotoPrintTests : IDisposable
             Assert.Equal(PrintJobKinds.OwnerStrip4, job.Kind);
             Assert.Equal(PrintFormats.Strip2x6Pair, job.Format);
             Assert.Equal(count, await Db(db => db.PrintJobSources.CountAsync(s => s.PrintJobId == job.Id)));
+        }
+    }
+
+    [Fact]
+    public async Task On_20x15_Two_10x15_And_Four_Strips_Are_One_Sheet_For_A_Printer_That_Joins_And_Cuts_It()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var photos = new List<Guid>();
+        for (var i = 0; i < 16; i++) photos.Add(await PhotoAsync(people.Owner));
+
+        // Not on 10x15: the two halves of a 20x15 are what it is.
+        (await HeartbeatCutting(printer.Credential, "4x6x2", "2x6x4")).EnsureSuccessStatusCode();
+        var small = await Submit(people.Owner, SheetBody(printer, "photo2", "framed", photos.Take(2), orientation: "portrait"));
+        Assert.Equal(HttpStatusCode.Conflict, small.StatusCode);
+        Assert.Equal("format_unsupported", await Error(small));
+
+        (await people.Owner.PutAsJsonAsync($"/api/print/stations/{printer.StationId}/devices/{printer.DeviceId}/paper",
+            new { paperSize = "20x15" })).EnsureSuccessStatusCode();
+
+        // A printer that does not join and cut a 20x15 is offered neither.
+        (await HeartbeatCutting(printer.Credential)).EnsureSuccessStatusCode();
+        foreach (var layout in new[] { "photo2", "quadStrip4" })
+        {
+            var uncut = await Submit(people.Owner, SheetBody(printer, layout, "framed",
+                photos.Take(layout == "photo2" ? 2 : 4), orientation: "portrait", paper: "20x15"));
+            Assert.Equal(HttpStatusCode.Conflict, uncut.StatusCode);
+            Assert.Equal("format_unsupported", await Error(uncut));
+        }
+
+        (await HeartbeatCutting(printer.Credential, "4x6x2", "2x6x4")).EnsureSuccessStatusCode();
+        // Two standing photographs lie side by side; two lying ones stand one above the other.
+        foreach (var (orientation, width, height) in new[] { ("portrait", 2400, 1800), ("landscape", 1800, 2400) })
+        {
+            Assert.Equal(HttpStatusCode.Accepted, (await Submit(people.Owner, SheetBody(printer, "photo2", "framed",
+                photos.Take(2), orientation: orientation, paper: "20x15"))).StatusCode);
+            var job = await Db(db => db.PrintJobs.OrderByDescending(j => j.CreatedAt).FirstAsync());
+            Assert.Equal(PrintJobKinds.OwnerPhoto2, job.Kind);
+            Assert.Equal(PrintFormats.Photo4x6Pair, job.Format);
+            using var sheet = await PrintedSheetAsync(printer);
+            Assert.Equal((width, height), (sheet.Width, sheet.Height));
+        }
+
+        // Four photographs are the same strip four times; sixteen are four strips.
+        foreach (var count in new[] { 4, 16 })
+        {
+            Assert.Equal(HttpStatusCode.Accepted, (await Submit(people.Owner, SheetBody(printer, "quadStrip4", "framed",
+                photos.Take(count), paper: "20x15"))).StatusCode);
+            var job = await Db(db => db.PrintJobs.OrderByDescending(j => j.CreatedAt).FirstAsync());
+            Assert.Equal(PrintJobKinds.OwnerQuadStrip4, job.Kind);
+            Assert.Equal(PrintFormats.Strip2x6Quad, job.Format);
+            Assert.Equal(count, await Db(db => db.PrintJobSources.CountAsync(s => s.PrintJobId == job.Id)));
+            using var sheet = await PrintedSheetAsync(printer);
+            Assert.Equal((2400, 1800), (sheet.Width, sheet.Height));
+        }
+
+        // Two photographs are turned by the person, never left to a guess; and exactly two.
+        foreach (var (body, error) in new (object, string)[]
+        {
+            (SheetBody(printer, "photo2", "framed", photos.Take(2), paper: "20x15"), "invalid_orientation"),
+            (SheetBody(printer, "photo2", "framed", photos.Take(3), orientation: "portrait", paper: "20x15"), "invalid_layout"),
+            (SheetBody(printer, "photo2", "fullBleed", photos.Take(2), orientation: "portrait", paper: "20x15"), "invalid_layout"),
+            (SheetBody(printer, "quadStrip4", "framed", photos.Take(8), paper: "20x15"), "invalid_layout"),
+        })
+        {
+            var refused = await Submit(people.Owner, body);
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            Assert.Equal(error, await Error(refused));
         }
     }
 

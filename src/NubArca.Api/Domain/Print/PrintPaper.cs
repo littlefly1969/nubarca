@@ -40,14 +40,14 @@ public static class PrintPapers
 
     /// <summary>
     /// The paper a job of <paramref name="format"/> needs loaded — the cut
-    /// twin strip is a 10x15 sheet — or null for a format that names no paper
+    /// twin strip is a 10x15 sheet, two 10x15 and four strips a 20x15 — or null for a format that names no paper
     /// (such a job is refused by the agent rather than held for a paper).
     /// </summary>
     public static string? RequiredFor(string format) => format switch
     {
         Photo10x15 or PrintFormats.Strip2x6Pair => Photo10x15,
         Photo13x18 => Photo13x18,
-        Photo20x15 => Photo20x15,
+        Photo20x15 or PrintFormats.Photo4x6Pair or PrintFormats.Strip2x6Quad => Photo20x15,
         _ => null,
     };
 

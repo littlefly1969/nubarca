@@ -174,6 +174,8 @@ public sealed class PartyPrintComposer
         {
             Domain.Print.PartyPrintProducts.TwinStrip4 => RenderStrip(composition),
             Domain.Print.PartyPrintProducts.Grid4 => RenderGrid4(composition),
+            PrintLayouts.Photo2 => RenderSlots(composition, PrintLayouts.Photo2, strip: false),
+            PrintLayouts.QuadStrip4 => RenderSlots(composition, PrintLayouts.QuadStrip4, strip: true),
             _ => RenderPhoto(composition),
         };
         return await EncodeAsync(sheet, composition.Calibration, cancellationToken);
@@ -282,12 +284,14 @@ public sealed class PartyPrintComposer
     /// <summary>
     /// A sheet of several photographs, laid out by the catalogue: each slot in
     /// the order they were arranged — a twin strip's first strip, then its
-    /// second, which repeats the first when only four were given — and the
-    /// bands that sign it.
+    /// second, which repeats the first when only four were given; the four
+    /// strips likewise — and the bands that sign it. Two 10x15 on a 20x15
+    /// stand or lie as the photographs were placed; nothing else turns.
     /// </summary>
     private Image<Rgba32> RenderSlots(PartyPrintComposition composition, string layout, bool strip)
     {
-        var arranged = PrintLayouts.Arrange(layout, PrintLayouts.Framed, composition.Paper, portrait: true);
+        var arranged = PrintLayouts.Arrange(layout, PrintLayouts.Framed, composition.Paper,
+            portrait: composition.Orientation != PartyPrintOrientation.Landscape);
         var (w, h) = (arranged.Width, arranged.Height);
         var sheet = new Image<Rgba32>(w, h);
         var palette = Palette(composition.Theme);

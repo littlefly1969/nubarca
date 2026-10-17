@@ -21,7 +21,7 @@ import {
   type AlbumSharePrintRequest,
   type OwnerPhotoPrintDate,
 } from '@nubarca/api-client';
-import { formatOwnerPrintDate, layoutAllowed, type PrintLayout } from '@nubarca/contracts';
+import { formatOwnerPrintDate, layoutAllowed, layoutCut, type PrintLayout } from '@nubarca/contracts';
 import { useI18n, type MessageKey } from '../i18n';
 import { usePermissions } from '../auth/usePermissions';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
@@ -262,6 +262,7 @@ export function SharePrintPage() {
         unavailable: printer.available ? null : 'ownerPrint.unavailable.offline',
         mediaRemaining: null, mediaObservedAt: null, offline: !printer.available,
         cutsStrips: printer.cutsStrips,
+        cutFormats: printer.cutFormats ?? [],
         // The visitor chooses no printer: the owner's own one, as it is.
         simulated: false,
       }];
@@ -447,9 +448,7 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
         style: composition.layout === 'photo' ? style : 'framed',
         photos: composition.slots.map((slot) => ({ fileItemId: slot.itemId, placement: slot.placement })),
         ...(composition.layout === 'photo' && style === 'popOut' && subjectPoint ? { subject: subjectPoint } : {}),
-        ...(composition.layout === 'photo'
-          ? { orientation: composition.orientation }
-          : {}),
+        ...(composition.orientation ? { orientation: composition.orientation } : {}),
         ...(framed && line ? { caption: line } : {}),
         ...(framed && brand ? { brand: true } : {}),
         includeDate,
@@ -475,8 +474,8 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
     }
   };
 
-  // The formats this printer and its paper can make: the twin strip only from
-  // a printer that cuts it.
+  // The formats this printer and its paper can make: the twin strip, two 10x15
+  // and four strips only from a printer that makes that cut.
   const formats = useMemo<StudioFormat[]>(() => {
     const offered: StudioFormat[] = [{
       layout: 'photo', count: 1, testId: 'party-print-format-photo',
@@ -490,6 +489,15 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
         help: t('partyPrint.format.grid4Help'), left: null, exhausted: false,
       });
     }
+    const cuts = (layout: PrintLayout) => layoutAllowed(paper, layout)
+      && target?.cutFormats.includes(layoutCut(layout)!) === true;
+    if (cuts('photo2')) {
+      offered.push({
+        layout: 'photo2', count: 2, testId: 'party-print-format-photo2',
+        label: t('ownerPrint.format.photo2'), help: t('ownerPrint.format.photo2Help'),
+        left: null, exhausted: false,
+      });
+    }
     if (layoutAllowed(paper, 'twinStrip4') && target?.cutsStrips) {
       offered.push({
         layout: 'twinStrip4', count: 4, testId: 'party-print-format-twinStrip4-4',
@@ -498,6 +506,17 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
       }, {
         layout: 'twinStrip4', count: 8, testId: 'party-print-format-twinStrip4',
         label: t('partyPrint.format.twinStrip4'), help: t('partyPrint.format.twinStrip4Help'),
+        left: null, exhausted: false,
+      });
+    }
+    if (cuts('quadStrip4')) {
+      offered.push({
+        layout: 'quadStrip4', count: 4, testId: 'party-print-format-quadStrip4-4',
+        label: t('ownerPrint.format.quadStrip4Same'), help: t('ownerPrint.format.quadStrip4SameHelp'),
+        left: null, exhausted: false,
+      }, {
+        layout: 'quadStrip4', count: 16, testId: 'party-print-format-quadStrip4',
+        label: t('ownerPrint.format.quadStrip4'), help: t('ownerPrint.format.quadStrip4Help'),
         left: null, exhausted: false,
       });
     }
