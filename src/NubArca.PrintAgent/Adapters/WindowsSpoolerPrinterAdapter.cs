@@ -73,6 +73,9 @@ public sealed class WindowsSpoolerPrinterAdapter : IPrinterAdapter
         // No twin here: a simulated job is refused, never put on paper.
         if (submission.Simulated)
             return Task.FromResult(new PrintSubmissionResult(false, null, "simulation_unavailable"));
+        // A joined 20x15 is Gutenprint's DNP backend's; it is never reported here, and never printed uncut.
+        if (SpoolerQueueRouting.LargeCuts.Contains(submission.Format))
+            return Task.FromResult(new PrintSubmissionResult(false, null, "format_unsupported"));
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         cancellationToken.ThrowIfCancellationRequested();
         // The strip is the same 10x15 artifact; only the queue differs, and the

@@ -239,7 +239,8 @@ public sealed class PrintStationService
                 device.LoadedPaperChangedAt,
                 share.MaxSheets, share.UsedSheets,
                 device.MediaRemainingPrints, device.MediaRemainingObservedAt,
-                PrintSimulation.IsRequested(device));
+                PrintSimulation.IsRequested(device),
+                PrintCapabilityMatcher.CutFormats(device.CapabilitiesJson));
         }).Where(x => x is not null).Cast<SharedPrinterDto>()
             .OrderBy(x => x.OwnerName).ThenBy(x => x.DisplayName).ToArray();
     }
@@ -800,7 +801,8 @@ public sealed class PrintStationService
 
     /// <summary>Every job format that names a paper, and must wait for it.</summary>
     private static readonly string[] PaperFormats =
-        [PrintFormats.Photo10x15, PrintFormats.Photo13x18, PrintFormats.Photo20x15, PrintFormats.Strip2x6Pair];
+        [PrintFormats.Photo10x15, PrintFormats.Photo13x18, PrintFormats.Photo20x15, PrintFormats.Strip2x6Pair,
+         PrintFormats.Photo4x6Pair, PrintFormats.Strip2x6Quad];
 
     public async Task<PrintClaimResponse?> ClaimAsync(Guid stationId, string? adapterKind,
         CancellationToken cancellationToken, bool supportsSimulation = false)
@@ -829,6 +831,8 @@ public sealed class PrintStationService
                     // names no paper is left to the agent to refuse.
                     && (x.Format == d.LoadedPaperSize
                         || (x.Format == PrintFormats.Strip2x6Pair && d.LoadedPaperSize == PrintPapers.Photo10x15)
+                        || ((x.Format == PrintFormats.Photo4x6Pair || x.Format == PrintFormats.Strip2x6Quad)
+                            && d.LoadedPaperSize == PrintPapers.Photo20x15)
                         || !PaperFormats.Contains(x.Format))));
             if (!string.IsNullOrWhiteSpace(adapterKind))
                 query = query.Where(x => _db.PrinterDevices.Any(d => d.Id == x.PrinterDeviceId
@@ -1053,7 +1057,8 @@ public sealed class PrintStationService
             MediaRemainingObservedAt: x.MediaRemainingObservedAt,
             Simulated: PrintSimulation.IsRequested(x),
             SimulationAvailable: x.SimulationAvailable,
-            SimulationOnly: x.SimulationOnly);
+            SimulationOnly: x.SimulationOnly,
+            CutFormats: PrintCapabilityMatcher.CutFormats(x.CapabilitiesJson));
 
     private static string PaperOf(PrinterDevice x) =>
         PrintPapers.IsKnown(x.LoadedPaperSize) ? x.LoadedPaperSize : PrintPapers.Photo10x15;

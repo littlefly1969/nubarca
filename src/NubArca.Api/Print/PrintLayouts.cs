@@ -33,8 +33,12 @@ public static class PrintLayouts
     public const string Grid4 = "grid4";
     /// <summary>Two strips of four on one 10x15, which the printer cuts apart.</summary>
     public const string TwinStrip4 = "twinStrip4";
+    /// <summary>Two photographs on one 20x15, which the printer cuts into two 10x15.</summary>
+    public const string Photo2 = "photo2";
+    /// <summary>Four strips of four on one 20x15, which the printer cuts apart.</summary>
+    public const string QuadStrip4 = "quadStrip4";
 
-    public static readonly IReadOnlyList<string> All = [Photo, Grid4, TwinStrip4];
+    public static readonly IReadOnlyList<string> All = [Photo, Grid4, TwinStrip4, Photo2, QuadStrip4];
 
     /// <summary>A border, and a band at the foot for words.</summary>
     public const string Framed = "framed";
@@ -47,28 +51,46 @@ public static class PrintLayouts
     /// </summary>
     public const string PopOut = "popOut";
 
-    public static bool IsKnown(string layout) => layout is Photo or Grid4 or TwinStrip4;
+    public static bool IsKnown(string layout) => layout is Photo or Grid4 or TwinStrip4 or Photo2 or QuadStrip4;
 
     /// <summary>
     /// Which format each paper can make. A photo and four photos on any known
-    /// paper; the twin strip only on 10x15, the sheet the printer cuts in two.
+    /// paper; the twin strip only on 10x15, the sheet the printer cuts in two;
+    /// two photographs and four strips only on 20x15, which it cuts into two
+    /// 10x15 or four 2x6.
     /// </summary>
     public static bool Allowed(string paper, string layout) => layout switch
     {
         Photo or Grid4 => PrintPapers.IsKnown(paper),
         TwinStrip4 => paper == PrintPapers.Photo10x15,
+        Photo2 or QuadStrip4 => paper == PrintPapers.Photo20x15,
         _ => false,
+    };
+
+    /// <summary>
+    /// The job format the Print Agent is sent for a sheet: the paper's own
+    /// name, or the cut that makes it more than one print.
+    /// </summary>
+    public static string JobFormat(string paper, string layout) => layout switch
+    {
+        TwinStrip4 => PrintFormats.Strip2x6Pair,
+        Photo2 => PrintFormats.Photo4x6Pair,
+        QuadStrip4 => PrintFormats.Strip2x6Quad,
+        _ => paper,
     };
 
     /// <summary>
     /// How many DIFFERENT photographs a format takes. The twin strip takes four
     /// — the same strip twice, one to keep and one to give — or eight, two
-    /// different strips.
+    /// different strips. The four strips take four, the same strip four
+    /// times, or sixteen, four different strips.
     /// </summary>
     public static IReadOnlyList<int> PhotoCounts(string layout) => layout switch
     {
         Grid4 => [4],
         TwinStrip4 => [SlotsPerStrip, SlotsPerStrip * StripsPerSheet],
+        Photo2 => [HalvesPerSheet],
+        QuadStrip4 => [SlotsPerStrip, SlotsPerStrip * StripsPerSheet * HalvesPerSheet],
         Photo => [1],
         _ => [],
     };
@@ -82,12 +104,17 @@ public static class PrintLayouts
 
     /// <summary>
     /// Which way the sheet stands: a single photograph's as it is placed; four
-    /// as the paper is named; the strips always standing.
+    /// as the paper is named; the twin strip always standing. A halved 20x15
+    /// lies when its halves stand — two standing photographs, or the four
+    /// strips — and stands when they lie, two landscape photographs one above
+    /// the other.
     /// </summary>
     public static bool SheetPortrait(string layout, string paper, bool photoPortrait) => layout switch
     {
         Grid4 => GridPortrait(paper),
         TwinStrip4 => true,
+        Photo2 => !photoPortrait,
+        QuadStrip4 => false,
         _ => photoPortrait,
     };
 
@@ -102,6 +129,7 @@ public static class PrintLayouts
         var (w, h) = Sheet(paper, sheetPortrait);
         return layout switch
         {
+            Photo2 or QuadStrip4 => Halves(layout, w, h, portrait),
             Grid4 => new(w, h, [.. Enumerable.Range(0, 4).Select(i => GridSlot(paper, i))], [GridFooter(paper)]),
             TwinStrip4 => new(w, h,
                 [.. Enumerable.Range(0, StripsPerSheet).SelectMany(strip =>
@@ -218,6 +246,38 @@ public static class PrintLayouts
         var edge = PopOutEdgeFraction * Math.Min(w, h);
         var (_, slotY, _, _) = PopOutSlot(paper, portrait);
         return (edge / w, edge / h, (w - (2 * edge)) / w, slotY - (edge / h));
+    }
+
+    // --- A 20x15 cut in two -------------------------------------------------------
+
+    /// <summary>
+    /// The halves a 20x15 is cut into by the printer: each exactly a 10x15
+    /// sheet (6x8 inches is two 4x6), so each half is laid out as that sheet
+    /// would be.
+    /// </summary>
+    public const int HalvesPerSheet = 2;
+
+    /// <summary>What each half of a halved 20x15 is: one framed 10x15 photograph, or the twin strip.</summary>
+    public static string HalfLayout(string layout) => layout == QuadStrip4 ? TwinStrip4 : Photo;
+
+    /// <summary>
+    /// Both halves, each the 10x15 sheet of <see cref="HalfLayout"/> placed in
+    /// its half: side by side on a lying sheet, one above the other on a
+    /// standing one. The slots are the first half's, then the second's — the
+    /// four strips left to right.
+    /// </summary>
+    private static PrintSheetLayout Halves(string layout, int w, int h, bool photoPortrait)
+    {
+        var half = Arrange(HalfLayout(layout), Framed, PrintPapers.Photo10x15, photoPortrait);
+        var sideBySide = w > h;
+        (double X, double Y, double Width, double Height) Place(
+            (double X, double Y, double Width, double Height) r, int index) => sideBySide
+            ? ((index + r.X) / HalvesPerSheet, r.Y, r.Width / HalvesPerSheet, r.Height)
+            : (r.X, (index + r.Y) / HalvesPerSheet, r.Width, r.Height / HalvesPerSheet);
+        var halves = Enumerable.Range(0, HalvesPerSheet).ToList();
+        return new(w, h,
+            [.. halves.SelectMany(i => half.Slots.Select(r => Place(r, i)))],
+            [.. halves.SelectMany(i => half.Bands.Select(r => Place(r, i)))]);
     }
 
     // --- Four photographs, two by two ----------------------------------------

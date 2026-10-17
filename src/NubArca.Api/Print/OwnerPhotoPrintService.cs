@@ -123,15 +123,17 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
             placements.Add(framing.ToPlacement());
         }
 
-        // Which way a single photograph's sheet stands is the person's choice;
-        // four and the strips stand as the catalogue sets them.
-        if (layout == PrintLayouts.Photo
+        // Which way a single photograph stands is the person's choice, and so
+        // is which way two 10x15 do; four and the strips stand as the catalogue
+        // sets them. The sheet stands as the catalogue says for that.
+        if (layout is PrintLayouts.Photo or PrintLayouts.Photo2
             ? request.Orientation is not ("portrait" or "landscape")
             : request.Orientation is not (null or "portrait" or "landscape"))
         {
             return Refuse(OwnerPhotoPrintErrors.InvalidOrientation);
         }
-        var portrait = PrintLayouts.SheetPortrait(layout, paper, request.Orientation != "landscape");
+        var photoPortrait = request.Orientation != "landscape";
+        var portrait = PrintLayouts.SheetPortrait(layout, paper, photoPortrait);
 
         // Words only where there is a band for them.
         if (!OwnerPrintText.TryNormaliseCaption(request.Caption, out var caption))
@@ -200,10 +202,10 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
             return Refuse(OwnerPhotoPrintErrors.PrinterOffline);
 
         // 5. The paper it was composed for, still in, one this printer prints —
-        // and for the twin strip, a printer that cuts it in two.
+        // and for a sheet the printer cuts, a printer that cuts it so.
         var loaded = PrintPapers.IsKnown(device.LoadedPaperSize) ? device.LoadedPaperSize : PrintPapers.Photo10x15;
         if (loaded != paper) return Refuse(OwnerPhotoPrintErrors.PaperChanged);
-        var printFormat = layout == PrintLayouts.TwinStrip4 ? PrintFormats.Strip2x6Pair : paper;
+        var printFormat = PrintLayouts.JobFormat(paper, layout);
         if (!PrintLayouts.Allowed(paper, layout)
             || !PrintCapabilityMatcher.SupportsFormat(device.CapabilitiesJson, paper)
             || !PrintCapabilityMatcher.SupportsFormat(device.CapabilitiesJson, printFormat))
@@ -215,7 +217,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         // The shape comes from the stored dimensions; a legacy file that has
         // none is checked against its own decoded pixels once they are read.
         var (sheetW, sheetH) = PrintLayouts.Sheet(paper, portrait);
-        var frameAspect = PrintLayouts.SlotAspect(layout, style, paper, portrait);
+        var frameAspect = PrintLayouts.SlotAspect(layout, style, paper, photoPortrait);
         var shapes = await PrintPhotoShapes.DisplayAspectsAsync(_db, ownerUserId, fileIds, cancellationToken);
         for (var i = 0; i < fileIds.Count; i++)
         {
@@ -316,7 +318,8 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                         [.. sources.Photos.Select((bytes, i) => PartyPrintPhoto.Placed(bytes!, placements[i]))],
                         PartyName: string.Empty,
                         FooterText: null,
-                        Orientation: portrait ? PartyPrintOrientation.Portrait : PartyPrintOrientation.Landscape,
+                        // The photographs' way up: the catalogue turns the sheet to it.
+                        Orientation: photoPortrait ? PartyPrintOrientation.Portrait : PartyPrintOrientation.Landscape,
                         Calibration: PrintCalibration.Of(device),
                         Paper: paper,
                         Words: new PrintSheetWords(caption, null, dateText, request.Brand),
@@ -340,6 +343,8 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
             {
                 PrintLayouts.Grid4 => PrintJobKinds.OwnerGrid4,
                 PrintLayouts.TwinStrip4 => PrintJobKinds.OwnerStrip4,
+                PrintLayouts.Photo2 => PrintJobKinds.OwnerPhoto2,
+                PrintLayouts.QuadStrip4 => PrintJobKinds.OwnerQuadStrip4,
                 _ => PrintJobKinds.OwnerPhoto,
             };
             var simulated = await PrintSimulation.IsRequestedAsync(_db, deviceId, cancellationToken);

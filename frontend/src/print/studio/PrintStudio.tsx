@@ -2,7 +2,8 @@ import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode,
 } from 'react';
 import {
-  effectiveZoom, placePhoto, popOutArea, visiblePhotoRect, type PhotoPlacement, type PrintLayout, type PrintStyle,
+  arrangeSheet, effectiveZoom, placePhoto, popOutArea, slotAspect as catalogueSlotAspect, visiblePhotoRect,
+  type PhotoPlacement, type PrintLayout, type PrintStyle,
 } from '@nubarca/contracts';
 import { useI18n, type MessageKey } from '../../i18n';
 import { PRODUCT_NAME } from '../../brand/brand';
@@ -67,14 +68,26 @@ export interface StudioSlot { itemId: string; placement: PhotoPlacement }
  */
 export interface StudioPopOut { photoId: string; url: string; region: SubjectRegion }
 
+/** The formats whose way up is the person's: a single photograph, and two 10x15 on a 20x15. */
+export type TurnableLayout = 'photo' | 'photo2';
+
+export function isTurnable(layout: PrintLayout): layout is TurnableLayout {
+  return layout === 'photo' || layout === 'photo2';
+}
+
+/** The strips: two on a 10x15, four on a 20x15. */
+export function isStrip(layout: PrintLayout | null): boolean {
+  return layout === 'twinStrip4' || layout === 'quadStrip4';
+}
+
 export type StudioSubmission = {
   slots: StudioSlot[];
   /** One key per composition: a retry of the same sheet keeps it, any change earns a new one. */
   key: string;
 } & (
-  /** A single photograph always sends the orientation shown by the studio. */
-  | { layout: 'photo'; orientation: 'portrait' | 'landscape' }
-  | { layout: Exclude<PrintLayout, 'photo'>; orientation: null }
+  /** A single photograph, and two 10x15, always send the orientation shown by the studio. */
+  | { layout: TurnableLayout; orientation: 'portrait' | 'landscape' }
+  | { layout: Exclude<PrintLayout, TurnableLayout>; orientation: null }
 );
 
 /** What a full-bleed sheet looks like to the words drawn over it. */
@@ -156,6 +169,15 @@ function GridIcon() {
       <rect x="13" y="3.5" width="7" height="8" rx="1.2" />
       <rect x="4" y="12.5" width="7" height="8" rx="1.2" />
       <rect x="13" y="12.5" width="7" height="8" rx="1.2" />
+    </svg>
+  );
+}
+
+function TwoPhotosIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="3" y="4.5" width="8" height="15" rx="1.2" />
+      <rect x="13" y="4.5" width="8" height="15" rx="1.2" />
     </svg>
   );
 }
@@ -362,6 +384,61 @@ function SheetPreview(props: SheetProps) {
     );
   }
 
+  if (layout === 'photo2' || layout === 'quadStrip4') {
+    // A 20x15 the printer cuts: two 10x15 side by side or one above the
+    // other, or four strips — the renderer's own layout, in the order they
+    // were arranged. Four photographs on four strips: the same strip on each.
+    const strips = layout === 'quadStrip4';
+    const portrait = orientation === null ? aspectOf(chosen[0]) <= 1 : orientation === 'portrait';
+    const arranged = arrangeSheet(layout, 'framed', paper, portrait);
+    const aspect = catalogueSlotAspect(layout, 'framed', paper, portrait);
+    return (
+      <div
+        className="party-print-sheet"
+        data-theme={sheetTheme}
+        data-testid="party-print-sheet"
+        data-layout={layout}
+        data-orientation={arranged.width < arranged.height ? 'portrait' : 'landscape'}
+        style={{ aspectRatio: `${arranged.width} / ${arranged.height}` }}
+      >
+        {arranged.slots.map((rect, index) => {
+          const id = chosen[index % chosen.length];
+          return (
+            <div
+              key={index}
+              className="party-print-slot"
+              data-testid={`party-print-slot-${index}`}
+              aria-hidden={index >= chosen.length ? 'true' : undefined}
+              style={{
+                left: pct(rect.x), top: pct(rect.y),
+                width: pct(rect.width), height: pct(rect.height),
+              }}
+            >
+              <FramedPhoto
+                photo={photoById.get(id)} aspect={aspectOf(id)}
+                slotAspect={aspect} view={viewOf(id)}
+                onAspect={(w, h) => onAspect(id, w, h)}
+              />
+            </div>
+          );
+        })}
+        {arranged.bands.map((rect, index) => (
+          <div
+            key={index}
+            className="party-print-footer-band"
+            style={{
+              left: pct(rect.x), top: pct(rect.y),
+              width: pct(rect.width), height: pct(rect.height),
+            }}
+          >
+            {bandFor(strips)}
+          </div>
+        ))}
+        {/* No cut marks: the printer cuts the sheet, and the print has none. */}
+      </div>
+    );
+  }
+
   if (layout === 'grid4') {
     // Four frames, two by two, on the paper as it is named — the renderer's
     // own layout, in the order they were arranged.
@@ -537,8 +614,8 @@ export function PrintStudio(props: PrintStudioProps) {
 
   const layout = chosenFormat?.layout ?? null;
   const required = chosenFormat?.count ?? 1;
-  // Four photographs on a twin strip: one strip, printed twice.
-  const sameStrip = layout === 'twinStrip4' && required === SLOTS_PER_STRIP;
+  // Four photographs on the strips: one strip, printed on each.
+  const sameStrip = isStrip(layout) && required === SLOTS_PER_STRIP;
 
   // The format chosen last, kept across a way back to the formats: only
   // another one is a new sheet.
@@ -594,9 +671,11 @@ export function PrintStudio(props: PrintStudioProps) {
       ? stripSlotAspect()
       : layout === 'grid4'
         ? gridSlotAspect(paper)
-        : photoStyle === 'fullBleed'
-          ? overlaySlotAspect(portraitFor(id), paper)
-          : photoSlotAspect(portraitFor(id), paper, photoStyle)
+        : layout === 'photo2' || layout === 'quadStrip4'
+          ? catalogueSlotAspect(layout, 'framed', paper, portraitFor(id))
+          : photoStyle === 'fullBleed'
+            ? overlaySlotAspect(portraitFor(id), paper)
+            : photoSlotAspect(portraitFor(id), paper, photoStyle)
   ), [layout, paper, photoStyle, portraitFor]);
 
   // "Esce dalla foto": once the subject is known, NubArca proposes the framing
@@ -623,23 +702,32 @@ export function PrintStudio(props: PrintStudioProps) {
   }, [chosenFormat, chosen, views, orientation, props.compositionKey]);
 
   const turnPhoto = (next: 'portrait' | 'landscape') => {
-    const id = chosen[0];
-    const aspect = aspectOf(id);
-    const view = views[id] ?? DEFAULT_CROP_VIEW;
     // Use the NEW frame directly, not the previous React orientation. Keep the
     // focal point and the displayed zoom, clamped to what the new frame allows.
-    const nextAspect = photoStyle === 'fullBleed'
-      ? overlaySlotAspect(next === 'portrait', paper)
-      : photoSlotAspect(next === 'portrait', paper, photoStyle);
-    const zoom = effectiveZoom(aspect, nextAspect,
-      effectiveZoom(aspect, slotAspectFor(id), view.zoom));
-    setViews((prev) => ({ ...prev, [id]: { ...view, zoom } }));
+    // Two 10x15 turn together: every photograph of the sheet is reframed.
+    const nextAspect = layout === 'photo2'
+      ? catalogueSlotAspect('photo2', 'framed', paper, next === 'portrait')
+      : photoStyle === 'fullBleed'
+        ? overlaySlotAspect(next === 'portrait', paper)
+        : photoSlotAspect(next === 'portrait', paper, photoStyle);
+    const turned = layout === 'photo2' ? chosen : [chosen[0]];
+    setViews((prev) => {
+      const nextViews = { ...prev };
+      for (const id of turned) {
+        const aspect = aspectOf(id);
+        const view = prev[id] ?? DEFAULT_CROP_VIEW;
+        const zoom = effectiveZoom(aspect, nextAspect,
+          effectiveZoom(aspect, slotAspectFor(id), view.zoom));
+        nextViews[id] = { ...view, zoom };
+      }
+      return nextViews;
+    });
     setOrientation(next);
   };
 
   // The sheet is turned where it is framed, and only there: the preview shows
   // the choice, and turning it again means going back to the framing it moves.
-  const orientationControls = layout === 'photo' && (
+  const orientationControls = layout !== null && isTurnable(layout) && (
     <fieldset className="party-print-themes" disabled={props.submitting}>
       <legend>{t('partyPrint.orientation')}</legend>
       {(['portrait', 'landscape'] as const).map((option) => (
@@ -683,7 +771,7 @@ export function PrintStudio(props: PrintStudioProps) {
     if (!layout) return;
     pendingRef.current ??= {
       key: newIdempotencyKey(),
-      ...(layout === 'photo'
+      ...(isTurnable(layout)
         ? { layout, orientation: shownOrientation }
         : { layout, orientation: null }),
       slots: chosen.map((id) => {
@@ -747,9 +835,10 @@ export function PrintStudio(props: PrintStudioProps) {
                   }}
                 >
                   <span className="party-print-format-icon" aria-hidden="true">
-                    {option.layout === 'twinStrip4'
+                    {isStrip(option.layout)
                       ? <StripIcon />
-                      : option.layout === 'grid4' ? <GridIcon /> : <PrinterIcon />}
+                      : option.layout === 'grid4' ? <GridIcon />
+                        : option.layout === 'photo2' ? <TwoPhotosIcon /> : <PrinterIcon />}
                   </span>
                   <span className="party-print-format-text">
                     <strong>{option.label}</strong>
@@ -770,7 +859,10 @@ export function PrintStudio(props: PrintStudioProps) {
           <h2 className="party-print-heading" id="party-print-heading">
             {t(layout === 'twinStrip4'
               ? (sameStrip ? 'partyPrint.selectStripSame' : 'partyPrint.selectStrip')
-              : layout === 'grid4' ? 'partyPrint.selectGrid' : 'partyPrint.selectPhoto')}
+              : layout === 'quadStrip4'
+                ? (sameStrip ? 'ownerPrint.selectQuadStripSame' : 'ownerPrint.selectQuadStrip')
+                : layout === 'photo2' ? 'ownerPrint.selectPhoto2'
+                  : layout === 'grid4' ? 'partyPrint.selectGrid' : 'partyPrint.selectPhoto')}
           </h2>
           <p className="party-print-count" role="status">
             {t('partyPrint.chosen', { count: chosen.length, total: required })}
@@ -846,7 +938,10 @@ export function PrintStudio(props: PrintStudioProps) {
           <p className="party-print-hint">
             {t(layout === 'grid4'
               ? 'partyPrint.arrangeHelpGrid'
-              : sameStrip ? 'partyPrint.arrangeHelpStripSame' : 'partyPrint.arrangeHelp')}
+              : layout === 'photo2' ? 'ownerPrint.arrangeHelpPhoto2'
+                : layout === 'quadStrip4'
+                  ? (sameStrip ? 'ownerPrint.arrangeHelpQuadStripSame' : 'ownerPrint.arrangeHelpQuadStrip')
+                  : sameStrip ? 'partyPrint.arrangeHelpStripSame' : 'partyPrint.arrangeHelp')}
           </p>
           {(() => {
             const label = (index: number) => (layout === 'grid4'
@@ -885,16 +980,20 @@ export function PrintStudio(props: PrintStudioProps) {
                   data-testid="party-print-order-strip-same"
                 >
                   <h3 className="party-print-order-heading" id="party-print-strip-heading-same">
-                    {t('partyPrint.sameStrip')}
+                    {t(layout === 'quadStrip4' ? 'ownerPrint.quadSameStrip' : 'partyPrint.sameStrip')}
                   </h3>
                   <ol className="party-print-order">{chosen.map(row)}</ol>
                 </section>
               );
             }
-            // The twin strip is two strips: the first four on one, the next
-            // four on the other — shown as the two groups they will be.
-            return layout === 'twinStrip4'
-              ? [0, 1].map((strip) => (
+            // The strips: the first four on one, the next four on the next —
+            // shown as the groups they will be.
+            const strips = Array.from({ length: chosen.length / SLOTS_PER_STRIP }, (_, strip) => strip);
+            const stripTitle = (strip: number) => (layout === 'twinStrip4'
+              ? t(strip === 0 ? 'partyPrint.firstStrip' : 'partyPrint.secondStrip')
+              : t('ownerPrint.stripN', { n: strip + 1 }));
+            return isStrip(layout)
+              ? strips.map((strip) => (
                 <section
                   key={strip}
                   className="party-print-order-group"
@@ -902,7 +1001,7 @@ export function PrintStudio(props: PrintStudioProps) {
                   data-testid={`party-print-order-strip-${strip}`}
                 >
                   <h3 className="party-print-order-heading" id={`party-print-strip-heading-${strip}`}>
-                    {t(strip === 0 ? 'partyPrint.firstStrip' : 'partyPrint.secondStrip')}
+                    {stripTitle(strip)}
                   </h3>
                   <ol className="party-print-order" start={strip * SLOTS_PER_STRIP + 1}>
                     {chosen.slice(strip * SLOTS_PER_STRIP, (strip + 1) * SLOTS_PER_STRIP)
@@ -1023,13 +1122,19 @@ export function PrintStudio(props: PrintStudioProps) {
             aspectOf={aspectOf}
             views={views}
             onAspect={noteAspect}
-            orientation={layout === 'photo' ? shownOrientation : null}
+            orientation={isTurnable(layout) ? shownOrientation : null}
             paper={paper}
             popOut={popOut}
           />
           <p className="party-print-hint">{t('partyPrint.previewHelp', { paper: PAPER_LABEL[paper] })}</p>
           {layout === 'twinStrip4' && (
             <p className="party-print-hint">{t('partyPrint.twinStrips')}</p>
+          )}
+          {layout === 'photo2' && (
+            <p className="party-print-hint">{t('ownerPrint.photo2Cut')}</p>
+          )}
+          {layout === 'quadStrip4' && (
+            <p className="party-print-hint">{t('ownerPrint.quadStripCut')}</p>
           )}
           {props.options(layout)}
           {props.submitError && (

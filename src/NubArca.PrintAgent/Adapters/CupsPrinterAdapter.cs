@@ -23,6 +23,13 @@ public interface IPrintSystemHealth
 /// queue is listed too. 13x18 and 20x15 are advertised when the queue's driver
 /// lists the 5x7 and 6x8 page sizes (<c>lpoptions -l</c>), and only those
 /// jobs carry a PageSize: a 10x15 goes out exactly as it always has.
+///
+/// A joined 20x15 (<c>4x6x2</c>, <c>2x6x4</c>) arrives as one 20x15 sheet and
+/// leaves as one CUPS job of its two 10x15 halves (<see cref="HalvesPdf"/>):
+/// with 6x8 media in, Gutenprint's DNP backend puts two 10x15 of one job on one
+/// sheet and the printer cuts it — in two, or with the strip queue's 2-inch
+/// cut, in four strips. It is advertised while the driver lists the DNP's own
+/// cut 6x8 sizes, the sign of a printer that does this.
 /// </summary>
 public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
 {
@@ -68,6 +75,17 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
     private static readonly TimeSpan PageSizeLifetime = TimeSpan.FromMinutes(10);
     private readonly Dictionary<string, (long At, IReadOnlyList<string> Papers)> _papers =
         new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The page size whose presence in the driver says a printer joins and cuts
+    /// a 20x15 this way: Gutenprint's DNP "4x6*2" and "2x6*4".
+    /// </summary>
+    public static string? JoinedSignFor(string format) => format switch
+    {
+        SpoolerQueueRouting.Photo4x6Pair => "w432h576-div2",
+        SpoolerQueueRouting.Strip2x6Quad => "w432h576-div4",
+        _ => null,
+    };
 
     /// <summary>The Gutenprint page size each paper beyond 10x15 is sent as.</summary>
     public static string? PageSizeFor(string format) => format switch
@@ -208,6 +226,8 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
             var sizes = CupsQueueSetup.PageSizes(options.StdOut);
             papers.AddRange(SpoolerQueueRouting.Papers
                 .Where(p => PageSizeFor(p) is { } size && sizes.Contains(size, StringComparer.Ordinal)));
+            papers.AddRange(SpoolerQueueRouting.LargeCuts
+                .Where(p => JoinedSignFor(p) is { } size && sizes.Contains(size, StringComparer.Ordinal)));
         }
         lock (_papers) _papers[queue] = (now, papers);
         return papers;
@@ -246,14 +266,35 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
         var title = submission.Simulated
             ? $"NubArca-{submission.JobId:N}"
             : $"NubArca-{submission.JobId.ToString("N")[..8]}";
+        // A joined 20x15 goes as its two 10x15 halves, one job of two pages.
+        var file = submission.ArtifactPath;
+        string? halves = null;
+        if (SpoolerQueueRouting.LargeCuts.Contains(submission.Format))
+        {
+            var pdf = HalvesPdf.FromSheet(await File.ReadAllBytesAsync(submission.ArtifactPath, cancellationToken));
+            if (pdf is null) return new PrintSubmissionResult(false, null, "artifact_invalid");
+            halves = submission.ArtifactPath + ".halves.pdf";
+            await File.WriteAllBytesAsync(halves, pdf, cancellationToken);
+            file = halves;
+        }
+
         // fit-to-page: the artifact is exactly the sheet's shape, so fitting it
         // fills the page; without it CUPS would print the JPEG at an assumed
         // pixel density and the photograph would come out the wrong size.
         // A larger paper names its page size; a 10x15 keeps the queue's own.
         string[] arguments = PageSizeFor(submission.Format) is { } pageSize
-            ? ["-d", queue, "-t", title, "-o", $"PageSize={pageSize}", "-o", "fit-to-page", submission.ArtifactPath]
-            : ["-d", queue, "-t", title, "-o", "fit-to-page", submission.ArtifactPath];
-        var result = await _runner.RunAsync("lp", arguments, SubmitTimeout, cancellationToken);
+            ? ["-d", queue, "-t", title, "-o", $"PageSize={pageSize}", "-o", "fit-to-page", file]
+            : ["-d", queue, "-t", title, "-o", "fit-to-page", file];
+        ProcessResult result;
+        try
+        {
+            result = await _runner.RunAsync("lp", arguments, SubmitTimeout, cancellationToken);
+        }
+        finally
+        {
+            // lp has copied it into the spool by the time it returns.
+            if (halves is not null) File.Delete(halves);
+        }
         Invalidate();
         if (result.Succeeded)
         {

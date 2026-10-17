@@ -41,8 +41,12 @@ public static class PrintJobKinds
     public const string OwnerPhoto = "owner-photo";
     public const string OwnerGrid4 = "owner-grid4";
     public const string OwnerStrip4 = "owner-strip4";
+    // A 20x15 the printer cuts: two 10x15 photographs, or four strips.
+    public const string OwnerPhoto2 = "owner-photo2";
+    public const string OwnerQuadStrip4 = "owner-quad-strip4";
 
-    public static bool IsOwner(string value) => value is OwnerPhoto or OwnerGrid4 or OwnerStrip4;
+    public static bool IsOwner(string value) =>
+        value is OwnerPhoto or OwnerGrid4 or OwnerStrip4 or OwnerPhoto2 or OwnerQuadStrip4;
 
     // Guest prints from a party. A photo and four photos compose one sheet of
     // the printer's loaded paper; the twin strip composes a 10x15 sheet that
@@ -81,6 +85,24 @@ public static class PrintFormats
     /// second Windows queue with the driver's "2inch cut" enabled.
     /// </summary>
     public const string Strip2x6Pair = "2x6x2";
+
+    /// <summary>
+    /// A 20x15 sheet of two 10x15, as the DNP makes it: the Print Agent sends
+    /// its two halves as one job of two 10x15 pages, the driver joins them on
+    /// the 6x8 and the printer cuts it in two. Only a printer that reports it
+    /// receives it.
+    /// </summary>
+    public const string Photo4x6Pair = "4x6x2";
+
+    /// <summary>
+    /// A 20x15 sheet of four strips: its two halves, each a twin strip, sent
+    /// as one job to the strip queue, joined on the 6x8 and cut with the
+    /// 2-inch cut into four 2x6. Only a printer that reports it receives it.
+    /// </summary>
+    public const string Strip2x6Quad = "2x6x4";
+
+    /// <summary>Every format that is a cut sheet, in the order they are reported.</summary>
+    public static readonly IReadOnlyList<string> Cuts = [Strip2x6Pair, Photo4x6Pair, Strip2x6Quad];
 }
 
 public static class PrintJobStates

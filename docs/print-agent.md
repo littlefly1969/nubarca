@@ -172,9 +172,13 @@ make, and only if the agent reports that paper:
 | 13×18 | yes | yes | no |
 | 20×15 | yes | yes | no |
 
+An owner's own print also has, on 20×15 only, **two 10×15** (`4x6x2`) and
+**four strips of 4** (`2x6x4`), when the printer reports them (see *The two
+CUPS queues*). A party does not offer them.
+
 A sheet is sent as its paper's format, and **the server hands a printer only
 the sheets its loaded paper can take**: a claim skips a job made for another
-paper (`2x6x2` counts as 10×15), which stays `ready` in the queue until that
+paper (`2x6x2` counts as 10×15, `4x6x2` and `2x6x4` as 20×15), which stays `ready` in the queue until that
 paper is loaded again, then prints in its turn. The Print stations page lists it
 as *waiting for 13×18 paper* (or whichever), and the guest's phone says the
 staff need to change the paper, so a roll changed mid-queue never prints a
@@ -471,14 +475,26 @@ time the agent only chooses a queue, the queues carry their settings.
 
 | Queue | Media | 2-inch cut | Receives |
 |---|---|---|---|
-| `NubArca-RX1HS` | the loaded roll | **off** | every paper (`10x15`, `13x18`, `20x15`) |
-| `NubArca-RX1HS-STRIP` | 4×6 / 10×15 | **on** | party strips (`2x6x2`) |
+| `NubArca-RX1HS` | the loaded roll | **off** | every paper (`10x15`, `13x18`, `20x15`), two 10×15 on 20×15 (`4x6x2`) |
+| `NubArca-RX1HS-STRIP` | 4×6 / 10×15 | **on** | strips (`2x6x2`), four strips on 20×15 (`2x6x4`) |
 
 The photo queue's default page size stays `w288h432` (4×6), and a 10×15 job
 goes out exactly as it always has. A `13x18` job names `-o PageSize=w360h504`
 (5×7) and a `20x15` job `-o PageSize=w432h576` (6×8). The agent reports those
 two papers only while the queue's driver lists those sizes (`lpoptions -l`,
 read once every ten minutes).
+
+**Two 10×15 and four strips on 20×15** (from agent 0.10.0). The server draws
+the whole 20×15: two 10×15 halves side by side, or one above the other. The
+agent sends it as ONE CUPS job of two 4×6 pages, one per half (`HalvesPdf`, a
+two-page PDF that shows each half of the same JPEG, so no pixel is decoded on
+the box). With 6×8 media loaded, Gutenprint's DNP backend joins two 4×6 pages
+of one job on one 6×8 sheet, and the printer cuts it in two. A `4x6x2` goes to
+the photo queue; a `2x6x4` goes to the strip queue, whose 2-inch cut makes
+each half two strips, so four in all. The agent reports `4x6x2` and `2x6x4`
+only beside `20x15`, and only while the driver lists the DNP's cut 6×8 sizes
+(`w432h576-div2`, `w432h576-div4`). It reports `2x6x4` only with the strip
+queue ready. The server sends them only while 20×15 is the loaded paper.
 
 `setup-cups` takes the printer's **Gutenprint dye-sub** device
 (`gutenprint53+usb://dnp-dsrx1/…`, plain `usb://` only as a last resort) and

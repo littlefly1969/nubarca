@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { OwnerPhotoPrintDate, OwnerPhotoPrintRequest, PrintPaperSize } from './printStations';
+import type { OwnerPhotoPrintDate, OwnerPhotoPrintRequest, PrintCutFormat, PrintPaperSize } from './printStations';
 
 // SHARE BY LINK — one album, one address, whoever is holding it.
 //
@@ -80,6 +80,8 @@ export interface AlbumSharePrinter {
   available: boolean;
   paper: PrintPaperSize;
   cutsStrips: boolean;
+  /** Every cut sheet the printer makes itself. */
+  cutFormats?: PrintCutFormat[] | null;
 }
 
 /**

@@ -412,14 +412,17 @@ export function PartyPrintPage() {
 
   const submit = async (composition: StudioSubmission) => {
     if (!token) return;
-    const theme = themeFor(composition.layout);
+    const product = composition.layout;
+    // A party offers only its products: the 20x15 cuts are an owner's.
+    if (product === 'photo2' || product === 'quadStrip4') return;
+    const theme = themeFor(product);
     setSubmitting(true);
     setSubmitError(null);
     try {
       const accepted = await submitPartyPrint(
         token,
         {
-          product: composition.layout,
+          product,
           theme,
           slots: composition.slots,
           // Omitted when the guest left the default: the server follows the

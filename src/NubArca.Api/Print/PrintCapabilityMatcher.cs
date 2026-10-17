@@ -1,4 +1,5 @@
 using System.Text.Json;
+using NubArca.Api.Domain.Print;
 
 namespace NubArca.Api.Print;
 
@@ -18,6 +19,10 @@ public static class PrintCapabilityMatcher
             return false;
         }
     }
+
+    /// <summary>The cut sheets a printer reports it makes, in <see cref="PrintFormats.Cuts"/> order.</summary>
+    public static IReadOnlyList<string> CutFormats(string snapshotJson) =>
+        [.. PrintFormats.Cuts.Where(format => SupportsFormat(snapshotJson, format))];
 
     private static bool TryGetFormats(JsonElement root, out JsonElement formats)
     {
