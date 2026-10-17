@@ -98,6 +98,9 @@ public static class PrintLayouts
     /// <summary>The most photographs a format takes.</summary>
     public static int MaxPhotos(string layout) => PhotoCounts(layout).DefaultIfEmpty(0).Max();
 
+    /// <summary>The most photographs any format takes: four different strips.</summary>
+    public static int MostPhotos { get; } = All.Max(MaxPhotos);
+
     /// <summary>A style is a single photograph's choice; four and the strips are always framed.</summary>
     public static bool SupportsStyle(string layout, string style) =>
         style == Framed ? IsKnown(layout) : style is (FullBleed or PopOut) && layout == Photo;

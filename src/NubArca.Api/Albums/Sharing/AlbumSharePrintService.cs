@@ -118,7 +118,7 @@ public sealed class AlbumSharePrintService : IAlbumSharePrintService
         CancellationToken cancellationToken)
     {
         if (!access.CanPrint) return OwnerPhotoPrintResult.Refuse(AlbumSharePrintErrors.NotAllowed);
-        if (request.Photos is not { Count: > 0 and <= 8 } photos || photos.Any(p => p.FileItemId is null))
+        if (request.Photos is not { Count: > 0 } photos || photos.Count > PrintLayouts.MostPhotos || photos.Any(p => p.FileItemId is null))
             return OwnerPhotoPrintResult.Refuse(OwnerPhotoPrintErrors.InvalidRequest);
 
         // The photographs must be THIS album's, visible to its share — the
