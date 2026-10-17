@@ -75,6 +75,14 @@ export function isTurnable(layout: PrintLayout): layout is TurnableLayout {
   return layout === 'photo' || layout === 'photo2';
 }
 
+/**
+ * The style a halved 20x15 is drawn in: two 10x15 take the photograph's own,
+ * to the edges or framed; the four strips are always framed.
+ */
+function halvesStyle(layout: PrintLayout, photoStyle: PrintStyle): PrintStyle {
+  return layout === 'photo2' && photoStyle === 'fullBleed' ? 'fullBleed' : 'framed';
+}
+
 /** The strips: two on a 10x15, four on a 20x15. */
 export function isStrip(layout: PrintLayout | null): boolean {
   return layout === 'twinStrip4' || layout === 'quadStrip4';
@@ -390,8 +398,11 @@ function SheetPreview(props: SheetProps) {
     // were arranged. Four photographs on four strips: the same strip on each.
     const strips = layout === 'quadStrip4';
     const portrait = orientation === null ? aspectOf(chosen[0]) <= 1 : orientation === 'portrait';
-    const arranged = arrangeSheet(layout, 'framed', paper, portrait);
-    const aspect = catalogueSlotAspect(layout, 'framed', paper, portrait);
+    const style = halvesStyle(layout, photoStyle);
+    const arranged = arrangeSheet(layout, style, paper, portrait);
+    const aspect = catalogueSlotAspect(layout, style, paper, portrait);
+    // Each of two 10x15 to the edges carries its words as a 10x15 does.
+    const [halfWidth, halfHeight] = sheet('10x15', portrait);
     return (
       <div
         className="party-print-sheet"
@@ -412,6 +423,7 @@ function SheetPreview(props: SheetProps) {
               style={{
                 left: pct(rect.x), top: pct(rect.y),
                 width: pct(rect.width), height: pct(rect.height),
+                ...(style === 'fullBleed' ? { containerType: 'inline-size' as const } : {}),
               }}
             >
               <FramedPhoto
@@ -419,6 +431,10 @@ function SheetPreview(props: SheetProps) {
                 slotAspect={aspect} view={viewOf(id)}
                 onAspect={(w, h) => onAspect(id, w, h)}
               />
+              {style === 'fullBleed' && props.fullBleedWords?.({
+                portrait, width: halfWidth, height: halfHeight,
+                visible: visiblePhotoRect(placePhoto(aspectOf(id), aspect, viewOf(id))),
+              })}
             </div>
           );
         })}
@@ -672,7 +688,7 @@ export function PrintStudio(props: PrintStudioProps) {
       : layout === 'grid4'
         ? gridSlotAspect(paper)
         : layout === 'photo2' || layout === 'quadStrip4'
-          ? catalogueSlotAspect(layout, 'framed', paper, portraitFor(id))
+          ? catalogueSlotAspect(layout, halvesStyle(layout, photoStyle), paper, portraitFor(id))
           : photoStyle === 'fullBleed'
             ? overlaySlotAspect(portraitFor(id), paper)
             : photoSlotAspect(portraitFor(id), paper, photoStyle)
@@ -706,7 +722,7 @@ export function PrintStudio(props: PrintStudioProps) {
     // focal point and the displayed zoom, clamped to what the new frame allows.
     // Two 10x15 turn together: every photograph of the sheet is reframed.
     const nextAspect = layout === 'photo2'
-      ? catalogueSlotAspect('photo2', 'framed', paper, next === 'portrait')
+      ? catalogueSlotAspect('photo2', halvesStyle('photo2', photoStyle), paper, next === 'portrait')
       : photoStyle === 'fullBleed'
         ? overlaySlotAspect(next === 'portrait', paper)
         : photoSlotAspect(next === 'portrait', paper, photoStyle);
@@ -1111,7 +1127,7 @@ export function PrintStudio(props: PrintStudioProps) {
           </h2>
           <SheetPreview
             layout={layout}
-            photoStyle={layout === 'photo' ? photoStyle : 'framed'}
+            photoStyle={layout === 'photo' || layout === 'photo2' ? photoStyle : 'framed'}
             sheetTheme={props.sheetTheme(layout)}
             bandDark={props.bandDark(layout)}
             band={props.band}
