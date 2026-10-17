@@ -212,12 +212,13 @@ public sealed class NetworkProvisioningService : BackgroundService
         NetworkSnapshot snapshot;
         while (!(snapshot = await _network.GetSnapshotAsync(ct)).ManagerAvailable)
         {
-            Update(s => s with { Mode = ProvisioningMode.Unavailable, ManagerAvailable = false });
+            // Logged before the state changes: whoever sees Unavailable can find the reason.
             if (!_unavailableLogged)
             {
                 _unavailableLogged = true;
                 _logger.LogCritical("Network provisioning unavailable: NetworkManager is not running. The setup network cannot open until it is.");
             }
+            Update(s => s with { Mode = ProvisioningMode.Unavailable, ManagerAvailable = false });
             await Task.Delay(_timings.Poll * 5, ct);
         }
         if (_unavailableLogged)
