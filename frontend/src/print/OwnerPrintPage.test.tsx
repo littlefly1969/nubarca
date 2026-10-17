@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { AuthedWrapper, installFetchMock, jsonResponse } from '../test-utils';
+import { AuthedWrapper, installFetchMock, jsonResponse, type MockHandler } from '../test-utils';
 import { OwnerPrintPage } from './OwnerPrintPage';
 import { popOutPlacement } from './popOut';
 import { resetSubjectCutoutAvailabilityForTests } from '../subjectCutout/useSubjectCutoutAvailable';
@@ -35,7 +35,7 @@ function items(ids: string[]) {
 }
 
 function mount(path: string, { stations = [station()], extra = {} }: {
-  stations?: unknown[]; extra?: Record<string, () => Response>;
+  stations?: unknown[]; extra?: Record<string, MockHandler>;
 } = {}) {
   const mock = installFetchMock({
     'GET /api/print/stations': () => jsonResponse(stations),
@@ -223,6 +223,42 @@ describe('OwnerPrintPage', () => {
     const body = lastPost(mock.calls);
     expect(body).toMatchObject({ expectedPaperSize: '20x15', layout: 'photo2', style: 'fullBleed', orientation: 'landscape' });
     expect(body.photos.map((p: { fileItemId: string }) => p.fileItemId)).toEqual(['f3', 'f1']);
+  });
+
+  it('dates each of two 10×15 with its own photograph, framed and to the edges', async () => {
+    const user = userEvent.setup();
+    const days: Record<string, string> = { f3: '2019-07-01', f1: '2021-03-05' };
+    const mock = mount(`/print?album=${ALBUM}`, {
+      stations: [station(false, '20x15', ['4x6x2'])],
+      extra: {
+        'GET /api/print/photo-jobs/date': ({ url }) => jsonResponse({
+          date: days[new URL(url, 'http://x').searchParams.get('fileItemId') ?? ''], source: 'embedded',
+        }),
+      },
+    });
+    await user.click(await screen.findByTestId('party-print-format-photo2'));
+    const picks = screen.getAllByRole('button', { name: /Scegli questa foto/ });
+    await user.click(picks[2]);
+    await user.click(picks[0]);
+    await user.click(next());
+    await user.click(next());
+    await user.click(screen.getByRole('radio', { name: 'Orizzontale' }));
+    await user.click(next());
+    await user.click(next());
+    await user.click(screen.getByTestId('owner-print-date'));
+
+    // To the edges: the date on each photograph is that photograph's.
+    await waitFor(() => expect(screen.getAllByTestId('owner-print-date-text').map((d) => d.textContent))
+      .toEqual(['01/07/2019', '05/03/2021']));
+    expect(screen.getByTestId('owner-print-date-note')).toHaveTextContent('01/07/2019');
+    expect(screen.getByTestId('owner-print-date-note')).toHaveTextContent('05/03/2021');
+    // Framed: each half's band is signed with its own.
+    await user.click(screen.getByRole('radio', { name: 'Cornice' }));
+    expect(screen.getAllByTestId('print-sheet-mark').map((m) => m.textContent)).toEqual(['01/07/2019', '05/03/2021']);
+
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    expect(lastPost(mock.calls)).toMatchObject({ layout: 'photo2', style: 'framed', includeDate: true });
   });
 
   it('prints four photographs as the same strip four times on 20×15', async () => {

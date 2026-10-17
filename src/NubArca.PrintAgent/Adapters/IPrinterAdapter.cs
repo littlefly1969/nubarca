@@ -13,8 +13,16 @@ public sealed record DiscoveredPrinter(
     string DeviceKey, string DisplayName, string? Manufacturer, string? Model, string AdapterKind);
 public sealed record PrinterObservedStatus(string State, string? Detail = null);
 /// <summary><c>Simulated</c>: the job goes to the printer's simulated twin — never to paper.</summary>
+/// <param name="Files">
+/// Every file of the artifact, in order: <paramref name="ArtifactPath"/> alone,
+/// or a joined 20x15's two 10x15 (see <see cref="JobArtifactFiles"/>).
+/// </param>
 public sealed record PrintSubmission(
-    Guid JobId, string DeviceKey, string ArtifactPath, string ContentType, string Format, bool Simulated = false);
+    Guid JobId, string DeviceKey, string ArtifactPath, string ContentType, string Format, bool Simulated = false,
+    IReadOnlyList<string>? Files = null)
+{
+    public IReadOnlyList<string> AllFiles => Files ?? [ArtifactPath];
+}
 
 /// <summary>Whether a printer has a simulated twin, and whether that is all it has.</summary>
 public sealed record PrinterSimulation(bool Available, bool Only)

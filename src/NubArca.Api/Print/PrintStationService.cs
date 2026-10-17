@@ -612,8 +612,18 @@ public sealed class PrintStationService
                 && _db.PrintStations.Any(s => s.Id == x.PrintStationId && s.OwnerUserId == ownerId),
             cancellationToken);
         if (job is null) return null;
-        return new PrintArtifact(await _artifacts.OpenReadAsync(job.ArtifactStorageKey!, cancellationToken),
-            job.ArtifactContentType ?? "image/png");
+        var stored = await _artifacts.OpenReadAsync(job.ArtifactStorageKey!, cancellationToken);
+        if (job.ArtifactContentType != PrintArtifactParts.ContentType)
+            return new PrintArtifact(stored, job.ArtifactContentType ?? "image/png");
+        // A joined 20x15 is two files on the printer: the owner sees them as
+        // the sheet they come out of.
+        await using (stored)
+        {
+            var parts = await PrintArtifactParts.ReadAllAsync(stored, cancellationToken);
+            if (parts is null) return null;
+            return new PrintArtifact(new MemoryStream(await PrintArtifactParts.JoinForViewAsync(parts, cancellationToken),
+                writable: false), PrintArtifactParts.PartContentType);
+        }
     }
 
     /// <summary>
@@ -840,6 +850,9 @@ public sealed class PrintStationService
             // A simulated job goes only to an agent that says it sends it to
             // the twin: an older one would put it on paper.
             if (!supportsSimulation) query = query.Where(x => !x.Simulated);
+            // A joined 20x15 is two files: it waits for an agent that prints them.
+            if (!PrintAgentCompatibility.PrintsJoinedParts(station.AgentVersion))
+                query = query.Where(x => !PrintFormats.Joined.Contains(x.Format));
             var candidate = await query.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id)
                 .Select(x => new { x.Id, x.State }).FirstOrDefaultAsync(cancellationToken);
             if (candidate is null) return null;
@@ -859,20 +872,61 @@ public sealed class PrintStationService
             var deviceKey = await _db.PrinterDevices.AsNoTracking()
                 .Where(x => x.Id == job.PrinterDeviceId && x.PrintStationId == stationId)
                 .Select(x => x.DeviceKey).SingleAsync(cancellationToken);
+            var url = $"/api/print-agent/jobs/{job.Id:D}/artifact";
+            if (job.ArtifactContentType == PrintArtifactParts.ContentType)
+            {
+                // Each file on its own: its address, its size, a JPEG.
+                await using var stored = await _artifacts.OpenReadAsync(job.ArtifactStorageKey!, cancellationToken);
+                var lengths = await PrintArtifactParts.ReadLengthsAsync(stored, cancellationToken)
+                    ?? throw new InvalidDataException("The job's parts artifact has no readable header.");
+                var parts = lengths.Select((length, index) => new PrintArtifactPartDto(
+                    $"{url}/{index}", length, PrintArtifactParts.PartContentType)).ToArray();
+                return new(job.Id, rawClaim, job.Kind, job.Format, parts[0].Url, parts[0].ByteLength,
+                    parts[0].ContentType, deviceKey, job.Simulated, parts);
+            }
             return new(job.Id, rawClaim, job.Kind, job.Format,
-                $"/api/print-agent/jobs/{job.Id:D}/artifact", job.ArtifactByteLength!.Value,
+                url, job.ArtifactByteLength!.Value,
                 job.ArtifactContentType!, deviceKey, job.Simulated);
         }
         return null;
     }
 
+    /// <summary>
+    /// The claimed job's artifact, or with <paramref name="part"/> one file of
+    /// an artifact made of several. A single file is its part 0; a parts
+    /// artifact is never served whole.
+    /// </summary>
     public async Task<PrintArtifact?> OpenArtifactAsync(Guid stationId, Guid jobId, string claimToken,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, int? part = null)
     {
         var job = await FindClaimedAsync(stationId, jobId, claimToken, cancellationToken);
         if (job?.ArtifactStorageKey is null || job.ArtifactContentType is null) return null;
-        return new(await _artifacts.OpenReadAsync(job.ArtifactStorageKey, cancellationToken),
-            job.ArtifactContentType);
+        if (job.ArtifactContentType != PrintArtifactParts.ContentType)
+        {
+            return part is null or 0
+                ? new(await _artifacts.OpenReadAsync(job.ArtifactStorageKey, cancellationToken), job.ArtifactContentType)
+                : null;
+        }
+        if (part is not int index) return null;
+        await using var stored = await _artifacts.OpenReadAsync(job.ArtifactStorageKey, cancellationToken);
+        var lengths = await PrintArtifactParts.ReadLengthsAsync(stored, cancellationToken);
+        if (lengths is null || index < 0 || index >= lengths.Count) return null;
+        // The stream stands after the header: skip the parts before this one.
+        for (var i = 0; i < index; i++) await Skip(stored, lengths[i], cancellationToken);
+        var bytes = new byte[lengths[index]];
+        await stored.ReadExactlyAsync(bytes, cancellationToken);
+        return new(new MemoryStream(bytes, writable: false), PrintArtifactParts.PartContentType);
+    }
+
+    private static async Task Skip(Stream stream, int count, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[Math.Min(count, 81920)];
+        while (count > 0)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(0, Math.Min(count, buffer.Length)), cancellationToken);
+            if (read == 0) throw new EndOfStreamException();
+            count -= read;
+        }
     }
 
     public async Task<bool> MarkSubmittingAsync(Guid stationId, Guid jobId, string claimToken,

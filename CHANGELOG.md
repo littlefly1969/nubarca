@@ -6,12 +6,18 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
-### Printing: two 10x15 on 20x15 go to the edges, like a 10x15
+### Printing: a 20x15 of two 10x15 is two 10x15 files in one print job
 
 - **Two 10x15 photos are no longer always framed.** Each one takes the style
-  a single 10x15 takes: to the edges (the default, with the date on the photo
-  when asked) or framed. To the edges, each half of the sheet is exactly the
-  10x15 a single photo prints, and the printer cuts and prints it the same way.
+  a single 10x15 takes: to the edges (the default) or framed.
+- **Each 10x15 has its own date.** With the date turned on, each of the two
+  photos prints its own date, and the preview shows both.
+- **Each 10x15 is its own file.** The server renders each 10x15 on its own,
+  exactly as it prints alone; for the four strips that means two twin
+  strips. The Print Box downloads each file separately and hands both to one
+  CUPS job, which the DNP driver joins on the 6x8 sheet and cuts.
+- **Needs Print Agent 0.11.0.** An older box is not handed these prints: they
+  wait in the queue until the box updates.
 
 ### Printing: two 10x15 and four strips on 20x15 paper
 

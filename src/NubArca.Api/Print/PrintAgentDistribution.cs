@@ -40,6 +40,16 @@ public static class PrintAgentCompatibility
     public static bool IsCompatible(string? reported) => Parse(reported) is not { } version || version >= MinimumVersion;
 
     /// <summary>
+    /// The first agent that prints a joined 20x15 from its two 10x15 files
+    /// (<c>PrintArtifactParts</c>). An older one would wait for one sheet, so
+    /// those jobs wait for it to update; an unreadable version is served, as above.
+    /// </summary>
+    public static readonly Version JoinedPartsVersion = new(0, 11, 0);
+
+    public static bool PrintsJoinedParts(string? reported) =>
+        Parse(reported) is not { } version || version >= JoinedPartsVersion;
+
+    /// <summary>
     /// How an agent stands against this server and the bundle it hands out:
     /// its compatibility, and whether it claims the published version without
     /// being that build — a development build, or one not from this project's CI.

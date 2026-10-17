@@ -87,19 +87,22 @@ public static class PrintFormats
     public const string Strip2x6Pair = "2x6x2";
 
     /// <summary>
-    /// A 20x15 sheet of two 10x15, as the DNP makes it: the Print Agent sends
-    /// its two halves as one job of two 10x15 pages, the driver joins them on
-    /// the 6x8 and the printer cuts it in two. Only a printer that reports it
-    /// receives it.
+    /// A 20x15 sheet of two 10x15, as the DNP makes it: two 10x15 JPEGs, each
+    /// rendered on its own, which the Print Agent hands to one CUPS job; the
+    /// driver joins them on the 6x8 and the printer cuts it in two. Only a
+    /// printer that reports it receives it.
     /// </summary>
     public const string Photo4x6Pair = "4x6x2";
 
     /// <summary>
-    /// A 20x15 sheet of four strips: its two halves, each a twin strip, sent
+    /// A 20x15 sheet of four strips: two 10x15 JPEGs, each a twin strip, sent
     /// as one job to the strip queue, joined on the 6x8 and cut with the
     /// 2-inch cut into four 2x6. Only a printer that reports it receives it.
     /// </summary>
     public const string Strip2x6Quad = "2x6x4";
+
+    /// <summary>The joined 20x15: an artifact of two 10x15 files (<c>PrintArtifactParts</c>), never one sheet.</summary>
+    public static readonly IReadOnlyList<string> Joined = [Photo4x6Pair, Strip2x6Quad];
 
     /// <summary>Every format that is a cut sheet, in the order they are reported.</summary>
     public static readonly IReadOnlyList<string> Cuts = [Strip2x6Pair, Photo4x6Pair, Strip2x6Quad];

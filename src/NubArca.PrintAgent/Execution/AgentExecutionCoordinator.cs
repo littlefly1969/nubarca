@@ -60,7 +60,7 @@ public sealed class AgentExecutionCoordinator
             }
             else if (entry.State == LocalExecutionStates.Claimed)
             {
-                if (File.Exists(entry.ArtifactPath)) await SubmitAsync(entry, cancellationToken);
+                if (FilesOf(entry).All(File.Exists)) await SubmitAsync(entry, cancellationToken);
                 else await DropUnsubmittedAsync(entry, cancellationToken);
                 handled = true;
             }
@@ -74,8 +74,30 @@ public sealed class AgentExecutionCoordinator
         await EnforceTemporaryBoundAsync(cancellationToken);
         var extension = claim.ContentType == "image/png" ? ".png" : ".jpg";
         var path = Path.Combine(_options.TemporaryPath, $"{claim.JobId:N}{extension}");
-        if (File.Exists(path)) File.Delete(path);
-        await _api.DownloadAsync(claim, path, _options.MaxArtifactBytes, cancellationToken);
+        var files = JobArtifactFiles.Of(path, claim.Format);
+        foreach (var file in files) if (File.Exists(file)) File.Delete(file);
+        if (claim.ArtifactParts is { Count: > 0 } parts)
+        {
+            // A joined 20x15: each 10x15 is its own file, downloaded on its own.
+            if (parts.Count != files.Count)
+                throw new InvalidDataException("The job's files are not the ones its format prints.");
+            // Both or neither: a 10x15 whose twin did not arrive is never printed alone.
+            try
+            {
+                for (var i = 0; i < parts.Count; i++)
+                    await _api.DownloadAsync(claim, parts[i].Url, parts[i].ByteLength, files[i],
+                        _options.MaxArtifactBytes, cancellationToken);
+            }
+            catch
+            {
+                foreach (var file in files) if (File.Exists(file)) File.Delete(file);
+                throw;
+            }
+        }
+        else
+        {
+            await _api.DownloadAsync(claim, path, _options.MaxArtifactBytes, cancellationToken);
+        }
         var entry = new JournalEntry(claim.JobId, claim.ClaimToken, path, claim.DeviceKey,
             claim.ContentType, claim.Format, LocalExecutionStates.Claimed, null, null, claim.Simulated);
         await _journal.UpsertClaimedAsync(entry, cancellationToken);
@@ -94,7 +116,8 @@ public sealed class AgentExecutionCoordinator
         try
         {
             var result = await _adapter.SubmitAsync(new PrintSubmission(entry.JobId,
-                entry.DeviceKey, entry.ArtifactPath, entry.ContentType, entry.Format, entry.Simulated), cancellationToken);
+                entry.DeviceKey, entry.ArtifactPath, entry.ContentType, entry.Format, entry.Simulated,
+                FilesOf(entry)), cancellationToken);
             resultEntry = result.Accepted
                 ? entry with { State = LocalExecutionStates.Completed, SpoolReference = result.SpoolReference }
                 : entry with { State = LocalExecutionStates.Failed,
@@ -130,7 +153,7 @@ public sealed class AgentExecutionCoordinator
                     entry.SpoolReference, cancellationToken))
                 _logger.LogWarning("The server no longer knows job {JobId}; its outcome is not sent again.", entry.JobId);
             await _journal.MarkAcknowledgedAsync(entry.JobId, cancellationToken);
-            if (File.Exists(entry.ArtifactPath)) File.Delete(entry.ArtifactPath);
+            DeleteFiles(entry);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
@@ -149,13 +172,20 @@ public sealed class AgentExecutionCoordinator
         _logger.LogInformation("Job {JobId} was not submitted and its claim is no longer held; the server hands it out again.",
             entry.JobId);
         await _journal.MarkAcknowledgedAsync(entry.JobId, cancellationToken);
-        if (File.Exists(entry.ArtifactPath)) File.Delete(entry.ArtifactPath);
+        DeleteFiles(entry);
+    }
+
+    private static IReadOnlyList<string> FilesOf(JournalEntry entry) => JobArtifactFiles.Of(entry.ArtifactPath, entry.Format);
+
+    private static void DeleteFiles(JournalEntry entry)
+    {
+        foreach (var file in FilesOf(entry)) if (File.Exists(file)) File.Delete(file);
     }
 
     private async Task EnforceTemporaryBoundAsync(CancellationToken cancellationToken)
     {
         var referenced = (await _journal.LoadPendingAsync(cancellationToken))
-            .Select(x => Path.GetFullPath(x.ArtifactPath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .SelectMany(FilesOf).Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var files = new DirectoryInfo(_options.TemporaryPath).EnumerateFiles()
             .OrderBy(x => x.LastWriteTimeUtc).ToList();
         var total = files.Sum(x => x.Length);

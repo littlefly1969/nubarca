@@ -133,61 +133,21 @@ public sealed class PrintArtifactRenderer
     public async Task<byte[]> RenderOwnerPhotoAsync(
         OwnerPhotoComposition composition, CancellationToken cancellationToken)
     {
-        using var sheet = DrawOwnerPhoto(composition.Bytes, composition.Paper, composition.Portrait,
-            composition.Placement, composition.DateText);
-        return await EncodeAsync(sheet, composition.Calibration, cancellationToken);
-    }
-
-    /// <summary>
-    /// Two owner photographs on a 20x15 the printer cuts in two: each half is
-    /// exactly the 10x15 <see cref="RenderOwnerPhotoAsync"/> prints on its own,
-    /// to the edges, with its date when asked — side by side when they stand,
-    /// one above the other when they lie.
-    /// </summary>
-    public async Task<byte[]> RenderOwnerPhotoPairAsync(
-        IReadOnlyList<(byte[] Bytes, PhotoPlacement Placement)> photos, string paper, bool photoPortrait,
-        string? dateText, PrintCalibration? calibration, CancellationToken cancellationToken)
-    {
-        var arranged = PrintLayouts.Arrange(PrintLayouts.Photo2, PrintLayouts.FullBleed, paper, photoPortrait);
-        if (photos.Count != arranged.Slots.Count)
-            throw new ArgumentException("Two photographs, one for each half.", nameof(photos));
-        using var sheet = new Image<Rgba32>(arranged.Width, arranged.Height, OwnerBand);
-        for (var i = 0; i < photos.Count; i++)
-        {
-            using var half = DrawOwnerPhoto(photos[i].Bytes, Domain.Print.PrintPapers.Photo10x15, photoPortrait,
-                photos[i].Placement, dateText);
-            var slot = arranged.Slots[i];
-            var at = new Point((int)Math.Round(slot.X * arranged.Width), (int)Math.Round(slot.Y * arranged.Height));
-            sheet.Mutate(x => x.DrawImage(half, at, 1f));
-        }
-        return await EncodeAsync(sheet, calibration, cancellationToken);
-    }
-
-    /// <summary>One owner photograph on a sheet of its own, placed and dated, not yet calibrated.</summary>
-    private Image<Rgba32> DrawOwnerPhoto(
-        byte[] bytes, string paper, bool portrait, PhotoPlacement placement, string? dateText)
-    {
-        using var source = Image.Load<Rgba32>(bytes);
+        using var source = Image.Load<Rgba32>(composition.Bytes);
         source.Mutate(x => x.AutoOrient());
-        var (w, h) = PrintLayouts.Sheet(paper, portrait);
-        var sheet = new Image<Rgba32>(w, h, OwnerBand);
+        var (w, h) = PrintLayouts.Sheet(composition.Paper, composition.Portrait);
+        using var sheet = new Image<Rgba32>(w, h, OwnerBand);
         var frame = new Rectangle(0, 0, w, h);
-        PartyPrintComposer.DrawPlaced(sheet, source, placement, frame, OwnerBand);
+        PartyPrintComposer.DrawPlaced(sheet, source, composition.Placement, frame, OwnerBand);
 
-        if (dateText is { Length: > 0 } text)
+        if (composition.DateText is { Length: > 0 } text)
         {
             var placed = PhotoPlacementGeometry.Place(
-                (double)source.Width / source.Height, (double)w / h, placement);
+                (double)source.Width / source.Height, (double)w / h, composition.Placement);
             DrawDate(sheet, text, PhotoPlacementGeometry.Visible(placed));
         }
-        return sheet;
-    }
 
-    /// <summary>The sheet as the printer receives it: calibrated, stripped of every source's metadata, a JPEG.</summary>
-    private static async Task<byte[]> EncodeAsync(
-        Image<Rgba32> sheet, PrintCalibration? calibration, CancellationToken cancellationToken)
-    {
-        (calibration ?? PrintCalibration.Neutral).ApplyTo(sheet);
+        (composition.Calibration ?? PrintCalibration.Neutral).ApplyTo(sheet);
         sheet.Metadata.ExifProfile = null;
         sheet.Metadata.XmpProfile = null;
         sheet.Metadata.IptcProfile = null;

@@ -57,6 +57,8 @@ export interface StudioBand {
   line: string | null;
   /** The text at the right of the signature row (an owner's date); a guest's number is never previewed. */
   mark: string | null;
+  /** Two 10x15: each half's own mark, in the order of its photographs (each its own date). */
+  marks?: readonly (string | null)[];
   brand: boolean;
 }
 
@@ -105,6 +107,8 @@ export interface FullBleedSheet {
   height: number;
   /** The visible photograph, in fractions of the sheet. */
   visible: { left: number; top: number; width: number; height: number };
+  /** Which photograph of the sheet the words are on: 0, or 1 for the second of two 10x15. */
+  index: number;
 }
 
 export type StudioStep = 'format' | 'select' | 'arrange' | 'crop' | 'preview';
@@ -342,6 +346,7 @@ function SheetPreview(props: SheetProps) {
         {props.fullBleedWords?.({
           portrait, width: w, height: h,
           visible: visiblePhotoRect(placePhoto(aspect, slotAspect, viewOf(id))),
+          index: 0,
         })}
       </div>
     );
@@ -434,6 +439,7 @@ function SheetPreview(props: SheetProps) {
               {style === 'fullBleed' && props.fullBleedWords?.({
                 portrait, width: halfWidth, height: halfHeight,
                 visible: visiblePhotoRect(placePhoto(aspectOf(id), aspect, viewOf(id))),
+                index,
               })}
             </div>
           );
@@ -447,7 +453,10 @@ function SheetPreview(props: SheetProps) {
               width: pct(rect.width), height: pct(rect.height),
             }}
           >
-            {bandFor(strips)}
+            {/* Each of two 10x15 is signed with its own photograph's date. */}
+            {strips || !props.band.marks ? bandFor(strips) : (
+              <SheetBand band={{ ...props.band, mark: props.band.marks[index] ?? null }} dark={props.bandDark} />
+            )}
           </div>
         ))}
         {/* No cut marks: the printer cuts the sheet, and the print has none. */}
@@ -599,7 +608,7 @@ export interface PrintStudioProps {
   canSubmit?: boolean;
   onSubmit: (submission: StudioSubmission) => void;
   /** Told the photographs chosen, in order, whenever they change (an owner's date is the first one's). */
-  onChosenChange?: (chosen: string[]) => void;
+  onChosenChange?: (chosen: string[], layout: PrintLayout | null) => void;
   /**
    * Told when a format is chosen that is not the one chosen before: the
    * page's own choices for the sheet (style, words, date, look) start again.
@@ -667,7 +676,7 @@ export function PrintStudio(props: PrintStudioProps) {
   const pendingRef = useRef<StudioSubmission | null>(null);
 
   const { onChosenChange } = props;
-  useEffect(() => { onChosenChange?.(chosen); }, [chosen, onChosenChange]);
+  useEffect(() => { onChosenChange?.(chosen, layout); }, [chosen, layout, onChosenChange]);
 
   // The natural shape of a photograph, learned when its preview loads. Until
   // then it is treated as filling its slot exactly, which crops nothing.
