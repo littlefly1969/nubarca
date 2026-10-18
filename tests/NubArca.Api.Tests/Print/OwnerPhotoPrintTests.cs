@@ -82,11 +82,14 @@ public sealed class OwnerPhotoPrintTests : IDisposable
         return _factory.CreateClient().SendAsync(request);
     }
 
-    private static byte[] Jpeg(int width, int height)
+    private static readonly Rgb24 Red = new(200, 30, 30);
+    private static readonly Rgb24 Blue = new(30, 30, 200);
+
+    private static byte[] Jpeg(int width, int height, Rgb24? color = null)
     {
         // Each photograph its own bytes: identical bytes are ONE blob, and a
         // test setting one photo's metadata would rewrite another's.
-        using var image = new Image<Rgb24>(width, height, new Rgb24(200, 30, 30));
+        using var image = new Image<Rgb24>(width, height, color ?? Red);
         image[0, 0] = new Rgb24((byte)Random.Shared.Next(256), (byte)Random.Shared.Next(256), 0);
         image[1, 0] = new Rgb24((byte)Random.Shared.Next(256), 0, (byte)Random.Shared.Next(256));
         using var stream = new MemoryStream();
@@ -96,10 +99,10 @@ public sealed class OwnerPhotoPrintTests : IDisposable
 
     /// <summary>A photograph in the owner's library with the metadata a real one carries.</summary>
     private async Task<Guid> PhotoAsync(HttpClient client, int width = 300, int height = 200,
-        DateTime? dateTaken = null, string category = MediaCategories.Image)
+        DateTime? dateTaken = null, string category = MediaCategories.Image, Rgb24? color = null)
     {
         var form = new MultipartFormDataContent();
-        var part = new ByteArrayContent(Jpeg(width, height));
+        var part = new ByteArrayContent(Jpeg(width, height, color));
         part.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
         form.Add(part, "file", $"p{Guid.NewGuid():N}.jpg");
         var uploaded = await client.PostAsync("/api/files", form);
@@ -161,6 +164,37 @@ public sealed class OwnerPhotoPrintTests : IDisposable
         download.Headers.Add("X-NubArca-Print-Claim", job.GetProperty("claimToken").GetString());
         var bytes = await (await _factory.CreateClient().SendAsync(download)).Content.ReadAsByteArrayAsync();
         return Image.Load<Rgb24>(bytes);
+    }
+
+    /// <summary>
+    /// A joined 20x15 as the agent receives it: two 10x15 JPEGs, each named in
+    /// the claim and downloaded on its own, in order.
+    /// </summary>
+    private async Task<List<byte[]>> PrintedPartsAsync(Printer printer)
+    {
+        var claim = await Agent(HttpMethod.Post, "/api/print-agent/jobs/claim", printer.Credential, new { adapterKind = "cups" });
+        claim.EnsureSuccessStatusCode();
+        var job = await claim.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("image/jpeg", job.GetProperty("contentType").GetString());
+        var parts = job.GetProperty("artifactParts").EnumerateArray().ToList();
+        Assert.Equal(2, parts.Count);
+        var result = new List<byte[]>();
+        for (var i = 0; i < parts.Count; i++)
+        {
+            Assert.EndsWith($"/artifact/{i}", parts[i].GetProperty("url").GetString());
+            Assert.Equal("image/jpeg", parts[i].GetProperty("contentType").GetString());
+            var download = new HttpRequestMessage(HttpMethod.Get, parts[i].GetProperty("url").GetString());
+            download.Headers.Add("X-NubArca-Print-Credential", printer.Credential);
+            download.Headers.Add("X-NubArca-Print-Claim", job.GetProperty("claimToken").GetString());
+            var response = await _factory.CreateClient().SendAsync(download);
+            response.EnsureSuccessStatusCode();
+            Assert.Equal("image/jpeg", response.Content.Headers.ContentType?.MediaType);
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            Assert.Equal(parts[i].GetProperty("byteLength").GetInt64(), bytes.Length);
+            Assert.Equal(Image.DetectFormat(bytes).Name, "JPEG");
+            result.Add(bytes);
+        }
+        return result;
     }
 
     // --- printing ----------------------------------------------------------
@@ -662,9 +696,12 @@ public sealed class OwnerPhotoPrintTests : IDisposable
 
     /// <summary>The printer reports the twin strip's cut: a second queue with the driver's "2inch cut".</summary>
     private Task<HttpResponseMessage> HeartbeatCutting(string credential, params string[] extra) =>
+        HeartbeatCuttingAs("0.11.0", credential, extra);
+
+    private Task<HttpResponseMessage> HeartbeatCuttingAs(string agentVersion, string credential, params string[] extra) =>
         Agent(HttpMethod.Post, "/api/print-agent/heartbeat", credential, new
         {
-            agentVersion = "0.5.0",
+            agentVersion,
             devices = new[]
             {
                 new
@@ -759,7 +796,8 @@ public sealed class OwnerPhotoPrintTests : IDisposable
         var people = await PeopleAsync();
         var printer = await PrinterAsync(people.Owner);
         var photos = new List<Guid>();
-        for (var i = 0; i < 16; i++) photos.Add(await PhotoAsync(people.Owner));
+        // The first of each 10x15 red, the second blue: which file is which shows.
+        for (var i = 0; i < 16; i++) photos.Add(await PhotoAsync(people.Owner, color: i is 1 or >= 8 ? Blue : Red));
 
         // Not on 10x15: the two halves of a 20x15 are what it is.
         (await HeartbeatCutting(printer.Credential, "4x6x2", "2x6x4")).EnsureSuccessStatusCode();
@@ -781,19 +819,36 @@ public sealed class OwnerPhotoPrintTests : IDisposable
         }
 
         (await HeartbeatCutting(printer.Credential, "4x6x2", "2x6x4")).EnsureSuccessStatusCode();
-        // Two standing photographs lie side by side; two lying ones stand one above the other.
-        foreach (var (orientation, width, height) in new[] { ("portrait", 2400, 1800), ("landscape", 1800, 2400) })
+        // Two 10x15 files, each its own JPEG: standing photographs stand, lying ones lie.
+        foreach (var (style, orientation, width, height) in new[]
         {
-            Assert.Equal(HttpStatusCode.Accepted, (await Submit(people.Owner, SheetBody(printer, "photo2", "framed",
+            ("framed", "portrait", 1200, 1800), ("framed", "landscape", 1800, 1200),
+            ("fullBleed", "portrait", 1200, 1800), ("fullBleed", "landscape", 1800, 1200),
+        })
+        {
+            Assert.Equal(HttpStatusCode.Accepted, (await Submit(people.Owner, SheetBody(printer, "photo2", style,
                 photos.Take(2), orientation: orientation, paper: "20x15"))).StatusCode);
             var job = await Db(db => db.PrintJobs.OrderByDescending(j => j.CreatedAt).FirstAsync());
             Assert.Equal(PrintJobKinds.OwnerPhoto2, job.Kind);
             Assert.Equal(PrintFormats.Photo4x6Pair, job.Format);
-            using var sheet = await PrintedSheetAsync(printer);
-            Assert.Equal((width, height), (sheet.Width, sheet.Height));
+            Assert.Equal(style, JsonDocument.Parse(job.RenderSpecificationJson).RootElement
+                .GetProperty("style").GetString());
+            var parts = await PrintedPartsAsync(printer);
+            for (var i = 0; i < parts.Count; i++)
+            {
+                using var image = Image.Load<Rgb24>(parts[i]);
+                Assert.Equal((width, height), (image.Width, image.Height));
+                // Each file is its own photograph, in the order chosen.
+                Assert.True(IsColour(image[width / 2, height / 2], i == 0 ? Red : Blue), $"part {i} is not photograph {i}");
+                if (style != "fullBleed") continue;
+                // To the edges, each is the 10x15 a single photograph prints:
+                // the photograph from corner to corner, no border.
+                foreach (var (x, y) in new[] { (2, 2), (width - 3, height - 3), (2, height - 3), (width - 3, 2) })
+                    Assert.True(IsColour(image[x, y], i == 0 ? Red : Blue), $"part {i} ({x},{y}) is paper, not photograph: {image[x, y]}");
+            }
         }
 
-        // Four photographs are the same strip four times; sixteen are four strips.
+        // Four photographs are the same twin strip twice; sixteen are four strips, two 10x15 of two each.
         foreach (var count in new[] { 4, 16 })
         {
             Assert.Equal(HttpStatusCode.Accepted, (await Submit(people.Owner, SheetBody(printer, "quadStrip4", "framed",
@@ -802,8 +857,14 @@ public sealed class OwnerPhotoPrintTests : IDisposable
             Assert.Equal(PrintJobKinds.OwnerQuadStrip4, job.Kind);
             Assert.Equal(PrintFormats.Strip2x6Quad, job.Format);
             Assert.Equal(count, await Db(db => db.PrintJobSources.CountAsync(s => s.PrintJobId == job.Id)));
-            using var sheet = await PrintedSheetAsync(printer);
-            Assert.Equal((2400, 1800), (sheet.Width, sheet.Height));
+            var parts = await PrintedPartsAsync(printer);
+            foreach (var part in parts)
+            {
+                using var image = Image.Load<Rgb24>(part);
+                Assert.Equal((1200, 1800), (image.Width, image.Height));
+            }
+            // Sixteen: the first 10x15 holds photographs 1-8, the second 9-16.
+            if (count == 16) Assert.False(parts[0].AsSpan().SequenceEqual(parts[1]), "the two 10x15 are the same file");
         }
 
         // Two photographs are turned by the person, never left to a guess; and exactly two.
@@ -811,7 +872,7 @@ public sealed class OwnerPhotoPrintTests : IDisposable
         {
             (SheetBody(printer, "photo2", "framed", photos.Take(2), paper: "20x15"), "invalid_orientation"),
             (SheetBody(printer, "photo2", "framed", photos.Take(3), orientation: "portrait", paper: "20x15"), "invalid_layout"),
-            (SheetBody(printer, "photo2", "fullBleed", photos.Take(2), orientation: "portrait", paper: "20x15"), "invalid_layout"),
+            (SheetBody(printer, "photo2", "popOut", photos.Take(2), orientation: "portrait", paper: "20x15"), "invalid_layout"),
             (SheetBody(printer, "quadStrip4", "framed", photos.Take(8), paper: "20x15"), "invalid_layout"),
         })
         {
@@ -819,6 +880,46 @@ public sealed class OwnerPhotoPrintTests : IDisposable
             Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
             Assert.Equal(error, await Error(refused));
         }
+    }
+
+    [Fact]
+    public async Task A_Joined_20x15_Waits_For_An_Agent_That_Sends_Its_Two_10x15_As_Their_Own_Files()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var photos = new[] { await PhotoAsync(people.Owner), await PhotoAsync(people.Owner, color: Blue) };
+        (await people.Owner.PutAsJsonAsync($"/api/print/stations/{printer.StationId}/devices/{printer.DeviceId}/paper",
+            new { paperSize = "20x15" })).EnsureSuccessStatusCode();
+        (await HeartbeatCuttingAs("0.10.0", printer.Credential, "4x6x2", "2x6x4")).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.Accepted, (await Submit(people.Owner, SheetBody(printer, "photo2", "fullBleed",
+            photos, orientation: "portrait", paper: "20x15"))).StatusCode);
+
+        // An older agent would make one file of them: it is never handed the job.
+        var old = await Agent(HttpMethod.Post, "/api/print-agent/jobs/claim", printer.Credential, new { adapterKind = "cups" });
+        Assert.Equal(HttpStatusCode.NoContent, old.StatusCode);
+
+        (await HeartbeatCutting(printer.Credential, "4x6x2", "2x6x4")).EnsureSuccessStatusCode();
+        Assert.Equal(2, (await PrintedPartsAsync(printer)).Count);
+    }
+
+    [Fact]
+    public async Task Two_10x15_Each_Carry_Their_Own_Photographs_Date()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var summer = await PhotoAsync(people.Owner, dateTaken: new DateTime(2019, 7, 1, 10, 0, 0, DateTimeKind.Utc));
+        var spring = await PhotoAsync(people.Owner, dateTaken: new DateTime(2021, 3, 5, 10, 0, 0, DateTimeKind.Utc), color: Blue);
+        (await people.Owner.PutAsJsonAsync($"/api/print/stations/{printer.StationId}/devices/{printer.DeviceId}/paper",
+            new { paperSize = "20x15" })).EnsureSuccessStatusCode();
+        (await HeartbeatCutting(printer.Credential, "4x6x2", "2x6x4")).EnsureSuccessStatusCode();
+
+        Assert.Equal(HttpStatusCode.Accepted, (await Submit(people.Owner, SheetBody(printer, "photo2", "framed",
+            [summer, spring], includeDate: true, orientation: "portrait", paper: "20x15"))).StatusCode);
+        var spec = JsonDocument.Parse(await Db(db => db.PrintJobs.Select(j => j.RenderSpecificationJson).SingleAsync())).RootElement;
+        Assert.Equal(["2019-07-01", "2021-03-05"],
+            spec.GetProperty("resolvedDates").EnumerateArray().Select(d => d.GetString()).ToArray());
+        Assert.Equal("2019-07-01", spec.GetProperty("resolvedDate").GetString());
+        Assert.Equal(2, (await PrintedPartsAsync(printer)).Count);
     }
 
     [Fact]
@@ -886,6 +987,11 @@ public sealed class OwnerPhotoPrintTests : IDisposable
     }
 
     /// <summary>Near-white pixels inside the (red) photograph: the date's letters.</summary>
+    /// <summary>The photograph's own hue, after the printer's colour handling: red stays red, blue stays blue, paper is neither.</summary>
+    private static bool IsColour(Rgb24 pixel, Rgb24 colour) => colour.Equals(Red)
+        ? pixel.R > pixel.G + 80 && pixel.R > pixel.B + 80
+        : pixel.B > pixel.R + 80 && pixel.B > pixel.G + 80;
+
     private static int BrightPixels(Image<Rgb24> image, int x, int y, int w, int h)
     {
         var count = 0;

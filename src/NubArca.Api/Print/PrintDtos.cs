@@ -151,7 +151,11 @@ public sealed record PrintClaimRequest(string? AdapterKind = null, bool Supports
 public sealed record PrintClaimResponse(
     Guid JobId, string ClaimToken, string Kind, string Format,
     string ArtifactUrl, long ArtifactByteLength, string ContentType, string DeviceKey,
-    bool Simulated = false);
+    bool Simulated = false,
+    /// <summary>A joined 20x15's two 10x15 files, in order, each downloaded on its own; null for a single file.</summary>
+    IReadOnlyList<PrintArtifactPartDto>? ArtifactParts = null);
+/// <summary>One file of a print artifact made of several.</summary>
+public sealed record PrintArtifactPartDto(string Url, long ByteLength, string ContentType);
 public sealed record SetPrinterSimulationRequest(bool Enabled);
 /// <summary>A simulated print as its printer's owner sees it: what, when, whose — the sheet is downloaded apart.</summary>
 public sealed record SimulatedPrintDto(Guid Id, string ShortCode, string Kind, string Format, string State,

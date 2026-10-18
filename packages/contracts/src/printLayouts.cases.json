@@ -150,7 +150,7 @@
   {
    "layout": "photo2",
    "style": "fullBleed",
-   "supported": false
+   "supported": true
   },
   {
    "layout": "photo2",
@@ -1385,6 +1385,58 @@
     }
    ],
    "slotAspect": 1.4570614570614573
+  },
+  {
+   "layout": "photo2",
+   "style": "fullBleed",
+   "paper": "20x15",
+   "portrait": true,
+   "sheet": {
+    "width": 2400,
+    "height": 1800
+   },
+   "slots": [
+    {
+     "x": 0.0,
+     "y": 0.0,
+     "width": 0.5,
+     "height": 1.0
+    },
+    {
+     "x": 0.5,
+     "y": 0.0,
+     "width": 0.5,
+     "height": 1.0
+    }
+   ],
+   "bands": [],
+   "slotAspect": 0.6666666666666666
+  },
+  {
+   "layout": "photo2",
+   "style": "fullBleed",
+   "paper": "20x15",
+   "portrait": false,
+   "sheet": {
+    "width": 1800,
+    "height": 2400
+   },
+   "slots": [
+    {
+     "x": 0.0,
+     "y": 0.0,
+     "width": 1.0,
+     "height": 0.5
+    },
+    {
+     "x": 0.0,
+     "y": 0.5,
+     "width": 1.0,
+     "height": 0.5
+    }
+   ],
+   "bands": [],
+   "slotAspect": 1.5
   }
  ],
  "popOutAreas": [

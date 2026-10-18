@@ -90,10 +90,11 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         var paper = request.ExpectedPaperSize!;
 
         // The format and its style, from the catalogue every print shares. One
-        // photograph is to the edges unless framed; four and the strips are framed.
+        // photograph, and each of two 10x15, is to the edges unless framed;
+        // four and the strips are framed.
         var layout = request.Layout ?? PrintLayouts.Photo;
         if (!PrintLayouts.IsKnown(layout)) return Refuse(OwnerPhotoPrintErrors.InvalidLayout);
-        var style = request.Style ?? (layout == PrintLayouts.Photo ? PrintLayouts.FullBleed : PrintLayouts.Framed);
+        var style = request.Style ?? (layout is PrintLayouts.Photo or PrintLayouts.Photo2 ? PrintLayouts.FullBleed : PrintLayouts.Framed);
         if (!PrintLayouts.SupportsStyle(layout, style)) return Refuse(OwnerPhotoPrintErrors.InvalidLayout);
         // "Esce dalla foto" lifts the subject with the owner's own private AI:
         // the owner's request only, never one through a share.
@@ -229,12 +230,18 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         }
 
         // 7. The date, only when asked for: the first photograph's — the owner's
-        // own, the camera's, else today.
-        var first = files[fileIds[0]];
-        var (date, dateSource) = request.IncludeDate
-            ? OwnerPhotoPrintDates.Resolve(first.Override, first.Embedded, Now, zone!)
+        // own, the camera's, else today. Two 10x15 are two prints, each with
+        // its own photograph's date.
+        var dated = request.IncludeDate
+            ? (layout == PrintLayouts.Photo2 ? fileIds : [fileIds[0]])
+                .Select(id => OwnerPhotoPrintDates.Resolve(files[id].Override, files[id].Embedded, Now, zone!))
+                .ToList()
+            : [];
+        var (date, dateSource) = dated.Count > 0
+            ? ((DateOnly?)dated[0].Date, dated[0].Source)
             : (default(DateOnly?), OwnerPhotoPrintDates.SourceNone);
-        var dateText = date is DateOnly d ? OwnerPhotoPrintDates.Format(d, request.DateLocale!) : null;
+        var dateTexts = dated.Select(x => OwnerPhotoPrintDates.Format(x.Date, request.DateLocale!)).ToList();
+        var dateText = dateTexts.Count > 0 ? dateTexts[0] : null;
 
         // 8. "Esce dalla foto": the subject, lifted before a sheet is taken — it
         // takes seconds, and a photograph with nothing to lift is refused
@@ -304,11 +311,18 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
 
             // 11. Rendered at 300dpi from them: Piena by the owner's own renderer,
             // a framed sheet by the composer every framed print is drawn with,
-            // in white, with the owner's words in its band.
+            // in white, with the owner's words in its band. A joined 20x15 is
+            // its two 10x15, each rendered and encoded on its own exactly as
+            // that 10x15 prints alone, and kept as two files.
             byte[] artifact;
+            var joined = PrintFormats.Joined.Contains(printFormat);
             try
             {
-                artifact = style == PrintLayouts.FullBleed
+                artifact = joined
+                    ? PrintArtifactParts.Pack(await RenderHalvesAsync(layout, style,
+                        [.. sources.Photos.Select(bytes => bytes!)], placements, photoPortrait,
+                        caption, request.Brand, dateTexts, PrintCalibration.Of(device), cancellationToken))
+                    : style == PrintLayouts.FullBleed
                     ? await _renderer.RenderOwnerPhotoAsync(new OwnerPhotoComposition(
                         sources.Photos[0]!, paper, portrait, placements[0], dateText, PrintCalibration.Of(device)),
                         cancellationToken)
@@ -378,6 +392,10 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                         brand = request.Brand,
                         includeDate = request.IncludeDate,
                         resolvedDate = date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                        // Two 10x15: each photograph's own date, in order.
+                        resolvedDates = layout == PrintLayouts.Photo2 && dated.Count > 0
+                            ? dated.Select(x => x.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)).ToArray()
+                            : null,
                         dateSource,
                         dateLocale = request.IncludeDate ? request.DateLocale : null,
                         background = "white",
@@ -387,7 +405,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                         albumId = origin?.AlbumId,
                     }),
                     ArtifactStorageKey = stored.StorageKey,
-                    ArtifactContentType = "image/jpeg",
+                    ArtifactContentType = joined ? PrintArtifactParts.ContentType : "image/jpeg",
                     ArtifactByteLength = stored.SizeBytes,
                     CreatedAt = now,
                     RenderedAt = now,
@@ -472,6 +490,47 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         OwnerPrintRecords.AcceptedAsync(_db, jobId, stationId, mediaRemaining, cancellationToken);
 
     /// <summary>The display shape of encoded image bytes, from their header and EXIF orientation; null when they are not an image.</summary>
+    /// <summary>
+    /// The two 10x15 of a joined 20x15, in order, each rendered on its own as
+    /// that 10x15 prints alone: two photographs each the single print of their
+    /// style, with their own date; the four strips two twin strips — sixteen
+    /// photographs the first eight and the last eight, four photographs the
+    /// same strip on both.
+    /// </summary>
+    private async Task<IReadOnlyList<byte[]>> RenderHalvesAsync(
+        string layout, string style, IReadOnlyList<byte[]> photos, IReadOnlyList<PhotoPlacement> placements,
+        bool photoPortrait, string? caption, bool brand, IReadOnlyList<string> dateTexts,
+        PrintCalibration calibration, CancellationToken cancellationToken)
+    {
+        var halves = new List<byte[]>(PrintLayouts.HalvesPerSheet);
+        var perHalf = layout == PrintLayouts.Photo2 ? 1 : photos.Count / PrintLayouts.HalvesPerSheet;
+        for (var half = 0; half < PrintLayouts.HalvesPerSheet; half++)
+        {
+            var from = photos.Count == PrintLayouts.SlotsPerStrip ? 0 : half * perHalf;
+            var count = photos.Count == PrintLayouts.SlotsPerStrip ? photos.Count : perHalf;
+            var date = layout == PrintLayouts.Photo2 ? dateTexts.ElementAtOrDefault(half) : dateTexts.FirstOrDefault();
+            if (layout == PrintLayouts.Photo2 && style == PrintLayouts.FullBleed)
+            {
+                halves.Add(await _renderer.RenderOwnerPhotoAsync(new OwnerPhotoComposition(
+                    photos[half], PrintPapers.Photo10x15, photoPortrait, placements[half], date, calibration),
+                    cancellationToken));
+                continue;
+            }
+            halves.Add(await _composer.RenderAsync(new PartyPrintComposition(
+                PrintLayouts.HalfLayout(layout),
+                PartyPrintTheme.Pure,
+                [.. Enumerable.Range(from, count).Select(i => PartyPrintPhoto.Placed(photos[i], placements[i]))],
+                PartyName: string.Empty,
+                FooterText: null,
+                Orientation: photoPortrait ? PartyPrintOrientation.Portrait : PartyPrintOrientation.Landscape,
+                Calibration: calibration,
+                Paper: PrintPapers.Photo10x15,
+                Words: new PrintSheetWords(caption, null, date, brand)),
+                cancellationToken));
+        }
+        return halves;
+    }
+
     internal static double? DisplayAspectOf(byte[] bytes)
     {
         try

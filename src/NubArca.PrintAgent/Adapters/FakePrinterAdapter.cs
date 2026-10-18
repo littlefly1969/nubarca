@@ -80,12 +80,18 @@ public sealed class FakePrinterAdapter : IPrinterAdapter
         Directory.CreateDirectory(_outputPath);
         var extension = Path.GetExtension(submission.ArtifactPath);
         if (string.IsNullOrEmpty(extension)) extension = ".bin";
-        var destination = Path.Combine(_outputPath, $"{submission.JobId:N}{extension}");
-        await using var source = File.OpenRead(submission.ArtifactPath);
-        await using var target = new FileStream(destination, FileMode.CreateNew, FileAccess.Write,
-            FileShare.None, 81920, FileOptions.Asynchronous | FileOptions.WriteThrough);
-        await source.CopyToAsync(target, cancellationToken);
-        await target.FlushAsync(cancellationToken);
+        // Every file of the job, as the printer gets them: a joined 20x15's two 10x15 side by side.
+        var destinations = JobArtifactFiles.Of(Path.Combine(_outputPath, $"{submission.JobId:N}{extension}"),
+            submission.Format);
+        var files = submission.AllFiles;
+        for (var i = 0; i < files.Count; i++)
+        {
+            await using var source = File.OpenRead(files[i]);
+            await using var target = new FileStream(destinations[Math.Min(i, destinations.Count - 1)], FileMode.CreateNew,
+                FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous | FileOptions.WriteThrough);
+            await source.CopyToAsync(target, cancellationToken);
+            await target.FlushAsync(cancellationToken);
+        }
         // One sheet out, one print fewer on the media.
         if (_remainingPrints is int remaining) _remainingPrints = Math.Max(0, remaining - 1);
         return new(true, $"fake:{submission.JobId:N}", null);

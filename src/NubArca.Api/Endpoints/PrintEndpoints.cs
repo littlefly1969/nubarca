@@ -335,6 +335,16 @@ public static class PrintEndpoints
             return artifact is null ? Results.NotFound()
                 : Results.Stream(artifact.Content, artifact.ContentType);
         }).WithName("DownloadPrintArtifact");
+        // One file of a joined 20x15, downloaded on its own.
+        station.MapGet("/jobs/{jobId:guid}/artifact/{part:int}", async (Guid jobId, int part,
+            [FromHeader(Name = ClaimHeader)] string? claimToken, HttpContext context,
+            [FromServices] PrintStationService service, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(claimToken)) return Results.NotFound();
+            var artifact = await service.OpenArtifactAsync(StationId(context), jobId, claimToken, ct, part);
+            return artifact is null ? Results.NotFound()
+                : Results.Stream(artifact.Content, artifact.ContentType);
+        }).WithName("DownloadPrintArtifactPart");
         station.MapPost("/jobs/{jobId:guid}/submitting", async (Guid jobId,
             [FromBody] PrintSubmittingRequest request, HttpContext context,
             [FromServices] PrintStationService service, CancellationToken ct) =>

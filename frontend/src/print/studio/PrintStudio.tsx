@@ -57,6 +57,8 @@ export interface StudioBand {
   line: string | null;
   /** The text at the right of the signature row (an owner's date); a guest's number is never previewed. */
   mark: string | null;
+  /** Two 10x15: each half's own mark, in the order of its photographs (each its own date). */
+  marks?: readonly (string | null)[];
   brand: boolean;
 }
 
@@ -73,6 +75,14 @@ export type TurnableLayout = 'photo' | 'photo2';
 
 export function isTurnable(layout: PrintLayout): layout is TurnableLayout {
   return layout === 'photo' || layout === 'photo2';
+}
+
+/**
+ * The style a halved 20x15 is drawn in: two 10x15 take the photograph's own,
+ * to the edges or framed; the four strips are always framed.
+ */
+function halvesStyle(layout: PrintLayout, photoStyle: PrintStyle): PrintStyle {
+  return layout === 'photo2' && photoStyle === 'fullBleed' ? 'fullBleed' : 'framed';
 }
 
 /** The strips: two on a 10x15, four on a 20x15. */
@@ -97,6 +107,8 @@ export interface FullBleedSheet {
   height: number;
   /** The visible photograph, in fractions of the sheet. */
   visible: { left: number; top: number; width: number; height: number };
+  /** Which photograph of the sheet the words are on: 0, or 1 for the second of two 10x15. */
+  index: number;
 }
 
 export type StudioStep = 'format' | 'select' | 'arrange' | 'crop' | 'preview';
@@ -334,6 +346,7 @@ function SheetPreview(props: SheetProps) {
         {props.fullBleedWords?.({
           portrait, width: w, height: h,
           visible: visiblePhotoRect(placePhoto(aspect, slotAspect, viewOf(id))),
+          index: 0,
         })}
       </div>
     );
@@ -390,8 +403,11 @@ function SheetPreview(props: SheetProps) {
     // were arranged. Four photographs on four strips: the same strip on each.
     const strips = layout === 'quadStrip4';
     const portrait = orientation === null ? aspectOf(chosen[0]) <= 1 : orientation === 'portrait';
-    const arranged = arrangeSheet(layout, 'framed', paper, portrait);
-    const aspect = catalogueSlotAspect(layout, 'framed', paper, portrait);
+    const style = halvesStyle(layout, photoStyle);
+    const arranged = arrangeSheet(layout, style, paper, portrait);
+    const aspect = catalogueSlotAspect(layout, style, paper, portrait);
+    // Each of two 10x15 to the edges carries its words as a 10x15 does.
+    const [halfWidth, halfHeight] = sheet('10x15', portrait);
     return (
       <div
         className="party-print-sheet"
@@ -412,6 +428,7 @@ function SheetPreview(props: SheetProps) {
               style={{
                 left: pct(rect.x), top: pct(rect.y),
                 width: pct(rect.width), height: pct(rect.height),
+                ...(style === 'fullBleed' ? { containerType: 'inline-size' as const } : {}),
               }}
             >
               <FramedPhoto
@@ -419,6 +436,11 @@ function SheetPreview(props: SheetProps) {
                 slotAspect={aspect} view={viewOf(id)}
                 onAspect={(w, h) => onAspect(id, w, h)}
               />
+              {style === 'fullBleed' && props.fullBleedWords?.({
+                portrait, width: halfWidth, height: halfHeight,
+                visible: visiblePhotoRect(placePhoto(aspectOf(id), aspect, viewOf(id))),
+                index,
+              })}
             </div>
           );
         })}
@@ -431,7 +453,10 @@ function SheetPreview(props: SheetProps) {
               width: pct(rect.width), height: pct(rect.height),
             }}
           >
-            {bandFor(strips)}
+            {/* Each of two 10x15 is signed with its own photograph's date. */}
+            {strips || !props.band.marks ? bandFor(strips) : (
+              <SheetBand band={{ ...props.band, mark: props.band.marks[index] ?? null }} dark={props.bandDark} />
+            )}
           </div>
         ))}
         {/* No cut marks: the printer cuts the sheet, and the print has none. */}
@@ -583,7 +608,7 @@ export interface PrintStudioProps {
   canSubmit?: boolean;
   onSubmit: (submission: StudioSubmission) => void;
   /** Told the photographs chosen, in order, whenever they change (an owner's date is the first one's). */
-  onChosenChange?: (chosen: string[]) => void;
+  onChosenChange?: (chosen: string[], layout: PrintLayout | null) => void;
   /**
    * Told when a format is chosen that is not the one chosen before: the
    * page's own choices for the sheet (style, words, date, look) start again.
@@ -651,7 +676,7 @@ export function PrintStudio(props: PrintStudioProps) {
   const pendingRef = useRef<StudioSubmission | null>(null);
 
   const { onChosenChange } = props;
-  useEffect(() => { onChosenChange?.(chosen); }, [chosen, onChosenChange]);
+  useEffect(() => { onChosenChange?.(chosen, layout); }, [chosen, layout, onChosenChange]);
 
   // The natural shape of a photograph, learned when its preview loads. Until
   // then it is treated as filling its slot exactly, which crops nothing.
@@ -672,7 +697,7 @@ export function PrintStudio(props: PrintStudioProps) {
       : layout === 'grid4'
         ? gridSlotAspect(paper)
         : layout === 'photo2' || layout === 'quadStrip4'
-          ? catalogueSlotAspect(layout, 'framed', paper, portraitFor(id))
+          ? catalogueSlotAspect(layout, halvesStyle(layout, photoStyle), paper, portraitFor(id))
           : photoStyle === 'fullBleed'
             ? overlaySlotAspect(portraitFor(id), paper)
             : photoSlotAspect(portraitFor(id), paper, photoStyle)
@@ -706,7 +731,7 @@ export function PrintStudio(props: PrintStudioProps) {
     // focal point and the displayed zoom, clamped to what the new frame allows.
     // Two 10x15 turn together: every photograph of the sheet is reframed.
     const nextAspect = layout === 'photo2'
-      ? catalogueSlotAspect('photo2', 'framed', paper, next === 'portrait')
+      ? catalogueSlotAspect('photo2', halvesStyle('photo2', photoStyle), paper, next === 'portrait')
       : photoStyle === 'fullBleed'
         ? overlaySlotAspect(next === 'portrait', paper)
         : photoSlotAspect(next === 'portrait', paper, photoStyle);
@@ -1111,7 +1136,7 @@ export function PrintStudio(props: PrintStudioProps) {
           </h2>
           <SheetPreview
             layout={layout}
-            photoStyle={layout === 'photo' ? photoStyle : 'framed'}
+            photoStyle={layout === 'photo' || layout === 'photo2' ? photoStyle : 'framed'}
             sheetTheme={props.sheetTheme(layout)}
             bandDark={props.bandDark(layout)}
             band={props.band}

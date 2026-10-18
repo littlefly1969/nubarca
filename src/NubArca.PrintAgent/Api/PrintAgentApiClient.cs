@@ -31,7 +31,11 @@ public sealed record AgentMediaRemaining(bool Available, int? RemainingPrints, i
         : new(false, null, null);
 }
 public sealed record AgentClaim(Guid JobId, string ClaimToken, string Kind, string Format,
-    string ArtifactUrl, long ArtifactByteLength, string ContentType, string DeviceKey, bool Simulated = false);
+    string ArtifactUrl, long ArtifactByteLength, string ContentType, string DeviceKey, bool Simulated = false,
+    IReadOnlyList<AgentArtifactPart>? ArtifactParts = null);
+
+/// <summary>One file of a joined 20x15: a 10x15 JPEG, downloaded on its own.</summary>
+public sealed record AgentArtifactPart(string Url, long ByteLength, string ContentType);
 
 internal sealed record AgentRefusal(string? Error, string? MinimumVersion);
 
@@ -112,12 +116,17 @@ public sealed class PrintAgentApiClient
         return await response.Content.ReadFromJsonAsync<AgentClaim>(cancellationToken);
     }
 
-    public async Task DownloadAsync(AgentClaim claim, string path, long maxBytes,
+    public Task DownloadAsync(AgentClaim claim, string path, long maxBytes,
+        CancellationToken cancellationToken) =>
+        DownloadAsync(claim, claim.ArtifactUrl, claim.ArtifactByteLength, path, maxBytes, cancellationToken);
+
+    /// <summary>One file of the claim's artifact — the whole of it, or one part of several.</summary>
+    public async Task DownloadAsync(AgentClaim claim, string url, long byteLength, string path, long maxBytes,
         CancellationToken cancellationToken)
     {
-        if (claim.ArtifactByteLength is <= 0 || claim.ArtifactByteLength > maxBytes)
+        if (byteLength is <= 0 || byteLength > maxBytes)
             throw new InvalidDataException("Artifact exceeds the configured bound.");
-        using var request = Auth(HttpMethod.Get, claim.ArtifactUrl);
+        using var request = Auth(HttpMethod.Get, url);
         request.Headers.TryAddWithoutValidation(ClaimHeader, claim.ClaimToken);
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -135,6 +144,8 @@ public sealed class PrintAgentApiClient
             if (total > maxBytes) throw new InvalidDataException("Artifact stream exceeds the configured bound.");
             await target.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
         }
+        // A file cut short is never printed: it is the size the server named, or nothing.
+        if (total != byteLength) throw new InvalidDataException("Artifact is not the size the server named.");
         await target.FlushAsync(cancellationToken);
     }
 

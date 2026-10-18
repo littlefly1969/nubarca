@@ -46,6 +46,62 @@ public sealed class AgentExecutionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Joined_20x15_Downloads_Its_Two_10x15_On_Their_Own_And_Prints_Both_In_One_Submission()
+    {
+        var handler = new RecordingHandler();
+        handler.Bodies["/artifact/0"] = [0xFF, 0xD8, 0x01, 0xFF, 0xD9];
+        handler.Bodies["/artifact/1"] = [0xFF, 0xD8, 0x02, 0xFF, 0xD9];
+        var (coordinator, _, adapter, _) = await BuildAsync(handler);
+        var jobId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        await coordinator.ExecuteAsync(new AgentClaim(jobId, "claim", "owner-photo2", "4x6x2",
+            "/artifact/0", 5, "image/jpeg", "fake-10x15",
+            ArtifactParts: [new("/artifact/0", 5, "image/jpeg"), new("/artifact/1", 5, "image/jpeg")]), default);
+
+        // Two downloads, one submission of both files, in order, each its own bytes.
+        Assert.Equal(["/artifact/0", "/artifact/1"], handler.Downloads);
+        Assert.Equal(1, adapter.SubmissionCount);
+        var printed = Path.Combine(_root, "out", $"{jobId:N}.jpg");
+        Assert.Equal(handler.Bodies["/artifact/0"], await File.ReadAllBytesAsync(printed));
+        Assert.Equal(handler.Bodies["/artifact/1"], await File.ReadAllBytesAsync(Path.Combine(_root, "out", $"{jobId:N}.2.jpg")));
+        // Both files are gone once the outcome is sent.
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(_root, "temp")));
+    }
+
+    [Fact]
+    public async Task A_Joined_20x15_Whose_Second_10x15_Does_Not_Arrive_Whole_Prints_Nothing()
+    {
+        var handler = new RecordingHandler();
+        handler.Bodies["/artifact/0"] = [0xFF, 0xD8, 0x01, 0xFF, 0xD9];
+        handler.Bodies["/artifact/1"] = [0xFF, 0xD8, 0x02];
+        var (coordinator, journal, adapter, _) = await BuildAsync(handler);
+        await Assert.ThrowsAsync<InvalidDataException>(() => coordinator.ExecuteAsync(new AgentClaim(Guid.NewGuid(),
+            "claim", "owner-photo2", "4x6x2", "/artifact/0", 5, "image/jpeg", "fake-10x15",
+            ArtifactParts: [new("/artifact/0", 5, "image/jpeg"), new("/artifact/1", 5, "image/jpeg")]), default));
+
+        // Not the first alone, not a short second: nothing printed, nothing kept.
+        Assert.Equal(0, adapter.SubmissionCount);
+        Assert.Empty(await journal.LoadPendingAsync(default));
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(_root, "temp")));
+    }
+
+    [Fact]
+    public async Task A_Joined_20x15_Missing_A_File_On_Restart_Is_Never_Half_Printed()
+    {
+        var handler = new RecordingHandler();
+        var (coordinator, journal, adapter, _) = await BuildAsync(handler);
+        var artifact = Path.Combine(_root, "temp", "joined.jpg");
+        await File.WriteAllBytesAsync(artifact, [0xFF, 0xD8, 0x01, 0xFF, 0xD9]);
+        // Its second 10x15 is gone.
+        await journal.UpsertClaimedAsync(new JournalEntry(Guid.NewGuid(), "claim", artifact, "fake-10x15",
+            "image/jpeg", "4x6x2", LocalExecutionStates.Claimed, null, null), default);
+
+        await coordinator.RecoverAsync(default);
+
+        Assert.Equal(0, adapter.SubmissionCount);
+        Assert.Empty(await journal.LoadPendingAsync(default));
+    }
+
+    [Fact]
     public async Task Ack_Failure_Is_Retried_Without_Resubmitting()
     {
         var handler = new RecordingHandler { FailFirstResult = true };
@@ -212,11 +268,19 @@ public sealed class AgentExecutionTests : IDisposable
         public List<string> SubmittingClaims { get; } = [];
         public int ResultCalls { get; private set; }
         public string? LastOutcome { get; private set; }
+        public Dictionary<string, byte[]> Bodies { get; } = [];
+        public List<string> Downloads { get; } = [];
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             if (request.Method == HttpMethod.Get)
-                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) };
+            {
+                Downloads.Add(request.RequestUri!.AbsolutePath);
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(Bodies.GetValueOrDefault(request.RequestUri.AbsolutePath, [1, 2, 3, 4])),
+                };
+            }
             if (request.RequestUri!.AbsolutePath.EndsWith("/submitting", StringComparison.Ordinal))
             {
                 var json = await request.Content!.ReadAsStringAsync(cancellationToken);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import {
   ApiError,
@@ -341,9 +341,14 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
   const [caption, setCaption] = useState('');
   const [brand, setBrand] = useState(false);
   const [includeDate, setIncludeDate] = useState(false);
-  const [first, setFirst] = useState<string | null>(null);
-  const [date, setDate] = useState<{ id: string; value: OwnerPhotoPrintDate } | 'loading' | 'error' | null>(null);
-  const onChosenChange = useCallback((chosen: string[]) => setFirst(chosen[0] ?? null), []);
+  const [chosen, setChosen] = useState<{ ids: string[]; layout: PrintLayout | null }>({ ids: [], layout: null });
+  const onChosenChange = useCallback(
+    (ids: string[], layout: PrintLayout | null) => setChosen({ ids, layout }), []);
+  const first = chosen.ids[0] ?? null;
+  // The photographs whose date is printed: the first, or each of two 10x15.
+  const datedKey = chosen.ids.slice(0, chosen.layout === 'photo2' ? 2 : 1).join(',');
+  const dated = useMemo(() => (datedKey ? datedKey.split(',') : []), [datedKey]);
+  const [dates, setDates] = useState<Record<string, OwnerPhotoPrintDate | 'loading' | 'error'>>({});
   // Another format, or a print sent: the next sheet starts from the defaults.
   // Going back without changing the format keeps every choice.
   const resetChoices = useCallback(() => {
@@ -353,22 +358,31 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
     setIncludeDate(false);
   }, []);
 
-  // The date is the first photograph's, read only once someone asks for it.
+  // Each printed photograph's own date, read only once someone asks for it.
+  // A date read is kept by its photograph, so a reading is never stopped by
+  // another choice — only by leaving the page.
+  const datesController = useRef<AbortController | null>(null);
   useEffect(() => {
-    if (!includeDate || !first) return undefined;
-    if (date && typeof date === 'object' && date.id === first) return undefined;
-    const controller = new AbortController();
-    setDate('loading');
-    from.resolveDate(first, browserTimeZone(), controller.signal)
-      .then((value) => setDate({ id: first, value }))
-      .catch((err) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
-        setDate('error');
-      });
-    return () => controller.abort();
-  // `date` is what this effect writes: reading it here must not re-run it.
+    datesController.current = new AbortController();
+    return () => datesController.current?.abort();
+  }, []);
+  useEffect(() => {
+    const signal = datesController.current?.signal;
+    if (!includeDate || !signal) return;
+    const missing = dated.filter((id) => dates[id] === undefined || dates[id] === 'error');
+    if (missing.length === 0) return;
+    setDates((known) => ({ ...known, ...Object.fromEntries(missing.map((id) => [id, 'loading' as const])) }));
+    for (const id of missing) {
+      from.resolveDate(id, browserTimeZone(), signal)
+        .then((value) => setDates((known) => ({ ...known, [id]: value })))
+        .catch((err) => {
+          if (err instanceof DOMException && err.name === 'AbortError') return;
+          setDates((known) => ({ ...known, [id]: 'error' }));
+        });
+    }
+  // `dates` is what this effect writes: reading it here must not re-run it.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [includeDate, first, from]);
+  }, [includeDate, dated, from]);
   // "Esce dalla foto": the first photograph's subject, lifted once it is
   // asked for, for the preview and the framing NubArca proposes — every
   // subject, or the one person the owner touched. The print itself lifts it
@@ -422,9 +436,13 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
     });
   };
 
-  const dateText = includeDate && date && typeof date === 'object' && date.id === first
-    ? formatOwnerPrintDate(date.value.date, lang)
-    : null;
+  const dateOf = (id: string) => {
+    const known = dates[id];
+    return includeDate && known && typeof known === 'object' ? formatOwnerPrintDate(known.date, lang) : null;
+  };
+  const dateTexts = dated.map(dateOf);
+  const dateText = dateTexts[0] ?? null;
+  const allDated = dated.length > 0 && dateTexts.every((text) => text !== null);
   const captionInvalid = captionError(caption);
 
   // --- sending --------------------------------------------------------------------
@@ -434,9 +452,17 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
   const [resetSignal, setResetSignal] = useState(0);
   const [sent, setSent] = useState<{ shortCode: string; queueAhead: number } | null>(null);
 
+  // One photograph takes the chosen style, and each of two 10x15 takes it as
+  // a 10x15 would (to the edges or framed, never "Esce dalla foto"); four and
+  // the strips are framed.
+  const styleFor = (layout: PrintLayout): PrintStyleChoice => (
+    layout === 'photo' ? style : layout === 'photo2' && style === 'fullBleed' ? 'fullBleed' : 'framed'
+  );
+  const framedFor = (layout: PrintLayout) => styleFor(layout) !== 'fullBleed';
+
   const submit = async (composition: StudioSubmission) => {
     if (!target) return;
-    const framed = composition.layout !== 'photo' || style !== 'fullBleed';
+    const framed = framedFor(composition.layout);
     const line = caption.replace(/\s+/g, ' ').trim();
     setSubmitting(true);
     setError(null);
@@ -445,7 +471,7 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
       const accepted = await from.submit(target, {
         expectedPaperSize: target.paper,
         layout: composition.layout,
-        style: composition.layout === 'photo' ? style : 'framed',
+        style: styleFor(composition.layout),
         photos: composition.slots.map((slot) => ({ fileItemId: slot.itemId, placement: slot.placement })),
         ...(composition.layout === 'photo' && style === 'popOut' && subjectPoint ? { subject: subjectPoint } : {}),
         ...(composition.orientation ? { orientation: composition.orientation } : {}),
@@ -559,8 +585,9 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
     );
   }
 
-  const framedFor = (layout: PrintLayout) => layout !== 'photo' || style !== 'fullBleed';
-  const styles: PrintStyleChoice[] = popOut ? ['fullBleed', 'framed', 'popOut'] : ['fullBleed', 'framed'];
+  const stylesFor = (layout: PrintLayout): PrintStyleChoice[] => (
+    layout === 'photo' && popOut ? ['fullBleed', 'framed', 'popOut'] : ['fullBleed', 'framed']
+  );
 
   return (
     <OwnerPrintShell title={title} back={back}>
@@ -617,13 +644,19 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
         sheetTheme={(layout) => (framedFor(layout) ? 'pure' : 'overlay')}
         bandDark={() => false}
         paperColor={(layout) => (framedFor(layout) ? FRAMED_PAPER : FULL_BLEED_PAPER)}
-        band={{ title: caption.replace(/\s+/g, ' ').trim() || null, line: null, mark: dateText, brand }}
-        fullBleedWords={dateText ? (sheet) => <PrintedDate text={dateText} sheet={sheet} /> : undefined}
+        band={{
+          title: caption.replace(/\s+/g, ' ').trim() || null, line: null, mark: dateText, brand,
+          marks: chosen.layout === 'photo2' ? dateTexts : undefined,
+        }}
+        fullBleedWords={dateText ? (sheet) => {
+          const text = dateTexts[sheet.index] ?? null;
+          return text ? <PrintedDate text={text} sheet={sheet} /> : null;
+        } : undefined}
         compositionKey={JSON.stringify([target?.key, style, caption, brand, includeDate, lang, subjectPoint])}
         submitError={error ? t(error) : null}
         submitting={submitting}
         canSubmit={target !== null && target.unavailable === null && !captionInvalid
-          && (!includeDate || dateText !== null)
+          && (!includeDate || allDated)
           && (style !== 'popOut' || popOutLayer !== null)}
         popOut={popOutLayer}
         onChosenChange={onChosenChange}
@@ -632,10 +665,10 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
         onSubmit={(composition) => { void submit(composition); }}
         options={(layout) => (
           <>
-            {layout === 'photo' && (
+            {(layout === 'photo' || layout === 'photo2') && (
               <fieldset className="party-print-themes" data-testid="owner-print-style">
                 <legend>{t('ownerPrint.style')}</legend>
-                {styles.map((option) => (
+                {stylesFor(layout).map((option) => (
                   <label key={option} className="party-print-theme">
                     <input
                       type="radio"
@@ -715,12 +748,14 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
             </label>
             {includeDate && (
               <p className="party-print-hint" data-testid="owner-print-date-note" role="status">
-                {date === 'loading' || date === null || (typeof date === 'object' && date.id !== first)
-                  ? t('ownerPrint.dateLoading')
-                  : date === 'error' ? t('ownerPrint.dateError')
-                    : date.value.source === 'today'
-                      ? t('ownerPrint.dateToday', { date: dateText ?? '' })
-                      : t('ownerPrint.datePhoto', { date: dateText ?? '' })}
+                {dated.some((id) => dates[id] === 'error') ? t('ownerPrint.dateError')
+                  : !allDated ? t('ownerPrint.dateLoading')
+                    // Two 10x15: each photograph's own date, in order.
+                    : dated.map((id, index) => {
+                      const known = dates[id] as OwnerPhotoPrintDate;
+                      return t(known.source === 'today' ? 'ownerPrint.dateToday' : 'ownerPrint.datePhoto',
+                        { date: dateTexts[index] ?? '' });
+                    }).join(' · ')}
               </p>
             )}
           </>

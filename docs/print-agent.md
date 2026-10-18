@@ -484,17 +484,32 @@ goes out exactly as it always has. A `13x18` job names `-o PageSize=w360h504`
 two papers only while the queue's driver lists those sizes (`lpoptions -l`,
 read once every ten minutes).
 
-**Two 10×15 and four strips on 20×15** (from agent 0.10.0). The server draws
-the whole 20×15: two 10×15 halves side by side, or one above the other. The
-agent sends it as ONE CUPS job of two 4×6 pages, one per half (`HalvesPdf`, a
-two-page PDF that shows each half of the same JPEG, so no pixel is decoded on
-the box). With 6×8 media loaded, Gutenprint's DNP backend joins two 4×6 pages
-of one job on one 6×8 sheet, and the printer cuts it in two. A `4x6x2` goes to
+**Two 10×15 and four strips on 20×15** (from agent 0.11.0). The server renders
+the two 10×15 as two JPEGs, each on its own and exactly as that 10×15 prints
+alone (two photos, or two twin strips). It stores them as one parts artifact
+(`PrintArtifactParts`), so the job keeps one owner of its bytes. The claim
+lists each file, and the agent downloads each one separately
+(`/jobs/{id}/artifact/{part}`). It then passes both files to ONE `lp`, one
+CUPS job of two documents, each on the queue's own 4×6 page as a 10×15 always
+goes. With 6×8 media loaded, Gutenprint's DNP backend joins the two 4×6 of one
+job on one 6×8 sheet, and the printer cuts it in two. An agent older than
+0.11.0 is not handed these jobs: they wait until it updates. A `4x6x2` goes to
 the photo queue; a `2x6x4` goes to the strip queue, whose 2-inch cut makes
 each half two strips, so four in all. The agent reports `4x6x2` and `2x6x4`
 only beside `20x15`, and only while the driver lists the DNP's cut 6×8 sizes
 (`w432h576-div2`, `w432h576-div4`). It reports `2x6x4` only with the strip
 queue ready. The server sends them only while 20×15 is the loaded paper.
+Those two sizes are only the capability sign: the job never names them, nor
+any `PageSize`. Each file keeps its queue's own size, so the strip queue's
+`w288h432-div2` (its 2-inch cut) holds. A part that arrives short or not at
+all prints nothing, and a box that restarts with only one of the two files
+drops the job rather than printing half of it.
+
+**Unverified on hardware.** CUPS accepts several files in one `lp` request.
+Gutenprint's DNP backend pairs compatible 4×6 jobs (`dnp_combine_jobs`). It
+has not been proven, offline or on a DS-RX1HS, that two documents of one CUPS
+job reach that pairing as one combinable backend stream. The 6×8 join and the
+cuts are therefore expected, not guaranteed.
 
 `setup-cups` takes the printer's **Gutenprint dye-sub** device
 (`gutenprint53+usb://dnp-dsrx1/…`, plain `usb://` only as a last resort) and

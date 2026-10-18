@@ -101,9 +101,18 @@ public static class PrintLayouts
     /// <summary>The most photographs any format takes: four different strips.</summary>
     public static int MostPhotos { get; } = All.Max(MaxPhotos);
 
-    /// <summary>A style is a single photograph's choice; four and the strips are always framed.</summary>
-    public static bool SupportsStyle(string layout, string style) =>
-        style == Framed ? IsKnown(layout) : style is (FullBleed or PopOut) && layout == Photo;
+    /// <summary>
+    /// A style is a single photograph's choice, and each of two 10x15 is one:
+    /// framed or to the edges. Four and the strips are always framed, and
+    /// "Esce dalla foto" is one photograph's alone.
+    /// </summary>
+    public static bool SupportsStyle(string layout, string style) => style switch
+    {
+        Framed => IsKnown(layout),
+        FullBleed => layout is Photo or Photo2,
+        PopOut => layout == Photo,
+        _ => false,
+    };
 
     /// <summary>
     /// Which way the sheet stands: a single photograph's as it is placed; four
@@ -132,7 +141,7 @@ public static class PrintLayouts
         var (w, h) = Sheet(paper, sheetPortrait);
         return layout switch
         {
-            Photo2 or QuadStrip4 => Halves(layout, w, h, portrait),
+            Photo2 or QuadStrip4 => Halves(layout, style, w, h, portrait),
             Grid4 => new(w, h, [.. Enumerable.Range(0, 4).Select(i => GridSlot(paper, i))], [GridFooter(paper)]),
             TwinStrip4 => new(w, h,
                 [.. Enumerable.Range(0, StripsPerSheet).SelectMany(strip =>
@@ -260,18 +269,19 @@ public static class PrintLayouts
     /// </summary>
     public const int HalvesPerSheet = 2;
 
-    /// <summary>What each half of a halved 20x15 is: one framed 10x15 photograph, or the twin strip.</summary>
+    /// <summary>What each half of a halved 20x15 is: one 10x15 photograph, or the twin strip.</summary>
     public static string HalfLayout(string layout) => layout == QuadStrip4 ? TwinStrip4 : Photo;
 
     /// <summary>
     /// Both halves, each the 10x15 sheet of <see cref="HalfLayout"/> placed in
     /// its half: side by side on a lying sheet, one above the other on a
-    /// standing one. The slots are the first half's, then the second's — the
-    /// four strips left to right.
+    /// standing one. Two photographs are each the 10x15 print of their style,
+    /// framed or to the edges; the strips are always framed. The slots are the
+    /// first half's, then the second's — the four strips left to right.
     /// </summary>
-    private static PrintSheetLayout Halves(string layout, int w, int h, bool photoPortrait)
+    private static PrintSheetLayout Halves(string layout, string style, int w, int h, bool photoPortrait)
     {
-        var half = Arrange(HalfLayout(layout), Framed, PrintPapers.Photo10x15, photoPortrait);
+        var half = Arrange(HalfLayout(layout), layout == Photo2 ? style : Framed, PrintPapers.Photo10x15, photoPortrait);
         var sideBySide = w > h;
         (double X, double Y, double Width, double Height) Place(
             (double X, double Y, double Width, double Height) r, int index) => sideBySide

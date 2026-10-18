@@ -112,9 +112,15 @@ export function layoutPhotoCounts(layout: PrintLayout): readonly number[] {
   }
 }
 
-/** A style is a single photograph's choice; four and the strips are always framed. */
+/**
+ * A style is a single photograph's choice, and each of two 10x15 is one: framed
+ * or to the edges. Four and the strips are always framed, and "Esce dalla foto"
+ * is one photograph's alone.
+ */
 export function layoutSupportsStyle(layout: PrintLayout, style: PrintStyle): boolean {
-  return style === 'framed' || ((style === 'fullBleed' || style === 'popOut') && layout === 'photo');
+  if (style === 'framed') return true;
+  if (style === 'fullBleed') return layout === 'photo' || layout === 'photo2';
+  return layout === 'photo';
 }
 
 /**
@@ -139,7 +145,7 @@ export function arrangeSheet(
 ): PrintSheetLayout {
   const standing = sheetPortrait(layout, paper, portrait);
   const [width, height] = printSheet(paper, standing);
-  if (layout === 'photo2' || layout === 'quadStrip4') return halves(layout, width, height, portrait);
+  if (layout === 'photo2' || layout === 'quadStrip4') return halves(layout, style, width, height, portrait);
   if (layout === 'grid4') {
     return { width, height, slots: [0, 1, 2, 3].map((i) => gridSlot(paper, i)), bands: [gridFooter(paper)] };
   }
@@ -235,7 +241,7 @@ export function popOutArea(paper: PrintPaper, portrait: boolean): PrintRect {
 /** A 20x15 is two 10x15 (6x8 inches is two 4x6): each half is laid out as that sheet would be. */
 export const HALVES_PER_SHEET = 2;
 
-/** What each half of a halved 20x15 is: one framed 10x15 photograph, or the twin strip. */
+/** What each half of a halved 20x15 is: one 10x15 photograph, or the twin strip. */
 export function halfLayout(layout: PrintLayout): PrintLayout {
   return layout === 'quadStrip4' ? 'twinStrip4' : 'photo';
 }
@@ -245,8 +251,10 @@ export function halfLayout(layout: PrintLayout): PrintLayout {
  * by side on a lying sheet, one above the other on a standing one — the first
  * half's slots, then the second's.
  */
-function halves(layout: PrintLayout, width: number, height: number, portrait: boolean): PrintSheetLayout {
-  const half = arrangeSheet(halfLayout(layout), 'framed', '10x15', portrait);
+function halves(
+  layout: PrintLayout, style: PrintStyle, width: number, height: number, portrait: boolean,
+): PrintSheetLayout {
+  const half = arrangeSheet(halfLayout(layout), layout === 'photo2' ? style : 'framed', '10x15', portrait);
   const sideBySide = width > height;
   const place = (r: PrintRect, index: number): PrintRect => (sideBySide
     ? { x: (index + r.x) / HALVES_PER_SHEET, y: r.y, width: r.width / HALVES_PER_SHEET, height: r.height }

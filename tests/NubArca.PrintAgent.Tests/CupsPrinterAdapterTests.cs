@@ -152,59 +152,51 @@ public sealed class CupsPrinterAdapterTests
         Assert.Equal(["10x15", "2x6x2"], (await no6x8.GetCapabilitiesAsync(Device(), default)).Formats);
     }
 
-    /// <summary>The header of a 2400x1800 (or turned) RGB JPEG: all a sheet's halves are cut by.</summary>
-    internal static byte[] SheetJpeg(int width, int height) =>
-    [
-        0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08,
-        (byte)(height >> 8), (byte)height, (byte)(width >> 8), (byte)width, 0x03,
-        0x01, 0x11, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01,
-        0xFF, 0xD9,
-    ];
-
     [Theory]
     [InlineData("4x6x2", Photo)]
     [InlineData("2x6x4", Strip)]
-    public async Task A_20x15_Goes_As_One_Job_Of_Its_Two_10x15_Halves(string format, string queue)
+    public async Task A_20x15_Goes_As_One_Job_Of_Its_Two_Own_10x15_Files(string format, string queue)
     {
-        string? sent = null;
-        byte[]? pdf = null;
         var runner = new FakeProcessRunner((file, args) =>
-        {
-            if (file != "lp") return file == "lpstat" ? FakeProcessRunner.Ok(BothIdle) : ProcessResult.Missing(file);
-            sent = args[^1];
-            pdf = File.ReadAllBytes(sent);
-            return FakeProcessRunner.Ok("request id is NubArca-RX1HS-42 (1 file(s))\n");
-        });
+            file == "lp" ? FakeProcessRunner.Ok("request id is NubArca-RX1HS-42 (2 file(s))\n")
+            : file == "lpstat" ? FakeProcessRunner.Ok(BothIdle) : ProcessResult.Missing(file));
         var adapter = new CupsPrinterAdapter(Photo, Strip, runner, NullLogger<CupsPrinterAdapter>.Instance);
-        var artifact = Path.GetTempFileName();
+        var directory = Directory.CreateTempSubdirectory().FullName;
         try
         {
-            await File.WriteAllBytesAsync(artifact, SheetJpeg(2400, 1800));
+            var files = JobArtifactFiles.Of(Path.Combine(directory, "job.jpg"), format);
+            Assert.Equal(2, files.Count);
+            await File.WriteAllBytesAsync(files[0], [0xFF, 0xD8, 0x01, 0xFF, 0xD9]);
+            await File.WriteAllBytesAsync(files[1], [0xFF, 0xD8, 0x02, 0xFF, 0xD9]);
             var jobId = Guid.Parse("0d99a1b2-0000-0000-0000-000000000000");
-            var result = await adapter.SubmitAsync(new PrintSubmission(jobId, Photo, artifact, "image/jpeg", format), default);
+            var result = await adapter.SubmitAsync(
+                new PrintSubmission(jobId, Photo, files[0], "image/jpeg", format, Files: files), default);
 
             Assert.True(result.Accepted);
+            // ONE lp, of both files in order, each on the queue's own 10x15
+            // page as a 10x15 always goes: the driver joins the two on the 6x8.
             var lp = Assert.Single(runner.Calls, c => c.File == "lp");
-            // The queue's own 10x15 page: the driver joins the two on the 6x8.
-            Assert.Equal(["-d", queue, "-t", "NubArca-0d99a1b2", "-o", "fit-to-page", artifact + ".halves.pdf"], lp.Args);
-            Assert.Contains("/Count 2", System.Text.Encoding.ASCII.GetString(pdf!));
-            // Spooled, then gone.
-            Assert.False(File.Exists(sent));
+            Assert.Equal(["-d", queue, "-t", "NubArca-0d99a1b2", "-o", "fit-to-page", files[0], files[1]], lp.Args);
         }
-        finally { File.Delete(artifact); }
+        finally { Directory.Delete(directory, recursive: true); }
     }
 
     [Fact]
-    public async Task A_20x15_That_Is_Not_Two_10x15_Is_Refused_Before_CUPS_Is_Asked()
+    public async Task A_20x15_That_Is_Not_Two_10x15_Files_Is_Refused_Before_CUPS_Is_Asked()
     {
         var (adapter, runner) = Adapter(BothIdle);
         var artifact = Path.GetTempFileName();
         try
         {
-            await File.WriteAllBytesAsync(artifact, [0x89, 0x50, 0x4E, 0x47]);
+            await File.WriteAllBytesAsync(artifact, [0xFF, 0xD8, 0xFF, 0xD9]);
+            // One file where the format prints two.
             var result = await adapter.SubmitAsync(
                 new PrintSubmission(Guid.NewGuid(), Photo, artifact, "image/jpeg", "4x6x2"), default);
             Assert.Equal("artifact_invalid", result.FailureCode);
+            // Its second file missing.
+            var missing = await adapter.SubmitAsync(new PrintSubmission(Guid.NewGuid(), Photo, artifact, "image/jpeg",
+                "4x6x2", Files: JobArtifactFiles.Of(artifact, "4x6x2")), default);
+            Assert.Equal("artifact_missing", missing.FailureCode);
             Assert.DoesNotContain(runner.Calls, c => c.File == "lp");
         }
         finally { File.Delete(artifact); }

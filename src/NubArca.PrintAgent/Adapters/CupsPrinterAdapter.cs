@@ -24,12 +24,13 @@ public interface IPrintSystemHealth
 /// lists the 5x7 and 6x8 page sizes (<c>lpoptions -l</c>), and only those
 /// jobs carry a PageSize: a 10x15 goes out exactly as it always has.
 ///
-/// A joined 20x15 (<c>4x6x2</c>, <c>2x6x4</c>) arrives as one 20x15 sheet and
-/// leaves as one CUPS job of its two 10x15 halves (<see cref="HalvesPdf"/>):
-/// with 6x8 media in, Gutenprint's DNP backend puts two 10x15 of one job on one
-/// sheet and the printer cuts it — in two, or with the strip queue's 2-inch
-/// cut, in four strips. It is advertised while the driver lists the DNP's own
-/// cut 6x8 sizes, the sign of a printer that does this.
+/// A joined 20x15 (<c>4x6x2</c>, <c>2x6x4</c>) arrives as its two 10x15 JPEGs,
+/// each downloaded on its own, and leaves as ONE CUPS job of those two files,
+/// each printed exactly as a 10x15 is: with 6x8 media in, Gutenprint's DNP
+/// backend puts the two 10x15 of one job on one sheet and the printer cuts it —
+/// in two, or with the strip queue's 2-inch cut, in four strips. It is
+/// advertised while the driver lists the DNP's own cut 6x8 sizes, the sign of
+/// a printer that does this.
 /// </summary>
 public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
 {
@@ -258,43 +259,28 @@ public sealed class CupsPrinterAdapter : IPrinterAdapter, IPrintSystemHealth
                 return new PrintSubmissionResult(false, null, "simulation_unavailable");
             queue = twin;
         }
-        if (!File.Exists(submission.ArtifactPath))
+        var files = submission.AllFiles;
+        if (!files.All(File.Exists))
             return new PrintSubmissionResult(false, null, "artifact_missing");
+        // A joined 20x15 is its two 10x15 files, no more, no fewer.
+        if (SpoolerQueueRouting.LargeCuts.Contains(submission.Format) != (files.Count == 2) || files.Count > 2)
+            return new PrintSubmissionResult(false, null, "artifact_invalid");
 
         // A simulated job carries its whole id as its title: the twin's backend
         // names its output by it, so a clear can name exactly what to delete.
         var title = submission.Simulated
             ? $"NubArca-{submission.JobId:N}"
             : $"NubArca-{submission.JobId.ToString("N")[..8]}";
-        // A joined 20x15 goes as its two 10x15 halves, one job of two pages.
-        var file = submission.ArtifactPath;
-        string? halves = null;
-        if (SpoolerQueueRouting.LargeCuts.Contains(submission.Format))
-        {
-            var pdf = HalvesPdf.FromSheet(await File.ReadAllBytesAsync(submission.ArtifactPath, cancellationToken));
-            if (pdf is null) return new PrintSubmissionResult(false, null, "artifact_invalid");
-            halves = submission.ArtifactPath + ".halves.pdf";
-            await File.WriteAllBytesAsync(halves, pdf, cancellationToken);
-            file = halves;
-        }
-
         // fit-to-page: the artifact is exactly the sheet's shape, so fitting it
         // fills the page; without it CUPS would print the JPEG at an assumed
         // pixel density and the photograph would come out the wrong size.
-        // A larger paper names its page size; a 10x15 keeps the queue's own.
+        // A larger paper names its page size; a 10x15 keeps the queue's own —
+        // and so does each 10x15 of a joined 20x15: both files go in one lp,
+        // one CUPS job of two documents, which the DNP backend joins.
         string[] arguments = PageSizeFor(submission.Format) is { } pageSize
-            ? ["-d", queue, "-t", title, "-o", $"PageSize={pageSize}", "-o", "fit-to-page", file]
-            : ["-d", queue, "-t", title, "-o", "fit-to-page", file];
-        ProcessResult result;
-        try
-        {
-            result = await _runner.RunAsync("lp", arguments, SubmitTimeout, cancellationToken);
-        }
-        finally
-        {
-            // lp has copied it into the spool by the time it returns.
-            if (halves is not null) File.Delete(halves);
-        }
+            ? ["-d", queue, "-t", title, "-o", $"PageSize={pageSize}", "-o", "fit-to-page", .. files]
+            : ["-d", queue, "-t", title, "-o", "fit-to-page", .. files];
+        var result = await _runner.RunAsync("lp", arguments, SubmitTimeout, cancellationToken);
         Invalidate();
         if (result.Succeeded)
         {
