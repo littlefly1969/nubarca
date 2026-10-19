@@ -526,6 +526,11 @@ a {
   height: 1px;
   overflow: hidden;
 }
+.tv-personal-viewer .tv-viewer-selectmark {
+  position: absolute; top: 2.5rem; left: 2.5rem; z-index: 3;
+  display: grid; place-items: center; width: 3rem; height: 3rem; border-radius: 50%;
+  border: 3px solid #fff; background: var(--accent); color: #fff; font-size: 1.5rem; font-weight: 600;
+}
 .tv-personal-gallery .tv-tile-selected {
   border-color: #60a5fa;
   box-shadow: inset 0 0 0 3px #fff;
@@ -2784,8 +2789,9 @@ button.logout {
   background: color-mix(in srgb, var(--accent) 82%, #000);
 }
 
-/* Selection control: top-left, revealed on hover/focus, always shown once
-   selected or on touch devices (no hover). */
+/* Selection control: the round "tondino", top-left. Revealed on hover/focus,
+   always shown once selected, while a selection is active, or on touch devices
+   (no hover). Tapping the photograph itself always opens the viewer. */
 .media-tile__select {
   position: absolute;
   top: 6px;
@@ -2797,8 +2803,8 @@ button.logout {
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-radius: 6px;
-  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 50%;
+  border: 2px solid rgb(255 255 255 / 85%);
   background: color-mix(in srgb, #000 42%, transparent);
   color: #fff;
   font-size: 0.9rem;
@@ -2809,6 +2815,7 @@ button.logout {
 }
 .media-tile:hover .media-tile__select,
 .media-tile:focus-within .media-tile__select,
+.media-tile[data-interaction-mode='select'] .media-tile__select,
 .media-tile[data-selected='true'] .media-tile__select {
   opacity: 1;
 }
@@ -8905,8 +8912,6 @@ video.lightbox-image {
 .media-workspace .media-filter-chip { max-width: 85vw; }
 .media-filter-chip-remove { flex: 0 0 auto; min-width: 1.75rem; min-height: 1.75rem; }
 .media-tile[data-interaction-mode] .media-tile__open { touch-action: pan-y pinch-zoom; user-select: none; -webkit-touch-callout: none; }
-.media-tile__selection-mark { position: absolute; top: .4rem; left: .4rem; z-index: 4; display: grid; place-items: center; width: 1.6rem; height: 1.6rem; border: 2px solid #fff; border-radius: 50%; background: rgb(0 0 0 / 55%); color: #fff; font-weight: 600; pointer-events: none; }
-.media-tile[data-selected='true'] .media-tile__selection-mark { background: var(--accent-strong); color: var(--accent-contrast); }
 .media-tile[data-interaction-mode='select'][data-selected='true']::after { content: ''; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 3px var(--accent-strong); }
 .ws-dock-count-number { display: none; }
 .ws-mobile-tools { display: block; }
@@ -8946,3 +8951,34 @@ video.lightbox-image {
 .admin-updates .updates-confirm { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.875rem; }
 .admin-updates .updates-run-message { overflow-wrap: anywhere; }
 .admin-updates .updates-boxes { margin-top: 1.5rem; overflow-x: auto; }
+
+/* Selection inside the viewer: the same round mark as the grid tile, so a pick
+   reads the same wherever it was made. */
+.media-viewer-select { display: inline-flex; align-items: center; gap: .4rem; }
+.media-viewer-select__mark {
+  display: inline-grid; place-items: center; width: 1.4rem; height: 1.4rem;
+  border: 2px solid #fff; border-radius: 50%; font-size: .85rem; line-height: 1;
+}
+.media-viewer-select.is-selected .media-viewer-select__mark { background: var(--accent); border-color: var(--accent); }
+.media-viewer-select__count { font-size: .8rem; font-weight: 600; }
+
+/* The dock's count opens the tray. */
+.ws-dock-count.is-button { border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+
+/* The tray: what is selected, removable one by one. */
+.selection-tray {
+  position: fixed; z-index: 60; right: 1rem; bottom: 5.5rem; width: min(22rem, calc(100vw - 2rem));
+  max-height: min(60vh, 32rem); display: flex; flex-direction: column;
+  background: var(--surface-overlay); color: var(--text-primary); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
+}
+.selection-tray__head { display: flex; align-items: center; justify-content: space-between; padding: .6rem .8rem; }
+.selection-tray__head h3 { margin: 0; font-size: 1rem; }
+.selection-tray__close, .selection-tray__remove { border: 0; background: transparent; color: inherit; cursor: pointer; }
+.selection-tray__list { list-style: none; margin: 0; padding: 0 .4rem .6rem; overflow-y: auto; }
+.selection-tray__item { display: grid; grid-template-columns: 3rem 1fr auto; align-items: center; gap: .6rem; padding: .25rem .4rem; }
+.selection-tray__item img, .selection-tray__placeholder {
+  width: 3rem; height: 3rem; object-fit: cover; border-radius: 6px; display: grid; place-items: center;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.selection-tray__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

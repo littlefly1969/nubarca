@@ -12,6 +12,7 @@ import {
   type SemanticBestMatch,
 } from '@nubarca/api-client';
 import { useMediaSelection, type MediaSelection } from '../../gallery/useMediaSelection';
+import type { MediaSelectionStore } from '../../selection/mediaSelectionStore';
 import {
   DEFAULT_MEDIA_LIMIT,
   isSemanticActive,
@@ -303,6 +304,9 @@ export interface UseMediaWorkspaceOptions {
   // fingerprint effect below.
   identity: MediaWorkspaceIdentity;
   onAuthError?(): void;
+  // The selection's home. The account store keeps one selection across tabs,
+  // albums, filters and pages; without one the wall keeps its own.
+  selectionStore?: MediaSelectionStore | null;
   translate: {
     loadError: string;
     loadMoreError: string;
@@ -312,16 +316,16 @@ export interface UseMediaWorkspaceOptions {
 }
 
 export function useMediaWorkspace(
-  { source, identity, onAuthError, translate }: UseMediaWorkspaceOptions,
+  { source, identity, onAuthError, translate, selectionStore = null }: UseMediaWorkspaceOptions,
 ): UseMediaWorkspaceResult {
-  const selection = useMediaSelection({ explicitMode: true });
+  const selection = useMediaSelection({ explicitMode: true, store: selectionStore });
+  const store = selection.store;
 
   const [items, setItems] = useState<MediaItem[]>([]);
   const [previousCursor, setPreviousCursor] = useState<string | null>(null);
   const [navigationBusy, setNavigationBusy] = useState(false);
   const [navigationRevision, setNavigationRevision] = useState(0);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; revision: number } | null>(null);
-  const selectedCache = useRef(new Map<string, MediaItem>());
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [total, setTotal] = useState<number | null>(null);
   const [photoCount, setPhotoCount] = useState<number | null>(null);
@@ -365,14 +369,14 @@ export function useMediaWorkspace(
     setPreviousCursor(null);
     setNavigationBusy(false);
     setScrollTarget(null);
-    selectedCache.current.clear();
     setNavigationRevision((v) => v + 1);
     setNextCursor(null);
     setTotal(null);
     setViewerIndex(null);
     setSemanticNotice(null);
     setSemanticEvidence(NO_EVIDENCE);
-    selection.clear();
+    // The selection deliberately SURVIVES a new query: changing tab, filter,
+    // sort or album must never drop what the user already picked.
     setPhase({ kind: 'loadingInitial' });
 
     void (async () => {
@@ -468,8 +472,6 @@ export function useMediaWorkspace(
     setNavigationBusy(false);
     setScrollTarget(null);
     setNavigationRevision((v) => v + 1);
-    selectedCache.current.clear();
-    selection.clear();
     setViewerIndex(null);
     setSemanticNotice(null);
     setSemanticEvidence(NO_EVIDENCE);
@@ -496,7 +498,7 @@ export function useMediaWorkspace(
         if (gen === generationRef.current) loadingRef.current = false;
       }
     })();
-  }, [identity, source, selection, handleError, translate.loadError, noticeFor]);
+  }, [identity, source, handleError, translate.loadError, noticeFor]);
 
   const navigateWindow = useCallback(async (target: string | null): Promise<boolean> => {
     const before = target === null;
@@ -524,8 +526,6 @@ export function useMediaWorkspace(
         setPreviousCursor(data.previousCursor);
       } else {
         setViewerIndex(null);
-        for (const id of selectedCache.current.keys()) if (!selection.isSelected(id)) selectedCache.current.delete(id);
-        for (const item of items) if (selection.isSelected(item.id)) selectedCache.current.set(item.id, item);
         setItems(data.items);
         setNextCursor(data.nextCursor);
         setPreviousCursor(data.previousCursor);
@@ -549,12 +549,20 @@ export function useMediaWorkspace(
         setPhase((prev) => prev.kind === 'loadingMore' ? { kind: 'ready' } : prev);
       }
     }
-  }, [identity, source, previousCursor, items, selection, handleError, translate.loadError]);
+  }, [identity, source, previousCursor, items, handleError, translate.loadError]);
 
+  // Every page that lands refreshes the display snapshot of the selected media
+  // in it, so a selection made here can still be reasoned about (photo or
+  // video) once this wall shows something else.
+  useEffect(() => { store.remember(items); }, [store, items, selection.selected]);
   const selectedItems = useMemo(() => {
-    const available = new Map([...selectedCache.current, ...items.map((it) => [it.id, it] as const)]);
-    return [...selection.selected].flatMap((id) => available.has(id) ? [available.get(id)!] : []);
-  }, [items, selection.selected]);
+    const loaded = new Map(items.map((it) => [it.id, it] as const));
+    const known = store.getSnapshot().items;
+    return [...selection.selected].flatMap((id) => {
+      const item = loaded.get(id) ?? known.get(id);
+      return item ? [item] : [];
+    });
+  }, [items, selection.selected, store]);
 
   const removeLoadedIds = useCallback((ids: string[]) => {
     const set = new Set(ids);
@@ -563,7 +571,8 @@ export function useMediaWorkspace(
       return prev.filter((it) => !set.has(it.id));
     });
     setTotal((prev) => (prev !== null ? Math.max(0, prev - ids.length) : prev));
-    selection.clear();
+    // What was processed leaves the selection; anything else picked stays.
+    selection.remove(ids);
     setNavigationRevision((v) => v + 1);
   }, [selection]);
 
@@ -574,7 +583,6 @@ export function useMediaWorkspace(
   }, [selection, refresh]);
 
   const patchItem = useCallback((id: string, patch: Partial<MediaItem>) => {
-    if (selectedCache.current.has(id)) selectedCache.current.set(id, { ...selectedCache.current.get(id)!, ...patch } as MediaItem);
     setNavigationRevision((v) => v + 1);
     setItems((prev) => prev.map((it) => (it.id === id ? ({ ...it, ...patch } as MediaItem) : it)));
   }, []);

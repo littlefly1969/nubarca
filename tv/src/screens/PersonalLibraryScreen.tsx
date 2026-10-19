@@ -45,6 +45,8 @@ import {
   VIDEO_FALLBACK_ASPECT_RATIO,
 } from '../lib/mediaAspectRatio';
 import { useI18n } from '../i18n';
+import type { TvSelectionStore } from '../lib/tvSelection';
+import { useTvSelection } from '../lib/useTvSelection';
 import { actionableEventType, isMediaTransportEvent } from '../lib/remoteEvent';
 import { displayTotal, mergePagedTotal } from '../personal/pagingTotals';
 import { isSemanticActive } from '../personal/mediaWorkspaceQuery';
@@ -127,6 +129,9 @@ interface Props {
   onBack: () => void;
   onGrantInvalid: (reason?: 'pinChanged') => void;
   onSessionInvalid: () => void;
+  // The Personal Area selection, shared by the library and every album of this
+  // Personal session. OK in the viewer picks into it; the tiles show it.
+  selection?: TvSelectionStore | null;
 }
 
 const LibraryTile = memo(function LibraryTile({
@@ -137,6 +142,7 @@ const LibraryTile = memo(function LibraryTile({
   height,
   preferred,
   focusable,
+  selected,
   onOpen,
   onFocusIndex,
 }: {
@@ -147,13 +153,16 @@ const LibraryTile = memo(function LibraryTile({
   height: number;
   preferred: boolean;
   focusable: boolean;
+  selected: boolean;
   onOpen: (index: number) => void;
   onFocusIndex: (index: number, id: string) => void;
 }) {
   const [focused, setFocused] = useState(false);
+  const { t } = useI18n();
   return (
     <FocusableMediaTile
-      accessibilityLabel={item.displayName}
+      accessibilityLabel={selected ? `${item.displayName}, ${t('tile.selected')}` : item.displayName}
+      selected={selected}
       style={{ width }}
       hasTVPreferredFocus={preferred}
       focusable={focusable}
@@ -187,7 +196,7 @@ const LibraryTile = memo(function LibraryTile({
 });
 
 export function PersonalLibraryScreen({
-  source, title, onBack, onGrantInvalid, onSessionInvalid,
+  source, title, onBack, onGrantInvalid, onSessionInvalid, selection = null,
 }: Props) {
   const { t, lang } = useI18n();
   const { width, height } = useWindowDimensions();
@@ -197,6 +206,7 @@ export function PersonalLibraryScreen({
   const [load, setLoad] = useState<LoadState>(INITIAL_LOAD);
   const [panel, setPanel] = useState<Panel>('none');
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const selectionVersion = useTvSelection(selection);
 
   const {
     visible: overlayVisible,
@@ -487,6 +497,7 @@ export function PersonalLibraryScreen({
               height={tileHeight}
               preferred={gridFocusable && restoreIndex !== null && index === restoreIndex}
               focusable={gridFocusable}
+              selected={selection?.has(item.id) ?? false}
               onOpen={openAt}
               onFocusIndex={onTileFocus}
             />
@@ -494,7 +505,8 @@ export function PersonalLibraryScreen({
         })}
       </TVFocusGuideView>
     );
-  }, [total, gridFocusable, restoreIndex, openAt, onTileFocus]);
+    // selectionVersion re-renders the rows when a pick changes the ✓ marks.
+  }, [total, gridFocusable, restoreIndex, openAt, onTileFocus, selection, selectionVersion]);
 
   const filterCount = activeFilterCount(identity);
   const emptyLabel = filterCount > 0 ? t('gallery.noResults') : t('gallery.empty');
@@ -566,6 +578,7 @@ export function PersonalLibraryScreen({
           <FlatList
             data={rows}
             renderItem={renderRow}
+            extraData={selectionVersion}
             keyExtractor={(row) => row.key}
             contentContainerStyle={[styles.grid, { paddingBottom: inset.y }]}
             initialNumToRender={TV_MEDIA_GRID_INITIAL_ROWS}
@@ -662,6 +675,7 @@ export function PersonalLibraryScreen({
           hasMore={load.nextCursor !== null}
           onNeedMore={loadMore}
           onClose={closeViewer}
+          selection={selection}
         />
       )}
     </View>

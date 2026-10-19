@@ -265,7 +265,7 @@ describe('MediaWorkspace', () => {
     renderWorkspace(page([imageItem, videoItem]));
     await screen.findByText('photo.jpg');
     await enterSelection();
-    const controls = screen.getAllByTestId('media-open');
+    const controls = screen.getAllByTestId('media-select-control');
     await userEvent.click(controls[0]);
     expect(await screen.findByTestId('media-selection-bar')).toBeInTheDocument();
     // Two grouped commands, not a flat row: the destinations live inside them.
@@ -310,7 +310,7 @@ describe('MediaWorkspace', () => {
 
     await screen.findByText('photo.jpg');
     await enterSelection();
-    await userEvent.click(screen.getAllByTestId('media-open')[0]);
+    await userEvent.click(screen.getAllByTestId('media-select-control')[0]);
     await screen.findByTestId('media-selection-bar');
 
     await userEvent.click(screen.getByTestId('media-sel-add-to'));
@@ -352,7 +352,7 @@ describe('MediaWorkspace', () => {
     );
     await screen.findByText('photo.jpg');
     await enterSelection();
-    const controls = screen.getAllByTestId('media-open');
+    const controls = screen.getAllByTestId('media-select-control');
 
     // The photograph: Print is right on the dock, not in a menu.
     await userEvent.click(controls[0]);
@@ -395,7 +395,7 @@ describe('MediaWorkspace', () => {
 
     await screen.findByText('photo.jpg');
     await enterSelection();
-    const controls = screen.getAllByTestId('media-open');
+    const controls = screen.getAllByTestId('media-select-control');
     await userEvent.click(controls[0]);
     await userEvent.click(await screen.findByTestId('media-sel-add-to'));
     expect(screen.getByTestId('media-sel-plates')).toBeInTheDocument();
@@ -445,7 +445,7 @@ describe('MediaWorkspace', () => {
 
     await screen.findByText('photo.jpg');
     await enterSelection();
-    const controls = screen.getAllByTestId('media-open');
+    const controls = screen.getAllByTestId('media-select-control');
     await userEvent.click(controls[0]);
     await userEvent.click(controls[1]);
     await userEvent.click(await screen.findByTestId('media-sel-add-to'));
@@ -492,7 +492,7 @@ describe('MediaWorkspace', () => {
 
     await screen.findByText('photo.jpg');
     await enterSelection();
-    await userEvent.click(screen.getAllByTestId('media-open')[0]);
+    await userEvent.click(screen.getAllByTestId('media-select-control')[0]);
     await userEvent.click(await screen.findByTestId('media-sel-add-to'));
     await userEvent.click(await screen.findByTestId('media-sel-album'));
 
@@ -668,7 +668,7 @@ describe('MediaWorkspace', () => {
       expect(viewport.scrollTop).toBe(640);
 
       await enterSelection();
-    await userEvent.click(screen.getAllByTestId('media-open')[0]);
+    await userEvent.click(screen.getAllByTestId('media-select-control')[0]);
       expect(await screen.findByTestId('media-selection-bar')).toBeInTheDocument();
       expect(viewport.scrollTop).toBe(640);
     });

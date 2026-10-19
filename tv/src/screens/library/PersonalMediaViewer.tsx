@@ -15,7 +15,10 @@ import {
   TV_VIDEO_SEEK_SECONDS,
   type TvVideoControls,
 } from '../../components/TvVideoPlayer';
-import { mapViewerRemoteEvent } from '../../video/remoteMap';
+import { mapViewerRemoteEvent, viewerBarActions, type ViewerBarAction } from '../../video/remoteMap';
+import { ViewerActionBar, ViewerFlash } from '../../components/ViewerActionBar';
+import type { TvSelectionStore } from '../../lib/tvSelection';
+import { useTvSelection } from '../../lib/useTvSelection';
 import { useScreenAwake } from '../../lib/useScreenAwake';
 import { useHostState } from '../../lib/useHostActive';
 import { shouldKeepPhotoSlideshowAwake, shouldRotateSlideshow } from '../../video/wakePolicy';
@@ -34,12 +37,18 @@ import type { TvPersonalMediaItem } from '../../api/personalMedia';
 // (see video/remoteMap.ts) — the same event could never also drive grid focus,
 // because the grid is not a focus destination while the viewer is up.
 //
-// Modes, and what owns the remote in each:
-//   PHOTO → LEFT/RIGHT previous/next, play/pause toggles the slideshow.
+// Modes, and what owns the remote in each (the selection contract in
+// video/remoteMap.ts):
+//   PHOTO → OK selects / deselects (a running slideshow keeps running),
+//           LEFT/RIGHT previous/next (pausing the slideshow), play/pause
+//           starts, pauses and resumes the slideshow.
 //   VIDEO → SELECT / play-pause toggles playback, REWIND / FAST_FORWARD (and
-//           LEFT/RIGHT) seek, UP/DOWN change item.
-//   BACK  → always navigation: stop playback, return to the grid. It is never
-//           spent as a playback control.
+//           LEFT/RIGHT) seek, DOWN next item.
+//   UP    → opens the ACTION BAR: the one place this viewer has focusable
+//           views. While it is open the native focus engine owns the D-pad
+//           (the bar traps it), so this screen stops reading directions.
+//   BACK  → closes the action bar when it is open; otherwise navigation: stop
+//           playback, return to the grid on the same item, selection intact.
 //   MENU  → toggles the ambient chrome (name, counter, slideshow pill).
 //   HOME  → never intercepted. It is a system action; the player's AppState
 //           handling is what stops audio when the launcher takes over.
@@ -76,10 +85,12 @@ interface Props {
   onNeedMore: () => void;
   // Reports the index the user ended on so the grid restores focus to it.
   onClose: (currentIndex: number) => void;
+  // The Personal Area selection. Absent → OK keeps the slideshow semantics.
+  selection?: TvSelectionStore | null;
 }
 
 export function PersonalMediaViewer({
-  items, startIndex, totalCount, hasMore, onNeedMore, onClose,
+  items, startIndex, totalCount, hasMore, onNeedMore, onClose, selection = null,
 }: Props) {
   const { t } = useI18n();
   const { width, height } = useWindowDimensions();
@@ -90,6 +101,17 @@ export function PersonalMediaViewer({
   // OVERLAY_IDLE_MS as the album viewer.
   const chrome = useMenuOverlay();
   const showChrome = chrome.show;
+  useTvSelection(selection);
+  const selectable = selection !== null;
+  // The action bar (UP). A ref too, so the identity-stable remote handler and
+  // the Back handler read the latest value without re-subscribing.
+  const [barOpen, setBarOpen] = useState(false);
+  const barOpenRef = useRef(false);
+  barOpenRef.current = barOpen;
+  // A discreet one-line confirmation of what OK just did ("✓ Selected"). The
+  // key re-mounts it on every press so a repeated OK restarts its fade.
+  const [flash, setFlash] = useState<{ text: string; key: number } | null>(null);
+  const clearFlash = useCallback(() => setFlash(null), []);
 
   // Show it briefly on entry so the viewer knows where they are, then let the
   // shared idle window take it away. Runs once per viewer, NOT per item.
@@ -169,19 +191,39 @@ export function PersonalMediaViewer({
     return () => clearTimeout(timer);
   }, [rotating, clamped, goNext]);
 
-  // The viewer owns the WHOLE remote while it is up.
+  const togglePlay = useCallback(() => {
+    if (isVideo) controlsRef.current?.togglePlay();
+    else setSlideshow((p) => !p);
+  }, [isVideo]);
+
+  const toggleSelected = useCallback(() => {
+    const id = itemsRef.current[indexRef.current]?.id;
+    if (!selection || id === undefined) return;
+    const text = selection.toggle(id) ? t('viewer.selected') : t('viewer.deselected');
+    setFlash((prev) => ({ text, key: (prev?.key ?? 0) + 1 }));
+  }, [selection, t]);
+
+  // The viewer owns the WHOLE remote while it is up — except the D-pad and OK
+  // while the action bar is open, which belong to the bar's focus scope.
   const onTVEvent = useCallback((evt: HWEvent) => {
     // ONE phase rule for the whole app (lib/remoteEvent.ts): key-down is
     // dropped, key-up and unknown-phase runtimes each act exactly once.
     const eventType = actionableEventType(evt);
     if (eventType === null) return;
-    switch (mapViewerRemoteEvent(eventType, isVideo)) {
-      case 'prev': goPrev(); break;
-      case 'next': goNext(); break;
-      case 'toggle-play':
-        if (isVideo) controlsRef.current?.togglePlay();
-        else setSlideshow((p) => !p);
-        break;
+    const action = mapViewerRemoteEvent(eventType, isVideo, { selectable });
+    if (barOpenRef.current && action !== 'toggle-play' && action !== 'toggle-overlay') {
+      chrome.bump();
+      return;
+    }
+    switch (action) {
+      // Manual navigation PAUSES a running slideshow: the person has taken
+      // over, and the next photo must not be swept away nine seconds later.
+      case 'prev': if (selectable) setSlideshow(false); goPrev(); break;
+      case 'next': if (selectable) setSlideshow(false); goNext(); break;
+      case 'toggle-play': togglePlay(); break;
+      // Selecting never touches the slideshow: it keeps running.
+      case 'toggle-select': toggleSelected(); break;
+      case 'open-actions': setBarOpen(true); showChrome(); break;
       case 'seek-back': controlsRef.current?.seekBy(-TV_VIDEO_SEEK_SECONDS); break;
       case 'seek-forward': controlsRef.current?.seekBy(TV_VIDEO_SEEK_SECONDS); break;
       case 'toggle-overlay': chrome.toggle(); return;
@@ -192,16 +234,32 @@ export function PersonalMediaViewer({
     // slideshow tick does not, which is what stops a 9s slide from pinning a
     // 10s overlay open forever.
     chrome.bump();
-  }, [isVideo, goNext, goPrev, chrome]);
+  }, [isVideo, selectable, goNext, goPrev, chrome, togglePlay, toggleSelected, showChrome]);
   useTVEventHandler(onTVEvent);
+
+  const onBarAction = useCallback((action: ViewerBarAction) => {
+    chrome.bump();
+    switch (action) {
+      case 'play-pause':
+        togglePlay();
+        // Starting the slideshow is a request to WATCH: the bar steps aside.
+        setBarOpen(false);
+        break;
+      case 'select': toggleSelected(); break;
+      case 'prev': setSlideshow(false); goPrev(); break;
+      case 'next': setSlideshow(false); goNext(); break;
+      case 'clear-selection': selection?.clear(); break;
+    }
+  }, [chrome, togglePlay, toggleSelected, goPrev, goNext, selection]);
 
   // BACK leaves playback. Stopping FIRST is the point: the grid must never be
   // drawn over a video that is still audible.
   useEffect(() => {
     const onBackPress = () => {
-      // BACK stays NAVIGATION here. Unlike the album viewer, this one has no
-      // focusable overlay controls to dismiss first, so swallowing a BACK to
-      // hide decoration would make leaving the viewer take two presses.
+      // The action bar is the only thing BACK dismisses first; with it closed
+      // BACK is NAVIGATION — swallowing it to hide passive decoration would
+      // make leaving the viewer take two presses.
+      if (barOpenRef.current) { setBarOpen(false); return true; }
       controlsRef.current?.stop();
       onClose(indexRef.current);
       return true;
@@ -237,12 +295,37 @@ export function PersonalMediaViewer({
           <View style={[styles.name, { bottom: inset.y, left: inset.x }]} pointerEvents="none">
             <Text style={styles.nameText} numberOfLines={1}>{item.displayName}</Text>
           </View>
-          {!isVideo && slideshow && (
+          {!isVideo && slideshow && !barOpen && (
             <View style={[styles.pill, { top: inset.y }]} pointerEvents="none">
               <Text style={styles.pillText}>{t('viewer.slideshow')}</Text>
             </View>
           )}
         </>
+      )}
+
+      {/* The selection mark of the item on screen: always shown while it is
+          picked (not only with the chrome), so OK never looks like it did
+          nothing. */}
+      {selection !== null && selection.has(item.id) && (
+        <View style={[styles.mark, { top: inset.y, left: inset.x }]} pointerEvents="none">
+          <Text style={styles.markText}>✓</Text>
+        </View>
+      )}
+      {flash !== null && (
+        <ViewerFlash key={flash.key} text={flash.text} bottom={inset.y + 56} onDone={clearFlash} />
+      )}
+
+      {barOpen && selection !== null && (
+        <ViewerActionBar
+          top={inset.y}
+          actions={viewerBarActions({ isVideo, selectedCount: selection.count })}
+          isVideo={isVideo}
+          slideshowRunning={slideshow}
+          selected={selection.has(item.id)}
+          selectedCount={selection.count}
+          onAction={onBarAction}
+          onActivity={chrome.bump}
+        />
       )}
     </View>
   );
@@ -283,4 +366,16 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.78)',
   },
   pillText: { color: colors.text, fontSize: font.caption, fontWeight: '700' },
+  mark: {
+    position: 'absolute',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#ffffff',
+    backgroundColor: colors.accent,
+  },
+  markText: { color: '#ffffff', fontSize: font.caption, fontWeight: '800' },
 });

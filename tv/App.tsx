@@ -52,6 +52,7 @@ import { PartyGuestbookScreen } from './src/screens/PartyGuestbookScreen';
 import { PartySlideshowScreen } from './src/screens/PartySlideshowScreen';
 import { PartyNativeSurface } from './src/components/PartyNativeSurface';
 import { exitTvApp } from './src/lib/tvPlatform';
+import { TvSelectionStore } from './src/lib/tvSelection';
 import { AlbumsScreen } from './src/screens/AlbumsScreen';
 import { AlbumItemsScreen } from './src/screens/AlbumItemsScreen';
 import { ViewerScreen } from './src/screens/ViewerScreen';
@@ -111,6 +112,11 @@ function AppInner(): React.JSX.Element {
   const { t, setLanguage } = useI18n();
   const [flow, rawDispatch] = useReducer(tvFlowReducer, initialFlowState);
   const [partyScreen, setPartyScreen] = useState<PartyScreen>({ name: 'albums' });
+  // The Personal Area selection: one for the library and every album of the
+  // session, and nothing of it survives leaving (or locking) the Personal Area.
+  const [personalSelection] = useState(() => new TvSelectionStore());
+  const inPersonal = isPersonalState(flow);
+  useEffect(() => { if (!inPersonal) personalSelection.clear(); }, [inPersonal, personalSelection]);
   // Current flow state as a ref, so stable callbacks can compute the required
   // teardown effects (flowEffects) for the state they fire from.
   const flowRef = React.useRef<TvFlowState>(flow);
@@ -531,6 +537,7 @@ function AppInner(): React.JSX.Element {
           onBack={() => rawDispatch({ type: 'LIBRARY_BACK' })}
           onGrantInvalid={onLock}
           onSessionInvalid={onSessionInvalid}
+          selection={personalSelection}
         />
       )}
       {flow.name === 'personalAlbums' && (
@@ -553,6 +560,7 @@ function AppInner(): React.JSX.Element {
           onBack={() => rawDispatch({ type: 'ALBUM_BACK' })}
           onGrantInvalid={onLock}
           onSessionInvalid={onSessionInvalid}
+          selection={personalSelection}
         />
       )}
       {flow.name === 'beautyLab' && (

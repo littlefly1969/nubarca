@@ -24,6 +24,8 @@ import { usePeopleIndex } from '../../gallery/workspace/usePeopleIndex';
 import { TrashConfirmation } from '../../gallery/workspace/TrashConfirmation';
 import { moveFilesToTrash } from '../../gallery/workspace/bulkTrash';
 import { usePermissions } from '../../auth/usePermissions';
+import { useAccountSelectionStore } from '../../selection/AccountSelectionProvider';
+import { SelectionTray } from '../../selection/SelectionTray';
 
 // A photo-only bulk destination (Beauty Lab, Plates, …). `run` receives the
 // selected ids; the shell binds the live selection so the page never has to
@@ -106,10 +108,12 @@ export function MediaWorkspace({
   const people = usePeopleIndex();
   const viewportRef = useAppScrollViewport();
 
+  const accountSelection = useAccountSelectionStore();
   const ws = useMediaWorkspace({
     source,
     identity,
     onAuthError: invalidateAuth,
+    selectionStore: accountSelection,
     translate: {
       loadError: t('mediaWs.loadError'),
       loadMoreError: t('mediaWs.loadError'),
@@ -122,10 +126,12 @@ export function MediaWorkspace({
   const refreshNow = ws.refresh;
   useEffect(() => {
     if (refreshToken === seenRefreshToken.current) return;
-    if (viewer.index !== null || selection.count > 0) return;
+    // A refresh no longer drops the selection (it lives in its store), so only
+    // somebody looking at a photo holds it back.
+    if (viewer.index !== null) return;
     seenRefreshToken.current = refreshToken;
     refreshNow();
-  }, [refreshToken, viewer.index, selection.count, refreshNow]);
+  }, [refreshToken, viewer.index, refreshNow]);
   const [visibleKey, setVisibleKey] = useState<string | null>(null);
   const [previousFailed, setPreviousFailed] = useState(false);
   const previousWindowEpoch = useRef(0);
@@ -163,6 +169,7 @@ export function MediaWorkspace({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [trayOpen, setTrayOpen] = useState(false);
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
@@ -279,8 +286,8 @@ export function MediaWorkspace({
     if (ids.length === 0) { setTrashOpen(false); return; }
     setBusy(true);
     const result = await moveFilesToTrash(ids, { onAuthError: invalidateAuth });
+    // What moved leaves the wall and the selection; what failed stays picked.
     ws.removeLoadedIds(result.moved);
-    selection.selectAll(result.failed);
     const done = tn(result.moved.length, 'gallery.ws.trash.done');
     setNotice(done);
     announce(done);
@@ -293,7 +300,8 @@ export function MediaWorkspace({
   }, [ws]);
 
   // ---- keyboard: Escape clears selection; Ctrl/Cmd+A selects loaded ---------
-  const anyOverlayOpen = viewer.isOpen || sheetOpen || trashOpen || pickerOpen || moveToPersonal.isOpen || moveToExcluded.isOpen;
+  const anyOverlayOpen = viewer.isOpen || sheetOpen || trashOpen || pickerOpen || trayOpen
+    || moveToPersonal.isOpen || moveToExcluded.isOpen;
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape' && !anyOverlayOpen && selection.isSelectionActive) { selection.clear(); return; }
@@ -302,7 +310,8 @@ export function MediaWorkspace({
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
         if (anyOverlayOpen || ws.orderedIds.length === 0) return;
         e.preventDefault();
-        selection.selectAll(ws.orderedIds);
+        // ADDS the loaded items: what was picked on other screens stays picked.
+        selection.addAll(ws.orderedIds);
       }
     }
     window.addEventListener('keydown', onKey);
@@ -421,6 +430,9 @@ export function MediaWorkspace({
   }, [ws.semanticEvidence]);
 
   const selectedItems = ws.selectedItems;
+  const viewerSelection = useMemo(() => ({
+    isSelected: selection.isSelected, toggle: selection.toggle, count: selection.count,
+  }), [selection.isSelected, selection.toggle, selection.count]);
   const capabilities = getMediaSelectionCapabilities({
     items: selectedItems,
     source: source.kind,
@@ -645,6 +657,7 @@ export function MediaWorkspace({
           onClose={() => { play.stop(); viewer.close(); }}
           onIndexChange={viewer.setIndex}
           onNearEnd={() => loadMoreRef.current()}
+          selection={viewerSelection}
           playback={play.active || play.finished
             ? {
               active: play.active,
@@ -687,8 +700,15 @@ export function MediaWorkspace({
         actions={actionModel}
         restoreBusy={restoreBusy}
         onAction={runSelectionAction}
-        onClear={selection.clear}
+        onClear={() => { setTrayOpen(false); selection.clear(); }}
+        loadedCount={ws.orderedIds.length}
+        onSelectLoaded={() => selection.addAll(ws.orderedIds)}
+        onOpenTray={() => setTrayOpen(true)}
       />
+
+      {trayOpen && selection.isSelectionActive && (
+        <SelectionTray store={selection.store} onClose={() => setTrayOpen(false)} />
+      )}
 
       {notice && <div className="gallery-notice" role="status" data-testid="ws-notice">{notice}</div>}
 

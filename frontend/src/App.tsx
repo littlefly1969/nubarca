@@ -4,6 +4,7 @@ import { HomeScreenAppCanonical, HomeScreenAppHead, homeScreenAppBasename } from
 import { I18nProvider } from './i18n';
 import { ThemeProvider } from './theme';
 import { AuthProvider } from './auth/AuthProvider';
+import { AccountSelectionProvider } from './selection/AccountSelectionProvider';
 import { PermissionRoute } from './auth/PermissionRoute';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { PERMISSIONS } from '@nubarca/api-client';
@@ -79,6 +80,7 @@ export function App() {
       <ThemeProvider>
       <I18nProvider>
       <AuthProvider>
+      <AccountSelectionProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           {/* PUBLIC password recovery. Unauthenticated by necessity — the
@@ -391,6 +393,7 @@ export function App() {
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+      </AccountSelectionProvider>
       </AuthProvider>
       </I18nProvider>
       </ThemeProvider>

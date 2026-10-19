@@ -572,6 +572,18 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   virtualized, with a single Actions control per row. While it is open, the
   page's wall (`MediaWorkspace` / `SharedAlbumBrowser`) is UNMOUNTED, not
   hidden.
+- **A selection lives in a store above the screens, never in a wall.** The
+  web keeps one `MediaSelectionStore` per scope (`AccountSelectionProvider`
+  for the owner's library and albums, keyed on the signed-in user); a new
+  query, album, filter or page never clears it. Tapping a photograph always
+  opens the viewer; the round tile control, Ctrl/Cmd/Shift, long press and the
+  viewer's own toggle (button or `x`) select; Ctrl/Cmd+A ADDS the loaded items.
+  Grid, viewer and tray read the same store. The TV remote contract is
+  `tv/src/video/remoteMap.ts` (`selectable`), ported to the browser and held by
+  `nativeParity.test.ts`: in a viewer opened from a grid OK selects, LEFT/RIGHT
+  move and pause the slideshow, PLAY/PAUSE runs it, UP opens a D-pad action bar
+  with an on-screen Play/Pause, BACK closes the bar, then the viewer. The
+  assigned (unattended) party wall keeps OK = slideshow.
 - **There is ONE media-selection experience, and it is the Media Library.** A
   shared album's "Add from library" navigates to `/media` with the album in
   transient router state — never a URL, never a second route, never a fork of

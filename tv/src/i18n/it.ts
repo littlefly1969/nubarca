@@ -379,6 +379,20 @@ const it = {
   'viewer.videoPreparing': 'Preparazione del video in corso…',
   'viewer.videoError': 'Impossibile riprodurre questo video.',
   'viewer.videoNavHint': 'OK riproduci/pausa · ◀ ▶ ±10 s · ▲ ▼ cambia elemento · MENU comandi',
+  'viewer.bar.play': '▶ Avvia slideshow',
+  'viewer.bar.pause': 'Ⅱ Pausa',
+  'viewer.bar.toggleVideo': '⏯ Riproduci / pausa',
+  'viewer.bar.select': '○ Seleziona',
+  'viewer.bar.deselect': '✓ Selezionata',
+  'viewer.bar.prev': '◀ Precedente',
+  'viewer.bar.next': 'Successivo ▶',
+  'viewer.bar.clear': 'Svuota selezione',
+  'viewer.bar.count_one': '{count} selezionata',
+  'viewer.bar.count_other': '{count} selezionate',
+  'viewer.selected': '✓ Selezionata',
+  'viewer.deselected': 'Selezione tolta',
+  'viewer.selectHint': 'OK seleziona · ◀ ▶ cambia foto · ▲ azioni · ⏯ slideshow',
+  'tile.selected': 'selezionata',
 } as const;
 
 export type TvMessageKey = keyof typeof it;

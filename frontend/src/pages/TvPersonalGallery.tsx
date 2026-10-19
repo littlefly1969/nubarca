@@ -339,6 +339,8 @@ interface TvPersonalGalleryProps {
   onPersonalError: (err: unknown) => boolean;
 }
 
+const EMPTY_SELECTION: ReadonlySet<string> = new Set();
+
 export function TvPersonalGallery({ grant, onBack, onPersonalError }: TvPersonalGalleryProps) {
   const { t, tn, lang } = useI18n();
   const L = useCallback((it: string, en: string) => (lang === 'it' ? it : en), [lang]);
@@ -357,7 +359,13 @@ export function TvPersonalGallery({ grant, onBack, onPersonalError }: TvPersonal
   const [selectionLayer, setSelectionLayer] = useState<'none' | 'album' | 'destination' | 'trash'>('none');
   const [bulkBusy, setBulkBusy] = useState(false);
   const [people, setPeople] = useState<TvPersonalPerson[] | null>(null);
+  // What is picked (null: nothing picked and no selection started). Picking
+  // happens in the viewer (OK) or, optionally, in "quick selection" on the grid.
   const [selection, setSelection] = useState<string[] | null>(null);
+  // Quick selection (the optional bulk mode from the menu): only while it is on
+  // does OK on a grid tile pick instead of opening — the default contract is
+  // OK in the grid opens the photo, OK in the opened photo selects it.
+  const [quickSelect, setQuickSelect] = useState(false);
   const [albums, setAlbums] = useState<TvPersonalAlbum[] | null>(null);
   const [selectedAlbumId, setSelectedAlbumId] = useState('');
   const [albumBusy, setAlbumBusy] = useState(false);
@@ -410,7 +418,7 @@ export function TvPersonalGallery({ grant, onBack, onPersonalError }: TvPersonal
     setNextCursor(null);
     setTotalCount(null);
     setViewerIndex(null);
-    setSelection((cur) => (cur !== null ? [] : null));
+    // A new query never drops what was picked: the selection is ids, not rows.
     setPhase({ kind: 'loadingInitial' });
     listTvPersonalGallery(grant, toWireQuery(applied, null), ctrl.signal)
       .then((page) => {
@@ -702,6 +710,7 @@ export function TvPersonalGallery({ grant, onBack, onPersonalError }: TvPersonal
         album: album?.name ?? '',
       }));
       setSelection(result.skipped > 0 ? selection : null);
+      if (result.skipped === 0) setQuickSelect(false);
       setSelectionLayer('none');
     } catch (err) {
       if (!handleError(err)) setToast(t('tvGallery.albumError'));
@@ -717,6 +726,7 @@ export function TvPersonalGallery({ grant, onBack, onPersonalError }: TvPersonal
       const result = await addTvPersonalItemsToDestination(grant, destination, selection);
       const failed = result.failures.map((item) => item.itemId);
       setSelection(failed.length > 0 ? failed : null);
+      if (failed.length === 0) setQuickSelect(false);
       setSelectionLayer('none');
       const label = destination === 'beauty-lab' ? L('Laboratorio bellezza', 'Beauty Lab') : L('Targhe', 'Plates');
       setToast(L(
@@ -745,6 +755,7 @@ export function TvPersonalGallery({ grant, onBack, onPersonalError }: TvPersonal
       setTotalCount((current) => current === null ? current : Math.max(0, current - removed.size));
       const failed = result.failures.map((item) => item.itemId);
       setSelection(failed.length > 0 ? failed : null);
+      if (failed.length === 0) setQuickSelect(false);
       setSelectionLayer('none');
       setToast(L(
         `${result.succeeded} spostate nel Cestino, ${result.skipped} non spostate.`,
@@ -833,23 +844,27 @@ export function TvPersonalGallery({ grant, onBack, onPersonalError }: TvPersonal
       if (selectionLayer !== 'none') setSelectionLayer('none');
       else if (showFilters) cancelWorkspace();
       else if (menuOpen) closeMenu();
-      else if (selection !== null) setSelection(null);
+      else if (selection !== null) { setSelection(null); setQuickSelect(false); }
       else onBack();
     }
   }, [viewerIndex, selection, onBack, moveFocus, showFilters, menuOpen, selectionLayer,
     toggleMenu, moveLayerFocus, cancelWorkspace, closeMenu]);
 
+  const toggleSelected = useCallback((id: string) => {
+    setSelection((cur) => {
+      const list = cur ?? [];
+      return list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+    });
+  }, []);
+
   const openTile = useCallback((index: number) => {
-    if (selection !== null) {
+    if (quickSelect) {
       const id = itemsRef.current[index]?.id;
-      if (!id) return;
-      setSelection((cur) => (cur === null
-        ? cur
-        : cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+      if (id) toggleSelected(id);
       return;
     }
     setViewerIndex(index);
-  }, [selection]);
+  }, [quickSelect, toggleSelected]);
 
   const closeViewer = useCallback((index: number) => {
     setViewerIndex(null);
@@ -891,6 +906,8 @@ export function TvPersonalGallery({ grant, onBack, onPersonalError }: TvPersonal
         onClose={closeViewer}
         onToggleFavorite={toggleFavorite}
         onPersonalError={handleError}
+        selected={selectionSet ?? EMPTY_SELECTION}
+        onToggleSelect={toggleSelected}
       />
     );
   }
@@ -1014,7 +1031,7 @@ export function TvPersonalGallery({ grant, onBack, onPersonalError }: TvPersonal
                 <button type="button" onClick={openWorkspace}>
                   {L('Ricerca e filtri', 'Search and filters')}
                 </button>
-                <button type="button" data-testid="tv-personal-select" onClick={() => { setSelection([]); closeMenu(); }}>
+                <button type="button" data-testid="tv-personal-select" onClick={() => { setSelection((cur) => cur ?? []); setQuickSelect(true); closeMenu(); }}>
                   {t('tvGallery.select')}
                 </button>
               </>
@@ -1029,7 +1046,7 @@ export function TvPersonalGallery({ grant, onBack, onPersonalError }: TvPersonal
                 <button type="button" disabled={selection.length === 0} onClick={() => { setMenuOpen(false); setSelectionLayer('trash'); }}>
                   {L('Cestino', 'Trash')}
                 </button>
-                <button type="button" data-testid="tv-personal-cancel-selection" onClick={() => { setSelection(null); closeMenu(); }}>
+                <button type="button" data-testid="tv-personal-cancel-selection" onClick={() => { setSelection(null); setQuickSelect(false); closeMenu(); }}>
                   {L('Azzera selezione', 'Clear selection')}
                 </button>
               </>
@@ -1299,6 +1316,8 @@ function TvPersonalViewer({
   onClose,
   onToggleFavorite,
   onPersonalError,
+  selected,
+  onToggleSelect,
 }: {
   grant: string;
   cache: PersonalMediaCache;
@@ -1312,6 +1331,9 @@ function TvPersonalViewer({
   onClose: (index: number) => void;
   onToggleFavorite: (id: string, favorite: boolean) => Promise<boolean>;
   onPersonalError: (err: unknown) => boolean;
+  // The gallery's selection. OK on the photo picks it; the bar shows the count.
+  selected: ReadonlySet<string>;
+  onToggleSelect: (id: string) => void;
 }) {
   const { t, formatDate } = useI18n();
   const [index, setIndex] = useState(startIndex);
@@ -1358,23 +1380,56 @@ function TvPersonalViewer({
     return () => ctrl.abort();
   }, [infoOpen, item, grant, onPersonalError]);
 
+  const barRef = useRef<HTMLDivElement>(null);
   const goPrev = useCallback(() => setIndex((i) => Math.max(0, i - 1)), []);
   const goNext = useCallback(() => {
     setIndex((i) => Math.min(items.length - 1, i + 1));
   }, [items.length]);
 
+  // THE REMOTE CONTRACT (video/remoteMap.ts in the app, the same here):
+  //   OK          — select / deselect this photo; a slideshow keeps running.
+  //   LEFT/RIGHT  — previous / next, pausing a running slideshow.
+  //   PLAY/PAUSE  — the media key starts, pauses and resumes the slideshow;
+  //                 the bar's on-screen Play/Pause does the same for a remote
+  //                 (or keyboard) without one.
+  //   UP          — into the action bar; LEFT/RIGHT then walk its buttons.
+  //   BACK        — out of the bar first, then out of the viewer, back to the
+  //                 same tile, selection intact.
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    const inBar = barRef.current?.contains(e.target as Node) ?? false;
+    if (e.key === 'MediaPlayPause' || e.key === 'MediaPlay' || e.key === 'MediaPause') {
       e.preventDefault();
+      setPlaying((p) => (e.key === 'MediaPlay' ? true : e.key === 'MediaPause' ? false : !p));
+      return;
+    }
+    if (inBar) {
+      const buttons = Array.from(barRef.current!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+      const at = buttons.indexOf(e.target as HTMLButtonElement);
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const next = Math.max(0, Math.min(buttons.length - 1, at + (e.key === 'ArrowRight' ? 1 : -1)));
+        buttons[next]?.focus();
+      } else if (e.key === 'ArrowDown' || e.key === 'Backspace' || e.key === 'Escape') {
+        e.preventDefault();
+        rootRef.current?.focus();
+      }
+      // Enter / Space act on the focused button natively.
+      return;
+    }
+    if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      setPlaying(false);
       goNext();
-    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    } else if (e.key === 'ArrowLeft') {
       e.preventDefault();
+      setPlaying(false);
       goPrev();
-    } else if (e.key === 'Enter' || e.key === ' ') {
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === 'BUTTON') return; // let focused bar buttons act normally
+    } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setPlaying((p) => !p);
+      barRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (item) onToggleSelect(item.id);
     } else if (e.key === 'Backspace' || e.key === 'Escape') {
       e.preventDefault();
       if (infoOpen) setInfoOpen(false);
@@ -1447,19 +1502,30 @@ function TvPersonalViewer({
           )}
         </aside>
       )}
-      <div className="tv-viewer-bar">
-        <button type="button" data-testid="tv-personal-viewer-back" onClick={() => onClose(clamped)}>
-          {t('tv.viewerBack')}
-        </button>
-        <button type="button" onClick={goPrev}>{t('tv.prev')}</button>
+      {selected.has(item.id) && (
+        <span className="tv-viewer-selectmark" data-testid="tv-personal-viewer-selected" aria-hidden="true">✓</span>
+      )}
+      <div className="tv-viewer-bar" ref={barRef} data-testid="tv-personal-viewer-bar">
+        {/* Play/Pause first: the five-way route to the slideshow. */}
         <button
           type="button"
+          data-testid="tv-personal-viewer-play"
           aria-pressed={playing}
           onClick={() => setPlaying((p) => !p)}
         >
           {playing ? t('tv.pause') : t('tv.play')}
         </button>
-        <button type="button" onClick={goNext}>{t('tv.next')}</button>
+        <button
+          type="button"
+          data-testid="tv-personal-viewer-select"
+          aria-pressed={selected.has(item.id)}
+          onClick={() => onToggleSelect(item.id)}
+        >
+          {selected.has(item.id) ? t('tvGallery.viewerSelected') : t('tvGallery.viewerSelect')}
+          {selected.size > 0 && ` · ${selected.size}`}
+        </button>
+        <button type="button" onClick={() => { setPlaying(false); goPrev(); }}>{t('tv.prev')}</button>
+        <button type="button" onClick={() => { setPlaying(false); goNext(); }}>{t('tv.next')}</button>
         <button
           type="button"
           disabled={favoriteBusy}
@@ -1476,6 +1542,9 @@ function TvPersonalViewer({
           onClick={() => setInfoOpen((v) => !v)}
         >
           {t('tvGallery.details')}
+        </button>
+        <button type="button" data-testid="tv-personal-viewer-back" onClick={() => onClose(clamped)}>
+          {t('tv.viewerBack')}
         </button>
         <span className="tv-viewer-caption" data-testid="tv-personal-viewer-counter">
           {/* Absolute position (loaded items are an ordered prefix, so the

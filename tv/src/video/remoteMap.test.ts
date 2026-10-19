@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mapViewerRemoteEvent } from './remoteMap.ts';
+import { mapViewerRemoteEvent, viewerBarActions } from './remoteMap.ts';
 
 test('MENU owns the overlay for photos and videos alike', () => {
   assert.equal(mapViewerRemoteEvent('menu', false), 'toggle-overlay');
@@ -83,4 +83,60 @@ test('unknown and system events are inert in both modes', () => {
     assert.equal(mapViewerRemoteEvent(key, false), 'none');
     assert.equal(mapViewerRemoteEvent(key, true), 'none');
   }
+});
+
+// ---- the selection contract (a viewer opened from a grid) ------------------
+
+const sel = { selectable: true };
+
+test('OK selects the photo on screen; PLAY/PAUSE owns the slideshow', () => {
+  assert.equal(mapViewerRemoteEvent('select', false, sel), 'toggle-select');
+  assert.equal(mapViewerRemoteEvent('playPause', false, sel), 'toggle-play');
+  assert.equal(mapViewerRemoteEvent('left', false, sel), 'prev');
+  assert.equal(mapViewerRemoteEvent('right', false, sel), 'next');
+  assert.equal(mapViewerRemoteEvent('rewind', false, sel), 'prev');
+  assert.equal(mapViewerRemoteEvent('fastForward', false, sel), 'next');
+  assert.equal(mapViewerRemoteEvent('menu', false, sel), 'toggle-overlay');
+});
+
+test('UP opens the action bar for photos and videos alike', () => {
+  for (const isVideo of [false, true]) {
+    assert.equal(mapViewerRemoteEvent('up', isVideo, sel), 'open-actions');
+    assert.equal(mapViewerRemoteEvent('longUp', isVideo, sel), 'open-actions');
+  }
+});
+
+test('a video keeps OK as play/pause and LEFT/RIGHT as seek; DOWN is the next item', () => {
+  assert.equal(mapViewerRemoteEvent('select', true, sel), 'toggle-play');
+  assert.equal(mapViewerRemoteEvent('playPause', true, sel), 'toggle-play');
+  assert.equal(mapViewerRemoteEvent('left', true, sel), 'seek-back');
+  assert.equal(mapViewerRemoteEvent('right', true, sel), 'seek-forward');
+  assert.equal(mapViewerRemoteEvent('down', true, sel), 'next');
+});
+
+test('BACK and system keys stay unmapped in the selection contract too', () => {
+  for (const key of ['back', 'home', 'info', 'stop', 'guide']) {
+    assert.equal(mapViewerRemoteEvent(key, false, sel), 'none');
+    assert.equal(mapViewerRemoteEvent(key, true, sel), 'none');
+  }
+});
+
+test('the five-way keys reach selection, navigation and the action bar', () => {
+  const fiveWay = ['up', 'down', 'left', 'right', 'select'];
+  const reachable = (isVideo: boolean) =>
+    new Set(fiveWay.map((key) => mapViewerRemoteEvent(key, isVideo, sel)).filter((a) => a !== 'none'));
+  // The slideshow is reached through the bar's on-screen Play/Pause.
+  assert.deepEqual(reachable(false), new Set(['open-actions', 'prev', 'next', 'toggle-select']));
+  assert.deepEqual(reachable(true), new Set(['open-actions', 'toggle-play', 'seek-back', 'seek-forward', 'next']));
+});
+
+test('the action bar always offers an on-screen Play/Pause, and select for a video', () => {
+  assert.deepEqual(viewerBarActions({ isVideo: false, selectedCount: 0 }), ['play-pause', 'select']);
+  assert.deepEqual(viewerBarActions({ isVideo: true, selectedCount: 0 }), ['play-pause', 'select', 'prev', 'next']);
+  assert.deepEqual(viewerBarActions({ isVideo: false, selectedCount: 3 }), ['play-pause', 'select', 'clear-selection']);
+});
+
+test('the unattended party wall keeps its slideshow semantics', () => {
+  assert.equal(mapViewerRemoteEvent('select', false, { selectable: false }), 'toggle-play');
+  assert.equal(mapViewerRemoteEvent('up', false), 'none');
 });

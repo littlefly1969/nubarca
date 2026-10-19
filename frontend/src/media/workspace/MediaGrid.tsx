@@ -351,10 +351,9 @@ export function MediaTile({
         onMouseLeave={() => setHovered(false)}
         onFocus={() => setHovered(true)}
         onBlur={() => setHovered(false)}
-        aria-pressed={interactionMode === 'select' ? selected : undefined}
-        aria-label={t(interactionMode === 'select'
-          ? selected ? 'mediaWs.deselectAria' : 'mediaWs.selectAria'
-          : 'mediaWs.previewAria', { name: item.displayName })}
+        // Opening is what the photograph does, in browse and in select mode
+        // alike; picking is the round control's job.
+        aria-label={t('mediaWs.previewAria', { name: item.displayName })}
       >
         {isVideo ? (
           // The tile is already the video's real aspect ratio, so 'cover' fills
@@ -447,9 +446,7 @@ export function MediaTile({
         </span>
       </button>
 
-      {interactionMode === 'select' ? <span className="media-tile__selection-mark" aria-hidden="true">
-        {selected ? '✓' : ''}
-      </span> : interactionMode === undefined && <button
+      <button
         type="button"
         className="media-tile__select"
         data-testid="media-select-control"
@@ -458,7 +455,7 @@ export function MediaTile({
         onClick={onSelectClick}
       >
         <span aria-hidden="true">{selected ? '✓' : ''}</span>
-      </button>}
+      </button>
     </div>
   );
 }

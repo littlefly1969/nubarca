@@ -371,6 +371,20 @@ const en: Partial<Record<TvMessageKey, string>> = {
   'viewer.videoPreparing': 'Preparing this video…',
   'viewer.videoError': 'Could not play this video.',
   'viewer.videoNavHint': 'OK play/pause · ◀ ▶ ±10 s · ▲ ▼ change item · MENU controls',
+  'viewer.bar.play': '▶ Start slideshow',
+  'viewer.bar.pause': 'Ⅱ Pause',
+  'viewer.bar.toggleVideo': '⏯ Play / pause',
+  'viewer.bar.select': '○ Select',
+  'viewer.bar.deselect': '✓ Selected',
+  'viewer.bar.prev': '◀ Previous',
+  'viewer.bar.next': 'Next ▶',
+  'viewer.bar.clear': 'Clear selection',
+  'viewer.bar.count_one': '{count} selected',
+  'viewer.bar.count_other': '{count} selected',
+  'viewer.selected': '✓ Selected',
+  'viewer.deselected': 'Deselected',
+  'viewer.selectHint': 'OK select · ◀ ▶ change photo · ▲ actions · ⏯ slideshow',
+  'tile.selected': 'selected',
 };
 
 export default en;
