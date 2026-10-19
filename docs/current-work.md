@@ -584,6 +584,17 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   move and pause the slideshow, PLAY/PAUSE runs it, UP opens a D-pad action bar
   with an on-screen Play/Pause, BACK closes the bar, then the viewer. The
   assigned (unattended) party wall keeps OK = slideshow.
+- **The print picker is a viewer plus a round control, and its choice is the
+  composition's.** In `PrintStudio`'s select step a tile opens the photograph
+  whole in `PublicMediaViewer` (the medium or share/party-scoped preview it was
+  handed, never an original, no download) and its round control chooses it;
+  the viewer chooses too (`selection` prop). The grid stays mounted under the
+  viewer, so closing returns focus to the same tile with scroll and order
+  intact. The choice is local studio state, never the account selection.
+  Arriving with more photographs than the format takes chooses none of them
+  and says so (`partyPrint.chooseFromMore`); exactly as many are taken in
+  their order. One studio serves the owner, a share and a party, so all three
+  paths get it.
 - **The account selection is a server-held list, and lists hold references.**
   `media_lists` / `media_list_items` (`MediaListService`, `/api/lists`,
   `/api/selection`): one `CurrentSelection` per owner (filtered unique index)

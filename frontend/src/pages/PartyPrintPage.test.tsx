@@ -938,7 +938,7 @@ describe('PartyPrintPage (public print studio)', () => {
     render(wrapper());
     await chooseFormat(user, 'photo');
     const picks = screen.getAllByRole('button', { name: /Scegli questa foto/ });
-    setNatural(within(picks[0]).getByRole('presentation', { hidden: true }), 4000, 3000);
+    setNatural(within(picks[0].closest('li')!).getByRole('presentation', { hidden: true }), 4000, 3000);
     await user.click(picks[0]);
     await user.click(next());
     await user.click(next());
@@ -1282,7 +1282,7 @@ describe('PartyPrintPage (public print studio)', () => {
     render(wrapper());
     await chooseFormat(user, 'photo');
     const picks = screen.getAllByRole('button', { name: /Scegli questa foto/ });
-    setNatural(within(picks[0]).getByRole('presentation', { hidden: true }), 4000, 3000);
+    setNatural(within(picks[0].closest('li')!).getByRole('presentation', { hidden: true }), 4000, 3000);
     await user.click(picks[0]);
     await user.click(next());
 
@@ -1312,7 +1312,7 @@ describe('PartyPrintPage (public print studio)', () => {
     render(wrapper());
     await chooseFormat(user, 'photo');
     const pick = screen.getAllByRole('button', { name: /Scegli questa foto/ })[0];
-    setNatural(within(pick).getByRole('presentation', { hidden: true }), 4000, 3000);
+    setNatural(within(pick.closest('li')!).getByRole('presentation', { hidden: true }), 4000, 3000);
     await user.click(pick);
     await user.click(next());
     expect(screen.getByRole('radio', { name: 'Orizzontale' })).toBeChecked();

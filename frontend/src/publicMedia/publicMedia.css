@@ -183,6 +183,31 @@
 
 .public-viewer-action:disabled { opacity: 0.7; cursor: progress; }
 
+/* Choosing the photograph on screen: a round mark, filled once chosen. */
+.public-viewer-select { gap: 0.55rem; }
+.public-viewer-select:disabled { cursor: not-allowed; }
+
+.public-viewer-select-mark {
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 2px solid currentcolor;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.public-viewer-select[aria-pressed='true'] {
+  border-color: var(--brand-cyan-glow);
+}
+
+.public-viewer-select[aria-pressed='true'] .public-viewer-select-mark {
+  border-color: var(--brand-cyan-glow);
+  background: var(--brand-cyan-glow);
+  color: var(--brand-midnight-navy);
+}
+
 .public-viewer-action--primary {
   border: 0;
   background:
