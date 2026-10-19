@@ -7,7 +7,7 @@ namespace NubArca.Api.Endpoints;
 
 // A member's personal selection inside one album shared with them.
 //
-//   GET    /api/shared-albums/{albumId}/selection          { version, count }
+//   GET    /api/shared-albums/{albumId}/selection          { version, count, stamp }
 //   GET    /api/shared-albums/{albumId}/selection/ids      id page in pick order (sync)
 //   POST   /api/shared-albums/{albumId}/selection/items    add { fileItemIds } — idempotent
 //   DELETE /api/shared-albums/{albumId}/selection/items    remove { fileItemIds } — idempotent

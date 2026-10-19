@@ -1442,6 +1442,31 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(screen.getAllByRole('button', { name: /Scegli questa foto/ })).toHaveLength(10);
   });
 
+  // --- Carrying the guest's print picks across -----------------------------
+
+  it('starts the sheet with the photographs the guest picked on the hub, in pick order', async () => {
+    window.sessionStorage.setItem('nubarca.party.picks', JSON.stringify(['f3', 'other-party', 'f1']));
+    const user = setup();
+    mount();
+    render(wrapper());
+    await chooseFormat(user, 'twinStrip4');
+    // Only what THIS token serves is carried over, in the order it was picked;
+    // the rest of the strip is chosen here.
+    const chosen = screen.getAllByRole('button', { name: /Togli dalla selezione/ });
+    expect(chosen).toHaveLength(2);
+    expect(within(chosen[0]).getByText('2')).toBeInTheDocument();
+    expect(within(chosen[1]).getByText('1')).toBeInTheDocument();
+  });
+
+  it('lets the guest choose among their picks when they are more than the format takes', async () => {
+    window.sessionStorage.setItem('nubarca.party.picks', JSON.stringify(['f1', 'f2', 'f3']));
+    const user = setup();
+    mount();
+    render(wrapper());
+    await chooseFormat(user, 'photo');
+    expect(screen.queryAllByRole('button', { name: /Togli dalla selezione/ })).toHaveLength(0);
+  });
+
   // --- The way out --------------------------------------------------------
 
   it('offers the way back the hub left behind, and nothing when opened cold', async () => {

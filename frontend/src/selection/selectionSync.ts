@@ -44,6 +44,9 @@ export interface SelectionSyncOptions {
   maxIds?: number;
   // Called when the server refuses the session (signed out elsewhere).
   onUnauthorized?: () => void;
+  // Called when the selection's scope is gone (404): a shared album whose
+  // membership was revoked or whose album was deleted. Sync stops at once.
+  onGone?: () => void;
 }
 
 type Op = { kind: 'add' | 'remove'; ids: string[] } | { kind: 'clear' };
@@ -82,10 +85,16 @@ export function startSelectionSync(
   const isUnauthorized = (err: unknown) =>
     typeof err === 'object' && err !== null && 'status' in err && (err as { status: number }).status === 401;
 
+  const isGone = (err: unknown) =>
+    typeof err === 'object' && err !== null && 'status' in err && (err as { status: number }).status === 404;
+
   const fail = (err: unknown) => {
     if (isUnauthorized(err)) {
       stop();
       options.onUnauthorized?.();
+    } else if (isGone(err) && options.onGone) {
+      stop();
+      options.onGone();
     }
     // Anything else (offline, a 5xx): the queue is kept and retried on the next
     // change or poll. The local selection is never rolled back for it.

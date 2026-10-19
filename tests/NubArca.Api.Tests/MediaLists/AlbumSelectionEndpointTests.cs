@@ -168,6 +168,7 @@ public sealed class AlbumSelectionEndpointTests : IDisposable
         var c = await AddPngAsync(owner, albumId, "c.png");
         await InviteAndAcceptAsync(owner, member, albumId, MemberEmail);
         await PostItemsAsync(member, albumId, [a, b, c]);
+        var picked = await member.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}/selection");
 
         // Removed from the album, trashed, moved to the Vault: none is shown.
         (await owner.DeleteAsync($"/api/albums/{albumId}/items/{a}")).EnsureSuccessStatusCode();
@@ -176,10 +177,16 @@ public sealed class AlbumSelectionEndpointTests : IDisposable
         Assert.Empty(await IdsAsync(member, albumId));
         var state = await member.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}/selection");
         Assert.Equal(0, state.GetProperty("count").GetInt32());
+        // Nobody wrote the selection, so its version is unchanged; the stamp is
+        // what tells the member's other devices.
+        Assert.Equal(picked.GetProperty("version").GetInt32(), state.GetProperty("version").GetInt32());
+        Assert.NotEqual(picked.GetProperty("stamp").GetString(), state.GetProperty("stamp").GetString());
 
         // Restored, the trashed one is back in the member's selection.
         await MutateFileAsync(b, f => f.DeletedAt = null);
         Assert.Equal([b], await IdsAsync(member, albumId));
+        var restored = await member.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}/selection");
+        Assert.NotEqual(state.GetProperty("stamp").GetString(), restored.GetProperty("stamp").GetString());
     }
 
     [Fact]

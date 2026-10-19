@@ -619,6 +619,22 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   album", and the semantic search paths are not offered there (no list scope).
   Selection add/remove is not audited (personal UI state); named-list changes
   are, with counts only.
+- **Shared albums and parties get personal, scoped selections, never the
+  account one.** A member's picks in a shared album are a `media_lists` row of
+  kind `AlbumSelection` keyed on (owner, album) (`AlbumSelectionService`,
+  `/api/shared-albums/{id}/selection*`): every call resolves the album grant
+  first (no grant is the same 404 as no album), only what the album serves the
+  member now can be picked or is shown (`IAlbumAccessResolver.ServableMediaIds`),
+  the list carries the same visible-ids `stamp`, deleting the album cascades,
+  and a revoked membership stops the web sync (`onGone`) and forgets the picks
+  on screen. The browser (`SharedAlbumBrowser`) offers the round control, the
+  viewer toggle and only what the membership may do with the picks (withdraw
+  their own contributions); download stays per item and Editor removal stays in
+  the curation panel. An anonymous party guest has no account, so their print
+  picks are ids in this tab's sessionStorage (`partyGuestMemo`), offered only
+  when the party offers printing, intersected with what the token serves,
+  forgotten when the party stops answering, and preselected by the print
+  studio when they fit the format.
 - **There is ONE media-selection experience, and it is the Media Library.** A
   shared album's "Add from library" navigates to `/media` with the album in
   transient router state — never a URL, never a second route, never a fork of

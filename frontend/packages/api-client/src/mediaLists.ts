@@ -123,7 +123,7 @@ export function listMediaListItems(
 // Personal and scoped to that album: never the account selection, never a list.
 // A revoked or missing membership is a 404 on every call.
 
-export interface SharedAlbumSelectionState { version: number; count: number }
+export interface SharedAlbumSelectionState { version: number; count: number; stamp: string }
 
 export function getSharedAlbumSelection(albumId: string, signal?: AbortSignal): Promise<SharedAlbumSelectionState> {
   return api<SharedAlbumSelectionState>(`/api/shared-albums/${albumId}/selection`, { signal });

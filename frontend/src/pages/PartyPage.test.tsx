@@ -493,6 +493,92 @@ describe('PartyPage (public party landing)', () => {
     }
   });
 
+  // A guest's own picks for printing: offered only where printing is, held as
+  // ids for this tab only, intersected with what the party serves, and gone
+  // with the grant.
+  describe('print picks', () => {
+    const withVideo = {
+      albumName: 'Beach Party',
+      items: [
+        items.items[0],
+        {
+          id: 'v1', mediaType: 'video',
+          thumbnailUrl: '/api/party/tok-1/media/v1/thumbnail',
+          previewUrl: '/api/party/tok-1/media/v1/preview',
+          downloadUrl: null,
+        },
+      ],
+    };
+    const stored = () => window.sessionStorage.getItem('nubarca.party.picks');
+
+    it('picks a photo from the grid and the viewer, and leads to the print studio', async () => {
+      installFetchMock({
+        'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 2, printUrl: '/party/print-token/print' })),
+        'GET /api/party/tok-1/items': () => jsonResponse(withVideo),
+      });
+      const user = userEvent.setup();
+      render(wrapper());
+      await screen.findByTestId('party-grid');
+
+      // A video does not print, so it has no pick control.
+      const controls = screen.getAllByTestId('public-gallery-pick');
+      expect(controls).toHaveLength(1);
+      await user.click(controls[0]);
+      expect(controls[0]).toHaveAttribute('aria-pressed', 'true');
+      // Picking never opens the photo.
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByTestId('party-picks-count')).toHaveTextContent('1 foto scelta per la stampa');
+      expect(screen.getByTestId('party-picks-print')).toHaveAttribute('href', '/party/print-token/print');
+      // Ids only: no token, no URL.
+      expect(stored()).toBe('["f1"]');
+
+      // The viewer shows the pick and can take it back.
+      await user.click(screen.getAllByRole('button', { name: /Apri foto/i })[0]);
+      const viewer = await screen.findByRole('dialog', { name: /Visualizzatore foto/i });
+      const unpick = within(viewer).getByRole('button', { name: 'Togli dalle scelte per la stampa' });
+      expect(unpick).toHaveAttribute('aria-pressed', 'true');
+      await user.click(unpick);
+      expect(within(viewer).getByRole('button', { name: 'Scegli per la stampa' }))
+        .toHaveAttribute('aria-pressed', 'false');
+      expect(stored()).toBeNull();
+    });
+
+    it('offers no picking where the party offers no printing', async () => {
+      installFetchMock({
+        'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 1 })),
+        'GET /api/party/tok-1/items': () => jsonResponse(items),
+      });
+      render(wrapper());
+      await screen.findByTestId('party-grid');
+      expect(screen.queryByTestId('public-gallery-pick')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('party-picks-bar')).not.toBeInTheDocument();
+    });
+
+    it('counts only what this party serves, and clears on an explicit Clear', async () => {
+      window.sessionStorage.setItem('nubarca.party.picks', JSON.stringify(['from-another-party', 'f1']));
+      installFetchMock({
+        'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 1, printUrl: '/party/print-token/print' })),
+        'GET /api/party/tok-1/items': () => jsonResponse(items),
+      });
+      render(wrapper());
+      expect(await screen.findByTestId('party-picks-count')).toHaveTextContent('1 foto scelta per la stampa');
+      await userEvent.setup().click(screen.getByTestId('party-picks-clear'));
+      expect(screen.queryByTestId('party-picks-bar')).not.toBeInTheDocument();
+      expect(stored()).toBeNull();
+    });
+
+    it('forgets the picks the moment the party stops answering', async () => {
+      window.sessionStorage.setItem('nubarca.party.picks', JSON.stringify(['f1']));
+      installFetchMock({
+        'GET /api/party/tok-1': () => errorResponse(404),
+        'GET /api/party/tok-1/items': () => errorResponse(404),
+      });
+      render(wrapper());
+      expect(await screen.findByText(/non è più disponibile/i)).toBeInTheDocument();
+      await waitFor(() => expect(stored()).toBeNull());
+    });
+  });
+
   it('becomes unavailable when the token is revoked during refresh', async () => {
     let revoked = false;
     installFetchMock({

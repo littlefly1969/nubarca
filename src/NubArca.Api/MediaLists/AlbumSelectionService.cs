@@ -5,9 +5,13 @@ using NubArca.Api.Domain;
 
 namespace NubArca.Api.MediaLists;
 
-public sealed record AlbumSelectionState(int Version, int Count);
+// `Stamp` digests the visible ordered ids, as on the account selection: it moves
+// when the album stops (or starts again) serving a picked item, which writes no
+// selection row and so leaves the version alone.
+public sealed record AlbumSelectionState(int Version, int Count, string Stamp);
 
-public sealed record AlbumSelectionItemsResult(int Requested, int Succeeded, int Skipped, int Version, int Count);
+public sealed record AlbumSelectionItemsResult(
+    int Requested, int Succeeded, int Skipped, int Version, int Count, string Stamp);
 
 public sealed record AlbumSelectionIdsPage(IReadOnlyList<Guid> Ids, string? NextCursor, int Version, int Count);
 
@@ -50,9 +54,9 @@ public sealed class AlbumSelectionService : IAlbumSelectionService
     public async Task<AlbumSelectionState> GetAsync(AlbumAccessGrant grant, CancellationToken cancellationToken)
     {
         var list = await FindAsync(grant, cancellationToken);
-        return list is null
-            ? new AlbumSelectionState(0, 0)
-            : new AlbumSelectionState(list.Version, await CountVisibleAsync(grant, list.Id, cancellationToken));
+        if (list is null) return new AlbumSelectionState(0, 0, MediaListService.StampOf([]));
+        var (count, stamp) = await VisibleStateAsync(grant, list.Id, cancellationToken);
+        return new AlbumSelectionState(list.Version, count, stamp);
     }
 
     public async Task<AlbumSelectionIdsPage?> ListIdsAsync(
@@ -183,11 +187,15 @@ public sealed class AlbumSelectionService : IAlbumSelectionService
     private async Task<AlbumSelectionItemsResult> ResultAsync(
         AlbumAccessGrant grant, MediaList? list, int requested, int succeeded, CancellationToken cancellationToken)
     {
-        if (list is null) return new AlbumSelectionItemsResult(requested, succeeded, requested - succeeded, 0, 0);
+        if (list is null)
+        {
+            return new AlbumSelectionItemsResult(
+                requested, succeeded, requested - succeeded, 0, 0, MediaListService.StampOf([]));
+        }
         var version = await _db.MediaLists.AsNoTracking()
             .Where(l => l.Id == list.Id).Select(l => l.Version).FirstAsync(cancellationToken);
-        return new AlbumSelectionItemsResult(requested, succeeded, requested - succeeded, version,
-            await CountVisibleAsync(grant, list.Id, cancellationToken));
+        var (count, stamp) = await VisibleStateAsync(grant, list.Id, cancellationToken);
+        return new AlbumSelectionItemsResult(requested, succeeded, requested - succeeded, version, count, stamp);
     }
 
     private IQueryable<MediaListItem> VisibleItems(AlbumAccessGrant grant, Guid listId)
@@ -199,6 +207,16 @@ public sealed class AlbumSelectionService : IAlbumSelectionService
 
     private Task<int> CountVisibleAsync(AlbumAccessGrant grant, Guid listId, CancellationToken cancellationToken) =>
         VisibleItems(grant, listId).CountAsync(cancellationToken);
+
+    private async Task<(int Count, string Stamp)> VisibleStateAsync(
+        AlbumAccessGrant grant, Guid listId, CancellationToken cancellationToken)
+    {
+        var ids = await VisibleItems(grant, listId)
+            .OrderBy(i => i.Position).ThenBy(i => i.FileItemId)
+            .Select(i => i.FileItemId)
+            .ToListAsync(cancellationToken);
+        return (ids.Count, MediaListService.StampOf(ids));
+    }
 
     private Task<MediaList?> FindAsync(AlbumAccessGrant grant, CancellationToken cancellationToken) =>
         _db.MediaLists.AsNoTracking()

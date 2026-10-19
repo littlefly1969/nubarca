@@ -17,7 +17,7 @@ import type { PrintLayout } from '@nubarca/contracts';
 import { useI18n, type MessageKey } from '../i18n';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PRODUCT_NAME } from '../brand/brand';
-import { recallFaceFilter, recallPartyHome } from './partyGuestMemo';
+import { recallFaceFilter, recallPartyHome, recallPartyPicks } from './partyGuestMemo';
 import {
   PAPER_LABEL, PrintStudio, useFitLine,
   type FullBleedSheet, type StudioFormat, type StudioSubmission,
@@ -349,6 +349,13 @@ export function PartyPrintPage() {
   // What the guest's own face search found, if they ran one on the hub. The
   // memo is intersected with THIS token's photographs, so a stale one from
   // another party simply matches nothing and is never offered.
+  // What the guest picked on the hub for printing, in pick order, kept to the
+  // photographs THIS token serves: they open the sheet already chosen.
+  const picked = useMemo(() => {
+    const served = new Set((manifest?.photos ?? []).map((photo) => photo.id));
+    return recallPartyPicks().filter((id) => served.has(id));
+  }, [manifest]);
+
   const mine = useMemo(() => {
     const remembered = new Set(recallFaceFilter());
     return (manifest?.photos ?? []).filter((photo) => remembered.has(photo.id));
@@ -529,6 +536,7 @@ export function PartyPrintPage() {
         formats={formats}
         gallery={gallery}
         photoById={photoById}
+        preselected={picked.length > 0 ? picked : undefined}
         // Offered only when the guest's own search actually matched
         // photographs this token serves.
         galleryTools={mine.length > 0 ? (

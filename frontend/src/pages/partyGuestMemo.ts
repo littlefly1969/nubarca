@@ -70,3 +70,43 @@ export function recallPartyHome(): string | null {
     return null;
   }
 }
+
+/*
+ * The guest's own picks, for printing.
+ *
+ * An anonymous guest has no account to hold a selection, so it lives exactly as
+ * long as the session that granted it: this tab's sessionStorage, ids only —
+ * never a token, never a URL. Like the face filter it is only ever used by
+ * intersecting with what the current token serves, and the hub forgets it the
+ * moment the party stops answering (revoked, disabled, expired).
+ */
+const PICKS_KEY = 'nubarca.party.picks';
+const MAX_PICKS = 200;
+
+export function rememberPartyPicks(itemIds: readonly string[]): void {
+  try {
+    if (itemIds.length === 0) {
+      window.sessionStorage.removeItem(PICKS_KEY);
+      return;
+    }
+    window.sessionStorage.setItem(PICKS_KEY, JSON.stringify(itemIds.slice(0, MAX_PICKS)));
+  } catch {
+    // Without storage the picks simply last as long as the page.
+  }
+}
+
+export function recallPartyPicks(): string[] {
+  try {
+    const raw = window.sessionStorage.getItem(PICKS_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is string => typeof id === 'string').slice(0, MAX_PICKS);
+  } catch {
+    return [];
+  }
+}
+
+export function forgetPartyPicks(): void {
+  rememberPartyPicks([]);
+}
