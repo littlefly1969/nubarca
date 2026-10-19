@@ -28,7 +28,7 @@ public sealed class MediaListEndpointTests : IDisposable
 
     public void Dispose() => _factory.Dispose();
 
-    private sealed record Summary(Guid Id, string? Name, string Kind, int Version, int Count);
+    private sealed record Summary(Guid Id, string? Name, string Kind, int Version, int Count, string? Stamp = null);
     private sealed record ItemsResult(int Requested, int Succeeded, int Skipped, int Version, int Count);
     private sealed record IdsPage(List<Guid> Ids, string? NextCursor, int Version, int Count);
     private sealed record Item(Guid Id, string Kind, string ThumbnailUrl);
@@ -273,6 +273,64 @@ public sealed class MediaListEndpointTests : IDisposable
             await db.SaveChangesAsync();
         });
         Assert.Equal(new[] { p[0], p[2] }, await IdsAsync(client, list.Id));
+    }
+
+    // Trash, Vault and restore change what a list SHOWS without writing it, so
+    // its version stays put. The stamp moves, and moves even when one file
+    // leaves as another comes back at the same count: that is what other
+    // devices follow to drop or regain a pick.
+    [Fact]
+    public async Task The_Stamp_Follows_Trash_Vault_And_Restore_When_The_Version_Does_Not()
+    {
+        var (owner, laptop) = await _factory.CreateAuthenticatedClientAsync();
+        var phone = await _factory.LoginAsync();
+        var p = await PhotosAsync(owner, 3);
+        var selection = (await laptop.GetFromJsonAsync<Summary>("/api/selection"))!;
+        await AddAsync(laptop, selection.Id, p);
+        var start = (await phone.GetFromJsonAsync<Summary>("/api/selection"))!;
+        Assert.False(string.IsNullOrEmpty(start.Stamp));
+        Assert.Equal(start.Stamp, (await laptop.GetFromJsonAsync<Summary>($"/api/lists/{selection.Id}"))!.Stamp);
+
+        Guid vaultId = Guid.Empty;
+        await InDbAsync(async db =>
+        {
+            var vault = new PrivateVault { Id = Guid.NewGuid(), OwnerUserId = owner, CreatedAt = DateTime.UtcNow };
+            vaultId = vault.Id;
+            db.PrivateVaults.Add(vault);
+            (await db.FileItems.FirstAsync(f => f.Id == p[2])).DeletedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        });
+        var trashed = (await phone.GetFromJsonAsync<Summary>("/api/selection"))!;
+        Assert.Equal(start.Version, trashed.Version);
+        Assert.Equal(2, trashed.Count);
+        Assert.NotEqual(start.Stamp, trashed.Stamp);
+
+        // p[0] goes to the Vault as p[2] comes back from the Trash: still two.
+        await InDbAsync(async db =>
+        {
+            (await db.FileItems.FirstAsync(f => f.Id == p[0])).PrivateVaultId = vaultId;
+            (await db.FileItems.IgnoreQueryFilters().FirstAsync(f => f.Id == p[2])).DeletedAt = null;
+            await db.SaveChangesAsync();
+        });
+        var swapped = (await phone.GetFromJsonAsync<Summary>("/api/selection"))!;
+        Assert.Equal(start.Version, swapped.Version);
+        Assert.Equal(2, swapped.Count);
+        Assert.NotEqual(trashed.Stamp, swapped.Stamp);
+        Assert.Equal(new[] { p[1], p[2] }, await IdsAsync(phone, selection.Id));
+
+        // Back to the same visible picks, back to the same stamp.
+        await InDbAsync(async db =>
+        {
+            (await db.FileItems.IgnoreQueryFilters().FirstAsync(f => f.Id == p[0])).PrivateVaultId = null;
+            await db.SaveChangesAsync();
+        });
+        Assert.Equal(start.Stamp, (await phone.GetFromJsonAsync<Summary>("/api/selection"))!.Stamp);
+
+        // A write answers with the stamp too, and it never carries a file id.
+        var write = await laptop.PostAsJsonAsync($"/api/lists/{selection.Id}/items", new { fileItemIds = new[] { p[0] } });
+        var body = await write.Content.ReadAsStringAsync();
+        Assert.Contains("\"stamp\"", body);
+        foreach (var id in p) Assert.DoesNotContain(id.ToString(), body, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

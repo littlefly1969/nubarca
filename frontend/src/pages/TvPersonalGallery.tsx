@@ -877,10 +877,14 @@ export function TvPersonalGallery({ grant, onBack, onPersonalError }: TvPersonal
       if (selectionLayer !== 'none') setSelectionLayer('none');
       else if (showFilters) cancelWorkspace();
       else if (menuOpen) closeMenu();
-      else if (selection !== null) { setSelection(null); setQuickSelect(false); }
+      // Back steps out of quick selection, or out of the gallery — never
+      // through the picks: they are the account's selection, held on the
+      // server for every device, and only "Azzera selezione" clears them.
+      else if (selection !== null && selection.length === 0) { setSelection(null); setQuickSelect(false); }
+      else if (quickSelect) setQuickSelect(false);
       else onBack();
     }
-  }, [viewerIndex, selection, onBack, moveFocus, showFilters, menuOpen, selectionLayer,
+  }, [viewerIndex, selection, quickSelect, onBack, moveFocus, showFilters, menuOpen, selectionLayer,
     toggleMenu, moveLayerFocus, cancelWorkspace, closeMenu]);
 
   const toggleSelected = useCallback((id: string) => {

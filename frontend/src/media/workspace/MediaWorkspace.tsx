@@ -28,6 +28,7 @@ import { moveFilesToTrash } from '../../gallery/workspace/bulkTrash';
 import { usePermissions } from '../../auth/usePermissions';
 import { useAccountSelectionStore } from '../../selection/AccountSelectionProvider';
 import { SelectionTray } from '../../selection/SelectionTray';
+import { SelectionScope } from '../../selection/SelectionScope';
 
 // A photo-only bulk destination (Beauty Lab, Plates, …). `run` receives the
 // selected ids; the shell binds the live selection so the page never has to
@@ -304,6 +305,12 @@ export function MediaWorkspace({
       setBusy(false);
     }
   }, [source, selection, busy, pruneMoved, reconcile, tn, t, invalidateAuth, onAlbumMembershipChanged]);
+
+  // Every confirmation that acts on the selection says it is the ACCOUNT's
+  // selection and counts what lies outside this view, so an action started
+  // over a list never looks as if it stopped at the list.
+  const onScreen = useMemo(() => new Set(ws.orderedIds), [ws.orderedIds]);
+  const scopeOf = (ids: readonly string[]) => <SelectionScope store={selection.store} ids={ids} onScreen={onScreen} />;
 
   async function confirmTrash() {
     const ids = [...selection.selected];
@@ -754,6 +761,7 @@ export function MediaWorkspace({
       {trashOpen && (
         <TrashConfirmation
           count={selection.count}
+          scope={scopeOf([...selection.selected])}
           busy={busy}
           onConfirm={confirmTrash}
           onCancel={() => setTrashOpen(false)}
@@ -801,11 +809,11 @@ export function MediaWorkspace({
       )}
 
       {moveToPersonal.isOpen && (
-        <MoveToPersonalDialog fileIds={moveToPersonal.ids} onClose={moveToPersonal.close} execute={moveToPersonal.execute} />
+        <MoveToPersonalDialog fileIds={moveToPersonal.ids} scope={scopeOf(moveToPersonal.ids)} onClose={moveToPersonal.close} execute={moveToPersonal.execute} />
       )}
 
       {moveToExcluded.isOpen && (
-        <MoveToExcludedDialog count={moveToExcluded.ids.length} onClose={moveToExcluded.close} execute={moveToExcluded.execute} />
+        <MoveToExcludedDialog count={moveToExcluded.ids.length} scope={scopeOf(moveToExcluded.ids)} onClose={moveToExcluded.close} execute={moveToExcluded.execute} />
       )}
     </section>
   );
