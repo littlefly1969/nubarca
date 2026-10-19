@@ -5,8 +5,8 @@
 import { tvDelete, tvGet, tvPost } from './client';
 import { personalHeaders } from './personal';
 
-export interface TvSelectionSummary { id: string; version: number; count: number }
-export interface TvSelectionWrite { version: number; count: number }
+export interface TvSelectionSummary { id: string; version: number; count: number; stamp?: string | null }
+export interface TvSelectionWrite { version: number; count: number; stamp?: string | null }
 
 export function getPersonalSelection(signal?: AbortSignal): Promise<TvSelectionSummary> {
   return tvGet<TvSelectionSummary>('/api/tv/personal/selection', personalHeaders(), signal);

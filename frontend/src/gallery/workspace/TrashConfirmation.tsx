@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { useI18n } from '../../i18n';
 
 // Confirmation dialog for the destructive bulk move-to-Trash. Focus is trapped
@@ -9,9 +9,11 @@ interface Props {
   busy: boolean;
   onConfirm(): void;
   onCancel(): void;
+  // What the action reaches, when it starts from the account selection.
+  scope?: ReactNode;
 }
 
-export function TrashConfirmation({ count, busy, onConfirm, onCancel }: Props) {
+export function TrashConfirmation({ count, busy, onConfirm, onCancel, scope }: Props) {
   const { t, tn } = useI18n();
   const confirmRef = useRef<HTMLButtonElement>(null);
 
@@ -37,6 +39,7 @@ export function TrashConfirmation({ count, busy, onConfirm, onCancel }: Props) {
           {tn(count, 'gallery.ws.trash.title')}
         </h2>
         <p className="ws-confirm-body">{t('gallery.ws.trash.body')}</p>
+        {scope}
         <div className="ws-confirm-actions">
           <button type="button" className="row-action" data-testid="ws-trash-cancel" disabled={busy} onClick={onCancel}>
             {t('common.cancel')}

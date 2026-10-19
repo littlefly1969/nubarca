@@ -9,10 +9,20 @@ namespace NubArca.Api.MediaLists;
 // DTOs. A list never carries a blob id, a hash, a storage key, a URL it stores
 // or a token: only the owner's own FileItem ids and what the gallery already
 // shows the owner about them.
+//
+// `Stamp` names what the list SHOWS right now: a digest of its visible entries
+// in order. `Version` only moves on a list edit, but what a list shows also
+// changes when one of its files is trashed, moved to the Vault or restored, and
+// no list row is written then. A device compares stamps, not versions, so it
+// notices those changes too — including one file leaving while another comes
+// back, which leaves the count unchanged. Null where it is not computed (the
+// named-list overview).
 public sealed record MediaListSummary(
-    Guid Id, string? Name, string Kind, int Version, int Count, DateTime CreatedAt, DateTime UpdatedAt);
+    Guid Id, string? Name, string Kind, int Version, int Count, DateTime CreatedAt, DateTime UpdatedAt,
+    string? Stamp = null);
 
-public sealed record MediaListItemsResult(int Requested, int Succeeded, int Skipped, int Version, int Count);
+public sealed record MediaListItemsResult(
+    int Requested, int Succeeded, int Skipped, int Version, int Count, string Stamp);
 
 public sealed record MediaListIdsPage(IReadOnlyList<Guid> Ids, string? NextCursor, int Version, int Count);
 
@@ -100,13 +110,16 @@ public sealed class MediaListService : IMediaListService
     public async Task<MediaListSummary?> GetAsync(Guid ownerUserId, Guid listId, CancellationToken cancellationToken)
     {
         var list = await FindAsync(ownerUserId, listId, cancellationToken);
-        return list is null ? null : ToSummary(list, await CountVisibleAsync(ownerUserId, listId, cancellationToken));
+        if (list is null) return null;
+        var (count, stamp) = await VisibleStateAsync(ownerUserId, listId, cancellationToken);
+        return ToSummary(list, count) with { Stamp = stamp };
     }
 
     public async Task<MediaListSummary> GetSelectionAsync(Guid ownerUserId, CancellationToken cancellationToken)
     {
         var list = await EnsureSelectionAsync(ownerUserId, cancellationToken);
-        return ToSummary(list, await CountVisibleAsync(ownerUserId, list.Id, cancellationToken));
+        var (count, stamp) = await VisibleStateAsync(ownerUserId, list.Id, cancellationToken);
+        return ToSummary(list, count) with { Stamp = stamp };
     }
 
     public async Task<MediaListResult<MediaListSummary>> CreateAsync(
@@ -362,8 +375,8 @@ public sealed class MediaListService : IMediaListService
     {
         var version = await _db.MediaLists.AsNoTracking()
             .Where(l => l.Id == listId).Select(l => l.Version).FirstAsync(cancellationToken);
-        return new MediaListItemsResult(requested, succeeded, requested - succeeded, version,
-            await CountVisibleAsync(ownerUserId, listId, cancellationToken));
+        var (count, stamp) = await VisibleStateAsync(ownerUserId, listId, cancellationToken);
+        return new MediaListItemsResult(requested, succeeded, requested - succeeded, version, count, stamp);
     }
 
     private async Task<(IReadOnlyList<Guid> Ids, string? Next)?> PageAsync(
@@ -404,6 +417,27 @@ public sealed class MediaListService : IMediaListService
         join f in _db.FileItems.AsNoTracking() on i.FileItemId equals f.Id
         where f.OwnerUserId == ownerUserId && f.DeletedAt == null
         select i;
+
+    // The visible entries' count and their stamp (see MediaListSummary). Ids
+    // only — a list holds at most MaxItemsPerList of them — read in the list's
+    // own order, so a reorder or a substitution changes the stamp as surely as
+    // an add or a removal.
+    private async Task<(int Count, string Stamp)> VisibleStateAsync(
+        Guid ownerUserId, Guid listId, CancellationToken cancellationToken)
+    {
+        var ids = await VisibleItems(ownerUserId, listId)
+            .OrderBy(i => i.Position).ThenBy(i => i.FileItemId)
+            .Select(i => i.FileItemId)
+            .ToListAsync(cancellationToken);
+        return (ids.Count, StampOf(ids));
+    }
+
+    internal static string StampOf(IReadOnlyList<Guid> ids)
+    {
+        var bytes = new byte[ids.Count * 16];
+        for (var i = 0; i < ids.Count; i++) ids[i].TryWriteBytes(bytes.AsSpan(i * 16, 16));
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes), 0, 12).ToLowerInvariant();
+    }
 
     private Task<int> CountVisibleAsync(Guid ownerUserId, Guid listId, CancellationToken cancellationToken) =>
         VisibleItems(ownerUserId, listId).CountAsync(cancellationToken);

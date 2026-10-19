@@ -10,13 +10,19 @@
 // Pure and node-testable: the transport is injected.
 import type { TvSelectionChange, TvSelectionStore } from './tvSelection';
 
+// `stamp` names what the selection SHOWS: it moves when a selected file is
+// trashed, vaulted or restored, which the list `version` does not.
+interface TvSelectionState { version: number; count: number; stamp?: string | null }
+
 export interface TvSelectionTransport {
-  summary(signal?: AbortSignal): Promise<{ id: string; version: number; count: number }>;
+  summary(signal?: AbortSignal): Promise<TvSelectionState & { id: string }>;
   ids(cursor: string | null, signal?: AbortSignal): Promise<{ ids: string[]; nextCursor: string | null }>;
-  add(ids: string[]): Promise<{ version: number; count: number }>;
-  remove(ids: string[]): Promise<{ version: number; count: number }>;
-  clear(): Promise<{ version: number; count: number }>;
+  add(ids: string[]): Promise<TvSelectionState>;
+  remove(ids: string[]): Promise<TvSelectionState>;
+  clear(): Promise<TvSelectionState>;
 }
+
+const stateOf = (r: TvSelectionState) => r.stamp ?? `v${r.version}`;
 
 export interface TvSelectionSyncHandle {
   refresh(): Promise<void>;
@@ -33,8 +39,11 @@ export function startTvSelectionSync(
 ): TvSelectionSyncHandle {
   let stopped = false;
   let loaded = false;
-  let knownVersion = -1;
+  let knownState: string | null = null;
   let queue: Op[] = [];
+  // The operation on the wire: never merged into, and never mistaken on its
+  // return for a Clear that replaced the queue meanwhile.
+  let inFlight: Op | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let sending: Promise<void> | null = null;
   let refreshing: Promise<void> | null = null;
@@ -44,7 +53,7 @@ export function startTvSelectionSync(
     if (change.kind === 'clear') queue = [{ kind: 'clear' }];
     else {
       const last = queue[queue.length - 1];
-      if (last && last.kind === change.kind) last.ids.push(...change.ids);
+      if (last && last !== inFlight && last.kind === change.kind) last.ids.push(...change.ids);
       else queue.push({ kind: change.kind, ids: [...change.ids] });
     }
     if (!stopped && timer === null) timer = setTimeout(() => { timer = null; void send(); }, debounceMs);
@@ -64,8 +73,8 @@ export function startTvSelectionSync(
   const load = async () => {
     const summary = await transport.summary(controller.signal);
     loaded = true;
-    if (summary.version !== knownVersion) {
-      knownVersion = summary.version;
+    if (stateOf(summary) !== knownState) {
+      knownState = stateOf(summary);
       if (queue.length === 0) await pull();
     }
   };
@@ -79,19 +88,27 @@ export function startTvSelectionSync(
         if (!loaded) await load();
         while (!stopped && queue.length > 0) {
           const op = queue[0];
-          let result: { version: number; count: number };
+          inFlight = op;
+          let result: TvSelectionState;
+          let rest: string[] = [];
           if (op.kind === 'clear') result = await transport.clear();
           else {
             const part = op.ids.slice(0, chunk);
+            rest = op.ids.slice(part.length);
             result = op.kind === 'add' ? await transport.add(part) : await transport.remove(part);
-            op.ids = op.ids.slice(part.length);
-            if (op.ids.length > 0) { knownVersion = result.version; continue; }
           }
-          queue.shift();
-          knownVersion = result.version;
+          inFlight = null;
+          knownState = stateOf(result);
+          // Done with exactly this operation, unless a Clear already replaced it.
+          const at = queue.indexOf(op);
+          if (at >= 0) {
+            if (op.kind !== 'clear' && rest.length > 0) { op.ids = rest; continue; }
+            queue.splice(at, 1);
+          }
           if (queue.length === 0 && result.count !== store.count) await pull();
         }
       } catch {
+        inFlight = null;
         // kept for the next attempt
       } finally {
         sending = null;
@@ -109,8 +126,8 @@ export function startTvSelectionSync(
         if (queue.length > 0) { await send(); return; }
         const summary = await transport.summary(controller.signal);
         loaded = true;
-        if (summary.version !== knownVersion && queue.length === 0 && !sending) {
-          knownVersion = summary.version;
+        if (stateOf(summary) !== knownState && queue.length === 0 && !sending) {
+          knownState = stateOf(summary);
           await pull();
         }
       } catch {
