@@ -18,6 +18,9 @@ export interface MediaListSummary {
   count: number;
   createdAt: string;
   updatedAt: string;
+  // A digest of what the list shows now; it moves when a listed file is
+  // trashed, vaulted or restored, which `version` does not. Null in overviews.
+  stamp?: string | null;
 }
 
 export interface MediaListItemsResult {
@@ -26,6 +29,7 @@ export interface MediaListItemsResult {
   skipped: number;
   version: number;
   count: number;
+  stamp: string;
 }
 
 export interface MediaListIdsPage {

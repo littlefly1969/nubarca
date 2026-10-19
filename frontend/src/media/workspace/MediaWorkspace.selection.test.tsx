@@ -104,3 +104,56 @@ it('keeps one selection in step across grid, viewer, tray and a change of view',
   await waitFor(() => expect(screen.getByTestId('media-selection-count')).toHaveTextContent('2'));
   expect(controls()[0]).toHaveAttribute('aria-pressed', 'true');
 });
+
+// The selection is the account's, so an action started over a list reaches
+// picks made elsewhere too. The confirmation says so, counts them, and shows
+// them, instead of reading as if it stopped at the list on screen.
+it('confirms Trash over a list against the whole account selection, naming what is not on screen', async () => {
+  const LIST: MediaWorkspaceSource = { kind: 'list', listId: 'L1' };
+  const deleted: string[] = [];
+  installFetchMock({
+    'GET /api/media': () => jsonResponse(page([photo('a'), photo('b')])),
+    'GET /api/lists/L1/media': () => jsonResponse(page([photo('b'), photo('c')])),
+    'DELETE /api/files/a': () => { deleted.push('a'); return new Response(null, { status: 204 }); },
+    'DELETE /api/files/b': () => { deleted.push('b'); return new Response(null, { status: 204 }); },
+    'DELETE /api/files/c': () => { deleted.push('c'); return new Response(null, { status: 204 }); },
+  });
+  function Switcher() {
+    const [source, setSource] = useState<MediaWorkspaceSource>(LIBRARY);
+    const [identity, setIdentity] = useState<MediaWorkspaceIdentity>(emptyIdentity(LIBRARY));
+    return (
+      <>
+        <button type="button" onClick={() => { setSource(LIST); setIdentity(emptyIdentity(LIST)); }}>open-list</button>
+        <MediaWorkspace source={source} identity={identity} onIdentityChange={setIdentity} searchPlaceholder="Cerca" />
+      </>
+    );
+  }
+  render(
+    <MemoryRouter>
+      <AuthedWrapper>
+        <AccountSelectionProvider sync={false}><Switcher /></AccountSelectionProvider>
+      </AuthedWrapper>
+    </MemoryRouter>,
+  );
+  await screen.findByText('a.jpg');
+  // 'a' and 'b' picked in the Library…
+  await userEvent.click(screen.getAllByTestId('media-select-control')[0]);
+  await userEvent.click(screen.getAllByTestId('media-select-control')[1]);
+  // …then the list, where only 'b' is on screen, and 'c' is picked there.
+  await userEvent.click(screen.getByText('open-list'));
+  await screen.findByText('c.jpg');
+  await userEvent.click(screen.getAllByTestId('media-select-control')[1]);
+  expect(screen.getByTestId('media-selection-count')).toHaveTextContent('3');
+
+  await userEvent.click(screen.getByTestId('media-sel-move-to'));
+  await userEvent.click(screen.getByTestId('media-sel-trash'));
+  const dialog = await screen.findByTestId('ws-trash-confirm');
+  expect(dialog).toHaveTextContent('Spostare 3 foto nel cestino?');
+  expect(screen.getByTestId('selection-scope-count')).toHaveTextContent('selezione del tuo account: 3 file');
+  expect(screen.getByTestId('selection-scope-elsewhere')).toHaveTextContent('1 di questi non è in questa vista');
+  expect(screen.getAllByTestId('selection-scope-thumb')).toHaveLength(3);
+  expect(deleted).toEqual([]);
+
+  await userEvent.click(screen.getByTestId('ws-trash-confirm-btn'));
+  await waitFor(() => expect([...deleted].sort()).toEqual(['a', 'b', 'c']));
+});

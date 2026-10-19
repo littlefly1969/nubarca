@@ -592,11 +592,18 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   untrashed, non-Vault media. Visibility is re-derived on every read, so a
   trashed or vaulted file drops out of every list and comes back on restore;
   a permanent delete cascades its entries. The web store is mirrored by
-  `selection/selectionSync.ts` (queued local writes, version-polled remote
-  reads adopted without echo); the TV Personal Area mirrors the same selection
-  through `/api/tv/personal/selection*` (grant-gated, selection only) and on
-  leaving forgets it on screen with `adopt([])` — never `clear()`, which would
-  wipe it for the account. A list is a workspace source (`{ kind: 'list' }`):
+  `selection/selectionSync.ts` (queued local writes, remote reads adopted
+  without echo); the TV Personal Area mirrors the same selection through
+  `/api/tv/personal/selection*` (grant-gated, selection only) and on leaving
+  forgets it on screen with `adopt([])` — never `clear()`, which would wipe it
+  for the account; BACK on the browser TV leaves quick selection and then the
+  gallery, never the picks. Devices follow the list's `stamp` (a digest of the
+  VISIBLE ordered ids), not its `version`: trash, Vault and restore move the
+  stamp without a list write, including equal-count substitutions. The sync
+  never merges a new edit into the request already on the wire, so a Clear
+  made meanwhile is always sent. A destructive confirmation over a list
+  (`SelectionScope`) says it acts on the ACCOUNT selection, counts the picks
+  outside the view and shows them. A list is a workspace source (`{ kind: 'list' }`):
   every library operation applies, "Remove from list" replaces "Remove from
   album", and the semantic search paths are not offered there (no list scope).
   Selection add/remove is not audited (personal UI state); named-list changes

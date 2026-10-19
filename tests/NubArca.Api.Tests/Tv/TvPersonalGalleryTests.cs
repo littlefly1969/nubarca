@@ -198,7 +198,7 @@ public sealed class TvPersonalGalleryTests : IDisposable
 
     // ── the account's current selection, shared with the owner's browsers ───
 
-    private sealed record TvSelectionDto(Guid Id, int Version, int Count);
+    private sealed record TvSelectionDto(Guid Id, int Version, int Count, string? Stamp = null);
     private sealed record TvSelectionIdsDto(List<Guid> Ids, string? NextCursor, int Version, int Count);
 
     [Fact]
@@ -247,7 +247,13 @@ public sealed class TvPersonalGalleryTests : IDisposable
         var tvIds = (await tv.Content.ReadFromJsonAsync<TvSelectionIdsDto>())!;
         Assert.Equal(new[] { second }, tvIds.Ids);
         var summary = await TvSendAsync(cookie, HttpMethod.Get, "/api/tv/personal/selection", grant);
-        Assert.Equal(web.Id, (await summary.Content.ReadFromJsonAsync<TvSelectionDto>())!.Id);
+        var tvSummary = (await summary.Content.ReadFromJsonAsync<TvSelectionDto>())!;
+        Assert.Equal(web.Id, tvSummary.Id);
+        // The TV follows the same visible-content stamp as the browser, so a
+        // trash or restore elsewhere reaches it even when the version stays put.
+        var webNow = (await owner.GetFromJsonAsync<TvSelectionDto>("/api/selection"))!;
+        Assert.False(string.IsNullOrEmpty(tvSummary.Stamp));
+        Assert.Equal(webNow.Stamp, tvSummary.Stamp);
 
         var clear = await TvSendAsync(cookie, HttpMethod.Post, "/api/tv/personal/selection/clear", grant);
         Assert.Equal(HttpStatusCode.OK, clear.StatusCode);

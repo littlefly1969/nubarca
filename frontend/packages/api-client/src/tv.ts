@@ -1032,8 +1032,8 @@ export function revokeTvDevice(sessionId: string, signal?: AbortSignal): Promise
 // The same server-held selection the owner's browsers read. Only the selection
 // is reachable from the TV, never a named list.
 
-export interface TvPersonalSelectionSummary { id: string; version: number; count: number }
-export interface TvPersonalSelectionWrite { requested: number; succeeded: number; skipped: number; version: number; count: number }
+export interface TvPersonalSelectionSummary { id: string; version: number; count: number; stamp?: string | null }
+export interface TvPersonalSelectionWrite { requested: number; succeeded: number; skipped: number; version: number; count: number; stamp?: string | null }
 
 export function getTvPersonalSelection(unlockToken: string, signal?: AbortSignal): Promise<TvPersonalSelectionSummary> {
   return api<TvPersonalSelectionSummary>('/api/tv/personal/selection', { headers: grantHeaders(unlockToken), signal });

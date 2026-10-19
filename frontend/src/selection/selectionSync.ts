@@ -15,8 +15,13 @@ import type { MediaSelectionStore, SelectionChange } from './mediaSelectionStore
 // Transport-agnostic: the web owner session and the TV Personal Area plug in
 // their own endpoints behind the same shape.
 
-export interface SelectionSummary { id: string; version: number; count: number }
-export interface SelectionWriteResult { version: number; count: number }
+// `stamp` names what the selection SHOWS (see MediaListSummary on the server):
+// it moves when a selected file is trashed, vaulted or restored, which a list
+// `version` does not. A transport without one falls back to the version.
+export interface SelectionSummary { id: string; version: number; count: number; stamp?: string | null }
+export interface SelectionWriteResult { version: number; count: number; stamp?: string | null }
+
+const stateOf = (r: { version: number; stamp?: string | null }) => r.stamp ?? `v${r.version}`;
 
 export interface SelectionSyncTransport {
   summary(signal?: AbortSignal): Promise<SelectionSummary>;
@@ -63,8 +68,12 @@ export function startSelectionSync(
 
   let stopped = false;
   let listId: string | null = null;
-  let knownVersion = -1;
+  let knownState: string | null = null;
   let queue: Op[] = [];
+  // The operation on the wire. A change arriving meanwhile never merges into
+  // it (its ids are already sent), and a Clear arriving meanwhile replaces the
+  // queue without the in-flight operation taking the Clear with it on return.
+  let inFlight: Op | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let sending: Promise<void> | null = null;
   let refreshing: Promise<void> | null = null;
@@ -87,7 +96,7 @@ export function startSelectionSync(
       queue = [{ kind: 'clear' }];
     } else {
       const last = queue[queue.length - 1];
-      if (last && last.kind === change.kind) last.ids.push(...change.ids);
+      if (last && last !== inFlight && last.kind === change.kind) last.ids.push(...change.ids);
       else queue.push({ kind: change.kind, ids: [...change.ids] });
     }
     schedule();
@@ -105,22 +114,32 @@ export function startSelectionSync(
         if (listId === null) await load();
         while (!stopped && listId !== null && queue.length > 0) {
           const op = queue[0];
+          inFlight = op;
           let result: SelectionWriteResult;
+          let rest: string[] = [];
           if (op.kind === 'clear') {
             result = await transport.clear(listId);
           } else {
             const part = op.ids.slice(0, chunk);
+            rest = op.ids.slice(part.length);
             result = op.kind === 'add' ? await transport.add(listId, part) : await transport.remove(listId, part);
-            op.ids = op.ids.slice(part.length);
-            if (op.ids.length > 0) { knownVersion = result.version; continue; }
           }
-          queue.shift();
-          knownVersion = result.version;
+          inFlight = null;
+          knownState = stateOf(result);
+          // Done with exactly this operation — unless a Clear replaced the
+          // queue while it was on the wire, in which case it is already gone
+          // and whatever is first now (the Clear) must still be sent.
+          const at = queue.indexOf(op);
+          if (at >= 0) {
+            if (op.kind !== 'clear' && rest.length > 0) { op.ids = rest; continue; }
+            queue.splice(at, 1);
+          }
           // What the server holds disagrees with what is shown (an id it
           // refused: trashed, vaulted, gone): take the server's word for it.
           if (queue.length === 0 && result.count !== store.count) await pull();
         }
       } catch (err) {
+        inFlight = null;
         fail(err);
       } finally {
         sending = null;
@@ -151,8 +170,8 @@ export function startSelectionSync(
   const load = async () => {
     const summary = await transport.summary(controller.signal);
     listId = summary.id;
-    if (summary.version !== knownVersion) {
-      knownVersion = summary.version;
+    if (stateOf(summary) !== knownState) {
+      knownState = stateOf(summary);
       if (queue.length === 0) await pull();
     }
   };
@@ -166,8 +185,10 @@ export function startSelectionSync(
         if (queue.length > 0) { await send(); return; }
         const summary = await transport.summary(controller.signal);
         listId = summary.id;
-        if (summary.version !== knownVersion && queue.length === 0 && !sending) {
-          knownVersion = summary.version;
+        // A different stamp: somebody else edited it, or one of its files
+        // was trashed, vaulted or restored — either way, read it again.
+        if (stateOf(summary) !== knownState && queue.length === 0 && !sending) {
+          knownState = stateOf(summary);
           await pull();
         }
       } catch (err) {

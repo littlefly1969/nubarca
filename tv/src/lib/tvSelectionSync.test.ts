@@ -96,3 +96,68 @@ test('a pick that fails to send is kept and sent on the next attempt', async () 
   assert.deepEqual(server.ids, ['x']);
   sync.stop();
 });
+
+// A request on the wire, and a Clear pressed meanwhile: the Clear must still
+// reach the account, whichever write was in flight.
+function gatedServer(initial: string[] = []) {
+  const server = { ids: [...initial], version: 1, calls: [] as string[], hold: false, gates: [] as Array<() => void> };
+  const gate = async () => { if (server.hold) await new Promise<void>((r) => server.gates.push(r)); };
+  const state = () => ({ version: server.version, count: server.ids.length });
+  const transport: TvSelectionTransport = {
+    summary: async () => ({ id: 's', ...state() }),
+    ids: async () => ({ ids: [...server.ids], nextCursor: null }),
+    add: async (ids) => { server.calls.push(`add:${ids.join(',')}`); await gate(); server.ids.push(...ids.filter((id) => !server.ids.includes(id))); server.version++; return state(); },
+    remove: async (ids) => { server.calls.push(`remove:${ids.join(',')}`); await gate(); server.ids = server.ids.filter((id) => !ids.includes(id)); server.version++; return state(); },
+    clear: async () => { server.calls.push('clear'); await gate(); server.ids = []; server.version++; return state(); },
+  };
+  return { server, transport };
+}
+
+const tick = () => new Promise((r) => setTimeout(r, 5));
+
+for (const first of ['add', 'remove'] as const) {
+  test(`${first} in flight, then Clear: the Clear still reaches the account`, async () => {
+    const { server, transport } = gatedServer(first === 'remove' ? ['a', 'b'] : []);
+    const store = new TvSelectionStore();
+    const sync = startTvSelectionSync(store, transport, { debounceMs: 0, pollMs: 0 });
+    await sync.refresh();
+    server.hold = true;
+    store.toggle('a');
+    await tick();
+    assert.equal(server.gates.length, 1);
+    store.clear();
+    server.hold = false;
+    server.gates.shift()!();
+    await tick();
+    await sync.flush();
+    assert.equal(server.calls.at(-1), 'clear');
+    assert.deepEqual(server.ids, []);
+    assert.deepEqual([...store.list()], []);
+    sync.stop();
+  });
+}
+
+// Trashing, vaulting or restoring a picked file changes what the selection
+// shows without a list edit: the stamp moves, the version does not.
+test('a file trashed and restored elsewhere leaves and returns on the TV', async () => {
+  const server = { ids: ['a', 'b', 'c'], hidden: new Set<string>(), version: 1 };
+  const visible = () => server.ids.filter((id) => !server.hidden.has(id));
+  const transport: TvSelectionTransport = {
+    summary: async () => ({ id: 's', version: server.version, count: visible().length, stamp: visible().join('|') }),
+    ids: async () => ({ ids: visible(), nextCursor: null }),
+    add: async () => ({ version: server.version, count: visible().length }),
+    remove: async () => ({ version: server.version, count: visible().length }),
+    clear: async () => ({ version: server.version, count: 0 }),
+  };
+  const store = new TvSelectionStore();
+  const sync = startTvSelectionSync(store, transport, { debounceMs: 0, pollMs: 0 });
+  await sync.refresh();
+  assert.deepEqual([...store.list()], ['a', 'b', 'c']);
+  server.hidden.add('b');
+  await sync.refresh();
+  assert.deepEqual([...store.list()], ['a', 'c']);
+  server.hidden = new Set(['a']); // 'a' vaulted as 'b' is restored: still two
+  await sync.refresh();
+  assert.deepEqual([...store.list()], ['b', 'c']);
+  sync.stop();
+});

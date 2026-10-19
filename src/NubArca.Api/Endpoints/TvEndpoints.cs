@@ -997,7 +997,7 @@ public static class TvEndpoints
             var (failure, ownerUserId) = await ResolveTvPersonalAccessAsync(httpContext, personal, cancellationToken);
             if (failure is not null) return failure;
             var selection = await lists.GetSelectionAsync(ownerUserId, cancellationToken);
-            return Results.Ok(new { selection.Id, selection.Version, selection.Count });
+            return Results.Ok(new { selection.Id, selection.Version, selection.Count, selection.Stamp });
         }).WithName("GetTvPersonalSelection");
 
         app.MapGet("/api/tv/personal/selection/ids", async (
