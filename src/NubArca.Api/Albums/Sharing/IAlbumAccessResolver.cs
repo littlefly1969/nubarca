@@ -27,6 +27,12 @@ public interface IAlbumAccessResolver
     Task<SharedMediaGrant?> ResolveMediaAsync(
         Guid albumId, Guid actorUserId, Guid fileItemId, SharedMediaAccess access,
         CancellationToken cancellationToken = default);
+
+    // The ids of every image and video of the grant's album that is servable to
+    // a member right now — the set form of ResolveMediaAsync's item check, for
+    // filtering a whole selection in one query. Composable; never materialized
+    // here.
+    IQueryable<Guid> ServableMediaIds(AlbumAccessGrant grant);
 }
 
 // What the caller wants to do with the media bytes. `Original` additionally

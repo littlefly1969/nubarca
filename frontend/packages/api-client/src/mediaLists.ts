@@ -113,3 +113,38 @@ export function listMediaListItems(
   if (cursor) params.set('cursor', cursor);
   return api<MediaListMediaPage>(`/api/lists/${listId}/items?${params.toString()}`, { signal });
 }
+
+// ── A member's own selection inside one shared album ───────────────────────
+//
+// Personal and scoped to that album: never the account selection, never a list.
+// A revoked or missing membership is a 404 on every call.
+
+export interface SharedAlbumSelectionState { version: number; count: number }
+
+export function getSharedAlbumSelection(albumId: string, signal?: AbortSignal): Promise<SharedAlbumSelectionState> {
+  return api<SharedAlbumSelectionState>(`/api/shared-albums/${albumId}/selection`, { signal });
+}
+
+export function listSharedAlbumSelectionIds(
+  albumId: string, cursor?: string | null, limit = 500, signal?: AbortSignal,
+): Promise<MediaListIdsPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set('cursor', cursor);
+  return api<MediaListIdsPage>(`/api/shared-albums/${albumId}/selection/ids?${params.toString()}`, { signal });
+}
+
+export function addSharedAlbumSelectionItems(
+  albumId: string, fileItemIds: string[], signal?: AbortSignal,
+): Promise<MediaListItemsResult> {
+  return api<MediaListItemsResult>(`/api/shared-albums/${albumId}/selection/items`, { method: 'POST', json: { fileItemIds }, signal });
+}
+
+export function removeSharedAlbumSelectionItems(
+  albumId: string, fileItemIds: string[], signal?: AbortSignal,
+): Promise<MediaListItemsResult> {
+  return api<MediaListItemsResult>(`/api/shared-albums/${albumId}/selection/items`, { method: 'DELETE', json: { fileItemIds }, signal });
+}
+
+export function clearSharedAlbumSelection(albumId: string, signal?: AbortSignal): Promise<MediaListItemsResult> {
+  return api<MediaListItemsResult>(`/api/shared-albums/${albumId}/selection/clear`, { method: 'POST', signal });
+}

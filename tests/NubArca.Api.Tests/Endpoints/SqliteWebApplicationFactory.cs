@@ -264,6 +264,8 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             // Owner media lists + current selection. Mirrors Program.cs.
             services.AddScoped<NubArca.Api.MediaLists.IMediaListService,
                 NubArca.Api.MediaLists.MediaListService>();
+            services.AddScoped<NubArca.Api.MediaLists.IAlbumSelectionService,
+                NubArca.Api.MediaLists.AlbumSelectionService>();
             // SHARE-ALBUM-01: live album sharing. Mirrors Program.cs
             // (Postgres-only block).
             services.AddScoped<NubArca.Api.Albums.Sharing.IAlbumAccessResolver,

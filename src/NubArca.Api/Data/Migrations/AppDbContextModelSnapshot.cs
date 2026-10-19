@@ -3751,6 +3751,9 @@ namespace NubArca.Api.Data.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("AlbumId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -3774,10 +3777,17 @@ namespace NubArca.Api.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AlbumId");
+
                     b.HasIndex("OwnerUserId")
                         .IsUnique()
                         .HasDatabaseName("ux_media_lists_owner_selection")
                         .HasFilter("\"Kind\" = 1");
+
+                    b.HasIndex("OwnerUserId", "AlbumId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_media_lists_owner_album_selection")
+                        .HasFilter("\"Kind\" = 2");
 
                     b.HasIndex("OwnerUserId", "Kind")
                         .HasDatabaseName("ix_media_lists_owner_kind");
@@ -8672,6 +8682,11 @@ namespace NubArca.Api.Data.Migrations
 
             modelBuilder.Entity("NubArca.Api.Domain.MediaList", b =>
                 {
+                    b.HasOne("NubArca.Api.Domain.Album", null)
+                        .WithMany()
+                        .HasForeignKey("AlbumId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("NubArca.Api.Domain.User", null)
                         .WithMany()
                         .HasForeignKey("OwnerUserId")
