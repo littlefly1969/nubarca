@@ -8982,3 +8982,16 @@ video.lightbox-image {
   background: color-mix(in srgb, currentColor 10%, transparent);
 }
 .selection-tray__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Owner media lists ───────────────────────────────────────────────────── */
+.media-lists-create { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: 0 0 1rem; }
+.media-lists-create input { flex: 1 1 14rem; min-width: 0; }
+.media-lists { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); }
+.media-lists-card { display: flex; gap: .75rem; align-items: center; padding: .8rem 1rem; border-radius: 12px;
+  border: 1px solid var(--border-default); background: var(--surface-raised); color: var(--text-primary);
+  text-decoration: none; }
+.media-lists-card:hover, .media-lists-card:focus-visible { border-color: var(--accent-strong); }
+.media-lists-card-text { display: flex; flex-direction: column; min-width: 0; }
+.media-lists-card-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-list-actions { display: flex; flex-wrap: wrap; gap: .4rem; }

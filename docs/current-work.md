@@ -584,6 +584,23 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   move and pause the slideshow, PLAY/PAUSE runs it, UP opens a D-pad action bar
   with an on-screen Play/Pause, BACK closes the bar, then the viewer. The
   assigned (unattended) party wall keeps OK = slideshow.
+- **The account selection is a server-held list, and lists hold references.**
+  `media_lists` / `media_list_items` (`MediaListService`, `/api/lists`,
+  `/api/selection`): one `CurrentSelection` per owner (filtered unique index)
+  plus named lists. An entry is `(ListId, FileItemId)` — dedup per list, never a
+  copy, a URL or a token; adds are idempotent and only take the owner's own,
+  untrashed, non-Vault media. Visibility is re-derived on every read, so a
+  trashed or vaulted file drops out of every list and comes back on restore;
+  a permanent delete cascades its entries. The web store is mirrored by
+  `selection/selectionSync.ts` (queued local writes, version-polled remote
+  reads adopted without echo); the TV Personal Area mirrors the same selection
+  through `/api/tv/personal/selection*` (grant-gated, selection only) and on
+  leaving forgets it on screen with `adopt([])` — never `clear()`, which would
+  wipe it for the account. A list is a workspace source (`{ kind: 'list' }`):
+  every library operation applies, "Remove from list" replaces "Remove from
+  album", and the semantic search paths are not offered there (no list scope).
+  Selection add/remove is not audited (personal UI state); named-list changes
+  are, with counts only.
 - **There is ONE media-selection experience, and it is the Media Library.** A
   shared album's "Add from library" navigates to `/media` with the album in
   transient router state — never a URL, never a second route, never a fork of

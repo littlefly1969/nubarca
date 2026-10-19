@@ -53,7 +53,7 @@ it('keeps one selection in step across grid, viewer, tray and a change of view',
   render(
     <MemoryRouter>
       <AuthedWrapper>
-        <AccountSelectionProvider><Harness /></AccountSelectionProvider>
+        <AccountSelectionProvider sync={false}><Harness /></AccountSelectionProvider>
       </AuthedWrapper>
     </MemoryRouter>,
   );

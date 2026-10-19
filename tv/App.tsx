@@ -53,6 +53,14 @@ import { PartySlideshowScreen } from './src/screens/PartySlideshowScreen';
 import { PartyNativeSurface } from './src/components/PartyNativeSurface';
 import { exitTvApp } from './src/lib/tvPlatform';
 import { TvSelectionStore } from './src/lib/tvSelection';
+import { startTvSelectionSync } from './src/lib/tvSelectionSync';
+import {
+  addPersonalSelectionItems,
+  clearPersonalSelection,
+  getPersonalSelection,
+  listPersonalSelectionIds,
+  removePersonalSelectionItems,
+} from './src/api/personalSelection';
 import { AlbumsScreen } from './src/screens/AlbumsScreen';
 import { AlbumItemsScreen } from './src/screens/AlbumItemsScreen';
 import { ViewerScreen } from './src/screens/ViewerScreen';
@@ -113,10 +121,25 @@ function AppInner(): React.JSX.Element {
   const [flow, rawDispatch] = useReducer(tvFlowReducer, initialFlowState);
   const [partyScreen, setPartyScreen] = useState<PartyScreen>({ name: 'albums' });
   // The Personal Area selection: one for the library and every album of the
-  // session, and nothing of it survives leaving (or locking) the Personal Area.
+  // session. It IS the account's current selection — mirrored to the server
+  // while the Personal Area is open, so a pick made with the remote is picked
+  // on the owner's laptop and phone too. Leaving (or locking) the Personal Area
+  // stops the mirror and forgets the picks on THIS screen without clearing them
+  // for the account (adopt is never echoed): nothing stays visible on a
+  // television once its Personal Area is closed.
   const [personalSelection] = useState(() => new TvSelectionStore());
   const inPersonal = isPersonalState(flow);
-  useEffect(() => { if (!inPersonal) personalSelection.clear(); }, [inPersonal, personalSelection]);
+  useEffect(() => {
+    if (!inPersonal) { personalSelection.adopt([]); return undefined; }
+    const sync = startTvSelectionSync(personalSelection, {
+      summary: (signal) => getPersonalSelection(signal),
+      ids: (cursor, signal) => listPersonalSelectionIds(cursor, signal),
+      add: addPersonalSelectionItems,
+      remove: removePersonalSelectionItems,
+      clear: clearPersonalSelection,
+    });
+    return () => { sync.stop(); personalSelection.adopt([]); };
+  }, [inPersonal, personalSelection]);
   // Current flow state as a ref, so stable callbacks can compute the required
   // teardown effects (flowEffects) for the state they fire from.
   const flowRef = React.useRef<TvFlowState>(flow);

@@ -196,6 +196,81 @@ public sealed class TvPersonalGalleryTests : IDisposable
         Assert.DoesNotContain(page.Items, i => i.Id == aliceFile);
     }
 
+    // ── the account's current selection, shared with the owner's browsers ───
+
+    private sealed record TvSelectionDto(Guid Id, int Version, int Count);
+    private sealed record TvSelectionIdsDto(List<Guid> Ids, string? NextCursor, int Version, int Count);
+
+    [Fact]
+    public async Task Selection_Needs_An_Unlocked_Tv_Session()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        // The owner's web cookie is not a TV session.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await owner.GetAsync("/api/tv/personal/selection")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await _factory.CreateClient().PostAsJsonAsync("/api/tv/personal/selection/items",
+                new { fileItemIds = new[] { Guid.NewGuid() } })).StatusCode);
+
+        // Paired but locked: no selection either.
+        var cookie = await PairTvAsync(owner);
+        var locked = await TvSendAsync(cookie, HttpMethod.Get, "/api/tv/personal/selection");
+        Assert.NotEqual(HttpStatusCode.OK, locked.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_Pick_On_The_Tv_Is_Picked_On_The_Web_And_Back()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var first = await UploadAsync(owner, "one.png");
+        var second = await UploadAsync(owner, "two.png");
+        var cookie = await PairTvAsync(owner);
+        var grant = await UnlockTokenAsync(cookie);
+
+        var add = await TvSendAsync(cookie, HttpMethod.Post, "/api/tv/personal/selection/items", grant,
+            json: new { fileItemIds = new[] { first, second } });
+        Assert.Equal(HttpStatusCode.OK, add.StatusCode);
+        AssertNoStore(add);
+
+        // The browser of the same account reads the same picks…
+        var web = (await owner.GetFromJsonAsync<TvSelectionDto>("/api/selection"))!;
+        Assert.Equal(2, web.Count);
+        var webIds = (await owner.GetFromJsonAsync<TvSelectionIdsDto>($"/api/lists/{web.Id}/ids"))!;
+        Assert.Equal(new[] { first, second }, webIds.Ids);
+
+        // …and what the browser removes, the TV no longer has.
+        using (var remove = new HttpRequestMessage(HttpMethod.Delete, $"/api/lists/{web.Id}/items")
+               { Content = JsonContent.Create(new { fileItemIds = new[] { first } }) })
+        {
+            Assert.Equal(HttpStatusCode.OK, (await owner.SendAsync(remove)).StatusCode);
+        }
+        var tv = await TvSendAsync(cookie, HttpMethod.Get, "/api/tv/personal/selection/ids", grant);
+        var tvIds = (await tv.Content.ReadFromJsonAsync<TvSelectionIdsDto>())!;
+        Assert.Equal(new[] { second }, tvIds.Ids);
+        var summary = await TvSendAsync(cookie, HttpMethod.Get, "/api/tv/personal/selection", grant);
+        Assert.Equal(web.Id, (await summary.Content.ReadFromJsonAsync<TvSelectionDto>())!.Id);
+
+        var clear = await TvSendAsync(cookie, HttpMethod.Post, "/api/tv/personal/selection/clear", grant);
+        Assert.Equal(HttpStatusCode.OK, clear.StatusCode);
+        Assert.Equal(0, (await owner.GetFromJsonAsync<TvSelectionDto>("/api/selection"))!.Count);
+    }
+
+    [Fact]
+    public async Task The_Tv_Selection_Never_Takes_Another_Owners_Media()
+    {
+        var (_, alice) = await _factory.CreateAuthenticatedClientAsync("alice@example.com");
+        var aliceFile = await UploadAsync(alice, "alice.png");
+        var (_, bob) = await _factory.CreateAuthenticatedClientAsync("bob@example.com");
+        var bobCookie = await PairTvAsync(bob);
+        var bobGrant = await UnlockTokenAsync(bobCookie);
+
+        var add = await TvSendAsync(bobCookie, HttpMethod.Post, "/api/tv/personal/selection/items", bobGrant,
+            json: new { fileItemIds = new[] { aliceFile } });
+        Assert.Equal(HttpStatusCode.OK, add.StatusCode);
+        var ids = await TvSendAsync(bobCookie, HttpMethod.Get, "/api/tv/personal/selection/ids", bobGrant);
+        Assert.Empty((await ids.Content.ReadFromJsonAsync<TvSelectionIdsDto>())!.Ids);
+        Assert.Equal(0, (await alice.GetFromJsonAsync<TvSelectionDto>("/api/selection"))!.Count);
+    }
+
     [Fact]
     public async Task Personal_Videos_List_And_Stream_The_Owners_Video_Only()
     {

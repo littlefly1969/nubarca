@@ -1,13 +1,10 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
-import {
-  addAestheticLabFromGallery,
-  addPlateImagesFromGallery,
-  type MediaGalleryScope,
-} from '@nubarca/api-client';
+import type { MediaGalleryScope } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n } from '../i18n';
-import { MediaWorkspace, type MediaPhotoDestination } from '../media/workspace/MediaWorkspace';
+import { MediaWorkspace } from '../media/workspace/MediaWorkspace';
+import { useLibraryPhotoDestinations } from '../media/workspace/useLibraryPhotoDestinations';
 import {
   filtersToUrlParams,
   identityFromUrlParams,
@@ -66,28 +63,7 @@ export function MediaLibraryPage({ scope = 'active' }: { scope?: MediaGallerySco
     setSearchParams(sp, { replace: true });
   }, [effectiveScope, navigate, setSearchParams]);
 
-  // WHAT each photo-only destination does when chosen. Whether it is OFFERED is
-  // not decided here: the workspace's action model gates both of these on an
-  // all-photo selection plus the Laboratory permissions the server requires, so
-  // this page cannot accidentally hand a user a door that answers 403.
-  const photoDestinations = useMemo<MediaPhotoDestination[]>(() => [
-    {
-      id: 'beauty-lab',
-      run: async (ids) => {
-        const r = await addAestheticLabFromGallery(ids);
-        return t('aesthetics.addedFromGallery', { added: r.added.length, skipped: r.skipped.length });
-      },
-    },
-    {
-      id: 'plates',
-      run: async (ids) => {
-        const r = await addPlateImagesFromGallery(ids);
-        return r.added.length === 1
-          ? t('gallery.ws.plates.added_one', { count: 1 })
-          : t('gallery.ws.plates.added_other', { count: r.added.length });
-      },
-    },
-  ], [t]);
+  const photoDestinations = useLibraryPhotoDestinations();
 
   if (state.status !== 'authed') return null;
 

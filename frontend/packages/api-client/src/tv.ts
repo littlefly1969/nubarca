@@ -1027,3 +1027,37 @@ export function revokeTvDevice(sessionId: string, signal?: AbortSignal): Promise
     signal,
   });
 }
+
+// --- TV Personal Area: the account's current selection ---------------------
+// The same server-held selection the owner's browsers read. Only the selection
+// is reachable from the TV, never a named list.
+
+export interface TvPersonalSelectionSummary { id: string; version: number; count: number }
+export interface TvPersonalSelectionWrite { requested: number; succeeded: number; skipped: number; version: number; count: number }
+
+export function getTvPersonalSelection(unlockToken: string, signal?: AbortSignal): Promise<TvPersonalSelectionSummary> {
+  return api<TvPersonalSelectionSummary>('/api/tv/personal/selection', { headers: grantHeaders(unlockToken), signal });
+}
+
+export function listTvPersonalSelectionIds(
+  unlockToken: string, cursor: string | null, signal?: AbortSignal,
+): Promise<{ ids: string[]; nextCursor: string | null; version: number; count: number }> {
+  const params = new URLSearchParams({ limit: '1000' });
+  if (cursor) params.set('cursor', cursor);
+  return api(`/api/tv/personal/selection/ids?${params.toString()}`, { headers: grantHeaders(unlockToken), signal });
+}
+
+export function addTvPersonalSelectionItems(unlockToken: string, fileItemIds: string[]): Promise<TvPersonalSelectionWrite> {
+  return api<TvPersonalSelectionWrite>('/api/tv/personal/selection/items',
+    { method: 'POST', json: { fileItemIds }, headers: grantHeaders(unlockToken) });
+}
+
+export function removeTvPersonalSelectionItems(unlockToken: string, fileItemIds: string[]): Promise<TvPersonalSelectionWrite> {
+  return api<TvPersonalSelectionWrite>('/api/tv/personal/selection/items',
+    { method: 'DELETE', json: { fileItemIds }, headers: grantHeaders(unlockToken) });
+}
+
+export function clearTvPersonalSelection(unlockToken: string): Promise<TvPersonalSelectionWrite> {
+  return api<TvPersonalSelectionWrite>('/api/tv/personal/selection/clear',
+    { method: 'POST', headers: grantHeaders(unlockToken) });
+}

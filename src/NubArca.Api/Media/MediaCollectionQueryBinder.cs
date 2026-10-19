@@ -169,4 +169,12 @@ public static class MediaCollectionQueryBinder
             limit ?? DefaultLimit);
         return true;
     }
+
+    // A list keeps what was put in it whatever its library state: with no
+    // explicit scope a list shows Active AND Excluded ("Trascurate") media.
+    // Trash and the Vault stay out through the gallery gate as everywhere.
+    public static MediaCollectionQuery WithListDefaultScope(MediaCollectionQuery query, string? scope) =>
+        query.Source is MediaCollectionSource.List && string.IsNullOrWhiteSpace(scope)
+            ? query with { LibraryScope = NubArca.Api.MediaLibrary.MediaLibraryScope.All }
+            : query;
 }

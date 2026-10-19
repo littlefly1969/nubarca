@@ -739,6 +739,52 @@ public static class GalleryMediaEndpoints
             return MapMediaCollectionResult(result, query.Limit);
         }).WithName("ListAlbumMedia").RequireAuthorization();
 
+        app.MapGet("/api/lists/{listId:guid}/media", async (
+            Guid listId,
+            [FromQuery] int? limit,
+            [FromQuery] string? cursor,
+            [FromQuery] string? scope,
+            [FromQuery] string? kind,
+            [FromQuery] string? q,
+            [FromQuery] bool? favorite,
+            [FromQuery] int? minRating,
+            [FromQuery] DateTime? dateTakenFrom,
+            [FromQuery] DateTime? dateTakenTo,
+            [FromQuery] string? sort,
+            [FromQuery] string? direction,
+            [FromQuery] bool? hasGps,
+            [FromQuery] bool? collapseDuplicates,
+            [FromQuery] Guid? similarTo,
+            [FromQuery] string? includePeople,
+            [FromQuery] string? excludePeople,
+            [FromQuery] string? includePeopleMode,
+            [FromQuery] double? durationMin,
+            [FromQuery] double? durationMax,
+            [FromQuery] int? minHeight,
+            [FromQuery] string? codec,
+            [FromQuery] bool? hasAudio,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Media.IMediaCollectionQueryService media,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            // An owner media list (or the current selection) under the gallery
+            // contract: same filters, sort and cursor; a foreign list is a 404.
+            if (!NubArca.Api.Media.MediaCollectionQueryBinder.TryBind(
+                new NubArca.Api.Media.MediaCollectionSource.List(listId),
+                limit, cursor, scope, kind, q, favorite, minRating, dateTakenFrom, dateTakenTo,
+                albumMembership: null, sort, direction, hasGps, collapseDuplicates, similarTo,
+                includePeople, excludePeople, includePeopleMode,
+                durationMin, durationMax, minHeight, codec, hasAudio,
+                out var query, out var bindError))
+            {
+                return Results.BadRequest(new { error = bindError });
+            }
+            query = NubArca.Api.Media.MediaCollectionQueryBinder.WithListDefaultScope(query, scope);
+            var result = await media.QueryAsync(ownerUserId, query, cancellationToken);
+            return MapMediaCollectionResult(result, query.Limit);
+        }).WithName("ListMediaListMedia").RequireAuthorization();
+
         app.MapMediaNavigationEndpoints();
         return app;
     }

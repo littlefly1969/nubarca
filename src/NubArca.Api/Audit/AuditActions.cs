@@ -42,6 +42,17 @@ public static class AuditActions
     public const string AlbumItemsBulkAdd = "album.items_bulk_add";
     public const string AlbumItemsBulkRemove = "album.items_bulk_remove";
 
+    // Owner media lists. Metadata carries safe counts only, never file ids or
+    // list names. The current selection's add/remove/clear are deliberately not
+    // audited: they are a personal, high-frequency UI state that changes no
+    // file, no share and no access.
+    public const string MediaListCreate = "media_list.create";
+    public const string MediaListRename = "media_list.rename";
+    public const string MediaListDuplicate = "media_list.duplicate";
+    public const string MediaListDelete = "media_list.delete";
+    public const string MediaListItemsAdd = "media_list.items_add";
+    public const string MediaListItemsRemove = "media_list.items_remove";
+
     // SHARE-ALBUM-01: live album sharing between authenticated users. The ACTOR
     // recorded on each event is whoever performed it — the album owner for
     // invite/update/revoke, the RECIPIENT for accept/decline/download — so the
@@ -452,6 +463,7 @@ public static class AuditEntityTypes
     public const string Role = "role";
     public const string Folder = "folder";
     public const string File = "file";
+    public const string MediaList = "media_list";
     public const string ShareLink = "share_link";
     public const string Blob = "blob";
     public const string Trash = "trash";

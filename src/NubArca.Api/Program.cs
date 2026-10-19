@@ -1017,6 +1017,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<IStorageAccountingService, StorageAccountingService>();
     builder.Services.AddScoped<IMetadataService, MetadataService>();
     builder.Services.AddScoped<IAlbumService, AlbumService>();
+    builder.Services.AddScoped<NubArca.Api.MediaLists.IMediaListService, NubArca.Api.MediaLists.MediaListService>();
     // SHARE-ALBUM-01: live album sharing. The resolver is the single gate for
     // "may this authenticated user act on this album"; the sharing service owns
     // the invitation lifecycle and the recipient read model. Neither widens the
@@ -1845,6 +1846,7 @@ app.MapPhotoExportEndpoints();
 // (party-settings, party-uploads) are deliberately NOT part of that module
 // — they stay here as Party feature endpoints.
 app.MapAlbumEndpoints();
+app.MapMediaListEndpoints();
 
 // SHARE-ALBUM-01: owner-side member management under /api/albums/{id}/members
 // and the recipient's /api/shared-albums/* family. Registration order relative

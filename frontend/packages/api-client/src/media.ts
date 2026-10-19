@@ -20,6 +20,7 @@ import type {
 import {
   MEDIA_LIST_PATH,
   MEDIA_SEMANTIC_PATH,
+  listMediaPath,
   albumMediaPath,
   mediaQueryToParams,
   mediaWindowQueryToParams,
@@ -67,6 +68,27 @@ export function listAlbumMedia(
   );
 }
 
+// One owner media list (or the current selection) under the same contract.
+export function listListMedia(
+  listId: string,
+  query: ListMediaQuery,
+  signal?: AbortSignal,
+): Promise<MediaListResponse> {
+  return api<MediaListResponse>(
+    withQuery(listMediaPath(listId), mediaQueryToParams(query)),
+    { signal },
+  );
+}
+
+// The collection a navigation index / window is read from: the library (null),
+// an album (its id) or an owner list ({ listId }).
+export type MediaNavigationSource = string | { listId: string } | null;
+
+function navigationPath(source: MediaNavigationSource): string {
+  if (source === null) return MEDIA_LIST_PATH;
+  return typeof source === 'string' ? albumMediaPath(source) : listMediaPath(source.listId);
+}
+
 // VSEM-03: unified photo+video semantic search. A conceptually DIFFERENT
 // backend operation from physical filtering — one relevance-ranked stream
 // across both kinds, with bounded temporal evidence on videos — so it keeps
@@ -85,15 +107,15 @@ export function searchSemanticMedia(
 export type { MediaNavigationBucket, MediaNavigationIndex, MediaNavigationWindow, MediaWindowQuery } from '@nubarca/contracts';
 
 export function getMediaNavigation(
-  albumId: string | null, query: ListMediaQuery, signal?: AbortSignal,
+  source: MediaNavigationSource, query: ListMediaQuery, signal?: AbortSignal,
 ): Promise<import('@nubarca/contracts').MediaNavigationIndex> {
-  const path = albumId ? albumMediaPath(albumId) : MEDIA_LIST_PATH;
+  const path = navigationPath(source);
   return api(withQuery(path + '/navigation', mediaQueryToParams(query)), { signal });
 }
 
 export function getMediaWindow(
-  albumId: string | null, query: import('@nubarca/contracts').MediaWindowQuery, signal?: AbortSignal,
+  source: MediaNavigationSource, query: import('@nubarca/contracts').MediaWindowQuery, signal?: AbortSignal,
 ): Promise<import('@nubarca/contracts').MediaNavigationWindow> {
-  const path = albumId ? albumMediaPath(albumId) : MEDIA_LIST_PATH;
+  const path = navigationPath(source);
   return api(withQuery(path + '/window', mediaWindowQueryToParams(query)), { signal });
 }

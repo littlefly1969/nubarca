@@ -9,11 +9,13 @@
 // mixed selection.
 //
 // Rules:
-//   * Add to album / Move to Personal / Move to Trash — any non-empty selection
-//     of normal owner-scoped media.
+//   * Add to album / Add to list / Move to Personal / Move to Trash — any
+//     non-empty selection of normal owner-scoped media.
 //   * Move to Excluded — Active scope only.
 //   * Restore to library — Excluded scope only.
-//   * Remove from THIS album — album source only.
+//   * Remove from THIS album — album source only. Never in a list: a list is
+//     not an album, and the photos in it may be in no album at all.
+//   * Remove from THIS list — list source only (the file is never touched).
 //   * Photo-only destinations (Beauty Lab, Plates, ...) — only when the
 //     selection is ENTIRELY images; never for a mixed or all-video selection.
 //   * Print — at least one photograph, in the library or an own album, Active
@@ -30,18 +32,20 @@ import type { MediaItem, MediaGalleryScope } from './media.ts';
 /** The most photographs one print session takes (their ids travel in the studio's URL). */
 export const PRINT_SELECTION_MAX = 100;
 
-export type MediaWorkspaceSourceKind = 'library' | 'album';
+export type MediaWorkspaceSourceKind = 'library' | 'album' | 'list';
 
 export interface MediaSelectionCapabilities {
   allImages: boolean;
   allVideos: boolean;
   mixed: boolean;
   canAddToAlbum: boolean;
+  canAddToList: boolean;
   canMoveToPersonal: boolean;
   canMoveToExcluded: boolean;
   canRestore: boolean;
   canTrash: boolean;
   canRemoveFromCurrentAlbum: boolean;
+  canRemoveFromCurrentList: boolean;
   canUsePhotoOnlyDestinations: boolean;
   canPrintPhoto: boolean;
 }
@@ -66,11 +70,14 @@ export function getMediaSelectionCapabilities(
     allVideos,
     mixed,
     canAddToAlbum: hasAny,
+    // A list is the owner's own bookmark: any non-empty selection, any source.
+    canAddToList: hasAny,
     canMoveToPersonal: hasAny,
     canMoveToExcluded: hasAny && scope === 'active',
     canRestore: hasAny && scope === 'excluded',
     canTrash: hasAny,
     canRemoveFromCurrentAlbum: hasAny && source === 'album',
+    canRemoveFromCurrentList: hasAny && source === 'list',
     canUsePhotoOnlyDestinations: allImages,
     // At least one photograph; the studio composes its sheets from them.
     canPrintPhoto: items.some((it) => it.kind === 'image') && scope === 'active',

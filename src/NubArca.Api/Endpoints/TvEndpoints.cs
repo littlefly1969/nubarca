@@ -981,6 +981,75 @@ public static class TvEndpoints
             return Results.Ok(await gallery.ListAlbumsAsync(ownerUserId, cancellationToken));
         }).WithName("ListTvPersonalGalleryAlbums");
 
+        // The account's CURRENT SELECTION, from the TV Personal Area: the same
+        // server-held selection the owner's browsers and phones read, so a photo
+        // picked with the remote is picked on the laptop and the other way round.
+        // Grant-gated like every Personal route. Only the selection is reachable
+        // from here — never a named list by id — and it only ever holds this
+        // owner's own, untrashed, non-Vault media (the list service re-checks).
+        app.MapGet("/api/tv/personal/selection", async (
+            HttpContext httpContext,
+            [FromServices] ITvPersonalAreaService personal,
+            [FromServices] NubArca.Api.MediaLists.IMediaListService lists,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var (failure, ownerUserId) = await ResolveTvPersonalAccessAsync(httpContext, personal, cancellationToken);
+            if (failure is not null) return failure;
+            var selection = await lists.GetSelectionAsync(ownerUserId, cancellationToken);
+            return Results.Ok(new { selection.Id, selection.Version, selection.Count });
+        }).WithName("GetTvPersonalSelection");
+
+        app.MapGet("/api/tv/personal/selection/ids", async (
+            [FromQuery] string? cursor,
+            [FromQuery] int? limit,
+            HttpContext httpContext,
+            [FromServices] ITvPersonalAreaService personal,
+            [FromServices] NubArca.Api.MediaLists.IMediaListService lists,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var (failure, ownerUserId) = await ResolveTvPersonalAccessAsync(httpContext, personal, cancellationToken);
+            if (failure is not null) return failure;
+            var selection = await lists.GetSelectionAsync(ownerUserId, cancellationToken);
+            var page = await lists.ListIdsAsync(ownerUserId, selection.Id, cursor, limit ?? 500, cancellationToken);
+            return page.Outcome == NubArca.Api.MediaLists.MediaListOutcome.Ok
+                ? Results.Ok(page.Value)
+                : Results.BadRequest(new { error = page.Error });
+        }).WithName("ListTvPersonalSelectionIds");
+
+        app.MapPost("/api/tv/personal/selection/items", (
+            [FromBody] TvPersonalGalleryBulkRequest? body,
+            HttpContext httpContext,
+            [FromServices] ITvPersonalAreaService personal,
+            [FromServices] NubArca.Api.MediaLists.IMediaListService lists,
+            CancellationToken cancellationToken) =>
+            ChangeTvSelectionAsync(httpContext, personal, lists, body, add: true, cancellationToken))
+            .WithName("AddTvPersonalSelectionItems");
+
+        app.MapMethods("/api/tv/personal/selection/items", ["DELETE"], (
+            [FromBody] TvPersonalGalleryBulkRequest? body,
+            HttpContext httpContext,
+            [FromServices] ITvPersonalAreaService personal,
+            [FromServices] NubArca.Api.MediaLists.IMediaListService lists,
+            CancellationToken cancellationToken) =>
+            ChangeTvSelectionAsync(httpContext, personal, lists, body, add: false, cancellationToken))
+            .WithName("RemoveTvPersonalSelectionItems");
+
+        app.MapPost("/api/tv/personal/selection/clear", async (
+            HttpContext httpContext,
+            [FromServices] ITvPersonalAreaService personal,
+            [FromServices] NubArca.Api.MediaLists.IMediaListService lists,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var (failure, ownerUserId) = await ResolveTvPersonalAccessAsync(httpContext, personal, cancellationToken);
+            if (failure is not null) return failure;
+            var selection = await lists.GetSelectionAsync(ownerUserId, cancellationToken);
+            var result = await lists.ClearAsync(ownerUserId, selection.Id, cancellationToken);
+            return Results.Ok(result.Value);
+        }).WithName("ClearTvPersonalSelection");
+
         // Bulk "add selection to album" — the ONLY bulk action the web gallery has.
         // Same idempotent semantics as the owner bulk endpoint (already-member and
         // foreign/missing ids count as skipped, never errors); the album must be the
@@ -2325,6 +2394,27 @@ public static class TvEndpoints
     // pin_changed for a stale PIN generation; 403 locked for any other grant
     // failure — one generic bucket, mirroring /api/tv/personal/home). On success
     // returns (null, ownerUserId).
+    private static async Task<IResult> ChangeTvSelectionAsync(
+        HttpContext httpContext,
+        ITvPersonalAreaService personal,
+        NubArca.Api.MediaLists.IMediaListService lists,
+        TvPersonalGalleryBulkRequest? body,
+        bool add,
+        CancellationToken cancellationToken)
+    {
+        SetNoStore(httpContext);
+        var (failure, ownerUserId) = await ResolveTvPersonalAccessAsync(httpContext, personal, cancellationToken);
+        if (failure is not null) return failure;
+        if (body?.FileItemIds is null) return Results.BadRequest(new { error = "Missing 'fileItemIds'." });
+        var selection = await lists.GetSelectionAsync(ownerUserId, cancellationToken);
+        var result = add
+            ? await lists.AddItemsAsync(ownerUserId, selection.Id, body.FileItemIds, cancellationToken)
+            : await lists.RemoveItemsAsync(ownerUserId, selection.Id, body.FileItemIds, cancellationToken);
+        return result.Outcome == NubArca.Api.MediaLists.MediaListOutcome.Ok
+            ? Results.Ok(result.Value)
+            : Results.BadRequest(new { error = result.Error });
+    }
+
     private static async Task<(IResult? Failure, Guid OwnerUserId)> ResolveTvPersonalAccessAsync(
         HttpContext httpContext,
         NubArca.Api.Tv.ITvPersonalAreaService personal,

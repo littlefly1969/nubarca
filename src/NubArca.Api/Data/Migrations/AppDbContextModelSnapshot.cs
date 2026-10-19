@@ -3746,6 +3746,70 @@ namespace NubArca.Api.Data.Migrations
                     b.ToTable("media_library_rules", (string)null);
                 });
 
+            modelBuilder.Entity("NubArca.Api.Domain.MediaList", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Version")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerUserId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_media_lists_owner_selection")
+                        .HasFilter("\"Kind\" = 1");
+
+                    b.HasIndex("OwnerUserId", "Kind")
+                        .HasDatabaseName("ix_media_lists_owner_kind");
+
+                    b.ToTable("media_lists", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.MediaListItem", b =>
+                {
+                    b.Property<Guid>("ListId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("FileItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AddedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Position")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("ListId", "FileItemId");
+
+                    b.HasIndex("FileItemId")
+                        .HasDatabaseName("ix_media_list_items_file");
+
+                    b.HasIndex("ListId", "Position")
+                        .HasDatabaseName("ix_media_list_items_list_position");
+
+                    b.ToTable("media_list_items", (string)null);
+                });
+
             modelBuilder.Entity("NubArca.Api.Domain.OwnerDeletedContentTombstone", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8603,6 +8667,30 @@ namespace NubArca.Api.Data.Migrations
                         .WithMany()
                         .HasForeignKey("FolderId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.MediaList", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.MediaListItem", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.FileItem", null)
+                        .WithMany()
+                        .HasForeignKey("FileItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("NubArca.Api.Domain.MediaList", null)
+                        .WithMany()
+                        .HasForeignKey("ListId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

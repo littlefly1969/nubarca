@@ -28,7 +28,7 @@ public sealed partial class MediaCollectionQueryService
         var error = await ValidateNavigationAsync(ownerUserId, query, cancellationToken);
         if (error is not null) return error;
         if (query.Cursor is not null) return new(MediaCollectionStatus.BadCursor, null, "An index cannot have a cursor.");
-        var filters = BuildFilters(query, (query.Source as MediaCollectionSource.Album)?.AlbumId);
+        var filters = BuildFilters(query);
         return new(MediaCollectionStatus.Ok,
             await _files.MediaNavigationAsync(ownerUserId, filters, query.MediaKind, query.Sort, query.Direction, cancellationToken), null);
     }
@@ -38,7 +38,7 @@ public sealed partial class MediaCollectionQueryService
     {
         var error = await ValidateNavigationAsync(ownerUserId, query, cancellationToken);
         if (error is not null) return error;
-        var filters = BuildFilters(query, (query.Source as MediaCollectionSource.Album)?.AlbumId);
+        var filters = BuildFilters(query);
         ImageCursor? cursor = null;
         if (query.Cursor is not null)
         {

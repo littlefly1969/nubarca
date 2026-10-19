@@ -4,6 +4,7 @@ import {
   listImages,
   listMedia,
   listAlbumMedia,
+  listListMedia,
   getMediaWindow,
   searchSemanticMedia,
   type ImageItem,
@@ -20,6 +21,7 @@ import {
   queryToWire,
   type MediaWorkspaceIdentity,
   type MediaWorkspaceSource,
+  navigationSourceOf,
 } from './mediaWorkspaceQuery';
 
 // The workspace engine shared by the library and album surfaces. It owns the
@@ -209,6 +211,17 @@ async function fetchPage(
   cursor: string | null,
   signal: AbortSignal,
 ): Promise<FetchedPage> {
+  // A list is always read through its own route: the semantic paths have no
+  // list scope, and answering a list from the whole library would look right
+  // while being wrong.
+  if (source.kind === 'list') {
+    const res = await listListMedia(source.listId, queryToWire(identity, cursor), signal);
+    return {
+      items: res.items, nextCursor: res.nextCursor, total: res.total,
+      photoCount: res.photoCount, videoCount: res.videoCount, semanticStatus: null, evidence: NO_EVIDENCE,
+    };
+  }
+
   // Photo tab with an active visual query OR similarity anchor → dedicated
   // /api/images path (server-side ranking / similarity restrict + albumId).
   if (usesLegacyPhotoPath(identity)) {
@@ -409,7 +422,7 @@ export function useMediaWorkspace(
     // Refetch keyed on the query identity fingerprint + source, not object
     // identity — a structurally-equal setIdentity does not refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fingerprint, source.kind, source.kind === 'album' ? source.albumId : '']);
+  }, [fingerprint, source.kind, source.kind === 'album' ? source.albumId : source.kind === 'list' ? source.listId : '']);
 
   const startLoadMore = useCallback((isRetry: boolean) => {
     if (loadingRef.current || nextCursor === null) return;
@@ -513,7 +526,7 @@ export function useMediaWorkspace(
     // A stalled read must leave the current wall usable, not wait forever.
     const deadline = window.setTimeout(() => controller.abort(), 30_000);
     try {
-      const data = await getMediaWindow(source.kind === 'album' ? source.albumId : null,
+      const data = await getMediaWindow(navigationSourceOf(source),
         { ...queryToWire(identity, before ? previousCursor : null),
           target: target ?? undefined, before }, controller.signal);
       if (controller.signal.aborted || gen !== generationRef.current) return false;

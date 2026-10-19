@@ -20,6 +20,14 @@ import {
 
 export * from '@nubarca/contracts';
 
+// Where the navigation index / window of a source is read: the library (null),
+// an album (its id) or an owner list.
+export function navigationSourceOf(source: MediaWorkspaceSource): string | { listId: string } | null {
+  if (source.kind === 'album') return source.albumId;
+  if (source.kind === 'list') return { listId: source.listId };
+  return null;
+}
+
 // Only safe, shareable fields go in the URL. Visual (semantic) query, people,
 // GPS, similar and the discovery filters (favorite/rating/dates/collapse) are
 // session-scoped refinements and deliberately NOT persisted — matching the

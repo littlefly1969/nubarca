@@ -32,9 +32,15 @@ test('while the action bar is open the D-pad and OK belong to it; BACK closes it
   assert.match(bar, /hasTVPreferredFocus=\{i === 0\}/);
 });
 
-test('the Personal Area shares one selection and drops it when it is left', () => {
+test('the Personal Area shares one selection, mirrors it to the account and drops it from the screen when left', () => {
   assert.match(app, /new TvSelectionStore\(\)/);
-  assert.match(app, /if \(!inPersonal\) personalSelection\.clear\(\)/);
+  // Mirrored only while the Personal Area is open…
+  assert.match(app, /const sync = startTvSelectionSync\(personalSelection, \{/);
+  // …and leaving forgets it on this screen WITHOUT clearing the account's
+  // selection: adopt() is never sent back, clear() would be.
+  assert.match(app, /if \(!inPersonal\) \{ personalSelection\.adopt\(\[\]\); return undefined; \}/);
+  assert.match(app, /return \(\) => \{ sync\.stop\(\); personalSelection\.adopt\(\[\]\); \};/);
+  assert.doesNotMatch(app, /personalSelection\.clear\(\)/);
   assert.equal(app.match(/selection=\{personalSelection\}/g)?.length, 2);
   assert.match(library, /selected=\{selection\?\.has\(item\.id\) \?\? false\}/);
   assert.match(library, /extraData=\{selectionVersion\}/);

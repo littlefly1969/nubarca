@@ -12,7 +12,7 @@ const image = { kind: 'image' as const };
 const video = { kind: 'video' as const };
 const caps = (
   items: Array<{ kind: 'image' | 'video' }>,
-  source: 'library' | 'album' = 'library',
+  source: 'library' | 'album' | 'list' = 'library',
   scope: 'active' | 'excluded' = 'active',
 ) => getMediaSelectionCapabilities({ items, source, scope });
 
@@ -62,6 +62,21 @@ test('scope decides between excluding and restoring, and never offers both', () 
 test('removing from THIS album is offered only inside an album', () => {
   assert.equal(caps([image], 'library').canRemoveFromCurrentAlbum, false);
   assert.equal(caps([image], 'album').canRemoveFromCurrentAlbum, true);
+});
+
+test('a list offers removing from THIS list, never removing from an album', () => {
+  const list = caps([image], 'list');
+  assert.equal(list.canRemoveFromCurrentList, true);
+  assert.equal(list.canRemoveFromCurrentAlbum, false);
+  assert.equal(caps([image], 'library').canRemoveFromCurrentList, false);
+  assert.equal(caps([image], 'album').canRemoveFromCurrentList, false);
+  // Every ordinary operation stays available from a list.
+  assert.equal(list.canTrash, true);
+  assert.equal(list.canAddToAlbum, true);
+  assert.equal(list.canAddToList, true);
+  assert.equal(list.canMoveToExcluded, true);
+  assert.equal(list.canMoveToPersonal, true);
+  assert.equal(list.canPrintPhoto, true);
 });
 
 test('being inside an album does not take the library actions away', () => {

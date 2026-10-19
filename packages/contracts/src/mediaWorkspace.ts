@@ -25,11 +25,13 @@ export const DEFAULT_MEDIA_LIMIT = 50;
 
 // ------------------------------------------------------------------ dimensions
 
-// Which collection the workspace is browsing. `album` carries the album id; the
-// backend predicate is the only thing that differs between the two sources.
+// Which collection the workspace is browsing. `album` carries the album id,
+// `list` one of the owner's media lists; the backend predicate is the only thing
+// that differs between the sources.
 export type MediaWorkspaceSource =
   | { kind: 'library' }
-  | { kind: 'album'; albumId: string };
+  | { kind: 'album'; albumId: string }
+  | { kind: 'list'; listId: string };
 
 // Primary in-workspace navigation: the "Tutti | Foto | Video" tabs.
 export type MediaKindScope = 'all' | 'image' | 'video';
@@ -274,8 +276,9 @@ export function queryToWire(
 // filters ONLY on the video tab, so switching kinds always changes it.
 export function queryFingerprint(identity: MediaWorkspaceIdentity): string {
   const { common, photo, video } = identity.filters;
-  const source =
-    identity.source.kind === 'album' ? `album:${identity.source.albumId}` : 'library';
+  const source = identity.source.kind === 'album'
+    ? `album:${identity.source.albumId}`
+    : identity.source.kind === 'list' ? `list:${identity.source.listId}` : 'library';
   const parts: unknown[] = [
     source,
     identity.libraryScope,
@@ -516,7 +519,7 @@ export function clearActiveFilters(identity: MediaWorkspaceIdentity): MediaWorks
     video: { ...identity.filters.video },
   };
   // Album-membership is only shown/cleared in the library source.
-  if (identity.source.kind === 'album') {
+  if (identity.source.kind !== 'library') {
     next.common.albumMembership = identity.filters.common.albumMembership;
   }
   if (identity.mediaKind === 'image') {
