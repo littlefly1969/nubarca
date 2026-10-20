@@ -200,3 +200,47 @@ test('a failed later page is retried, and a partial read is never shown', async 
   assert.deepEqual([...store.list()], ['a', 'b', 'c', 'd', 'e']);
   sync.stop();
 });
+
+// A write can leave the server with the same NUMBER of ids as the screen but
+// different ones (another device's change not read yet). The stamp moved with
+// our own write, so only reading back after it makes the TV converge.
+test('the TV converges after a write that leaves the same count but different ids', async () => {
+  const { server, transport } = fakeServer(['a']);
+  const phone = new TvSelectionStore();
+  const tv = new TvSelectionStore();
+  const phoneSync = startTvSelectionSync(phone, transport, { debounceMs: 0, pollMs: 0 });
+  const tvSync = startTvSelectionSync(tv, transport, { debounceMs: 0, pollMs: 0 });
+  await phoneSync.refresh();
+  await tvSync.refresh();
+
+  phone.toggle('a');
+  phone.toggle('c');
+  await phoneSync.flush();
+  assert.deepEqual(server.ids, ['c']);
+
+  tv.toggle('b');
+  await tvSync.flush();
+  assert.deepEqual(server.ids, ['c', 'b']);
+  assert.deepEqual([...tv.list()], ['c', 'b']);
+  await tvSync.refresh();
+  assert.deepEqual([...tv.list()], ['c', 'b']);
+  phoneSync.stop();
+  tvSync.stop();
+});
+
+test('a pick made on the TV while the ids are being read is kept and converges', async () => {
+  const { server, transport } = fakeServer(['a', 'b']);
+  const store = new TvSelectionStore();
+  const read = transport.ids;
+  let once = true;
+  transport.ids = async (cursor, signal) => {
+    if (once) { once = false; store.toggle('z'); }
+    return read(cursor, signal);
+  };
+  const sync = startTvSelectionSync(store, transport, { debounceMs: 0, pollMs: 0 });
+  await sync.refresh();
+  await sync.flush();
+  assert.deepEqual(server.ids, ['a', 'b', 'z']);
+  assert.deepEqual([...store.list()].sort(), ['a', 'b', 'z']);
+  sync.stop();
+});
