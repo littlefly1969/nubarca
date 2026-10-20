@@ -223,7 +223,7 @@ jobs:
           --configuration Release
           --no-restore
           --no-build
-          --filter "FullyQualifiedName~AlbumShareConcurrencyPostgresTests|FullyQualifiedName~PartyGuestbookGameRacePostgresTests|FullyQualifiedName~PartyGuestbookEndLiveRacePostgresTests|FullyQualifiedName~OwnerPhotoPrintRacePostgresTests|FullyQualifiedName~MediaNavigationPostgresTests|FullyQualifiedName~MediaNavigationPerformanceTests"
+          --filter "FullyQualifiedName~AlbumShareConcurrencyPostgresTests|FullyQualifiedName~AlbumVersionConcurrencyPostgresTests|FullyQualifiedName~PartyGuestbookGameRacePostgresTests|FullyQualifiedName~PartyGuestbookEndLiveRacePostgresTests|FullyQualifiedName~OwnerPhotoPrintRacePostgresTests|FullyQualifiedName~MediaNavigationPostgresTests|FullyQualifiedName~MediaNavigationPerformanceTests"
           --logger "console;verbosity=normal"
           --logger trx
           --results-directory "$GITHUB_WORKSPACE/TestResults/backend-concurrency"

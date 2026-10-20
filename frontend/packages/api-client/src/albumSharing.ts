@@ -41,7 +41,6 @@ import {
   albumContentPath,
   albumContentQueryToParams,
   albumInvitationPath,
-  sharedAlbumItemMovePath,
   sharedAlbumItemsPath,
   sharedAlbumItemsQueryToParams,
   withQuery,
@@ -346,31 +345,6 @@ export async function setSharedAlbumCover(
   return api<AlbumEditResult>(`/api/shared-albums/${albumId}/cover`, {
     method: 'PUT',
     json: { expectedVersion, fileItemId },
-    signal,
-  });
-}
-
-export interface AlbumItemMoveResult extends AlbumEditResult {
-  // Where the item landed (0-based), and the album's size.
-  position: number;
-  totalCount: number;
-}
-
-// Moves ONE item to a 0-based position. The payload is the item, the target and
-// the version — never the album's id sequence — so it costs the same for a
-// ten-item album and a thousand-item one, and reaches positions the caller has
-// not loaded. (The server's complete-list PUT /order still exists for clients
-// that predate this; the web client no longer uses it.)
-export async function moveSharedAlbumItem(
-  albumId: string,
-  albumItemId: string,
-  expectedVersion: number,
-  targetIndex: number,
-  signal?: AbortSignal,
-): Promise<AlbumItemMoveResult> {
-  return api<AlbumItemMoveResult>(sharedAlbumItemMovePath(albumId, albumItemId), {
-    method: 'POST',
-    json: { expectedVersion, targetIndex },
     signal,
   });
 }

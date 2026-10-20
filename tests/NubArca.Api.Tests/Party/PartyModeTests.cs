@@ -113,7 +113,7 @@ public sealed class PartyModeTests : IDisposable
     // --- Public access + revocation ---
 
     [Fact]
-    public async Task Public_Party_Item_Order_Is_Deterministic_When_AddedAt_Ties()
+    public async Task Public_Party_Item_Order_Is_Deterministic_When_Date_Taken_Ties()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
         var albumId = await CreateAlbumAsync(owner, "Party");
@@ -121,19 +121,10 @@ public sealed class PartyModeTests : IDisposable
         {
             await AddPngAsync(owner, albumId, $"p{i}.png");
         }
-        // Force an AddedAt tie for every item (a bulk add) — without a stable
-        // id tie-break the public party grid would reshuffle on each poll
-        // ("a slideshow of the whole gallery").
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var members = await db.AlbumItems.Where(ai => ai.AlbumId == albumId).ToListAsync();
-            foreach (var member in members)
-            {
-                member.AddedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-            }
-            await db.SaveChangesAsync();
-        }
+        // A burst taken at one moment — without a stable id tie-break the
+        // public party grid would reshuffle on each poll ("a slideshow of the
+        // whole gallery").
+        await SetTakenAtAsync(albumId, _ => new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
         var token = TokenFromUrl((await EnablePartyAsync(owner, albumId)).GetProperty("partyUrl").GetString()!);
         var anon = _factory.CreateClient();
 
@@ -141,7 +132,44 @@ public sealed class PartyModeTests : IDisposable
         var second = await OrderedPartyIdsAsync(anon, token);
         Assert.Equal(5, first.Count);
         Assert.Equal(first, second);
-        Assert.Equal(first.OrderBy(id => id, StringComparer.Ordinal).ToList(), first);
+        // Newest first by default, the tie-break running the same way.
+        Assert.Equal(first.OrderByDescending(id => id, StringComparer.Ordinal).ToList(), first);
+    }
+
+    [Fact]
+    public async Task Public_Party_Follows_The_Date_Taken_In_The_Owners_Direction()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var albumId = await CreateAlbumAsync(owner, "Party");
+        var ids = new List<Guid>();
+        for (var i = 0; i < 3; i++)
+        {
+            ids.Add(await AddPngAsync(owner, albumId, $"p{i}.png"));
+        }
+        var years = new Dictionary<Guid, int> { [ids[0]] = 2022, [ids[1]] = 2020, [ids[2]] = 2021 };
+        await SetTakenAtAsync(albumId, id => new DateTime(years[id], 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        var token = TokenFromUrl((await EnablePartyAsync(owner, albumId)).GetProperty("partyUrl").GetString()!);
+        var anon = _factory.CreateClient();
+
+        var newest = new List<string> { ids[0].ToString(), ids[2].ToString(), ids[1].ToString() };
+        Assert.Equal(newest, await OrderedPartyIdsAsync(anon, token));
+
+        (await owner.PutAsJsonAsync($"/api/albums/{albumId}/sort", new { direction = "asc" }))
+            .EnsureSuccessStatusCode();
+        newest.Reverse();
+        Assert.Equal(newest, await OrderedPartyIdsAsync(anon, token));
+    }
+
+    private async Task SetTakenAtAsync(Guid albumId, Func<Guid, DateTime> takenAt)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var fileIds = await db.AlbumItems.Where(ai => ai.AlbumId == albumId).Select(ai => ai.FileItemId).ToListAsync();
+        foreach (var file in await db.FileItems.Where(f => fileIds.Contains(f.Id)).ToListAsync())
+        {
+            file.EffectiveDateTaken = takenAt(file.Id);
+        }
+        await db.SaveChangesAsync();
     }
 
     private static async Task<List<string>> OrderedPartyIdsAsync(HttpClient anon, string token)

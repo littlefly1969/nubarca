@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { SharedAlbumDetailPage } from './SharedAlbumDetailPage';
@@ -43,6 +43,8 @@ const ALBUM = {
   itemCount: 2,
   version: 1,
   canEdit: false,
+  coverFileItemId: null as string | null,
+  sortDirection: 'desc' as const,
 };
 
 interface Item {
@@ -637,5 +639,84 @@ describe('SharedAlbumDetailPage — the member\'s own selection', () => {
     expect(await screen.findByTestId('shared-album-unavailable')).toBeInTheDocument();
     expect(screen.queryByTestId('shared-album-selection-bar')).not.toBeInTheDocument();
     expect(screen.queryByTestId('shared-media-pick')).not.toBeInTheDocument();
+  });
+});
+
+// «Set as album cover»: the viewer's LAST action, only for somebody the server
+// lets curate, through the album's own cover route.
+describe('SharedAlbumDetailPage — cover from the viewer', () => {
+  const EDITOR = { ...ALBUM, role: 'editor' as const, canEdit: true };
+
+  async function openViewerOn(index: number) {
+    await userEvent.click((await screen.findAllByTestId('shared-media-tile'))[index]);
+    return screen.findByTestId('media-viewer');
+  }
+
+  it('is the last action before close, and updates the album at once', async () => {
+    const mock = mockAlbum([item(), item({ fileItemId: 'f2' })], EDITOR, newPickServer(), {
+      'PUT /api/shared-albums/alb-1/cover': () => jsonResponse({
+        albumId: 'alb-1', version: 2, name: 'Vacanze', description: 'estate', coverFileItemId: 'f2',
+      }),
+    });
+    renderPage();
+    const viewer = await openViewerOn(1);
+
+    const action = within(viewer).getByTestId('viewer-set-album-cover');
+    expect(action).toHaveTextContent('Imposta come copertina dell’album');
+    // The last action of the chrome: only the close button comes after it.
+    const buttons = Array.from(action.parentElement!.querySelectorAll('button'));
+    expect(buttons.indexOf(action as HTMLButtonElement)).toBe(buttons.length - 2);
+
+    await userEvent.click(action);
+    const put = mock.calls.find((c) => c.method === 'PUT')!;
+    expect(JSON.parse(put.body!)).toEqual({ expectedVersion: 1, fileItemId: 'f2' });
+    // Adopted immediately: this photo is now the cover, no reload needed.
+    expect(await within(viewer).findByTestId('viewer-album-cover-current')).toBeInTheDocument();
+    expect(within(viewer).queryByTestId('viewer-set-album-cover')).not.toBeInTheDocument();
+
+    // The next set chains on the version the server returned.
+    await userEvent.keyboard('{ArrowLeft}');
+    await userEvent.click(within(viewer).getByTestId('viewer-set-album-cover'));
+    const puts = mock.calls.filter((c) => c.method === 'PUT');
+    expect(JSON.parse(puts[1].body!).expectedVersion).toBe(2);
+  });
+
+  it('says so and adopts the current album when somebody changed it first', async () => {
+    const mock = mockAlbum([item(), item({ fileItemId: 'f2' })], EDITOR, newPickServer(), {
+      'PUT /api/shared-albums/alb-1/cover': () => errorResponse(409, {
+        error: 'changed', albumId: 'alb-1', version: 7, name: 'Vacanze', description: null, coverFileItemId: 'f1',
+      }),
+    });
+    renderPage();
+    const viewer = await openViewerOn(1);
+    await userEvent.click(within(viewer).getByTestId('viewer-set-album-cover'));
+
+    expect(await within(viewer).findByTestId('viewer-album-cover-refusal'))
+      .toHaveTextContent(/cambiato nel frattempo/i);
+    // Never retried on its own.
+    expect(mock.calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+    // The other change made f1 the cover: shown as such.
+    await userEvent.keyboard('{ArrowLeft}');
+    expect(await within(viewer).findByTestId('viewer-album-cover-current')).toBeInTheDocument();
+  });
+
+  it('explains a photo that can no longer be the cover', async () => {
+    mockAlbum([item()], EDITOR, newPickServer(), {
+      'PUT /api/shared-albums/alb-1/cover': () => errorResponse(400, { error: 'not servable' }),
+    });
+    renderPage();
+    const viewer = await openViewerOn(0);
+    await userEvent.click(within(viewer).getByTestId('viewer-set-album-cover'));
+
+    expect(await within(viewer).findByTestId('viewer-album-cover-refusal'))
+      .toHaveTextContent(/non può più essere la copertina/i);
+  });
+
+  it('is absent for a member who may not curate', async () => {
+    mockAlbum([item()], { ...ALBUM, role: 'editor', canEdit: false });
+    renderPage();
+    const viewer = await openViewerOn(0);
+    expect(within(viewer).queryByTestId('viewer-set-album-cover')).not.toBeInTheDocument();
+    expect(within(viewer).queryByTestId('viewer-album-cover-current')).not.toBeInTheDocument();
   });
 });

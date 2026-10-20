@@ -578,7 +578,7 @@ function AppInner(): React.JSX.Element {
         // has between the library and an album.
         <PersonalLibraryScreen
           key={flow.album.id}
-          source={{ kind: 'album', albumId: flow.album.id }}
+          source={{ kind: 'album', albumId: flow.album.id, sortDirection: flow.album.sortDirection }}
           title={flow.album.name}
           onBack={() => rawDispatch({ type: 'ALBUM_BACK' })}
           onGrantInvalid={onLock}

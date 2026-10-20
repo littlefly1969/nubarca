@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
+using NubArca.Api.Albums;
 using NubArca.Api.Metadata;
 using NubArca.Api.Security;
 
@@ -432,7 +433,7 @@ public sealed class AlbumSharingService : IAlbumSharingService
             AddedAt = _time.GetUtcNow().UtcDateTime,
             // The invariant the resolver verifies: whoever added it owns it.
             AddedByUserId = actorUserId,
-            // A contribution appends to the album's curated order.
+            // A contribution appends to the album's append order (SortOrder).
             SortOrder = nextOrder,
         });
 
@@ -493,8 +494,8 @@ public sealed class AlbumSharingService : IAlbumSharingService
             .ToListAsync(cancellationToken);
         var alreadySet = already.ToHashSet();
 
-        // Request order preserved, so the album's curated order follows the order
-        // the contributor selected in.
+        // Request order preserved, so the append order (SortOrder) follows the
+        // order the contributor selected in; the album itself is shown by date.
         var toAdd = distinct
             .Where(id => contributable.Contains(id) && !alreadySet.Contains(id))
             .ToList();
@@ -556,7 +557,6 @@ public sealed class AlbumSharingService : IAlbumSharingService
         }
 
         await ClearCoverIfPointingAtAsync(albumId, fileItemId, cancellationToken);
-        await CompactSortOrderAsync(albumId, cancellationToken);
         await BumpAlbumVersionAsync(albumId, cancellationToken);
         return AlbumItemRemovalResult.Ok;
     }
@@ -602,7 +602,6 @@ public sealed class AlbumSharingService : IAlbumSharingService
             .ExecuteDeleteAsync(cancellationToken);
 
         await ClearCoverIfPointingAtAsync(albumId, fileItemId, cancellationToken);
-        await CompactSortOrderAsync(albumId, cancellationToken);
         await BumpAlbumVersionAsync(albumId, cancellationToken);
 
         return (AlbumItemRemovalResult.Ok, new RemovedAlbumItem(
@@ -632,7 +631,7 @@ public sealed class AlbumSharingService : IAlbumSharingService
 
         var album = await _db.Albums.AsNoTracking()
             .Where(a => a.Id == albumId)
-            .Select(a => new { a.Version, a.CoverFileItemId, a.OwnerUserId })
+            .Select(a => new { a.Version, a.CoverFileItemId, a.OwnerUserId, a.SortOldestFirst })
             .FirstAsync(cancellationToken);
         if (query?.ExpectedVersion is int expected && expected != album.Version)
         {
@@ -644,33 +643,44 @@ public sealed class AlbumSharingService : IAlbumSharingService
         var members = _db.AlbumItems.AsNoTracking().Where(ai => ai.AlbumId == albumId);
         var totalCount = await members.CountAsync(cancellationToken);
 
-        // A continuation resumes after the caller's last row. `(SortOrder,
+        // The album's sequence — date taken in the owner's direction,
+        // FileItemId the tie-break — read from the source even when it has
+        // since been vaulted, so every row of the moderation view has its place.
+        var page = members.Join(
+            _db.FileItems.IgnoreQueryFilters().AsNoTracking(),
+            ai => ai.FileItemId,
+            f => f.Id,
+            (ai, f) => new { Item = ai, TakenAt = f.EffectiveDateTaken });
+
+        // A continuation resumes after the caller's last row. `(date taken,
         // FileItemId)` is exactly the order below, so the page starts where the
         // previous one ended: nothing skipped, nothing repeated.
-        var page = members;
         if (query?.After is Guid after)
         {
-            var anchor = await members
-                .Where(ai => ai.Id == after)
-                .Select(ai => new { ai.SortOrder, ai.FileItemId })
+            var anchor = await page
+                .Where(x => x.Item.Id == after)
+                .Select(x => new { x.TakenAt, x.Item.FileItemId })
                 .FirstOrDefaultAsync(cancellationToken);
             if (anchor is null)
             {
                 return new AlbumContentReadResult(AlbumContentReadOutcome.InvalidCursor);
             }
-            var anchorOrder = anchor.SortOrder;
+            var anchorAt = anchor.TakenAt;
             var anchorFileId = anchor.FileItemId;
-            page = page.Where(ai => ai.SortOrder > anchorOrder
-                || (ai.SortOrder == anchorOrder && ai.FileItemId.CompareTo(anchorFileId) > 0));
+            page = album.SortOldestFirst
+                ? page.Where(x => x.TakenAt > anchorAt
+                    || (x.TakenAt == anchorAt && x.Item.FileItemId.CompareTo(anchorFileId) > 0))
+                : page.Where(x => x.TakenAt < anchorAt
+                    || (x.TakenAt == anchorAt && x.Item.FileItemId.CompareTo(anchorFileId) < 0));
         }
 
-        // The album's CURATED order, not the order things happened to be
-        // added in. FileItemId stays the final tie-break so the sequence is
-        // stable even if two rows share a SortOrder.
-        var ordered = page.OrderBy(ai => ai.SortOrder).ThenBy(ai => ai.FileItemId);
+        var ordered = album.SortOldestFirst
+            ? page.OrderBy(x => x.TakenAt).ThenBy(x => x.Item.FileItemId)
+            : page.OrderByDescending(x => x.TakenAt).ThenByDescending(x => x.Item.FileItemId);
         // One more than asked for: whether a further page exists is a fact
         // about the data, never a guess from a full page.
-        IQueryable<AlbumItem> bounded = query is null ? ordered : ordered.Take(query.Limit + 1);
+        IQueryable<AlbumItem> bounded = (query is null ? ordered : ordered.Take(query.Limit + 1))
+            .Select(x => x.Item);
 
         // Every row of the album, including ones whose source is no longer
         // servable — this is the moderation view, so a row the owner needs to
@@ -684,7 +694,6 @@ public sealed class AlbumSharingService : IAlbumSharingService
                 ai.FileItemId,
                 ai.AddedAt,
                 ai.AddedByUserId,
-                ai.SortOrder,
                 Source = _db.FileItems.IgnoreQueryFilters()
                     .Where(f => f.Id == ai.FileItemId)
                     .Select(f => new
@@ -790,7 +799,6 @@ public sealed class AlbumSharingService : IAlbumSharingService
         {
             await ClearCoverIfPointingAtAsync(albumId, fileId, cancellationToken);
         }
-        await CompactSortOrderAsync(albumId, cancellationToken);
         await BumpAlbumVersionAsync(albumId, cancellationToken);
 
         return fileIds;
@@ -821,6 +829,7 @@ public sealed class AlbumSharingService : IAlbumSharingService
                     x.Role,
                     x.AllowOriginalDownload,
                     x.AcceptedAt,
+                    x.Album.CoverFileItemId,
                 })
             .OrderBy(x => x.Name)
             .ToListAsync(cancellationToken);
@@ -837,19 +846,26 @@ public sealed class AlbumSharingService : IAlbumSharingService
         var albumIds = rows.Select(x => x.Id).ToList();
         var facts = await DisplayableMembers()
             .Where(x => albumIds.Contains(x.AlbumId))
-            // The DERIVED cover follows the album's curated order, so choosing
-            // an order also chooses what the card shows.
-            .OrderBy(x => x.SortOrder)
-            .ThenBy(x => x.FileItemId)
-            .Select(x => new { x.AlbumId, x.FileItemId, x.AlbumOwnerUserId, x.MediaCategory })
+            .Select(x => new
+            {
+                x.AlbumId, x.FileItemId, x.AlbumOwnerUserId, x.MediaCategory, x.TakenAt, x.SortOldestFirst,
+            })
             .ToListAsync(cancellationToken);
 
-        var byAlbum = facts.GroupBy(x => x.AlbumId).ToDictionary(g => g.Key, g => g.ToList());
+        // The DERIVED cover follows the album's sequence (date taken in the
+        // owner's direction), so turning the album around also turns the card.
+        var byAlbum = facts.GroupBy(x => x.AlbumId).ToDictionary(
+            g => g.Key,
+            g => (g.First().SortOldestFirst
+                ? g.OrderBy(x => x.TakenAt).ThenBy(x => x.FileItemId)
+                : g.OrderByDescending(x => x.TakenAt).ThenByDescending(x => x.FileItemId)).ToList());
 
         return rows.Select(x =>
         {
             var members = byAlbum.GetValueOrDefault(x.Id) ?? [];
+            // Led by the chosen cover while it is still shown.
             var cover = members
+                .OrderBy(m => m.FileItemId == x.CoverFileItemId ? 0 : 1)
                 .Take(4)
                 .Select(m => new SharedAlbumCoverItem(
                     m.FileItemId,
@@ -969,7 +985,7 @@ public sealed class AlbumSharingService : IAlbumSharingService
         var album = await _db.Albums
             .AsNoTracking()
             .Where(a => a.Id == grant.AlbumId)
-            .Select(a => new { a.Name, a.Description, a.Version })
+            .Select(a => new { a.Name, a.Description, a.Version, a.CoverFileItemId, a.SortOldestFirst })
             .FirstAsync(cancellationToken);
 
         var ownerDisplayName = await _db.Users
@@ -978,29 +994,37 @@ public sealed class AlbumSharingService : IAlbumSharingService
             .Select(u => u.DisplayName)
             .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
 
-        var count = await DisplayableMembers()
-            .Where(x => x.AlbumId == grant.AlbumId)
-            .CountAsync(cancellationToken);
+        var members = DisplayableMembers().Where(x => x.AlbumId == grant.AlbumId);
+        var count = await members.CountAsync(cancellationToken);
+        // The chosen cover, only while this member is shown it: an id the album
+        // no longer serves is never handed out.
+        var cover = album.CoverFileItemId is Guid chosen
+            && await members.AnyAsync(x => x.FileItemId == chosen, cancellationToken)
+                ? chosen
+                : (Guid?)null;
 
         return new SharedAlbumDetail(
             grant.AlbumId, album.Name, album.Description, ownerDisplayName,
             grant.Role, grant.AllowOriginalDownload, count,
             album.Version,
-            grant.IsOwner || AlbumRoles.CanEdit(grant.Role));
+            grant.IsOwner || AlbumRoles.CanEdit(grant.Role),
+            cover,
+            album.SortOldestFirst ? AlbumSortDirections.OldestFirst : AlbumSortDirections.NewestFirst);
     }
 
-    // One page of a shared album, in its curated order.
+    // One page of a shared album, in its date order.
     //
     // Three things are deliberate. The counts describe the whole album, not the
     // filtered slice, so a tab's label does not change meaning with the tab that
-    // is open. The page is a KEYSET over `(SortOrder, FileItemId)` — the very
-    // order the album is served in — so an item added or removed while the
+    // is open. The page is a KEYSET over `(date taken, FileItemId)` in the
+    // owner's direction — the very order the album is served in — so an item added or removed while the
     // recipient is scrolling shifts nothing already read. And the kind filter is
     // applied to the SAME query the counts come from, so "Videos" can never
     // include something "All" would not.
     //
-    // Returns null for a cursor that does not parse or was issued for another
-    // kind; the endpoint turns that into one 400.
+    // Returns null for a cursor that does not parse, was issued for another kind
+    // or direction, or names an item that is not in this album; the endpoint
+    // turns that into one 400.
     public async Task<SharedAlbumItemsPage?> ListSharedItemsAsync(
         AlbumAccessGrant grant,
         SharedAlbumItemQuery query,
@@ -1022,6 +1046,16 @@ public sealed class AlbumSharingService : IAlbumSharingService
         }
 
         var members = DisplayableMembers().Where(x => x.AlbumId == grant.AlbumId);
+        var oldestFirst = await _db.Albums.AsNoTracking()
+            .Where(a => a.Id == grant.AlbumId)
+            .Select(a => a.SortOldestFirst)
+            .FirstOrDefaultAsync(cancellationToken);
+        // A cursor issued before the owner turned the album around belongs to a
+        // sequence that no longer exists: the client starts again (one 400).
+        if (cursor is not null && cursor.OldestFirst != oldestFirst)
+        {
+            return null;
+        }
 
         // Counts first, over the unfiltered, unseeked set: one round trip that
         // answers every tab.
@@ -1043,17 +1077,34 @@ public sealed class AlbumSharingService : IAlbumSharingService
 
         if (cursor is not null)
         {
-            var boundaryOrder = cursor.SortOrder;
+            // The boundary's date is read here, never taken from the cursor. It
+            // must be an item of THIS album (even one no longer shown), so a
+            // cursor cannot be pointed at an arbitrary file to probe its date.
             var boundaryId = cursor.FileItemId;
-            page = page.Where(x => x.SortOrder > boundaryOrder
-                || (x.SortOrder == boundaryOrder && x.FileItemId.CompareTo(boundaryId) > 0));
+            var boundary = await _db.AlbumItems.AsNoTracking()
+                .Where(ai => ai.AlbumId == grant.AlbumId && ai.FileItemId == boundaryId)
+                .Join(_db.FileItems.IgnoreQueryFilters().AsNoTracking(),
+                    ai => ai.FileItemId, f => f.Id, (ai, f) => new { f.EffectiveDateTaken })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (boundary is null)
+            {
+                return null;
+            }
+            var boundaryAt = boundary.EffectiveDateTaken;
+            page = oldestFirst
+                ? page.Where(x => x.TakenAt > boundaryAt
+                    || (x.TakenAt == boundaryAt && x.FileItemId.CompareTo(boundaryId) > 0))
+                : page.Where(x => x.TakenAt < boundaryAt
+                    || (x.TakenAt == boundaryAt && x.FileItemId.CompareTo(boundaryId) < 0));
         }
 
-        // The album's CURATED order. FileItemId remains the final tie-break
-        // so the sequence is stable even if two rows share a SortOrder.
-        var rows = await page
-            .OrderBy(x => x.SortOrder)
-            .ThenBy(x => x.FileItemId)
+        // The album's sequence: date taken in the owner's direction, FileItemId
+        // the stable tie-break — the same order the owner, the TV and the party
+        // wall see.
+        var ordered = oldestFirst
+            ? page.OrderBy(x => x.TakenAt).ThenBy(x => x.FileItemId)
+            : page.OrderByDescending(x => x.TakenAt).ThenByDescending(x => x.FileItemId);
+        var rows = await ordered
             // One more than asked for: whether a further page exists is a fact
             // about the data, never a guess from a full page.
             .Take(query.Limit + 1)
@@ -1067,7 +1118,6 @@ public sealed class AlbumSharingService : IAlbumSharingService
                 x.Width,
                 x.Height,
                 x.Orientation,
-                x.SortOrder,
                 x.AddedByUserId,
                 x.FileOwnerUserId,
             })
@@ -1111,7 +1161,7 @@ public sealed class AlbumSharingService : IAlbumSharingService
 
         var last = rows.Count > 0 ? rows[^1] : null;
         var nextCursor = hasMore && last is not null
-            ? new SharedAlbumItemCursor(query.Kind, last.SortOrder, last.FileItemId).Encode()
+            ? new SharedAlbumItemCursor(query.Kind, last.FileItemId, oldestFirst).Encode()
             : null;
 
         return new SharedAlbumItemsPage(
@@ -1137,34 +1187,10 @@ public sealed class AlbumSharingService : IAlbumSharingService
                 s => s.SetProperty(a => a.CoverFileItemId, (Guid?)null),
                 cancellationToken);
 
-    // Renumber the album to a contiguous 1..n in its current order after a
-    // removal. Keeping the sequence dense means a reorder never has to reason
-    // about holes, and two albums with the same visible order always have the
-    // same stored order.
-    private async Task CompactSortOrderAsync(Guid albumId, CancellationToken cancellationToken)
-    {
-        var ordered = await _db.AlbumItems
-            .Where(ai => ai.AlbumId == albumId)
-            .OrderBy(ai => ai.SortOrder)
-            .ThenBy(ai => ai.FileItemId)
-            .ToListAsync(cancellationToken);
-
-        var position = 1;
-        var changed = false;
-        foreach (var item in ordered)
-        {
-            if (item.SortOrder != position)
-            {
-                item.SortOrder = position;
-                changed = true;
-            }
-            position += 1;
-        }
-        if (changed)
-        {
-            await _db.SaveChangesAsync(cancellationToken);
-        }
-    }
+    // No renumbering after a removal. The album's visible sequence is
+    // (EffectiveDateTaken, FileItemId) in the owner's direction, so SortOrder is
+    // only the append order and a hole in it changes nothing anyone sees. The
+    // old compaction loaded and rewrote every row of the album per removal.
 
     // SHARE-ALBUM-03: content mutations move the album's optimistic-concurrency
     // token. Contribution, withdrawal and the automatic withdrawal a revocation
@@ -1210,7 +1236,7 @@ public sealed class AlbumSharingService : IAlbumSharingService
                 (ai, a) => new
                 {
                     ai.AlbumId, ai.FileItemId, ai.AddedAt, ai.AddedByUserId, a.OwnerUserId,
-                    AlbumItemId = ai.Id, ai.SortOrder,
+                    AlbumItemId = ai.Id, ai.SortOrder, a.SortOldestFirst,
                 })
             .Join(_db.FileItems.AsNoTracking(),
                 x => x.FileItemId,
@@ -1223,6 +1249,8 @@ public sealed class AlbumSharingService : IAlbumSharingService
                     x.AddedByUserId,
                     x.AlbumItemId,
                     x.SortOrder,
+                    x.SortOldestFirst,
+                    TakenAt = f.EffectiveDateTaken,
                     AlbumOwnerUserId = x.OwnerUserId,
                     FileOwnerUserId = f.OwnerUserId,
                     f.BlobObjectId,
@@ -1249,6 +1277,8 @@ public sealed class AlbumSharingService : IAlbumSharingService
                     AddedAt = x.AddedAt,
                     AlbumItemId = x.AlbumItemId,
                     SortOrder = x.SortOrder,
+                    SortOldestFirst = x.SortOldestFirst,
+                    TakenAt = x.TakenAt,
                     AlbumOwnerUserId = x.AlbumOwnerUserId,
                     AddedByUserId = x.AddedByUserId,
                     FileOwnerUserId = x.FileOwnerUserId,
@@ -1335,6 +1365,10 @@ public sealed class AlbumSharingService : IAlbumSharingService
         public Guid FileItemId { get; set; }
         public Guid AlbumItemId { get; set; }
         public int SortOrder { get; set; }
+        // The album's sequence: date taken (never null; the upload time when a
+        // file carries no date), in the direction the owner chose.
+        public DateTime TakenAt { get; set; }
+        public bool SortOldestFirst { get; set; }
         public DateTime AddedAt { get; set; }
         public Guid AlbumOwnerUserId { get; set; }
         // SHARE-ALBUM-02 provenance, carried so ListSharedItemsAsync can tell

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   ApiError,
-  moveSharedAlbumItem,
   removeSharedAlbumItem,
   setSharedAlbumCover,
   type AlbumContentItem,
@@ -25,14 +24,15 @@ import { useAlbumContent } from './useAlbumContent';
 // can never acquire an owner-only action by inheriting one from a shared
 // component.
 //
-// The only mutations offered are curation: reorder, choose a cover, and
-// "Remove from album". "Delete" is deliberately absent for every row — for a
+// The only mutations offered are curation: choose a cover and "Remove from
+// album". The sequence is not curated: an album is shown by date taken, in the
+// direction its owner chose, so there is nothing to move here. "Delete" is deliberately absent for every row — for a
 // contribution the caller has no right to delete, and for the owner's own item
 // removing it from an album is curation, not deletion.
 //
 // CONCURRENCY: every mutation echoes the version last read. A 409 reloads and
-// explains; it never retries, because a silent retry of a reorder or a removal
-// would apply an intent formed against a state that no longer exists.
+// explains; it never retries, because a silent retry of a removal would apply
+// an intent formed against a state that no longer exists.
 //
 // SCALE: opening this costs the same for twenty items or two thousand.
 //   * The list is read one page at a time (useAlbumContent), and the next page
@@ -41,10 +41,8 @@ import { useAlbumContent } from './useAlbumContent';
 //     exist in the DOM, so neither nodes nor thumbnail requests grow with the
 //     album. Positions stay absolute — "37 of 520" — because the server sends
 //     the album's total.
-//   * Each row carries ONE control. Moves, the cover and removal sit behind a
+//   * Each row carries ONE control. The cover and removal sit behind a
 //     per-row Actions disclosure, rendered for the single row that is open.
-//   * A move sends the item, its destination and the version — never the
-//     album's id sequence — so "to the end" works on a row the list never read.
 //   * Thumbnails are the Micro icon the server addresses for this surface.
 
 interface Props {
@@ -60,8 +58,7 @@ const OVERSCAN_ROWS = 6;
 // steady scroll rarely reaches a row that is not there yet.
 const LOAD_AHEAD_ROWS = 10;
 
-type MoveAction = 'up' | 'down' | 'first' | 'last';
-type RowAction = MoveAction | 'set-cover' | 'clear-cover' | 'remove' | 'toggle';
+type RowAction = 'set-cover' | 'clear-cover' | 'remove' | 'toggle';
 type FocusRequest = { albumItemId: string; action: RowAction } | 'notice';
 
 export function AlbumSharedContentPanel({ albumId, onClose, returnFocusRef }: Props) {
@@ -69,16 +66,13 @@ export function AlbumSharedContentPanel({ albumId, onClose, returnFocusRef }: Pr
   const { invalidateAuth } = useAuth();
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  // Announced politely after a move so a screen-reader user hears the result
-  // without the focus being stolen.
-  const [liveMessage, setLiveMessage] = useState('');
   // At most ONE row shows its actions; every other row has a single control.
   const [openRowId, setOpenRowId] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const noticeRef = useRef<HTMLParagraphElement>(null);
-  // Focus to deliver once a render has the element. A moved row keeps focus
-  // across the re-render, so repeated keyboard moves stay on the same item.
+  // Focus to deliver once a render has the element, so a row keeps focus across
+  // the re-render an action causes.
   const focusRef = useRef<FocusRequest | null>(null);
 
   const onChangedWhileBrowsing = useCallback(() => {
@@ -189,40 +183,6 @@ export function AlbumSharedContentPanel({ albumId, onClose, returnFocusRef }: Pr
     }
   }
 
-  // Up / Down / Start / End as ONE item and ONE destination. The end is the
-  // album's end, not the end of the rows held.
-  async function move(item: AlbumContentItem, index: number, action: MoveAction) {
-    const target = action === 'up' ? index - 1
-      : action === 'down' ? index + 1
-        : action === 'first' ? 0
-          : totalCount - 1;
-    if (target < 0 || target >= totalCount || target === index) return;
-
-    const held = items.length;
-    const outcome = await mutate(
-      (v) => moveSharedAlbumItem(albumId, item.albumItemId, v, target),
-      t('albumContent.actionError'),
-    );
-    if (!outcome) return;
-    const { position, version, totalCount: total } = outcome.value;
-    content.applyMove(item.albumItemId, position, version);
-    setLiveMessage(t('albumContent.moved', { position: position + 1, total }));
-
-    if (position < held) {
-      // Still among the rows held: follow it, and bring it into view if the
-      // move took it away from the viewport.
-      focusRef.current = { albumItemId: item.albumItemId, action };
-      if (!virtualRows.some((v) => v.index === position)) {
-        virtualizer.scrollToIndex(position, { align: 'center' });
-      }
-    } else {
-      // Moved past the rows held. Focus stays where the user was — on the row
-      // that took its place — and the announcement says where it went.
-      setOpenRowId(null);
-      focusSuccessorOf(item, index);
-    }
-  }
-
   function contributorLabel(item: AlbumContentItem): string {
     if (!item.contributorDisplayName) return '';
     return item.contributorMaskedEmail
@@ -296,11 +256,7 @@ export function AlbumSharedContentPanel({ albumId, onClose, returnFocusRef }: Pr
 
         <div className="ws-sheet-body">
           <p className="muted">{t('albumContent.intro')}</p>
-          {canEdit && <p className="muted">{t('albumContent.reorderHelp')}</p>}
-
-          {/* Move results are announced, not focused. */}
-          <p className="visually-hidden" role="status" aria-live="polite"
-            data-testid="album-content-live">{liveMessage}</p>
+          {canEdit && <p className="muted">{t('albumContent.curateHelp')}</p>}
 
           {phase === 'loading' && <p>{t('common.loading')}</p>}
           {phase === 'gone' && (
@@ -439,31 +395,6 @@ export function AlbumSharedContentPanel({ albumId, onClose, returnFocusRef }: Pr
                             focusRef.current = { albumItemId: item.albumItemId, action: 'toggle' };
                           }}
                         >
-                          <button type="button" className="row-action" data-action="up"
-                            data-testid="album-content-move-up"
-                            disabled={index === 0 || busy}
-                            onClick={() => void move(item, index, 'up')}>
-                            {t('albumContent.moveUp')}
-                          </button>
-                          <button type="button" className="row-action" data-action="down"
-                            data-testid="album-content-move-down"
-                            disabled={index === totalCount - 1 || busy}
-                            onClick={() => void move(item, index, 'down')}>
-                            {t('albumContent.moveDown')}
-                          </button>
-                          <button type="button" className="row-action" data-action="first"
-                            data-testid="album-content-move-first"
-                            disabled={index === 0 || busy}
-                            onClick={() => void move(item, index, 'first')}>
-                            {t('albumContent.moveFirst')}
-                          </button>
-                          <button type="button" className="row-action" data-action="last"
-                            data-testid="album-content-move-last"
-                            disabled={index === totalCount - 1 || busy}
-                            onClick={() => void move(item, index, 'last')}>
-                            {t('albumContent.moveLast')}
-                          </button>
-
                           {/* Only a currently-servable member may become the
                               cover; the server refuses anything else, and
                               offering it would be a control that always fails. */}

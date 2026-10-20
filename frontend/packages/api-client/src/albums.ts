@@ -1,9 +1,11 @@
 import type {
   AlbumDetail,
   AlbumItemSummary,
+  AlbumSortDirection,
   AlbumSummary,
   BulkAlbumItemsResult,
 } from '@nubarca/contracts';
+import { albumSortPath } from '@nubarca/contracts';
 import { api } from './client';
 
 // Web TRANSPORT for owner album CRUD and membership.
@@ -20,6 +22,7 @@ export type {
   AlbumCoverItem,
   AlbumDetail,
   AlbumItemSummary,
+  AlbumSortDirection,
   AlbumSummary,
   BulkAlbumItemsResult,
 } from '@nubarca/contracts';
@@ -65,6 +68,20 @@ export async function setAlbumTvVisibility(
   return api<AlbumDetail>(`/api/albums/${albumId}/tv-settings`, {
     method: 'PATCH',
     json: { showOnTv },
+    signal,
+  });
+}
+
+// Owner only: turns the album's date order around (or back). The choice becomes
+// the album's order for every member, the TV and the party wall.
+export async function setAlbumSortDirection(
+  albumId: string,
+  direction: AlbumSortDirection,
+  signal?: AbortSignal,
+): Promise<AlbumDetail> {
+  return api<AlbumDetail>(albumSortPath(albumId), {
+    method: 'PUT',
+    json: { direction },
     signal,
   });
 }

@@ -4871,6 +4871,22 @@ video.lightbox-image {
   min-height: 44px;
   cursor: pointer;
 }
+.media-viewer-actions .media-viewer-cover-action {
+  font-size: 0.9rem;
+  padding: 0 0.75rem;
+  white-space: nowrap;
+}
+.media-viewer-cover-current {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 0.75rem;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  color: rgb(255 255 255 / 78%);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
 .media-viewer-nav {
   position: absolute;
   top: 50%;
