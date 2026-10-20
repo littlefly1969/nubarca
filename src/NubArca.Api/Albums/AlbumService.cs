@@ -489,7 +489,7 @@ public class AlbumService : IAlbumService
             // adder is always the album owner. A Contributor adds through
             // IAlbumSharingService, never here.
             AddedByUserId = ownerUserId,
-            // New items APPEND to the album's curated order.
+            // New items APPEND to the album's append order (SortOrder).
             SortOrder = await NextSortOrderAsync(albumId, cancellationToken),
         });
         // Adding an item changes the album's representation, so the content

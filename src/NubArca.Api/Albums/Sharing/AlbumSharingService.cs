@@ -433,7 +433,7 @@ public sealed class AlbumSharingService : IAlbumSharingService
             AddedAt = _time.GetUtcNow().UtcDateTime,
             // The invariant the resolver verifies: whoever added it owns it.
             AddedByUserId = actorUserId,
-            // A contribution appends to the album's curated order.
+            // A contribution appends to the album's append order (SortOrder).
             SortOrder = nextOrder,
         });
 
@@ -494,8 +494,8 @@ public sealed class AlbumSharingService : IAlbumSharingService
             .ToListAsync(cancellationToken);
         var alreadySet = already.ToHashSet();
 
-        // Request order preserved, so the album's curated order follows the order
-        // the contributor selected in.
+        // Request order preserved, so the append order (SortOrder) follows the
+        // order the contributor selected in; the album itself is shown by date.
         var toAdd = distinct
             .Where(id => contributable.Contains(id) && !alreadySet.Contains(id))
             .ToList();
@@ -1015,18 +1015,19 @@ public sealed class AlbumSharingService : IAlbumSharingService
             album.SortOldestFirst ? AlbumSortDirections.OldestFirst : AlbumSortDirections.NewestFirst);
     }
 
-    // One page of a shared album, in its curated order.
+    // One page of a shared album, in its date order.
     //
     // Three things are deliberate. The counts describe the whole album, not the
     // filtered slice, so a tab's label does not change meaning with the tab that
-    // is open. The page is a KEYSET over `(SortOrder, FileItemId)` — the very
-    // order the album is served in — so an item added or removed while the
+    // is open. The page is a KEYSET over `(date taken, FileItemId)` in the
+    // owner's direction — the very order the album is served in — so an item added or removed while the
     // recipient is scrolling shifts nothing already read. And the kind filter is
     // applied to the SAME query the counts come from, so "Videos" can never
     // include something "All" would not.
     //
-    // Returns null for a cursor that does not parse or was issued for another
-    // kind; the endpoint turns that into one 400.
+    // Returns null for a cursor that does not parse, was issued for another kind
+    // or direction, or names an item that is not in this album; the endpoint
+    // turns that into one 400.
     public async Task<SharedAlbumItemsPage?> ListSharedItemsAsync(
         AlbumAccessGrant grant,
         SharedAlbumItemQuery query,
@@ -1079,8 +1080,20 @@ public sealed class AlbumSharingService : IAlbumSharingService
 
         if (cursor is not null)
         {
-            var boundaryAt = cursor.TakenAt;
+            // The boundary's date is read here, never taken from the cursor. It
+            // must be an item of THIS album (even one no longer shown), so a
+            // cursor cannot be pointed at an arbitrary file to probe its date.
             var boundaryId = cursor.FileItemId;
+            var boundary = await _db.AlbumItems.AsNoTracking()
+                .Where(ai => ai.AlbumId == grant.AlbumId && ai.FileItemId == boundaryId)
+                .Join(_db.FileItems.IgnoreQueryFilters().AsNoTracking(),
+                    ai => ai.FileItemId, f => f.Id, (ai, f) => new { f.EffectiveDateTaken })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (boundary is null)
+            {
+                return null;
+            }
+            var boundaryAt = boundary.EffectiveDateTaken;
             page = oldestFirst
                 ? page.Where(x => x.TakenAt > boundaryAt
                     || (x.TakenAt == boundaryAt && x.FileItemId.CompareTo(boundaryId) > 0))
@@ -1108,7 +1121,6 @@ public sealed class AlbumSharingService : IAlbumSharingService
                 x.Width,
                 x.Height,
                 x.Orientation,
-                x.TakenAt,
                 x.AddedByUserId,
                 x.FileOwnerUserId,
             })
@@ -1152,7 +1164,7 @@ public sealed class AlbumSharingService : IAlbumSharingService
 
         var last = rows.Count > 0 ? rows[^1] : null;
         var nextCursor = hasMore && last is not null
-            ? new SharedAlbumItemCursor(query.Kind, last.TakenAt, last.FileItemId, oldestFirst).Encode()
+            ? new SharedAlbumItemCursor(query.Kind, last.FileItemId, oldestFirst).Encode()
             : null;
 
         return new SharedAlbumItemsPage(

@@ -6,14 +6,15 @@ namespace NubArca.Api.Albums.Sharing;
 // Opaque keyset cursor for one page of a shared album's items.
 //
 // The album's sequence is its photographs by date taken in the owner's
-// direction, so the boundary is exactly the pair that order is built from:
-// `(EffectiveDateTaken, FileItemId)`, plus the direction it was issued for (a
-// cursor from before the owner turned the album around is refused, not
-// misread). Nothing else is encoded — no owner id, no blob id, no storage fact.
+// direction. The cursor names only the last item served and the direction it
+// was issued for (a cursor from before the owner turned the album around is
+// refused, not misread); the server reads that item's date itself. The date is
+// deliberately NOT encoded: capture dates are owner-private and a member's
+// listing never carries them, so a cursor that did would hand one out per page.
+// Nothing else is encoded either — no owner id, no blob id, no storage fact.
 // `FileItemId` is already in every shared item DTO and every album-scoped media
-// URL, and the date is the member's own album sequence, so a decoded cursor
-// tells its holder nothing the listing did not. Version 2: a cursor of the old
-// curated order (`o`) does not parse.
+// URL, so a decoded cursor tells its holder nothing the listing did not.
+// Version 2: a cursor of the old curated order (`o`) does not parse.
 //
 // The requested KIND is bound into the cursor for the same reason the gallery
 // binds its filter fingerprint: a cursor issued while browsing Videos would
@@ -24,7 +25,6 @@ namespace NubArca.Api.Albums.Sharing;
 // the membership check on the request that carries it.
 public sealed record SharedAlbumItemCursor(
     [property: JsonPropertyName("k")] string Kind,
-    [property: JsonPropertyName("t")] DateTime TakenAt,
     [property: JsonPropertyName("i")] Guid FileItemId,
     [property: JsonPropertyName("a")] bool OldestFirst)
 {
@@ -64,11 +64,7 @@ public sealed record SharedAlbumItemCursor(
                 return false;
             }
 
-            // Dates are UTC on the wire and in the database; a forged one without
-            // a zone is read as UTC rather than reaching the query unqualified.
-            cursor = parsed.TakenAt.Kind == DateTimeKind.Utc
-                ? parsed
-                : parsed with { TakenAt = DateTime.SpecifyKind(parsed.TakenAt, DateTimeKind.Utc) };
+            cursor = parsed;
             return true;
         }
         catch

@@ -146,6 +146,39 @@ public sealed class SharedAlbumBrowsingTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Cursor_Carries_No_Capture_Date_And_Cannot_Name_A_Foreign_File()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, viewer) = await _factory.CreateAuthenticatedClientAsync(ViewerEmail);
+        var albumId = await CreateAlbumAsync(owner, "Private dates");
+        var files = new List<Guid>();
+        for (var i = 0; i < 3; i++)
+        {
+            files.Add(await AddPngAsync(owner, albumId, $"p{i}.png"));
+        }
+        var taken = new DateTime(2019, 8, 14, 9, 30, 0, DateTimeKind.Utc);
+        foreach (var file in files) await SetTakenAtAsync(file, taken);
+        var outside = await UploadPngAsync(owner, "outside.png");
+        await InviteAndAcceptAsync(owner, viewer, albumId);
+
+        var cursor = (await PageAsync(viewer, albumId, limit: 1)).GetProperty("nextCursor").GetString()!;
+        var padded = cursor.Replace('-', '+').Replace('_', '/');
+        padded += new string('=', (4 - padded.Length % 4) % 4);
+        var decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(padded));
+        // The capture date is owner-private: no form of it travels to a member.
+        Assert.DoesNotContain("2019", decoded);
+        Assert.DoesNotContain("\"t\"", decoded);
+
+        // A cursor pointed at a file outside the album is refused, so it cannot
+        // be used to place that file's date among the album's.
+        var forged = System.Text.Encoding.UTF8.GetBytes(
+            decoded.Replace(files.Except([outside]).Select(f => f.ToString()).First(f => decoded.Contains(f)), outside.ToString()));
+        var forgedCursor = Convert.ToBase64String(forged).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        Assert.Equal(HttpStatusCode.BadRequest, (await viewer.GetAsync(
+            $"/api/shared-albums/{albumId}/items?cursor={Uri.EscapeDataString(forgedCursor)}")).StatusCode);
+    }
+
+    [Fact]
     public async Task A_Cursor_Of_The_Old_Curated_Order_Is_Refused()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
