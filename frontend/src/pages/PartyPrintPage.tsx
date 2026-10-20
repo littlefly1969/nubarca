@@ -17,7 +17,7 @@ import type { PrintLayout } from '@nubarca/contracts';
 import { useI18n, type MessageKey } from '../i18n';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PRODUCT_NAME } from '../brand/brand';
-import { recallFaceFilter, recallPartyHome, recallPartyPicks } from './partyGuestMemo';
+import { partyPicksScope, recallFaceFilter, recallPartyHome, recallPartyPicks } from './partyGuestMemo';
 import {
   PAPER_LABEL, PrintStudio, useFitLine,
   type FullBleedSheet, type StudioFormat, type StudioSubmission,
@@ -351,10 +351,13 @@ export function PartyPrintPage() {
   // another party simply matches nothing and is never offered.
   // What the guest picked on the hub for printing, in pick order, kept to the
   // photographs THIS token serves: they open the sheet already chosen.
+  // Read under THIS party's scope (its print token, digested), so another
+  // party's picks in the same tab are never even looked at.
   const picked = useMemo(() => {
+    if (!token) return [];
     const served = new Set((manifest?.photos ?? []).map((photo) => photo.id));
-    return recallPartyPicks().filter((id) => served.has(id));
-  }, [manifest]);
+    return recallPartyPicks(partyPicksScope(token)).filter((id) => served.has(id));
+  }, [manifest, token]);
 
   const mine = useMemo(() => {
     const remembered = new Set(recallFaceFilter());
