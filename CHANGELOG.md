@@ -4,7 +4,7 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
-## Unreleased
+## 0.4.0 — 2026-10-20
 
 ### Selection, lists and album order
 
