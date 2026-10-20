@@ -1,8 +1,9 @@
 # NubArca — Development State
 
-NubArca `0.3.0` is the current baseline. It is a self-hosted personal cloud
-implemented with ASP.NET Core, EF Core, PostgreSQL, React and TypeScript, with
-local content-addressed blob storage and Docker Compose deployment.
+NubArca `0.4.0` is the current release, built on the `0.3.0` baseline recorded
+below. It is a self-hosted personal cloud implemented with ASP.NET Core, EF
+Core, PostgreSQL, React and TypeScript, with local content-addressed blob
+storage and Docker Compose deployment.
 
 ## Stable areas
 
