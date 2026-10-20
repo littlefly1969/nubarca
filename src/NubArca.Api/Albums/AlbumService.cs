@@ -401,21 +401,25 @@ public class AlbumService : IAlbumService
         Guid albumId, Guid ownerUserId, bool oldestFirst,
         CancellationToken cancellationToken = default)
     {
-        var album = await _db.Albums
+        // One conditional UPDATE, incremented in the database: a curator's edit
+        // claims the version with `WHERE Version = expected` at the same time,
+        // and a read-modify-write here could write back a version that edit had
+        // already used, hiding it from every client that compares versions. The
+        // direction is an absolute value, so setting it again is a no-op and
+        // does not move the version; the owner sends no expected version.
+        var now = _time.GetUtcNow().UtcDateTime;
+        await _db.Albums
+            .Where(a => a.Id == albumId && a.OwnerUserId == ownerUserId && a.SortOldestFirst != oldestFirst)
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(a => a.SortOldestFirst, oldestFirst)
+                      .SetProperty(a => a.UpdatedAt, now)
+                      .SetProperty(a => a.Version, a => a.Version + 1),
+                cancellationToken);
+
+        var album = await _db.Albums.AsNoTracking()
             .Where(a => a.Id == albumId && a.OwnerUserId == ownerUserId)
             .FirstOrDefaultAsync(cancellationToken);
-        if (album is null)
-            return null;
-
-        if (album.SortOldestFirst != oldestFirst)
-        {
-            album.SortOldestFirst = oldestFirst;
-            album.UpdatedAt = _time.GetUtcNow().UtcDateTime;
-            album.Version += 1;
-            await _db.SaveChangesAsync(cancellationToken);
-        }
-
-        return DetailOf(album);
+        return album is null ? null : DetailOf(album);
     }
 
     public async Task<IReadOnlyList<AlbumItemSummary>?> ListItemsAsync(
