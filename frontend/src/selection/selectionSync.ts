@@ -148,9 +148,13 @@ export function startSelectionSync(
             if (op.kind !== 'clear' && rest.length > 0) { op.ids = rest; continue; }
             queue.splice(at, 1);
           }
-          // What the server holds disagrees with what is shown (an id it
-          // refused: trashed, vaulted, gone): take the server's word for it.
-          if (queue.length === 0 && result.count !== store.count) await pull();
+          // The last write is done: read back what the server now holds before
+          // taking its stamp as adopted. A matching count proves nothing — an
+          // id it refused (trashed, vaulted, gone), or a change from another
+          // device this one had not read yet, can leave the same number of
+          // different ids. The stamp moved with our own write, so without this
+          // read no later poll would notice the difference.
+          if (queue.length === 0) await pull();
         }
       } catch (err) {
         inFlight = null;

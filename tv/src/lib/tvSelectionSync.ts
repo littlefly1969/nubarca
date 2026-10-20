@@ -111,7 +111,11 @@ export function startTvSelectionSync(
             if (op.kind !== 'clear' && rest.length > 0) { op.ids = rest; continue; }
             queue.splice(at, 1);
           }
-          if (queue.length === 0 && result.count !== store.count) await pull();
+          // Read back what the server now holds once the last write is done:
+          // the same count can be different ids (a refused id, or another
+          // device's change not read yet), and the stamp moved with our own
+          // write, so no later poll would notice (same rule as the web sync).
+          if (queue.length === 0) await pull();
         }
       } catch {
         inFlight = null;
