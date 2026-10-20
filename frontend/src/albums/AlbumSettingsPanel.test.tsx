@@ -11,6 +11,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const album = {
   id: 'a1', name: 'Trip', description: null, showOnTv: false,
   createdAt: '2025-01-01T00:00:00Z', updatedAt: '2025-01-01T00:00:00Z',
+  sortDirection: 'desc' as const, version: 1, coverFileItemId: null,
 };
 const party = {
   albumId: 'a1', showOnTv: false, partyMode: false, partyUrl: null,

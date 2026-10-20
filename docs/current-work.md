@@ -180,8 +180,8 @@ is built is described by `ARCHITECTURE.md`.
   destination, so another jump resumes automatic backfill. File selections
   persist across jumps by identity. Physical cursor type/sort validation lives
   in `ImageCursor.MatchesSort`, shared by ordinary pages and navigation windows.
-  Public/member album projections keep their curated order and expose no new
-  names or capture dates. PostgreSQL CI measures 50k/100k synthetic collections
+  Public/member album projections follow the album's date order and expose no
+  new names or capture dates. PostgreSQL CI measures 50k/100k synthetic collections
   and retains full query plans; see [performance acceptance](media-navigation-performance.md).
 - Library and owner albums share explicit browse/select interaction modes:
   ordinary taps open the viewer, touch/pen long-press selects, and selected ids
@@ -549,8 +549,10 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   with the tab that is open. `kind` is safe precisely because it is nothing new:
   it is answered from the media category the shared item shape already carried.
   A filter that needed owner-private metadata to answer would BE that metadata.
-  The cursor is `(SortOrder, FileItemId)` bound to the kind it was issued for,
-  and it is not a capability: membership is resolved BEFORE it is read, so a
+  The cursor (version 2) is `(EffectiveDateTaken, FileItemId)` plus the album
+  direction, bound to the kind it was issued for — a cursor from before the
+  owner turned the album around, or of the old curated order, is a 400 — and it
+  is not a capability: membership is resolved BEFORE it is read, so a
   stranger's malformed cursor is a 404 rather than the 400 that would confirm
   the album exists.
 - **The curation list reads the album a page at a time, and the version is the
@@ -563,12 +565,9 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   and continues after whichever row is now last. "Re-read after every edit" is
   therefore not the fix it looks like: it is the O(album) cost this replaced. A
   request naming none of `limit`/`cursor`/`expectedVersion` is the legacy
-  whole-album read, kept for clients that predate paging. Reorder is
-  `POST /api/shared-albums/{id}/items/{albumItemId}/move` (item, 0-based
-  target, version). It renumbers one range set-based, keeps the order dense, and
-  first renumbers, once, any album a copy numbered from zero. The complete-list
-  `PUT .../order` remains server-side for older clients; the web no longer calls
-  it. `AlbumSharedContentPanel` is ONE component for Owner and Editor. It is
+  whole-album read, kept for clients that predate paging. There is no reorder:
+  see the album-order bullet below. `AlbumSharedContentPanel` is ONE component
+  for Owner and Editor. It is
   virtualized, with a single Actions control per row. While it is open, the
   page's wall (`MediaWorkspace` / `SharedAlbumBrowser`) is UNMOUNTED, not
   hidden.
@@ -635,6 +634,27 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   when the party offers printing, intersected with what the token serves,
   forgotten when the party stops answering, and preselected by the print
   studio when they fit the format.
+- **An album is in date order; the owner only chooses the direction.** Every
+  album surface — shared items, the curation list, the owner's wall, mosaics,
+  TV, party wall — sequences by `FileItem.EffectiveDateTaken` (which already
+  falls back to the upload time when a file has no capture date), FileItemId
+  breaking ties in the same direction. `Album.SortOldestFirst` (default false =
+  newest first) is set by the owner only (`PUT /api/albums/{id}/sort`
+  `{direction:'asc'|'desc'}`, audited as `album.update`, bumps the version) and
+  is the album's order for members, TV and party; `AlbumDetail` and
+  `SharedAlbumDetail` carry `sortDirection`, and `AlbumDetail` also `version`
+  and `coverFileItemId`. Manual reorder is gone: `PUT .../order` and
+  `POST .../items/{id}/move` were removed with Up/Down/Start/End (no TV or
+  mobile client called them); `AlbumItem.SortOrder` remains only as the append
+  order, so a rolled-back image still reads valid values. Print-slot reordering
+  in PrintStudio is unrelated and stays. The ordering runs over the album's
+  primary key and the file key, then sorts per album — a denormalised
+  taken-at index on `album_items` was not added. «Set as album cover» is the
+  viewer's last action for a curator (`AlbumCoverViewerAction`, owner wall and
+  `SharedAlbumBrowser`), through the existing cover route: it adopts the result
+  at once, adopts the server's state on 409 without retrying, and explains a
+  400 (no longer servable). A chosen cover that stops being servable is not
+  returned to members, and the mosaic falls back to the first photo in order.
 - **There is ONE media-selection experience, and it is the Media Library.** A
   shared album's "Add from library" navigates to `/media` with the album in
   transient router state — never a URL, never a second route, never a fork of

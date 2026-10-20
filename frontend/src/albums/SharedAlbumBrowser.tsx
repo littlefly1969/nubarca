@@ -15,6 +15,7 @@ import { MEDIA_WALL_GAP_PX } from '../media/layout/mediaWallGeometry';
 import type { JustifiedLayoutItem } from '../media/layout/computeJustifiedRows';
 import { useSequencePlayback } from '../media/playback/useSequencePlayback';
 import { useSharedAlbumItems } from './useSharedAlbumItems';
+import { AlbumCoverViewerAction, type AlbumCoverState } from './AlbumCoverViewerAction';
 import { useSharedAlbumSelection } from './useSharedAlbumSelection';
 import type { AlbumExperienceCapabilities } from './albumCapabilities';
 
@@ -48,10 +49,12 @@ interface Props {
   // A withdrawal changed what the album contains; the page refreshes its header.
   onItemsChanged(): void;
   onNotice(message: string): void;
+  // The album's cover and version, for a curator's «Set as album cover».
+  cover?: { state: AlbumCoverState; onChange(next: AlbumCoverState): void };
 }
 
 export function SharedAlbumBrowser({
-  albumId, albumName, capabilities, onItemsChanged, onNotice,
+  albumId, albumName, capabilities, onItemsChanged, onNotice, cover,
 }: Props) {
   const { t, tn } = useI18n();
   const { invalidateAuth } = useAuth();
@@ -417,6 +420,20 @@ export function SharedAlbumBrowser({
               </>
             );
           }}
+          // Deliberately the LAST action, and only for somebody the server
+          // lets curate this album.
+          renderTrailingActions={capabilities.curateContent && cover
+            ? (viewerItem) => (
+              <AlbumCoverViewerAction
+                albumId={albumId}
+                fileItemId={viewerItem.id}
+                cover={cover.state}
+                onChange={cover.onChange}
+                onNotice={onNotice}
+                onUnauthorized={invalidateAuth}
+              />
+            )
+            : undefined}
           playback={play.active || play.finished
             ? {
               active: play.active,
