@@ -27,6 +27,18 @@ public class MediaListConfiguration : IEntityTypeConfiguration<MediaList>
             .HasFilter("\"Kind\" = 1")
             .HasDatabaseName("ux_media_lists_owner_selection");
 
+        // One personal selection per member per shared album.
+        builder.HasIndex(l => new { l.OwnerUserId, l.AlbumId })
+            .IsUnique()
+            .HasFilter("\"Kind\" = 2")
+            .HasDatabaseName("ux_media_lists_owner_album_selection");
+
+        // A deleted album takes its members' selections with it.
+        builder.HasOne<Album>()
+            .WithMany()
+            .HasForeignKey(l => l.AlbumId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         // Cascade FROM the user only (users are never deleted today); nothing on
         // the users table gains a restriction.
         builder.HasOne<User>()

@@ -32,11 +32,14 @@ export type PeopleMode = 'all' | 'any';
 
 const DEFAULT_MEDIA_LIMIT = 50;
 
-// Which collection the workspace is browsing. `album` carries the album id; the
-// only thing that differs between the two is the endpoint's source predicate.
+// Which collection the workspace is browsing. `album` carries the album id and
+// the owner's date order for it (`sortDirection`, from the album card; absent
+// from an older server, which means the album default, newest first). Besides
+// the endpoint's source predicate, that order is the only difference: an album
+// OPENS in its owner's order, a library in upload order.
 export type MediaWorkspaceSource =
   | { kind: 'library' }
-  | { kind: 'album'; albumId: string };
+  | { kind: 'album'; albumId: string; sortDirection?: MediaSortDirection };
 
 export interface CommonMediaFilters {
   metadataQuery: string; // '' = none → wire `q`
@@ -157,13 +160,24 @@ export function cloneMediaFilters(filters: MediaWorkspaceFilters): MediaWorkspac
   };
 }
 
+// The order a source opens in, and what "reset" returns to. An album follows
+// its owner (date taken, in the album's direction) — the same sequence the web,
+// the party wall and the slideshow show; the viewer can still pick another sort,
+// and that explicit choice is sent as asked.
+export function defaultOrder(
+  source: MediaWorkspaceSource,
+): { sort: MediaSortField; direction: MediaSortDirection } {
+  return source.kind === 'album'
+    ? { sort: 'datetaken', direction: source.sortDirection ?? 'desc' }
+    : { sort: 'created', direction: 'desc' };
+}
+
 export function emptyIdentity(source: MediaWorkspaceSource): MediaWorkspaceIdentity {
   return {
     source,
     mediaKind: 'all',
     filters: emptyMediaFilters(),
-    sort: 'created',
-    direction: 'desc',
+    ...defaultOrder(source),
   };
 }
 

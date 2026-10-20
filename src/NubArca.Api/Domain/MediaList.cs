@@ -14,6 +14,11 @@ public enum MediaListKind
     Named = 0,
     // At most one per owner (filtered unique index). Created lazily on first use.
     CurrentSelection = 1,
+    // A member's personal selection inside ONE album shared with them: at most
+    // one per (member, album). It references the album's media, which belongs to
+    // somebody else, so it is never a /api/lists list and never mixes with the
+    // member's own library selection. Readable only while the membership holds.
+    AlbumSelection = 2,
 }
 
 public class MediaList
@@ -23,6 +28,9 @@ public class MediaList
     // Null for the current selection, which has no name.
     public string? Name { get; set; }
     public MediaListKind Kind { get; set; }
+    // The album an AlbumSelection is scoped to; null for every other kind. The
+    // album id only — never a share token or URL.
+    public Guid? AlbumId { get; set; }
     // Moves on every change to the name or the contents. A device that holds an
     // older version knows its copy is stale; a rename that names an old version
     // is refused (409) rather than silently overwriting a newer name.

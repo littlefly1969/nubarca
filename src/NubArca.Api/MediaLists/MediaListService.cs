@@ -400,7 +400,7 @@ public sealed class MediaListService : IMediaListService
         return (rows.Select(r => r.FileItemId).ToList(), next);
     }
 
-    private static bool TryParseCursor(string cursor, out long position, out Guid fileItemId)
+    internal static bool TryParseCursor(string cursor, out long position, out Guid fileItemId)
     {
         position = 0;
         fileItemId = Guid.Empty;
@@ -444,7 +444,9 @@ public sealed class MediaListService : IMediaListService
 
     private Task<MediaList?> FindAsync(Guid ownerUserId, Guid listId, CancellationToken cancellationToken) =>
         _db.MediaLists.AsNoTracking()
-            .FirstOrDefaultAsync(l => l.Id == listId && l.OwnerUserId == ownerUserId, cancellationToken);
+            // An album-scoped selection is never reachable as an account list.
+            .FirstOrDefaultAsync(l => l.Id == listId && l.OwnerUserId == ownerUserId
+                && l.Kind != MediaListKind.AlbumSelection, cancellationToken);
 
     private async Task<MediaList> EnsureSelectionAsync(Guid ownerUserId, CancellationToken cancellationToken)
     {

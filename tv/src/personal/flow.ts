@@ -67,6 +67,7 @@
 //     would make BACK from it revoke a grant it never held.
 
 import type { AssignedParty, AssignmentView } from '../lib/assignmentView';
+import type { MediaSortDirection } from './mediaWorkspaceQuery';
 
 export interface PersonalHomeInfo {
   displayName: string;
@@ -88,6 +89,8 @@ export type UnlockTarget = 'personal' | 'beautyLab';
 export interface PersonalAlbumRef {
   id: string;
   name: string;
+  // The owner's date order, so the album opens in it.
+  sortDirection?: MediaSortDirection;
 }
 
 export type TvFlowState =

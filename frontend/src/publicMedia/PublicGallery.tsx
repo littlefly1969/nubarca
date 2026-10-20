@@ -61,37 +61,69 @@ export interface PublicGalleryItem {
   isVideo: boolean;
 }
 
+/** A personal pick on each tile: the round control, apart from opening. */
+export interface PublicGalleryPicking {
+  picked: ReadonlySet<string>;
+  /** Already localized, per tile and state. */
+  label(item: PublicGalleryItem, picked: boolean): string;
+  onToggle(id: string): void;
+}
+
 export function PublicGallery({
-  items, onOpen, testId, itemTestId,
+  items, onOpen, testId, itemTestId, picking,
 }: {
   items: PublicGalleryItem[];
   /** The tile is handed back so focus can return to it when the viewer closes. */
   onOpen(index: number, tile: HTMLButtonElement): void;
   testId?: string;
   itemTestId?: (item: PublicGalleryItem) => string;
+  picking?: PublicGalleryPicking;
 }) {
   const { t } = useI18n();
   const shapes = galleryShapes(items.length);
   return (
-    <div className="public-gallery" data-testid={testId}>
-      {items.map((item, index) => (
-        <button
-          key={item.id}
-          type="button"
-          className="public-gallery-tile"
-          data-shape={shapes[index]}
-          data-testid={itemTestId?.(item)}
-          onClick={(e) => onOpen(index, e.currentTarget)}
-          aria-label={item.isVideo ? t('party.openVideo') : t('party.openPhoto')}
-        >
-          <img className="public-gallery-tile-img" src={item.thumbnailUrl} alt="" loading="lazy" />
-          {/* A poster and a play mark, and no duration: none is served, so
-              none is invented. */}
-          {item.isVideo && (
-            <span className="public-gallery-tile-play" aria-hidden="true"><PlayIcon /></span>
-          )}
-        </button>
-      ))}
+    <div className="public-gallery" data-testid={testId} data-picking={picking ? picking.picked.size > 0 : undefined}>
+      {items.map((item, index) => {
+        const tile = (
+          <button
+            key={picking ? undefined : item.id}
+            type="button"
+            className="public-gallery-tile"
+            data-shape={shapes[index]}
+            data-testid={itemTestId?.(item)}
+            onClick={(e) => onOpen(index, e.currentTarget)}
+            aria-label={item.isVideo ? t('party.openVideo') : t('party.openPhoto')}
+          >
+            <img className="public-gallery-tile-img" src={item.thumbnailUrl} alt="" loading="lazy" />
+            {/* A poster and a play mark, and no duration: none is served, so
+                none is invented. */}
+            {item.isVideo && (
+              <span className="public-gallery-tile-play" aria-hidden="true"><PlayIcon /></span>
+            )}
+          </button>
+        );
+        if (!picking) return tile;
+        const picked = picking.picked.has(item.id);
+        // The tile still OPENS; the round control beside it picks.
+        return (
+          <div key={item.id} className="public-gallery-cell" data-shape={shapes[index]} data-picked={picked}>
+            {tile}
+            {/* Picks are for printing, and a video does not print. */}
+            {!item.isVideo && (
+            <button
+              type="button"
+              className="public-gallery-pick"
+              data-testid="public-gallery-pick"
+              aria-pressed={picked}
+              aria-label={picking.label(item, picked)}
+              onClick={() => picking.onToggle(item.id)}
+            >
+              <span aria-hidden="true">{picked ? '✓' : ''}</span>
+            </button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

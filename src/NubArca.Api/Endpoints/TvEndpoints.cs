@@ -856,6 +856,20 @@ public static class TvEndpoints
             var (failure, ownerUserId) = await ResolveTvPersonalAccessAsync(httpContext, personal, cancellationToken);
             if (failure is not null) return failure;
 
+            // A request that names no order gets the ALBUM's order: date taken in
+            // the owner's direction. Any explicit sort or direction is honoured
+            // as asked. A missing or foreign album keeps the binder default and
+            // is refused by the query below exactly as before.
+            if (string.IsNullOrWhiteSpace(sort) && string.IsNullOrWhiteSpace(direction))
+            {
+                var albumDirection = await media.GetAlbumSortDirectionAsync(ownerUserId, albumId, cancellationToken);
+                if (albumDirection is not null)
+                {
+                    sort = "datetaken";
+                    direction = albumDirection;
+                }
+            }
+
             // `albumMembership` is not a parameter here at all: every item of an
             // album is a member, so the filter is meaningless. The shared service
             // would reject it; not accepting it means the TV cannot even ask.

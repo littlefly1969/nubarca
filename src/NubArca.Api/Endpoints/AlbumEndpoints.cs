@@ -156,6 +156,31 @@ public static class AlbumEndpoints
             return Results.Ok(detail);
         }).WithName("SetAlbumTvVisibility").RequireAuthorization();
 
+        // The album's sequence is its photographs by date taken; the owner
+        // chooses only which way round ("desc" newest first, "asc" oldest
+        // first), and that is the order members, TVs and party walls get.
+        app.MapPut("/api/albums/{id:guid}/sort", async (
+            Guid id,
+            HttpContext httpContext,
+            [FromServices] IAlbumService albums,
+            [FromServices] IAuditLogger audit,
+            [FromBody] SetAlbumSortRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            if (!AlbumSortDirections.TryParseOldestFirst(body?.Direction, out var oldestFirst))
+                return Results.BadRequest(new { error = "'direction' must be 'asc' or 'desc'." });
+
+            var detail = await albums.SetSortDirectionAsync(id, ownerUserId, oldestFirst, cancellationToken);
+            if (detail is null)
+                return Results.NotFound();
+
+            await audit.LogAsync(ownerUserId, AuditActions.AlbumUpdate, AuditEntityTypes.Album,
+                id, httpContext.Connection.RemoteIpAddress?.ToString(),
+                new { sortDirection = detail.SortDirection }, cancellationToken);
+            return Results.Ok(detail);
+        }).WithName("SetAlbumSortDirection").RequireAuthorization();
+
         app.MapGet("/api/albums/{id:guid}/items", async (
             Guid id,
             HttpContext httpContext,

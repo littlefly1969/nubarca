@@ -875,8 +875,12 @@ export function PrintStudio(props: PrintStudioProps) {
                     // are all of it, already chosen, in the order selected.
                     // More than it takes: the person chooses which.
                     const ordered = (preselected ?? []).filter((id) => known.has(id));
-                    setChosen(known.size !== option.count ? []
-                      : ordered.length === option.count ? ordered : [...known]);
+                    // From a wider gallery (a party), picks made beforehand
+                    // that fit the format start the sheet; the rest is chosen
+                    // here. Picks that do not fit are chosen from instead.
+                    setChosen(known.size === option.count
+                      ? (ordered.length === option.count ? ordered : [...known])
+                      : ordered.length > 0 && ordered.length <= option.count ? ordered.slice() : []);
                     setStep('select');
                   }}
                 >

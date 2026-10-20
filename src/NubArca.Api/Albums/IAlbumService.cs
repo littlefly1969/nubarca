@@ -21,6 +21,10 @@ public interface IAlbumService
 
     // Owner-scoped toggle of the TV allowlist flag. Returns the updated album,
     // or null when the album is missing/foreign.
+    // The album's date order (newest first by default); null when not the owner's.
+    Task<AlbumDetail?> SetSortDirectionAsync(
+        Guid albumId, Guid ownerUserId, bool oldestFirst, CancellationToken cancellationToken = default);
+
     Task<AlbumDetail?> SetTvVisibilityAsync(
         Guid albumId, Guid ownerUserId, bool showOnTv,
         CancellationToken cancellationToken = default);

@@ -16,7 +16,7 @@ import { ApiError, listAlbumContent, type AlbumContentItem } from '@nubarca/api-
 // the album at `version + 1` is precisely the rows held here with that edit
 // applied. Applying it locally keeps the scroll position and re-reads nothing,
 // and because the cursor is simply the last row held, paging continues
-// correctly afterwards — even when the edit moved an item past the rows held.
+// correctly afterwards.
 
 export const ALBUM_CONTENT_PAGE_SIZE = 40;
 
@@ -48,7 +48,6 @@ export interface AlbumContent extends AlbumContentState {
   // version the edit is about to replace, so it is cancelled and whatever it
   // would have answered — rows or a 409 — never lands.
   discardPendingPage(): void;
-  applyMove(albumItemId: string, targetIndex: number, version: number): void;
   applyRemove(albumItemId: string, version: number, coverFileItemId: string | null): void;
   applyCover(coverFileItemId: string | null, version: number): void;
 }
@@ -197,19 +196,6 @@ export function useAlbumContent(
   // server returned for them; they also cancel any continuation in flight,
   // since that was read at the version they replace.
 
-  const applyMove = useCallback((albumItemId: string, targetIndex: number, version: number) => {
-    cancelNextPage();
-    setState((prev) => {
-      const moved = prev.items.find((i) => i.albumItemId === albumItemId);
-      const items = prev.items.filter((i) => i.albumItemId !== albumItemId);
-      // A destination past the rows held leaves the item out of them: those
-      // rows are the album's first positions, it no longer holds one, and the
-      // next page brings it in where it now belongs.
-      if (moved && targetIndex < prev.items.length) items.splice(targetIndex, 0, moved);
-      return { ...prev, version, items, loadingMore: false };
-    });
-  }, [cancelNextPage]);
-
   const applyRemove = useCallback(
     (albumItemId: string, version: number, coverFileItemId: string | null) => {
       cancelNextPage();
@@ -243,7 +229,6 @@ export function useAlbumContent(
     reload,
     loadMore,
     discardPendingPage,
-    applyMove,
     applyRemove,
     applyCover,
   };

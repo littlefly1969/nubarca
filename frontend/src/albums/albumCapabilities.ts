@@ -44,6 +44,10 @@ export interface AlbumExperienceCapabilities {
   withdrawOwnContribution: boolean;
   editAlbumDetails: boolean;
   curateContent: boolean;
+  // A personal selection scoped to this album: the member's own picks, kept
+  // apart from their library and invisible to everybody else. The owner picks
+  // with the account selection instead (selectMedia).
+  personalSelection: boolean;
 
   // ── Owner authority. Never true for a member, whatever their role ────────
   selectMedia: boolean;
@@ -90,6 +94,7 @@ export function getAlbumExperienceCapabilities(
     withdrawOwnContribution: !isOwner,
     editAlbumDetails: canCurate,
     curateContent: canCurate,
+    personalSelection: !isOwner,
 
     selectMedia: isOwner,
     editMetadata: isOwner,
