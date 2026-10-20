@@ -10,6 +10,8 @@ class FakeServer {
   calls: string[] = [];
   // Page starts ('0', '2', ...) whose next read fails once, like a dropped request.
   failIdsAt: string[] = [];
+  // Run once, inside the next read of the ids (a change made mid-read).
+  duringIds: (() => void) | null = null;
   bump() { this.version++; }
   transport(): SelectionSyncTransport {
     return {
@@ -18,6 +20,9 @@ class FakeServer {
         const start = cursor ? Number(cursor) : 0;
         const at = this.failIdsAt.indexOf(String(start));
         if (at >= 0) { this.failIdsAt.splice(at, 1); throw new Error('network'); }
+        const during = this.duringIds;
+        this.duringIds = null;
+        during?.();
         const page = this.ids.slice(start, start + 2);
         const next = start + 2 < this.ids.length ? String(start + 2) : null;
         return { ids: page, nextCursor: next };
@@ -54,6 +59,46 @@ const start = (store: MediaSelectionStore, server: FakeServer, chunk?: number) =
 afterEach(() => { while (handles.length) handles.pop()!.stop(); });
 
 describe('selection sync', () => {
+  it('converges after a write that leaves the same count but different ids', async () => {
+    const server = new FakeServer();
+    server.ids = ['a'];
+    const phone = new MediaSelectionStore();
+    const laptop = new MediaSelectionStore();
+    const phoneSync = start(phone, server);
+    const laptopSync = start(laptop, server);
+    await phoneSync.refresh();
+    await laptopSync.refresh();
+
+    // The phone swaps a for c; the laptop has not read that yet.
+    phone.remove(['a']);
+    phone.add(['c']);
+    await phoneSync.flush();
+    expect(server.ids).toEqual(['c']);
+
+    // The laptop adds b: the server holds {c, b}, two ids, as the laptop's {a, b}.
+    laptop.add(['b']);
+    await laptopSync.flush();
+    expect(server.ids).toEqual(['c', 'b']);
+    expect(laptop.getSnapshot().ids).toEqual(['c', 'b']);
+    // And nothing later undoes it.
+    await laptopSync.refresh();
+    expect(laptop.getSnapshot().ids).toEqual(['c', 'b']);
+  });
+
+  it('a local change made while the ids are being read is kept and still converges', async () => {
+    const server = new FakeServer();
+    server.ids = ['a', 'b', 'c'];
+    const store = new MediaSelectionStore();
+    const sync = start(store, server);
+    server.duringIds = () => store.add(['z']);
+    await sync.refresh();
+    await sync.flush();
+    expect(server.ids).toEqual(['a', 'b', 'c', 'z']);
+    expect([...store.getSnapshot().ids].sort()).toEqual(['a', 'b', 'c', 'z']);
+    await sync.refresh();
+    expect([...store.getSnapshot().ids].sort()).toEqual(['a', 'b', 'c', 'z']);
+  });
+
   it('retries a failed first read of the ids although the server stamp has not changed', async () => {
     const server = new FakeServer();
     server.ids = ['a', 'b', 'c'];
