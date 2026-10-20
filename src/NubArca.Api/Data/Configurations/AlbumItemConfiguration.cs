@@ -12,7 +12,7 @@ public class AlbumItemConfiguration : IEntityTypeConfiguration<AlbumItem>
         builder.HasKey(ai => new { ai.AlbumId, ai.FileItemId });
 
         // SHARE-ALBUM-03: stable surrogate identity for the membership row, used
-        // by the reorder contract. An ALTERNATE key — the composite primary key
+        // by the curation routes (remove, withdraw). An ALTERNATE key — the composite primary key
         // above still enforces one row per file per album.
         builder.Property(ai => ai.Id).ValueGeneratedNever();
         builder.HasAlternateKey(ai => ai.Id);
@@ -34,8 +34,10 @@ public class AlbumItemConfiguration : IEntityTypeConfiguration<AlbumItem>
         builder.HasIndex(ai => new { ai.AlbumId, ai.AddedByUserId })
             .HasDatabaseName("ix_album_items_album_added_by");
 
-        // SHARE-ALBUM-03: the album's curated order. Indexed with the album so
-        // every listing reads it in order without a sort.
+        // The append order (max + 1 on add, compacted on removal). It no longer
+        // sequences any listing: an album is shown by its photographs' date
+        // taken, read through the (AlbumId, FileItemId) primary key and the
+        // file's own key, then sorted per album. Kept for the append path.
         builder.HasIndex(ai => new { ai.AlbumId, ai.SortOrder })
             .HasDatabaseName("ix_album_items_album_sort_order");
 

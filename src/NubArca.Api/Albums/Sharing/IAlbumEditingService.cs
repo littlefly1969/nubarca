@@ -1,7 +1,9 @@
 namespace NubArca.Api.Albums.Sharing;
 
 // SHARE-ALBUM-03: the album's COLLABORATIVE mutation surface — title,
-// description, cover, order, and removing any item.
+// description, cover, and removing any item. The album's SEQUENCE is not
+// curated: it is the photographs by date taken, in the direction the owner
+// chose (IAlbumService.SetSortDirectionAsync), so there is no reorder here.
 //
 // ONE implementation for Owner and Editor. The owner is not a special case with
 // its own path: when they use the collaborative surface they go through exactly
@@ -13,7 +15,7 @@ namespace NubArca.Api.Albums.Sharing;
 //   2. validate the payload
 //   3. claim the version conditionally on Album.Version == expectedVersion
 //   4. zero rows updated  →  conflict; nothing was written, nothing audited
-//   5. otherwise: mutate, normalize the order, clear a stale cover, AUDIT
+//   5. otherwise: mutate, compact the append order, clear a stale cover, AUDIT
 //   6. commit — all of the above in ONE transaction
 //   7. return the new state and the new version
 //
@@ -23,7 +25,7 @@ namespace NubArca.Api.Albums.Sharing;
 // the endpoint no longer audits after the fact.
 //
 // WHAT MOVES THE VERSION: everything that changes what the album LOOKS like —
-// title, description, cover, order, and any item entering or leaving it
+// title, description, cover, and any item entering or leaving it
 // (including the automatic withdrawal a revocation performs).
 //
 // WHAT DOES NOT: invitations, role changes and allowOriginalDownload. Those
@@ -48,39 +50,6 @@ public interface IAlbumEditingService
     Task<AlbumEditResult> SetCoverAsync(
         Guid actorUserId, Guid albumId, int expectedVersion, Guid? fileItemId, string? ipAddress,
         CancellationToken cancellationToken = default);
-
-    // Reorders the album.
-    //
-    // The payload is the COMPLETE ordered list of AlbumItem ids. A partial list
-    // is rejected rather than interpreted: "these three first, the rest
-    // somehow" has no single correct answer, and guessing one is how two
-    // concurrent reorders silently produce a third order neither user asked
-    // for. The list must be exactly the album's current active items — no
-    // duplicates, no omissions, nothing from another album.
-    //
-    // Positions are normalized server-side to a contiguous 1..n, so the stored
-    // order never depends on what the client sent as indices.
-    Task<AlbumEditResult> ReorderAsync(
-        Guid actorUserId, Guid albumId, int expectedVersion,
-        IReadOnlyList<Guid> orderedAlbumItemIds, string? ipAddress,
-        CancellationToken cancellationToken = default);
-
-    // Moves ONE item to `targetIndex` (0-based) in the album's curated order.
-    //
-    // This is the curation surface's reorder. Its payload is O(1) whatever the
-    // album's size, and it reaches a destination the caller never loaded: "to
-    // the end" of a thousand-item album names index 999, not a thousand ids.
-    // ReorderAsync, the complete-list form, stays for clients that predate it.
-    //
-    // Only the rows between the old and the new position are renumbered, by a
-    // set-based UPDATE, and the order stays a dense 1..n. The version rule is
-    // the same as every other edit, so a move formed against a stale order is a
-    // conflict rather than a move to a position nobody chose — and for the same
-    // reason a `targetIndex` outside the album is refused, not clamped. Returns
-    // the item's resulting position and the album's size.
-    Task<AlbumEditResult> MoveItemAsync(
-        Guid actorUserId, Guid albumId, int expectedVersion, Guid albumItemId, int targetIndex,
-        string? ipAddress, CancellationToken cancellationToken = default);
 
     // Editorial removal of ANY item — the caller's own, another
     // collaborator's, or the owner's.
@@ -109,8 +78,7 @@ public enum AlbumEditOutcome
     // Album.Version had moved on. NOTHING was written and nothing was audited.
     VersionConflict,
     // The payload is not a valid command for the album's current contents:
-    // a cover that is not a servable member, a reorder that is not exactly the
-    // current active set, a name outside its bounds.
+    // a cover that is not a servable member, a name outside its bounds.
     InvalidCommand,
     // The addressed item is not in this album.
     ItemNotFound,
@@ -128,10 +96,7 @@ public sealed record AlbumEditResult(
     Guid? CoverFileItemId = null,
     // Populated on VersionConflict so the caller can explain the collision
     // without a second round-trip.
-    string? Message = null,
-    // A move only: where the item landed, and the album's size.
-    int? Position = null,
-    int? TotalCount = null)
+    string? Message = null)
 {
     public bool IsOk => Outcome == AlbumEditOutcome.Ok;
 }
@@ -147,11 +112,3 @@ public sealed record SetAlbumCoverRequest(
     int ExpectedVersion,
     // Null clears the chosen cover and returns the album to the derived one.
     Guid? FileItemId = null);
-
-public sealed record ReorderAlbumRequest(
-    int ExpectedVersion,
-    IReadOnlyList<Guid> AlbumItemIds);
-
-public sealed record MoveAlbumItemRequest(
-    int ExpectedVersion,
-    int? TargetIndex);

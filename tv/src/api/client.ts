@@ -168,8 +168,8 @@ export function tvPost<T>(
   return request<T>(path, { method: 'POST', json, headers, signal });
 }
 
-export function tvDelete<T>(path: string, headers?: Record<string, string>): Promise<T> {
-  return request<T>(path, { method: 'DELETE', headers });
+export function tvDelete<T>(path: string, headers?: Record<string, string>, json?: unknown): Promise<T> {
+  return request<T>(path, { method: 'DELETE', headers, json });
 }
 
 // ---------------------------------------------------------------------------

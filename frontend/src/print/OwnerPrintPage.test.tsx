@@ -657,3 +657,82 @@ describe('OwnerPrintPage — Esce dalla foto', () => {
     expect(screen.queryByRole('radio', { name: 'Esce dalla foto' })).toBeNull();
   });
 });
+
+// THE PICKER'S VIEWER: a photograph opens whole, is chosen from there or from
+// its round control, and coming back finds the grid as it was. Arriving with
+// more photographs than the format takes never chooses any of them for you.
+describe('OwnerPrintPage — choosing in the viewer', () => {
+  const FIVE = '/print?files=f1,f2,f3,f4,f5';
+  const pickFor = (n: number) => screen.getAllByRole('button', { name: /Scegli questa foto|Togli dalla selezione/ })[n];
+
+  it('asks which photographs to print when a selection brings more than the format takes', async () => {
+    const user = userEvent.setup();
+    const mock = mount(FIVE);
+    await user.click(await screen.findByTestId('party-print-format-grid4'));
+    expect(screen.getByTestId('party-print-choose-from-more'))
+      .toHaveTextContent('Hai 5 foto, ma questo formato ne stampa 4: scegli quali.');
+    expect(screen.getByRole('status')).toHaveTextContent('0 di 4');
+    expect(screen.queryAllByRole('button', { name: /Togli dalla selezione/ })).toHaveLength(0);
+    expect(next()).toBeDisabled();
+    expect(mock.calls.some((c) => c.method === 'POST')).toBe(false);
+  });
+
+  it('opens the medium preview, chooses from the viewer, steps on and comes back to the same tile', async () => {
+    const user = userEvent.setup();
+    mount(FIVE);
+    await user.click(await screen.findByTestId('party-print-format-grid4'));
+    const opener = screen.getByRole('button', { name: 'Apri la foto 2' });
+    await user.click(opener);
+
+    const viewer = screen.getByTestId('public-viewer');
+    expect(viewer.querySelector('img')!.getAttribute('src')).toBe('/api/files/f2/preview');
+    await user.click(screen.getByTestId('public-viewer-select'));
+    expect(screen.getByTestId('public-viewer-select')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('public-viewer-position')).toHaveTextContent('Posizione 1');
+
+    await user.click(screen.getByRole('button', { name: 'Successivo' }));
+    expect(viewer.querySelector('img')!.getAttribute('src')).toBe('/api/files/f3/preview');
+    expect(screen.getByTestId('public-viewer-select')).toHaveAttribute('aria-pressed', 'false');
+    await user.click(screen.getByTestId('public-viewer-select'));
+
+    await user.click(screen.getByTestId('public-viewer-close'));
+    expect(screen.queryByTestId('public-viewer')).toBeNull();
+    expect(opener).toHaveFocus();
+    // The grid shows the same choice, numbered in the order it was made.
+    expect(pickFor(1)).toHaveAttribute('aria-pressed', 'true');
+    expect(pickFor(1)).toHaveAccessibleName('Togli dalla selezione — Posizione 1');
+    expect(pickFor(2)).toHaveAccessibleName('Togli dalla selezione — Posizione 2');
+    expect(screen.getByRole('status')).toHaveTextContent('2 di 4');
+  });
+
+  it('chooses from the round control without opening the viewer, and stops at the format’s count', async () => {
+    const user = userEvent.setup();
+    const mock = mount(FIVE);
+    await user.click(await screen.findByTestId('party-print-format-grid4'));
+    for (const n of [3, 0, 1, 2]) await user.click(pickFor(n));
+    expect(screen.queryByTestId('public-viewer')).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('4 di 4');
+    // A fifth cannot be added from the grid, and the viewer says why.
+    expect(pickFor(4)).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Apri la foto 5' }));
+    expect(screen.getByTestId('public-viewer-select')).toBeDisabled();
+    expect(screen.getByTestId('public-viewer')).toHaveTextContent('Hai già scelto 4 foto');
+    await user.click(screen.getByTestId('public-viewer-close'));
+
+    // The order chosen is the order the slots start in, and still reorderable.
+    await user.click(next());
+    const rows = screen.getAllByRole('listitem').filter((li) => li.classList.contains('party-print-order-row'));
+    expect(rows).toHaveLength(4);
+    expect(screen.getAllByRole('button', { name: /^Sposta su — / }).length).toBeGreaterThan(0);
+    expect(mock.calls.some((c) => c.method === 'POST')).toBe(false);
+  });
+
+  it('takes a selection of exactly the format’s count as chosen, in its order', async () => {
+    const user = userEvent.setup();
+    mount('/print?files=f4,f2,f1,f3');
+    await user.click(await screen.findByTestId('party-print-format-grid4'));
+    expect(screen.queryByTestId('party-print-choose-from-more')).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('4 di 4');
+    expect(pickFor(0)).toHaveAccessibleName('Togli dalla selezione — Posizione 1');
+  });
+});

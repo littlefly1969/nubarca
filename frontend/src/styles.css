@@ -4871,6 +4871,22 @@ video.lightbox-image {
   min-height: 44px;
   cursor: pointer;
 }
+.media-viewer-actions .media-viewer-cover-action {
+  font-size: 0.9rem;
+  padding: 0 0.75rem;
+  white-space: nowrap;
+}
+.media-viewer-cover-current {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 0.75rem;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  color: rgb(255 255 255 / 78%);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
 .media-viewer-nav {
   position: absolute;
   top: 50%;
@@ -8982,3 +8998,38 @@ video.lightbox-image {
   background: color-mix(in srgb, currentColor 10%, transparent);
 }
 .selection-tray__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Owner media lists ───────────────────────────────────────────────────── */
+.media-lists-create { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: 0 0 1rem; }
+.media-lists-create input { flex: 1 1 14rem; min-width: 0; }
+.media-lists { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); }
+.media-lists-card { display: flex; gap: .75rem; align-items: center; padding: .8rem 1rem; border-radius: 12px;
+  border: 1px solid var(--border-default); background: var(--surface-raised); color: var(--text-primary);
+  text-decoration: none; }
+.media-lists-card:hover, .media-lists-card:focus-visible { border-color: var(--accent-strong); }
+.media-lists-card-text { display: flex; flex-direction: column; min-width: 0; }
+.media-lists-card-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-list-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+
+/* What a selection action reaches: the account selection, not just this view. */
+.selection-scope__elsewhere { color: var(--text-primary); font-weight: 600; }
+.selection-scope__thumbs { list-style: none; display: flex; flex-wrap: wrap; gap: .3rem; margin: 0 0 1rem; padding: 0; }
+.selection-scope__thumbs li { width: 2.5rem; height: 2.5rem; border-radius: 4px; overflow: hidden; display: grid; place-items: center; background: var(--surface-2, rgba(127,127,127,.15)); font-size: .8rem; }
+.selection-scope__thumbs img { width: 100%; height: 100%; object-fit: cover; }
+
+/* A member's own picks in a shared album: the same round control as the
+   library wall, top-left; the "mine" badge moves to the top-right. */
+.shared-media-cell { position: relative; flex: 0 0 auto; }
+.shared-media-cell > .shared-media-tile { width: 100%; height: 100%; }
+.shared-media-cell .shared-media-mine-badge { left: auto; right: 0.35rem; }
+.shared-media-cell:hover .shared-media-pick,
+.shared-media-cell:focus-within .shared-media-pick,
+.shared-media-cell[data-picked='true'] .shared-media-pick,
+.shared-media-wall[data-picking='true'] .shared-media-pick { opacity: 1; }
+@media (hover: none) { .shared-media-pick { opacity: 1; } }
+.shared-album-selection-bar {
+  position: sticky; bottom: 0.75rem; z-index: 5; display: flex; flex-wrap: wrap; align-items: center;
+  gap: 0.6rem; margin: 0.75rem auto 0; padding: 0.5rem 0.75rem; max-width: 40rem; border-radius: 999px;
+  background: var(--surface-raised); box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
+}

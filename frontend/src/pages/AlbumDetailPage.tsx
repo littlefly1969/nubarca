@@ -4,6 +4,7 @@ import {
   ApiError,
   getAlbum,
   getAlbumPartySettings,
+  setAlbumSortDirection,
   type AlbumDetail,
   type AlbumPartyStatus,
 } from '@nubarca/api-client';
@@ -16,6 +17,7 @@ import { AlbumSharePanel } from '../albums/AlbumSharePanel';
 import { AlbumSharedContentPanel } from '../albums/AlbumSharedContentPanel';
 import { AlbumCopyPanel } from '../albums/AlbumCopyPanel';
 import { AlbumUploadButton } from '../albums/AlbumUploadButton';
+import { AlbumCoverViewerAction, type AlbumCoverState } from '../albums/AlbumCoverViewerAction';
 import { MediaWorkspace } from '../media/workspace/MediaWorkspace';
 import { WorkspaceMenu } from '../media/workspace/WorkspaceMenu';
 import { Icon } from '../components/icons/Icon';
@@ -71,6 +73,8 @@ export function AlbumDetailPage() {
   const [uploadedToken, setUploadedToken] = useState(0);
   const onUploadsLanded = useCallback(() => setUploadedToken((n) => n + 1), []);
   const abortRef = useRef<AbortController | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [orderBusy, setOrderBusy] = useState(false);
 
   const source = useMemo<MediaWorkspaceSource>(
     () => ({ kind: 'album', albumId: albumId ?? '' }),
@@ -100,7 +104,15 @@ export function AlbumDetailPage() {
       getAlbum(albumId, ctrl.signal),
       canParty ? getAlbumPartySettings(albumId, ctrl.signal) : Promise.resolve(null),
     ])
-      .then(([album, party]) => setStatus({ kind: 'ready', album, party }))
+      .then(([album, party]) => {
+        setStatus({ kind: 'ready', album, party });
+        // The album's date order in the owner's chosen direction is what this
+        // wall opens on, unless the address names a sort of its own.
+        const fromUrl = initialParamsRef.current;
+        if (!fromUrl.has('sort') && !fromUrl.has('direction')) {
+          setIdentity((prev) => ({ ...prev, sort: 'datetaken', direction: album.sortDirection }));
+        }
+      })
       .catch((err) => {
         if ((err as Error).name === 'AbortError') return;
         if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
@@ -114,6 +126,33 @@ export function AlbumDetailPage() {
     setIdentity(next);
     setSearchParams(filtersToUrlParams(next), { replace: true });
   }, [setSearchParams]);
+
+  // The owner turns the album around. It is the album's order for everybody —
+  // members, the TV, the party wall — so it is saved, not just a view setting,
+  // and this wall follows it at once.
+  const toggleOrder = useCallback(async (album: AlbumDetail) => {
+    if (orderBusy) return;
+    const next = album.sortDirection === 'asc' ? 'desc' : 'asc';
+    setOrderBusy(true);
+    setNotice(null);
+    try {
+      const updated = await setAlbumSortDirection(album.id, next);
+      setStatus((prev) => prev.kind === 'ready' ? { ...prev, album: updated } : prev);
+      onIdentityChange({ ...identity, sort: 'datetaken', direction: updated.sortDirection });
+      setNotice(updated.sortDirection === 'asc' ? t('albumOrder.nowOldestFirst') : t('albumOrder.nowNewestFirst'));
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
+      setNotice(t('albumOrder.error'));
+    } finally {
+      setOrderBusy(false);
+    }
+  }, [identity, invalidateAuth, onIdentityChange, orderBusy, t]);
+
+  const adoptCover = useCallback((next: AlbumCoverState) => {
+    setStatus((prev) => prev.kind === 'ready'
+      ? { ...prev, album: { ...prev.album, version: next.version, coverFileItemId: next.coverFileItemId } }
+      : prev);
+  }, []);
 
   if (state.status !== 'authed' || !albumId) return null;
   if (status.kind === 'loading') return <div className="page-container"><p>{t('common.loading')}</p></div>;
@@ -155,6 +194,13 @@ export function AlbumDetailPage() {
             <WorkspaceMenu label={t('mediaWs.albumActions')} testId="album-more-actions" buttonRef={overflowButtonRef}
               actions={[
                 { id: 'content', label: t('albumContent.tab'), icon: 'edit', testId: 'album-open-content', onSelect: () => setContentOpen(true) },
+                {
+                  id: 'order',
+                  label: album.sortDirection === 'asc' ? t('albumOrder.showNewestFirst') : t('albumOrder.showOldestFirst'),
+                  icon: 'sort',
+                  testId: 'album-toggle-order',
+                  onSelect: () => void toggleOrder(album),
+                },
                 { id: 'copy', label: t('albumCopy.openButton'), icon: 'shares', testId: 'album-open-copy', onSelect: () => setCopyOpen(true) },
                 { id: 'print', label: t('ownerPrint.action'), icon: 'print', testId: 'album-open-print', href: `/print?album=${encodeURIComponent(album.id)}` },
                 { id: 'settings', label: t('mediaWs.albumSettings'), icon: 'info', testId: 'album-open-settings', onSelect: () => setSettingsOpen(true) },
@@ -162,6 +208,7 @@ export function AlbumDetailPage() {
           </div>
         </div>
         {album.description && <p className="album-description">{album.description}</p>}
+        {notice && <p className="muted" role="status" data-testid="album-detail-notice">{notice}</p>}
       </header>
 
       {/* ONE heavy media surface at a time. While the content manager is open
@@ -178,6 +225,16 @@ export function AlbumDetailPage() {
           searchPlaceholder={t('mediaWs.searchAlbum')}
           showPhotoPresentation
           refreshToken={uploadedToken}
+          renderViewerTrailingActions={(fileItemId) => (
+            <AlbumCoverViewerAction
+              albumId={album.id}
+              fileItemId={fileItemId}
+              cover={{ version: album.version, coverFileItemId: album.coverFileItemId }}
+              onChange={adoptCover}
+              onNotice={setNotice}
+              onUnauthorized={invalidateAuth}
+            />
+          )}
         />
       )}
 

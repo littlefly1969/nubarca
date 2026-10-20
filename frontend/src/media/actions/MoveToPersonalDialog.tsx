@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ApiError, getVaultStatus, type VaultMoveResult } from '@nubarca/api-client';
 import { useAuth } from '../../auth/useAuth';
@@ -22,11 +22,13 @@ export interface MoveToPersonalDialogProps {
   fileIds: string[];
   onClose(): void;
   execute(token: string): Promise<VaultMoveResult>;
+  // What the action reaches, when it starts from the account selection.
+  scope?: ReactNode;
 }
 
 type Phase = 'access' | 'moving';
 
-export function MoveToPersonalDialog({ fileIds, onClose, execute }: MoveToPersonalDialogProps) {
+export function MoveToPersonalDialog({ fileIds, onClose, execute, scope }: MoveToPersonalDialogProps) {
   const { t, tn } = useI18n();
   const { invalidateAuth } = useAuth();
   const [phase, setPhase] = useState<Phase>('access');
@@ -107,6 +109,7 @@ export function MoveToPersonalDialog({ fileIds, onClose, execute }: MoveToPerson
           <p className="ws-confirm-body">{t('moveToPersonal.explainAccess')}</p>
           <p className="ws-confirm-body">{t('moveToPersonal.explainKept')}</p>
         </div>
+        {scope}
 
         {phase === 'moving' ? (
           <p className="muted" role="status" data-testid="move-to-personal-busy">

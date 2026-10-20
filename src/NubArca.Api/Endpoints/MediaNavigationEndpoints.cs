@@ -8,7 +8,7 @@ public static class MediaNavigationEndpoints
 {
     public static void MapMediaNavigationEndpoints(this IEndpointRouteBuilder app)
     {
-        foreach (var prefix in new[] { "/api/media", "/api/albums/{albumId:guid}/media" })
+        foreach (var prefix in new[] { "/api/media", "/api/albums/{albumId:guid}/media", "/api/lists/{listId:guid}/media" })
         {
             app.MapGet(prefix + "/navigation", async ([AsParameters] NavigationRequest request,
                 HttpContext context, [FromServices] IMediaCollectionQueryService media, CancellationToken cancellationToken) =>
@@ -71,13 +71,18 @@ public static class MediaNavigationEndpoints
 
         public bool TryBind(HttpContext context, out MediaCollectionQuery query, out string? error)
         {
-            var source = context.Request.RouteValues.TryGetValue("albumId", out var value)
-                ? (MediaCollectionSource)new MediaCollectionSource.Album(Guid.Parse(value!.ToString()!))
-                : new MediaCollectionSource.Library();
-            return MediaCollectionQueryBinder.TryBind(source, Limit, Cursor, Scope, Kind, Q,
+            MediaCollectionSource source =
+                context.Request.RouteValues.TryGetValue("albumId", out var value)
+                    ? new MediaCollectionSource.Album(Guid.Parse(value!.ToString()!))
+                    : context.Request.RouteValues.TryGetValue("listId", out var list)
+                        ? new MediaCollectionSource.List(Guid.Parse(list!.ToString()!))
+                        : new MediaCollectionSource.Library();
+            var bound = MediaCollectionQueryBinder.TryBind(source, Limit, Cursor, Scope, Kind, Q,
                 Favorite, MinRating, DateTakenFrom, DateTakenTo, AlbumMembership, Sort, Direction,
                 HasGps, CollapseDuplicates, SimilarTo, IncludePeople, ExcludePeople, IncludePeopleMode,
                 DurationMin, DurationMax, MinHeight, Codec, HasAudio, out query, out error);
+            if (bound) query = MediaCollectionQueryBinder.WithListDefaultScope(query, Scope);
+            return bound;
         }
     }
 }

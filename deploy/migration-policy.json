@@ -226,6 +226,21 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Purely additive. It adds to print_stations one NOT NULL boolean with a constant DEFAULT FALSE (AgentSelfUpdate) and seven NULLABLE columns (AgentUpdateTarget, AgentUpdateRequestedAt, AgentUpdateSha256, AgentUpdateSizeBytes, AgentUpdateResult, AgentUpdateResultVersion, AgentUpdateResultAt). Each is a metadata-only ALTER TABLE ... ADD COLUMN on PostgreSQL 11+; no row is rewritten, nothing is backfilled, and no existing column, index or constraint is touched. The previous application neither reads nor writes these columns and its updates leave them alone, so rolled back it simply offers no agent self-update; a pending request is then ignored until the newer application runs again."
+    },
+    "20261019183641_AddMediaLists": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Purely additive. It creates two new tables: media_lists (its own primary key, a plain (OwnerUserId, Kind) index, a filtered unique index allowing one current selection per owner, and a foreign key FROM it TO users that cascades in that direction only) and media_list_items (a composite primary key, two plain indexes, a foreign key to media_lists that cascades and a foreign key FROM it TO file_items that cascades in that direction only). Nothing existing is altered, constrained, backfilled or dropped, and no delete path on an existing table gains a restriction: permanently deleting a file, by either application, simply also deletes its list entries, which are references and never copies. The previous application neither reads nor writes either table, so rolling the image back leaves every existing flow unchanged against the upgraded schema; the lists and the synced selection are then just not offered until the new application runs again. Down() drops both tables and with them the owners' lists and selections (references only; no file, blob or album is touched)."
+    },
+    "20261019204243_AddAlbumScopedSelections": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Purely additive. It adds one nullable column, media_lists.AlbumId, with a plain index, a filtered unique index allowing one album-scoped selection per (member, album) (Kind = 2), and a foreign key FROM media_lists TO albums that cascades in that direction only. No existing row is rewritten or backfilled (every existing list keeps AlbumId null) and no delete path on albums gains a restriction: deleting an album, by either application, simply also deletes its members' selections, which are references only. The previous application never writes Kind 2; it lists only named lists and reaches any other list solely by an id that is the member's own and never exposed, so rolling the image back leaves every existing flow unchanged and the album selections are just not offered. Down() first deletes the Kind 2 rows (their items cascade), then drops the column and indexes; no file, blob or album is touched."
+    },
+    "20261019235252_AddAlbumSortDirection": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Purely additive. It adds one non-nullable boolean column, albums.SortOldestFirst, with a database default of false, so every existing album keeps the default newest-first direction without a backfill or a table rewrite (a constant default is a metadata-only change on PostgreSQL 11+). No index, constraint or foreign key is added or altered. The previous application neither reads nor writes the column, and its inserts take the default, so rolling the image back leaves every existing flow working against the upgraded schema; albums are then shown in that application's own order until the new application runs again. album_items.SortOrder is kept and still written on append, so the previous application's curated-order reads and writes remain valid. Down() drops the column, losing only the owners' chosen direction (albums return to newest first); no file, blob or album item is touched."
     }
   }
 }

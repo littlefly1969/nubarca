@@ -39,6 +39,20 @@
 }
 
 .public-gallery-tile[data-shape='portrait'] { aspect-ratio: 4 / 5; }
+
+/* A tile with a personal pick: the cell takes the grid place, the round
+   control sits on the photograph, top-left, and never opens it. */
+.public-gallery-cell { position: relative; min-width: 0; }
+.public-gallery-cell[data-shape='featured'] { grid-column: 1 / -1; }
+.public-gallery-pick {
+  position: absolute; top: 0.5rem; left: 0.5rem; z-index: 2;
+  width: 1.9rem; height: 1.9rem; padding: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid rgb(255 255 255 / 90%); background: rgb(0 0 0 / 40%);
+  color: #fff; font-size: 1rem; line-height: 1; cursor: pointer;
+}
+.public-gallery-pick[aria-pressed='true'] { background: var(--accent, #3a7bd5); border-color: var(--accent, #3a7bd5); }
+.public-gallery-pick:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .public-gallery-tile[data-shape='square'] { aspect-ratio: 1 / 1; }
 
 /* The photograph is the colour on this surface: no permanent tint over it.
@@ -92,6 +106,8 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.6rem;
   }
+
+  .public-gallery-cell[data-shape='featured'] { grid-column: auto; }
 
   .public-gallery-tile[data-shape='featured'],
   .public-gallery-tile[data-shape='portrait'],
@@ -182,6 +198,31 @@
 }
 
 .public-viewer-action:disabled { opacity: 0.7; cursor: progress; }
+
+/* Choosing the photograph on screen: a round mark, filled once chosen. */
+.public-viewer-select { gap: 0.55rem; }
+.public-viewer-select:disabled { cursor: not-allowed; }
+
+.public-viewer-select-mark {
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 2px solid currentcolor;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.public-viewer-select[aria-pressed='true'] {
+  border-color: var(--brand-cyan-glow);
+}
+
+.public-viewer-select[aria-pressed='true'] .public-viewer-select-mark {
+  border-color: var(--brand-cyan-glow);
+  background: var(--brand-cyan-glow);
+  color: var(--brand-midnight-navy);
+}
 
 .public-viewer-action--primary {
   border: 0;

@@ -82,6 +82,10 @@ export interface SharedAlbumDetail {
   // both regardless — `canEdit` only decides whether to render the controls.
   version: number;
   canEdit: boolean;
+  // The chosen cover while it is still servable to this member, else null.
+  coverFileItemId: string | null;
+  // The owner's direction for the album's date order.
+  sortDirection: 'asc' | 'desc';
 }
 
 // One item of an album as its OWNER sees it for moderation. Additive surface:
@@ -90,7 +94,7 @@ export interface SharedAlbumDetail {
 // the owner's own items and use the same privacy-safe disambiguation as the
 // member list when present.
 export interface AlbumContentItem {
-  // The MEMBERSHIP row's stable id — what a reorder names, never the file.
+  // The MEMBERSHIP row's stable id — what a removal names, never the file.
   albumItemId: string;
   fileItemId: string;
   kind: 'image' | 'video';
@@ -151,20 +155,14 @@ export function albumContentQueryToParams(query: AlbumContentQuery): QueryParams
   return b.build();
 }
 
-/** Moves ONE item to a 0-based position: an O(1) payload whatever the album's size. */
-export interface MoveAlbumItemPayload {
-  expectedVersion: number;
-  targetIndex: number;
-}
-
 // One media item of a shared album. Deliberately carries NO file name: a
 // filename is owner-authored free text that can hold a person's name, and the
 // viewer does not need it. `downloadUrl` is null unless the membership permits
 // originals — and the endpoint enforces the same rule, so hiding the control is
 // a courtesy, not the control.
 export interface SharedAlbumItem {
-  // The membership row's stable id, so a client holding this list can express a
-  // reorder without conflating files and memberships.
+  // The membership row's stable id, so a client holding this list can address
+  // a curation row without conflating files and memberships.
   albumItemId: string;
   fileItemId: string;
   kind: 'image' | 'video';
@@ -271,9 +269,6 @@ export function sharedAlbumPath(albumId: string): string {
 }
 export function sharedAlbumItemsPath(albumId: string): string {
   return `${sharedAlbumPath(albumId)}/items`;
-}
-export function sharedAlbumItemMovePath(albumId: string, albumItemId: string): string {
-  return `${sharedAlbumItemsPath(albumId)}/${albumItemId}/move`;
 }
 export function albumInvitationPath(membershipId: string, action: 'accept' | 'decline'): string {
   return `${ALBUM_INVITATIONS_PATH}/${membershipId}/${action}`;

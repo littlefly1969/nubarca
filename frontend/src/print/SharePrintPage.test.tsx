@@ -107,4 +107,21 @@ describe('SharePrintPage', () => {
     await user.click(screen.getByRole('button', { name: 'Stampa' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('non è più consentita');
   });
+
+  // A visitor's viewer shows the share's own derived preview — never an
+  // original, never a download it was not offered — and chooses from there.
+  it('opens a photograph in the share-scoped viewer and chooses it there', async () => {
+    const user = userEvent.setup();
+    const mock = mount();
+    await user.click(await screen.findByTestId('party-print-format-photo'));
+    await user.click(screen.getByRole('button', { name: 'Apri la foto 2' }));
+    const viewer = screen.getByTestId('public-viewer');
+    expect(viewer.querySelector('img')!.getAttribute('src')).toBe(`/api/album-share/${TOKEN}/media/i2/preview`);
+    expect(screen.queryByTestId('public-viewer-download')).toBeNull();
+    await user.click(screen.getByTestId('public-viewer-select'));
+    await user.click(screen.getByTestId('public-viewer-close'));
+    expect(screen.getAllByRole('button', { name: /Scegli questa foto|Togli dalla selezione/ })[1])
+      .toHaveAttribute('aria-pressed', 'true');
+    expect(mock.calls.some((c) => c.method === 'POST')).toBe(false);
+  });
 });

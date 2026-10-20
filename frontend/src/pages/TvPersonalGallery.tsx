@@ -3,6 +3,11 @@ import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   addTvPersonalItemsToDestination,
   addTvPersonalItemsToAlbum,
+  addTvPersonalSelectionItems,
+  clearTvPersonalSelection,
+  getTvPersonalSelection,
+  listTvPersonalSelectionIds,
+  removeTvPersonalSelectionItems,
   fetchTvPersonalMediaObjectUrl,
   getTvPersonalMediaInfo,
   interpretTvPersonalGalleryCommand,
@@ -27,6 +32,8 @@ import {
   type TvPersonalPerson,
 } from '@nubarca/api-client';
 import { useI18n, type MessageKey } from '../i18n';
+import { MediaSelectionStore } from '../selection/mediaSelectionStore';
+import { startSelectionSync } from '../selection/selectionSync';
 
 // /tv Personal Gallery — the browser-fallback equivalent of the native TV
 // gallery: the SAME grant-gated projection endpoints, the same filters/sort/
@@ -366,6 +373,32 @@ export function TvPersonalGallery({ grant, onBack, onPersonalError }: TvPersonal
   // does OK on a grid tile pick instead of opening — the default contract is
   // OK in the grid opens the photo, OK in the opened photo selects it.
   const [quickSelect, setQuickSelect] = useState(false);
+  // The picks ARE the account's current selection: mirrored to the server, so
+  // a photo picked with the remote is picked on the owner's laptop and phone,
+  // and the other way round. The local array stays the instant truth the
+  // screen reads; the store is only the bridge to the sync.
+  const [syncStore] = useState(() => new MediaSelectionStore());
+  useEffect(() => {
+    const handle = startSelectionSync(syncStore, {
+      summary: (signal) => getTvPersonalSelection(grant, signal),
+      ids: (_list, cursor, signal) => listTvPersonalSelectionIds(grant, cursor, signal),
+      add: (_list, ids) => addTvPersonalSelectionItems(grant, ids),
+      remove: (_list, ids) => removeTvPersonalSelectionItems(grant, ids),
+      clear: () => clearTvPersonalSelection(grant),
+    });
+    return () => { void handle.flush().finally(() => handle.stop()); };
+  }, [grant, syncStore]);
+  // Server → screen (another device changed it).
+  useEffect(() => syncStore.subscribe(() => {
+    const ids = syncStore.getSnapshot().ids;
+    setSelection((cur) => {
+      const now = cur ?? [];
+      if (now.length === ids.length && now.every((id, i) => id === ids[i])) return cur;
+      return ids.length > 0 ? [...ids] : (cur === null ? null : []);
+    });
+  }), [syncStore]);
+  // Screen → server.
+  useEffect(() => { syncStore.replace(selection ?? []); }, [selection, syncStore]);
   const [albums, setAlbums] = useState<TvPersonalAlbum[] | null>(null);
   const [selectedAlbumId, setSelectedAlbumId] = useState('');
   const [albumBusy, setAlbumBusy] = useState(false);
@@ -844,10 +877,14 @@ export function TvPersonalGallery({ grant, onBack, onPersonalError }: TvPersonal
       if (selectionLayer !== 'none') setSelectionLayer('none');
       else if (showFilters) cancelWorkspace();
       else if (menuOpen) closeMenu();
-      else if (selection !== null) { setSelection(null); setQuickSelect(false); }
+      // Back steps out of quick selection, or out of the gallery — never
+      // through the picks: they are the account's selection, held on the
+      // server for every device, and only "Azzera selezione" clears them.
+      else if (selection !== null && selection.length === 0) { setSelection(null); setQuickSelect(false); }
+      else if (quickSelect) setQuickSelect(false);
       else onBack();
     }
-  }, [viewerIndex, selection, onBack, moveFocus, showFilters, menuOpen, selectionLayer,
+  }, [viewerIndex, selection, quickSelect, onBack, moveFocus, showFilters, menuOpen, selectionLayer,
     toggleMenu, moveLayerFocus, cancelWorkspace, closeMenu]);
 
   const toggleSelected = useCallback((id: string) => {

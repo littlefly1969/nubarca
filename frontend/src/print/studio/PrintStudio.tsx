@@ -16,6 +16,7 @@ import {
   photoSlotAspect, sheet, stripFooter, stripSlot, stripSlotAspect,
 } from '../../pages/partyPrintGeometry';
 import { popOutCutoutRect, popOutPlacement, type SubjectRegion } from '../popOut';
+import { PublicMediaViewer } from '../../publicMedia/PublicMediaViewer';
 import '../../pages/PartyPrintPage.css';
 
 /* THE PRINT STUDIO — one path to a printed sheet, for a party's guest and for
@@ -812,6 +813,26 @@ export function PrintStudio(props: PrintStudioProps) {
 
   const known = useMemo(() => new Set(photoById.keys()), [photoById]);
 
+  // The photograph open in the viewer, by its place in the gallery shown.
+  const [viewing, setViewing] = useState<number | null>(null);
+  const viewerOpenerRef = useRef<HTMLElement | null>(null);
+  const closeViewer = useCallback(() => {
+    setViewing(null);
+    const opener = viewerOpenerRef.current;
+    viewerOpenerRef.current = null;
+    // Back on the tile it was opened from, wherever the grid was scrolled.
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
+  }, []);
+  // Leaving the step, or a gallery that shrank under it, closes or clamps it.
+  useEffect(() => {
+    if (step !== 'select') setViewing(null);
+  }, [step]);
+  useEffect(() => {
+    setViewing((v) => (v === null ? v : gallery.length === 0 ? null : Math.min(v, gallery.length - 1)));
+  }, [gallery.length]);
+  const viewed = viewing === null ? null : gallery[viewing] ?? null;
+  const viewedAt = viewed ? chosen.indexOf(viewed.id) : -1;
+
   return (
     <>
       {step === 'format' && (
@@ -854,8 +875,12 @@ export function PrintStudio(props: PrintStudioProps) {
                     // are all of it, already chosen, in the order selected.
                     // More than it takes: the person chooses which.
                     const ordered = (preselected ?? []).filter((id) => known.has(id));
-                    setChosen(known.size !== option.count ? []
-                      : ordered.length === option.count ? ordered : [...known]);
+                    // From a wider gallery (a party), picks made beforehand
+                    // that fit the format start the sheet; the rest is chosen
+                    // here. Picks that do not fit are chosen from instead.
+                    setChosen(known.size === option.count
+                      ? (ordered.length === option.count ? ordered : [...known])
+                      : ordered.length > 0 && ordered.length <= option.count ? ordered.slice() : []);
                     setStep('select');
                   }}
                 >
@@ -893,22 +918,31 @@ export function PrintStudio(props: PrintStudioProps) {
             {t('partyPrint.chosen', { count: chosen.length, total: required })}
           </p>
           {props.galleryTools}
+          {(preselected?.length ?? 0) > required && chosen.length < required && (
+            <p className="party-print-hint" data-testid="party-print-choose-from-more">
+              {t('partyPrint.chooseFromMore', { count: preselected!.length, total: required })}
+            </p>
+          )}
           {gallery.length === 0 ? (
             <p className="party-print-note">{t('partyPrint.noPhotos')}</p>
           ) : (
+            // A photograph opens whole in the viewer; its round control
+            // chooses it. The grid stays mounted under the viewer, so coming
+            // back finds the same scroll, the same order and the same choice.
             <ul className="party-print-gallery">
-              {gallery.map((photo) => {
+              {gallery.map((photo, index) => {
                 const at = chosen.indexOf(photo.id);
                 return (
-                  <li key={photo.id}>
+                  <li key={photo.id} className="party-print-tile" data-chosen={at >= 0 ? 'true' : undefined}>
                     <button
                       type="button"
-                      className="party-print-pick"
-                      aria-pressed={at >= 0}
-                      aria-label={at >= 0
-                        ? t('partyPrint.unchoose')
-                        : t('partyPrint.choose')}
-                      onClick={() => toggle(photo.id)}
+                      className="party-print-open"
+                      aria-label={t('partyPrint.open', { n: index + 1 })}
+                      data-testid="party-print-open"
+                      onClick={(event) => {
+                        viewerOpenerRef.current = event.currentTarget;
+                        setViewing(index);
+                      }}
                     >
                       <img
                         src={photo.thumbnailUrl}
@@ -920,16 +954,42 @@ export function PrintStudio(props: PrintStudioProps) {
                           event.currentTarget.naturalHeight,
                         )}
                       />
-                      {at >= 0 && (
-                        <span className="party-print-pick-badge" aria-hidden="true">
-                          {at + 1}
-                        </span>
-                      )}
+                    </button>
+                    <button
+                      type="button"
+                      className="party-print-pick"
+                      aria-pressed={at >= 0}
+                      aria-label={at >= 0
+                        ? `${t('partyPrint.unchoose')} — ${t('partyPrint.position', { n: at + 1 })}`
+                        : t('partyPrint.choose')}
+                      disabled={at < 0 && chosen.length >= required}
+                      onClick={() => toggle(photo.id)}
+                    >
+                      <span className="party-print-pick-badge" aria-hidden="true">
+                        {at >= 0 ? at + 1 : ''}
+                      </span>
                     </button>
                   </li>
                 );
               })}
             </ul>
+          )}
+          {viewed && (
+            <PublicMediaViewer
+              item={{ id: viewed.id, kind: 'image', previewUrl: viewed.previewUrl }}
+              label={t('partyPrint.viewer')}
+              onClose={closeViewer}
+              onPrevious={viewing! > 0 ? () => setViewing((v) => (v === null ? v : v - 1)) : undefined}
+              onNext={viewing! < gallery.length - 1 ? () => setViewing((v) => (v === null ? v : v + 1)) : undefined}
+              selection={{
+                selected: viewedAt >= 0,
+                label: viewedAt >= 0 ? t('partyPrint.unchoose') : t('partyPrint.choose'),
+                position: viewedAt >= 0 ? t('partyPrint.position', { n: viewedAt + 1 }) : null,
+                disabled: viewedAt < 0 && chosen.length >= required,
+                note: viewedAt < 0 && chosen.length >= required ? t('partyPrint.full', { total: required }) : null,
+                onToggle: () => toggle(viewed.id),
+              }}
+            />
           )}
           {/* Pinned where a thumb is, so a person choosing from a long album
               never has to scroll to its end to go on. */}

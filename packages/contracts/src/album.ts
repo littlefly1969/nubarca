@@ -33,6 +33,13 @@ export interface AlbumSummary {
   coverItems: AlbumCoverItem[];
 }
 
+/**
+ * The album's sequence: its photographs by date taken, newest first ('desc')
+ * unless the owner turned it around ('asc'). The owner's choice is the order
+ * every member, TV and party wall gets; there is no manual order.
+ */
+export type AlbumSortDirection = 'asc' | 'desc';
+
 export interface AlbumDetail {
   id: string;
   name: string;
@@ -40,6 +47,19 @@ export interface AlbumDetail {
   showOnTv: boolean;
   createdAt: string;
   updatedAt: string;
+  sortDirection: AlbumSortDirection;
+  // The optimistic-concurrency token the cover and curation routes echo.
+  version: number;
+  // The chosen cover, or null when the album derives one.
+  coverFileItemId: string | null;
+}
+
+export interface SetAlbumSortPayload {
+  direction: AlbumSortDirection;
+}
+
+export function albumSortPath(albumId: string): string {
+  return `/api/albums/${albumId}/sort`;
 }
 
 export interface AlbumItemSummary {

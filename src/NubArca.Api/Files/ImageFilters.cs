@@ -63,6 +63,10 @@ public sealed record ImageFilters
     // RestrictToFileIds (kept out of the fingerprint so it can be re-resolved).
     public Guid? AlbumId { get; init; }
 
+    // Constrains to the members of ONE owner media list (already owner-validated
+    // by the collection service). Same shape and safety argument as AlbumId.
+    public Guid? MediaListId { get; init; }
+
     // Album MEMBERSHIP (distinct from AlbumId, which means "in THIS album"):
     // Assigned = in at least one album, Unassigned = in none, Any = no
     // constraint. Owner-safe because the FileItems it filters are already
@@ -107,6 +111,7 @@ public sealed record ImageFilters
         && FolderId is null
         && !CollapseDuplicates
         && AlbumId is null
+        && MediaListId is null
         && AlbumMembership == AlbumMembershipFilter.Any
         && !HasIncludePeople
         && !HasExcludePeople
@@ -147,6 +152,7 @@ public sealed record ImageFilters
         sb.Append("|fld="); sb.Append(FolderId?.ToString("D") ?? "");
         sb.Append("|dup="); sb.Append(CollapseDuplicates ? "1" : "0");
         sb.Append("|alb="); sb.Append(AlbumId?.ToString("D") ?? "");
+        if (MediaListId is Guid listId) { sb.Append("|lst="); sb.Append(listId.ToString("D")); }
         sb.Append("|albm="); sb.Append(AlbumMembership switch
         {
             AlbumMembershipFilter.Assigned => "assigned",

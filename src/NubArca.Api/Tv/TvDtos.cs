@@ -299,7 +299,11 @@ public sealed record TvPersonalAlbumCardDto(
     int ItemCount,
     int PhotoCount,
     int VideoCount,
-    IReadOnlyList<string> CoverImageUrls);
+    IReadOnlyList<string> CoverImageUrls,
+    // "desc" (newest first) or "asc": the owner's album order by date taken,
+    // which the TV album grid and slideshow start from unless the viewer
+    // explicitly picks another sort.
+    string SortDirection);
 
 public sealed record TvPersonalFavoriteRequest(bool Favorite);
 

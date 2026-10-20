@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { SharedAlbumDetailPage } from './SharedAlbumDetailPage';
+import { act } from 'react';
 import {
-  AuthedWrapper, errorResponse, installFetchMock, jsonResponse, sharedItemsPage,
+  AuthedWrapper, errorResponse, installFetchMock, jsonResponse, sharedItemsPage, type MockHandler,
 } from '../test-utils';
 
 // The recipient's album, browsed with the SAME language as the owner's — kind
@@ -42,6 +43,8 @@ const ALBUM = {
   itemCount: 2,
   version: 1,
   canEdit: false,
+  coverFileItemId: null as string | null,
+  sortDirection: 'desc' as const,
 };
 
 interface Item {
@@ -103,10 +106,48 @@ function renderPage(albumId = 'alb-1') {
 
 // The kind tab drives a server request, so the mock answers per kind exactly as
 // the endpoint does.
-function mockAlbum(items: Item[], album: Record<string, unknown> = ALBUM) {
+// The member's own selection in this album, as the server holds it. `gone`
+// answers every selection call with 404, as a revoked membership does.
+interface PickServer { ids: string[]; version: number; gone: boolean; writes: string[] }
+const newPickServer = (ids: string[] = []): PickServer => ({ ids, version: 1, gone: false, writes: [] });
+
+function pickHandlers(server: PickServer): Record<string, MockHandler> {
+  const state = () => ({ version: server.version, count: server.ids.length, stamp: server.ids.join('|') });
+  const write = (kind: string, body: string | null, apply: (ids: string[]) => void) => {
+    if (server.gone) return errorResponse(404);
+    const ids = body ? (JSON.parse(body) as { fileItemIds: string[] }).fileItemIds : [];
+    server.writes.push(`${kind}:${ids.join(',')}`);
+    apply(ids);
+    server.version += 1;
+    return jsonResponse({ requested: ids.length, succeeded: ids.length, skipped: 0, ...state() });
+  };
+  return {
+    'GET /api/shared-albums/alb-1/selection': () => (server.gone ? errorResponse(404) : jsonResponse(state())),
+    'GET /api/shared-albums/alb-1/selection/ids': () => (server.gone
+      ? errorResponse(404)
+      : jsonResponse({ ids: server.ids, nextCursor: null, version: server.version, count: server.ids.length })),
+    'POST /api/shared-albums/alb-1/selection/items': ({ body }) => write('add', body, (ids) => {
+      server.ids = [...server.ids, ...ids.filter((id) => !server.ids.includes(id))];
+    }),
+    'DELETE /api/shared-albums/alb-1/selection/items': ({ body }) => write('remove', body, (ids) => {
+      server.ids = server.ids.filter((id) => !ids.includes(id));
+    }),
+    'POST /api/shared-albums/alb-1/selection/clear': () => write('clear', null, () => { server.ids = []; }),
+  };
+}
+
+function mockAlbum(
+  items: Item[],
+  album: Record<string, unknown> = ALBUM,
+  picks: PickServer = newPickServer(),
+  extra: Record<string, MockHandler> = {},
+) {
   return installFetchMock({
-    'GET /api/shared-albums/alb-1': () => jsonResponse(album),
+    ...pickHandlers(picks),
+    ...extra,
+    'GET /api/shared-albums/alb-1': () => (picks.gone ? errorResponse(404) : jsonResponse(album)),
     'GET /api/shared-albums/alb-1/items': (req) => {
+      if (picks.gone) return errorResponse(404);
       const kind = new URL(req.url, 'http://x').searchParams.get('kind');
       const slice = kind === null ? items : items.filter((i) => i.kind === kind);
       return jsonResponse({ ...(sharedItemsPage(slice) as object), total: items.length,
@@ -179,7 +220,8 @@ describe('SharedAlbumDetailPage wall', () => {
     const box = (el: HTMLElement) => ({
       w: parseFloat(el.style.width), h: parseFloat(el.style.height),
     });
-    const [a, b] = tiles.map((t) => box(t as HTMLElement));
+    // The geometry is on the tile's cell, which also holds the round pick control.
+    const [a, b] = tiles.map((t) => box(t.parentElement as HTMLElement));
     expect(a.h).toBeCloseTo(b.h, 0);
     expect(a.w).toBeGreaterThan(b.w);
     expect(a.w / a.h).toBeCloseTo(4000 / 3000, 1);
@@ -497,5 +539,184 @@ describe('SharedAlbumDetailPage — one heavy media surface at a time', () => {
 
     await userEvent.click(screen.getByTestId('album-content-close'));
     expect(await screen.findAllByTestId('shared-media-tile')).toHaveLength(1);
+  });
+});
+
+// A member's own selection in this album: picked with the round control or in
+// the viewer, resumed from the server, never the library selection, and gone
+// with the membership.
+describe('SharedAlbumDetailPage — the member\'s own selection', () => {
+  it('picks with the round control and in the viewer, without opening or mixing with the library', async () => {
+    const picks = newPickServer();
+    const { calls } = mockAlbum([item(), item({ fileItemId: 'f2' })], ALBUM, picks);
+    renderPage();
+
+    const controls = await screen.findAllByTestId('shared-media-pick');
+    await userEvent.click(controls[0]);
+    expect(controls[0]).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByTestId('media-viewer')).not.toBeInTheDocument();
+    expect(screen.getByTestId('shared-album-selection-count')).toHaveTextContent('1 selezionato in questo album');
+    expect(screen.getByTestId('shared-album-selection-bar')).toHaveTextContent('Solo tu vedi questa selezione.');
+
+    // The photograph opens; the viewer picks the second one too.
+    await userEvent.click(screen.getAllByTestId('shared-media-tile')[1]);
+    const select = await screen.findByTestId('shared-viewer-select');
+    expect(select).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.click(select);
+    expect(select).toHaveAttribute('aria-pressed', 'true');
+
+    await vi.waitFor(() => expect(picks.ids).toEqual(['f1', 'f2']));
+    // Only the album's own selection was written: never the account selection
+    // or a list.
+    expect(calls.some((c) => c.url.startsWith('/api/selection') || c.url.startsWith('/api/lists'))).toBe(false);
+  });
+
+  it('resumes the picks made on another device', async () => {
+    mockAlbum([item(), item({ fileItemId: 'f2' })], ALBUM, newPickServer(['f2']));
+    renderPage();
+
+    const controls = await screen.findAllByTestId('shared-media-pick');
+    await vi.waitFor(() => expect(controls[1]).toHaveAttribute('aria-pressed', 'true'));
+    expect(controls[0]).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('offers only what this membership may do: withdraw the member\'s own picks', async () => {
+    const picks = newPickServer(['f1', 'f2']);
+    const withdrawn: string[] = [];
+    mockAlbum(
+      [item({ canWithdraw: true }), item({ fileItemId: 'f2' })],
+      { ...ALBUM, role: 'contributor' },
+      picks,
+      {
+        'DELETE /api/shared-albums/alb-1/contributions/f1': () => {
+          withdrawn.push('f1');
+          return new Response(null, { status: 204 });
+        },
+      },
+    );
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderPage();
+
+    const withdraw = await screen.findByTestId('shared-sel-withdraw');
+    // One of the two picks is the member's own; only that one is offered.
+    expect(withdraw).toHaveTextContent('Ritira il tuo contributo');
+    expect(screen.queryByTestId('shared-sel-trash')).not.toBeInTheDocument();
+    await userEvent.click(withdraw);
+    await vi.waitFor(() => expect(withdrawn).toEqual(['f1']));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('resta nella tua libreria'));
+    await vi.waitFor(() => expect(picks.ids).toEqual(['f2']));
+  });
+
+  it('offers no withdrawal for picks that are not the member\'s own', async () => {
+    mockAlbum([item(), item({ fileItemId: 'f2' })], ALBUM, newPickServer(['f1']));
+    renderPage();
+    const bar = await screen.findByTestId('shared-album-selection-bar');
+    expect(screen.queryByTestId('shared-sel-withdraw')).not.toBeInTheDocument();
+    // Clear is the only thing a member can do with someone else's files here:
+    // no trash, no vault, and no print — membership carries no print grant
+    // (printing in a shared album is the owner's, or a print-enabled link's).
+    expect(bar.querySelectorAll('button')).toHaveLength(1);
+    expect(screen.getByTestId('shared-sel-clear')).toBeInTheDocument();
+  });
+
+  it('clears the picks only on an explicit Clear', async () => {
+    const picks = newPickServer(['f1']);
+    mockAlbum([item()], ALBUM, picks);
+    renderPage();
+    await userEvent.click(await screen.findByTestId('shared-sel-clear'));
+    expect(screen.queryByTestId('shared-album-selection-bar')).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(picks.writes).toEqual(['clear:']));
+  });
+
+  it('forgets the picks and shows the album as unavailable once the membership is revoked', async () => {
+    const picks = newPickServer(['f1']);
+    mockAlbum([item()], ALBUM, picks);
+    renderPage();
+    await screen.findByTestId('shared-album-selection-bar');
+
+    picks.gone = true;
+    act(() => { window.dispatchEvent(new Event('focus')); });
+    expect(await screen.findByTestId('shared-album-unavailable')).toBeInTheDocument();
+    expect(screen.queryByTestId('shared-album-selection-bar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('shared-media-pick')).not.toBeInTheDocument();
+  });
+});
+
+// «Set as album cover»: the viewer's LAST action, only for somebody the server
+// lets curate, through the album's own cover route.
+describe('SharedAlbumDetailPage — cover from the viewer', () => {
+  const EDITOR = { ...ALBUM, role: 'editor' as const, canEdit: true };
+
+  async function openViewerOn(index: number) {
+    await userEvent.click((await screen.findAllByTestId('shared-media-tile'))[index]);
+    return screen.findByTestId('media-viewer');
+  }
+
+  it('is the last action before close, and updates the album at once', async () => {
+    const mock = mockAlbum([item(), item({ fileItemId: 'f2' })], EDITOR, newPickServer(), {
+      'PUT /api/shared-albums/alb-1/cover': () => jsonResponse({
+        albumId: 'alb-1', version: 2, name: 'Vacanze', description: 'estate', coverFileItemId: 'f2',
+      }),
+    });
+    renderPage();
+    const viewer = await openViewerOn(1);
+
+    const action = within(viewer).getByTestId('viewer-set-album-cover');
+    expect(action).toHaveTextContent('Imposta come copertina dell’album');
+    // The last action of the chrome: only the close button comes after it.
+    const buttons = Array.from(action.parentElement!.querySelectorAll('button'));
+    expect(buttons.indexOf(action as HTMLButtonElement)).toBe(buttons.length - 2);
+
+    await userEvent.click(action);
+    const put = mock.calls.find((c) => c.method === 'PUT')!;
+    expect(JSON.parse(put.body!)).toEqual({ expectedVersion: 1, fileItemId: 'f2' });
+    // Adopted immediately: this photo is now the cover, no reload needed.
+    expect(await within(viewer).findByTestId('viewer-album-cover-current')).toBeInTheDocument();
+    expect(within(viewer).queryByTestId('viewer-set-album-cover')).not.toBeInTheDocument();
+
+    // The next set chains on the version the server returned.
+    await userEvent.keyboard('{ArrowLeft}');
+    await userEvent.click(within(viewer).getByTestId('viewer-set-album-cover'));
+    const puts = mock.calls.filter((c) => c.method === 'PUT');
+    expect(JSON.parse(puts[1].body!).expectedVersion).toBe(2);
+  });
+
+  it('says so and adopts the current album when somebody changed it first', async () => {
+    const mock = mockAlbum([item(), item({ fileItemId: 'f2' })], EDITOR, newPickServer(), {
+      'PUT /api/shared-albums/alb-1/cover': () => errorResponse(409, {
+        error: 'changed', albumId: 'alb-1', version: 7, name: 'Vacanze', description: null, coverFileItemId: 'f1',
+      }),
+    });
+    renderPage();
+    const viewer = await openViewerOn(1);
+    await userEvent.click(within(viewer).getByTestId('viewer-set-album-cover'));
+
+    expect(await within(viewer).findByTestId('viewer-album-cover-refusal'))
+      .toHaveTextContent(/cambiato nel frattempo/i);
+    // Never retried on its own.
+    expect(mock.calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+    // The other change made f1 the cover: shown as such.
+    await userEvent.keyboard('{ArrowLeft}');
+    expect(await within(viewer).findByTestId('viewer-album-cover-current')).toBeInTheDocument();
+  });
+
+  it('explains a photo that can no longer be the cover', async () => {
+    mockAlbum([item()], EDITOR, newPickServer(), {
+      'PUT /api/shared-albums/alb-1/cover': () => errorResponse(400, { error: 'not servable' }),
+    });
+    renderPage();
+    const viewer = await openViewerOn(0);
+    await userEvent.click(within(viewer).getByTestId('viewer-set-album-cover'));
+
+    expect(await within(viewer).findByTestId('viewer-album-cover-refusal'))
+      .toHaveTextContent(/non può più essere la copertina/i);
+  });
+
+  it('is absent for a member who may not curate', async () => {
+    mockAlbum([item()], { ...ALBUM, role: 'editor', canEdit: false });
+    renderPage();
+    const viewer = await openViewerOn(0);
+    expect(within(viewer).queryByTestId('viewer-set-album-cover')).not.toBeInTheDocument();
+    expect(within(viewer).queryByTestId('viewer-album-cover-current')).not.toBeInTheDocument();
   });
 });

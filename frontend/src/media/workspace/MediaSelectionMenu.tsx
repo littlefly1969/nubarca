@@ -25,6 +25,8 @@ interface Props {
 const TEST_IDS: Record<MediaSelectionActionId, string> = {
   restore: 'media-sel-restore',
   'remove-from-album': 'media-sel-remove-album',
+  'remove-from-list': 'media-sel-remove-list',
+  list: 'media-sel-list',
   personal: 'media-sel-personal',
   excluded: 'media-sel-excluded',
   trash: 'media-sel-trash',

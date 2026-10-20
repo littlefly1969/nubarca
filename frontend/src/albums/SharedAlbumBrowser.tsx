@@ -15,6 +15,8 @@ import { MEDIA_WALL_GAP_PX } from '../media/layout/mediaWallGeometry';
 import type { JustifiedLayoutItem } from '../media/layout/computeJustifiedRows';
 import { useSequencePlayback } from '../media/playback/useSequencePlayback';
 import { useSharedAlbumItems } from './useSharedAlbumItems';
+import { AlbumCoverViewerAction, type AlbumCoverState } from './AlbumCoverViewerAction';
+import { useSharedAlbumSelection } from './useSharedAlbumSelection';
 import type { AlbumExperienceCapabilities } from './albumCapabilities';
 
 // The recipient's media browser for ONE shared album.
@@ -26,10 +28,15 @@ import type { AlbumExperienceCapabilities } from './albumCapabilities';
 // composes one from a file id, because a file id addresses the owner's library
 // and this caller has no grant on it.
 //
-// What is absent is as deliberate as what is present. There is no selection, no
-// metadata drawer, no exclude, no trash, no People, no similarity, no album
-// membership editing — not disabled, absent, so no regression can turn one back
-// on. The capability model decides the rest.
+// What is absent is as deliberate as what is present. There is no metadata
+// drawer, no exclude, no trash, no People, no similarity, no album membership
+// editing — not disabled, absent, so no regression can turn one back on. The
+// capability model decides the rest.
+//
+// A member does get a SELECTION, and it is their own: scoped to this album,
+// held apart from their library selection, resumed on their other devices,
+// never visible to anyone else, and gone the moment the membership is. It only
+// offers what this membership may do with the picks (withdraw what is theirs).
 
 // The kind tabs speak the workspace's vocabulary; the shared endpoint speaks
 // 'all' | 'image' | 'video'. They agree today, and this states that they must.
@@ -42,10 +49,12 @@ interface Props {
   // A withdrawal changed what the album contains; the page refreshes its header.
   onItemsChanged(): void;
   onNotice(message: string): void;
+  // The album's cover and version, for a curator's «Set as album cover».
+  cover?: { state: AlbumCoverState; onChange(next: AlbumCoverState): void };
 }
 
 export function SharedAlbumBrowser({
-  albumId, albumName, capabilities, onItemsChanged, onNotice,
+  albumId, albumName, capabilities, onItemsChanged, onNotice, cover,
 }: Props) {
   const { t, tn } = useI18n();
   const { invalidateAuth } = useAuth();
@@ -54,6 +63,21 @@ export function SharedAlbumBrowser({
 
   const wall = useSharedAlbumItems(albumId, kind, invalidateAuth);
   const { items } = wall;
+
+  const { store: picks, snapshot: picked } = useSharedAlbumSelection(albumId, {
+    sync: capabilities.personalSelection,
+    // Revoked or deleted: the picks are forgotten on screen and the wall
+    // re-reads, which then shows the album as unavailable.
+    onGone: () => { setOpenIndex(null); wall.refresh(); },
+    onUnauthorized: invalidateAuth,
+  });
+  const [withdrawing, setWithdrawing] = useState(false);
+  // Only what this member contributed and the wall has loaded can be withdrawn;
+  // the server checks each one again.
+  const withdrawable = useMemo(
+    () => items.filter((i) => i.canWithdraw && picked.set.has(i.fileItemId)),
+    [items, picked],
+  );
 
   const setSentinelNode = useWallSentinel({
     ready: wall.phase.kind === 'ready',
@@ -131,6 +155,33 @@ export function SharedAlbumBrowser({
     }
   }, [albumId, invalidateAuth, onItemsChanged, onNotice, t, wall]);
 
+  const withdrawPicked = async () => {
+    const targets = withdrawable;
+    if (targets.length === 0 || withdrawing) return;
+    if (!window.confirm(tn(targets.length, 'sharedAlbum.confirmWithdrawSelected'))) return;
+    setWithdrawing(true);
+    const done: string[] = [];
+    try {
+      for (const item of targets) {
+        try {
+          await withdrawSharedAlbumContribution(albumId, item.fileItemId);
+          done.push(item.fileItemId);
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
+          // Already gone counts as withdrawn; anything else stays picked.
+          if (err instanceof ApiError && err.status === 404) done.push(item.fileItemId);
+        }
+      }
+    } finally {
+      setWithdrawing(false);
+      picks.remove(done);
+      if (done.length > 0) { wall.refresh(); onItemsChanged(); }
+      onNotice(done.length === targets.length
+        ? tn(done.length, 'sharedAlbum.withdrawnSelected')
+        : t('sharedAlbum.withdrawnPartial', { done: done.length, total: targets.length }));
+    }
+  };
+
   if (wall.phase.kind === 'unavailable') {
     return (
       <p className="empty-state" data-testid="shared-album-unavailable" role="status">
@@ -200,6 +251,7 @@ export function SharedAlbumBrowser({
               role="list"
               aria-label={t('sharedAlbum.wallAria', { name: albumName })}
               data-testid="shared-album-items"
+              data-picking={picked.ids.length > 0}
               aria-busy={measured ? undefined : true}
             >
               {rows.map((row) => (
@@ -210,13 +262,18 @@ export function SharedAlbumBrowser({
                 >
                   {row.items.map((tile) => {
                     const item = items[tile.originalIndex];
+                    const isPicked = picked.set.has(item.fileItemId);
                     return (
-                      <button
+                      <div
                         key={tile.id}
+                        className="shared-media-cell"
+                        data-picked={isPicked}
+                        style={{ width: `${tile.width}px`, height: `${tile.height}px` }}
+                      >
+                      <button
                         type="button"
                         className="shared-media-tile"
                         data-testid="shared-media-tile"
-                        style={{ width: `${tile.width}px`, height: `${tile.height}px` }}
                         aria-label={t('sharedAlbum.openItem', {
                           index: tile.originalIndex + 1, total: items.length,
                         })}
@@ -241,6 +298,21 @@ export function SharedAlbumBrowser({
                           </span>
                         )}
                       </button>
+                      {capabilities.personalSelection && (
+                        <button
+                          type="button"
+                          className="media-tile__select shared-media-pick"
+                          data-testid="shared-media-pick"
+                          aria-pressed={isPicked}
+                          aria-label={t(isPicked ? 'sharedAlbum.unpickAria' : 'sharedAlbum.pickAria', {
+                            index: tile.originalIndex + 1, total: items.length,
+                          })}
+                          onClick={() => picks.toggle(item.fileItemId)}
+                        >
+                          <span aria-hidden="true">{isPicked ? '✓' : ''}</span>
+                        </button>
+                      )}
+                      </div>
                     );
                   })}
                 </div>
@@ -259,6 +331,44 @@ export function SharedAlbumBrowser({
         )}
       </div>
 
+      {/* No print action: album membership carries no print grant (owner print
+          takes only the owner's own files, and AlbumShareAccess.CanPrint lives on
+          an email + second-factor share link). Offering one here would widen what
+          a member may do with files that are not theirs. */}
+      {capabilities.personalSelection && picked.ids.length > 0 && (
+        <div
+          className="shared-album-selection-bar"
+          role="region"
+          aria-label={t('sharedAlbum.selectionAria')}
+          data-testid="shared-album-selection-bar"
+        >
+          <span data-testid="shared-album-selection-count">
+            {tn(picked.ids.length, 'sharedAlbum.pickedCount')}
+          </span>
+          <span className="muted">{t('sharedAlbum.selectionPrivate')}</span>
+          {capabilities.withdrawOwnContribution && withdrawable.length > 0 && (
+            <button
+              type="button"
+              className="row-action"
+              data-testid="shared-sel-withdraw"
+              disabled={withdrawing}
+              onClick={() => void withdrawPicked()}
+            >
+              {tn(withdrawable.length, 'sharedAlbum.withdrawSelected')}
+            </button>
+          )}
+          <button
+            type="button"
+            className="row-action"
+            data-testid="shared-sel-clear"
+            disabled={withdrawing}
+            onClick={() => picks.clear()}
+          >
+            {t('sharedAlbum.clearPicks')}
+          </button>
+        </div>
+      )}
+
       {openIndex !== null && viewerItems[openIndex] !== undefined && (
         <MediaViewer
           items={viewerItems}
@@ -272,8 +382,19 @@ export function SharedAlbumBrowser({
           renderActions={(viewerItem) => {
             const item = items.find((i) => i.fileItemId === viewerItem.id);
             if (item === undefined) return null;
+            const isPicked = picked.set.has(item.fileItemId);
             return (
               <>
+                {capabilities.personalSelection && (
+                  <button
+                    type="button"
+                    data-testid="shared-viewer-select"
+                    aria-pressed={isPicked}
+                    onClick={() => picks.toggle(item.fileItemId)}
+                  >
+                    {isPicked ? t('sharedAlbum.picked') : t('sharedAlbum.pick')}
+                  </button>
+                )}
                 {capabilities.withdrawOwnContribution && item.canWithdraw && (
                   <button
                     type="button"
@@ -303,6 +424,20 @@ export function SharedAlbumBrowser({
               </>
             );
           }}
+          // Deliberately the LAST action, and only for somebody the server
+          // lets curate this album.
+          renderTrailingActions={capabilities.curateContent && cover
+            ? (viewerItem) => (
+              <AlbumCoverViewerAction
+                albumId={albumId}
+                fileItemId={viewerItem.id}
+                cover={cover.state}
+                onChange={cover.onChange}
+                onNotice={onNotice}
+                onUnauthorized={invalidateAuth}
+              />
+            )
+            : undefined}
           playback={play.active || play.finished
             ? {
               active: play.active,

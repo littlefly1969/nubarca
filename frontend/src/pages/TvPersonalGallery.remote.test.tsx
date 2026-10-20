@@ -79,3 +79,76 @@ it('opens on OK, selects on OK, keeps the selection through BACK', async () => {
   fireEvent.click(tiles()[2]);
   expect(await screen.findByTestId('tv-personal-viewer')).toBeInTheDocument();
 });
+
+it('shows the account selection picked elsewhere, and sends a pick made with the remote', async () => {
+  const server = { ids: ['b'], version: 2 };
+  const posted: string[][] = [];
+  const handlers: Record<string, MockHandler> = {
+    'GET /api/tv/personal/gallery': () => jsonResponse({
+      items: [item('a'), item('b'), item('c')], nextCursor: null, hasMore: false, totalCount: 3,
+    }),
+    'GET /api/tv/personal/selection': () => jsonResponse({ id: 's', version: server.version, count: server.ids.length }),
+    'GET /api/tv/personal/selection/ids': () => jsonResponse({ ids: server.ids, nextCursor: null, version: server.version, count: server.ids.length }),
+    'POST /api/tv/personal/selection/items': ({ body }) => {
+      const ids = (JSON.parse(body!) as { fileItemIds: string[] }).fileItemIds;
+      posted.push(ids);
+      server.ids = [...server.ids, ...ids.filter((id) => !server.ids.includes(id))];
+      server.version += 1;
+      return jsonResponse({ requested: ids.length, succeeded: ids.length, skipped: 0, version: server.version, count: server.ids.length });
+    },
+  };
+  for (const id of ['a', 'b', 'c']) {
+    handlers[`GET /api/tv/personal/media/${id}/thumbnail`] = media;
+    handlers[`GET /api/tv/personal/media/${id}/preview`] = media;
+  }
+  installFetchMock(handlers);
+  render(<I18nProvider><TvPersonalGallery grant="g" onBack={() => {}} onPersonalError={() => false} /></I18nProvider>);
+  await screen.findByText('a.jpg');
+  const tiles = () => document.querySelectorAll<HTMLButtonElement>('[data-tile]');
+
+  // Picked on the laptop: already marked here.
+  await vi.waitFor(() => expect(tiles()[1]).toHaveAttribute('aria-pressed', 'true'));
+  expect(tiles()[0]).toHaveAttribute('aria-pressed', 'false');
+
+  // Picked with the remote: sent to the account's selection.
+  fireEvent.click(tiles()[0]);
+  const viewer = await screen.findByTestId('tv-personal-viewer');
+  fireEvent.keyDown(viewer, { key: 'Enter' });
+  await vi.waitFor(() => expect(posted).toEqual([['a']]));
+  expect(server.ids).toEqual(['b', 'a']);
+});
+
+// BACK never reaches through the picks: they are the account's selection, held
+// for every device, and only "Azzera selezione" clears them.
+it('leaves quick selection and then the gallery on BACK without clearing the account selection', async () => {
+  const server = { ids: ['b'], version: 2 };
+  const writes: string[] = [];
+  const handlers: Record<string, MockHandler> = {
+    'GET /api/tv/personal/gallery': () => jsonResponse({
+      items: [item('a'), item('b'), item('c')], nextCursor: null, hasMore: false, totalCount: 3,
+    }),
+    'GET /api/tv/personal/selection': () => jsonResponse({ id: 's', version: server.version, count: server.ids.length }),
+    'GET /api/tv/personal/selection/ids': () => jsonResponse({ ids: server.ids, nextCursor: null, version: server.version, count: server.ids.length }),
+    'POST /api/tv/personal/selection/clear': () => { writes.push('clear'); return jsonResponse({ requested: 0, succeeded: 0, skipped: 0, version: 9, count: 0 }); },
+    'DELETE /api/tv/personal/selection/items': () => { writes.push('remove'); return jsonResponse({ requested: 0, succeeded: 0, skipped: 0, version: 9, count: 0 }); },
+  };
+  for (const id of ['a', 'b', 'c']) {
+    handlers[`GET /api/tv/personal/media/${id}/thumbnail`] = media;
+    handlers[`GET /api/tv/personal/media/${id}/preview`] = media;
+  }
+  installFetchMock(handlers);
+  const onBack = vi.fn();
+  render(<I18nProvider><TvPersonalGallery grant="g" onBack={onBack} onPersonalError={() => false} /></I18nProvider>);
+  await screen.findByText('a.jpg');
+  const tiles = () => document.querySelectorAll<HTMLButtonElement>('[data-tile]');
+  await vi.waitFor(() => expect(tiles()[1]).toHaveAttribute('aria-pressed', 'true'));
+
+  const gallery = screen.getByTestId('tv-personal-gallery');
+  fireEvent.keyDown(gallery, { key: 'Escape' });
+  expect(onBack).toHaveBeenCalledTimes(1);
+  expect(tiles()[1]).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByTestId('tv-personal-selection-bar')).toHaveTextContent('1');
+  // Long enough for a debounced write to have gone out, had one been queued.
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(writes).toEqual([]);
+});

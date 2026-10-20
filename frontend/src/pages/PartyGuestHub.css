@@ -1347,3 +1347,30 @@
 @media (min-width: 40rem) {
   .party-invitation-cta { padding-block-start: 3rem; }
 }
+
+/* The guest's own print picks: a count, the way to the studio, and Clear. */
+.party-guest-hub-picks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid rgb(0 212 255 / 34%);
+  border-radius: 999px;
+  background: rgb(0 212 255 / 10%);
+  color: var(--party-hub-text);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.party-guest-hub-picks-print { color: inherit; text-decoration: underline; }
+.party-guest-hub-picks-clear {
+  margin-left: auto;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid rgb(255 255 255 / 30%);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}

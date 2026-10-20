@@ -15,7 +15,7 @@ describe('primary navigation model', () => {
   // before roles existed.
   it('keeps every normal-user destination for a Member', () => {
     expect(allRoutes(MEMBER_PERMISSIONS)).toEqual([
-      '/', '/media', '/albums', '/people', '/parties',
+      '/', '/media', '/albums', '/lists', '/people', '/parties',
       '/lab', '/shares', '/cloud-functions', '/private', '/trash',
     ]);
   });
@@ -96,10 +96,10 @@ describe('primary navigation model', () => {
   // ---------------------------------------------------------- permissions
 
   it('leaves the core personal cloud untouched for a Restricted user', () => {
-    // Files, media, albums, shares and trash are not gated at all — which is
-    // why Restricted needs no permission to keep them.
+    // Files, media, albums, lists, shares and trash are not gated at all —
+    // which is why Restricted needs no permission to keep them.
     expect(allRoutes(RESTRICTED)).toEqual([
-      '/', '/media', '/albums', '/shares', '/trash',
+      '/', '/media', '/albums', '/lists', '/shares', '/trash',
     ]);
   });
 
@@ -148,7 +148,7 @@ describe('primary navigation model', () => {
     expect(gated['/admin/jobs']).toBe(PERMISSIONS.adminJobsManage);
     expect(gated['/admin/updates']).toBe(PERMISSIONS.adminDashboard);
 
-    for (const core of ['/', '/media', '/albums', '/shared-albums', '/shares', '/trash']) {
+    for (const core of ['/', '/media', '/albums', '/lists', '/shared-albums', '/shares', '/trash']) {
       expect(gated[core]).toBeUndefined();
     }
   });
