@@ -152,7 +152,8 @@ public class AlbumService : IAlbumService
                 .ToList();
             return new AlbumSummary(
                 a.Id, a.Name, a.Description, a.ItemCount, a.ShowOnTv, a.CreatedAt, a.UpdatedAt,
-                photoCount, videoCount, excludedCount, cover);
+                photoCount, videoCount, excludedCount, cover,
+                a.SortOldestFirst ? AlbumSortDirections.OldestFirst : AlbumSortDirections.NewestFirst);
         }).ToList();
     }
 

@@ -655,6 +655,17 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   at once, adopts the server's state on 409 without retrying, and explains a
   400 (no longer servable). A chosen cover that stops being servable is not
   returned to members, and the mosaic falls back to the first photo in order.
+  The native TV Personal Area album reuses the library workspace with an album
+  source, whose sort is client-chosen: `AlbumSummary` and the TV album card now
+  carry `sortDirection`, the album opens on `datetaken` in that direction
+  (`defaultOrder` in `tv/src/personal/mediaWorkspaceQuery.ts`, also the filter
+  panel's reset/baseline), an explicit sort is sent as asked, and the viewer's
+  slideshow plays the grid's own items. `GET /api/tv/personal/albums/{id}/media`
+  with neither `sort` nor `direction` defaults to the album's order server-side,
+  for clients that send none. Not yet measured: EXPLAIN on a large album in
+  Postgres, and shared-items cursors issued before this change (a v1 cursor is
+  refused as an invalid cursor and never reinterpreted in the new order; how
+  each client recovers from that refusal has not been exercised).
 - **There is ONE media-selection experience, and it is the Media Library.** A
   shared album's "Add from library" navigates to `/media` with the album in
   transient router state — never a URL, never a second route, never a fork of

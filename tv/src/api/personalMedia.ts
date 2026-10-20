@@ -3,6 +3,7 @@ import { personalHeaders } from './personal';
 import {
   queryToWire,
   semanticToWire,
+  type MediaSortDirection,
   type MediaWorkspaceIdentity,
 } from '../personal/mediaWorkspaceQuery';
 
@@ -53,6 +54,8 @@ export interface TvPersonalAlbumCard {
   photoCount: number;
   videoCount: number;
   coverImageUrls: string[];
+  // The owner's album order by date taken; absent from an older server.
+  sortDirection?: MediaSortDirection;
 }
 
 function toQueryString(wire: Record<string, string>): string {

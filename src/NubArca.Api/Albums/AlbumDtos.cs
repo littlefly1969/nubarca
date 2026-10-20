@@ -24,7 +24,10 @@ public record AlbumSummary(
     int PhotoCount,
     int VideoCount,
     int ExcludedCount,
-    IReadOnlyList<AlbumCoverItem> CoverItems);
+    IReadOnlyList<AlbumCoverItem> CoverItems,
+    // The album's date order (AlbumSortDirections), so a surface that opens the
+    // album from its card starts in the owner's direction without a second call.
+    string SortDirection = AlbumSortDirections.NewestFirst);
 
 // `SortDirection` is the album's date order ("desc" newest first, the default;
 // "asc" oldest first), which every member, TV and party wall follows.
