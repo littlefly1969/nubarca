@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useNavigate, type NavigateFunction } from 'react-router';
 import { PartyPage } from './PartyPage';
 import {
   activeIntersectionObservers, errorResponse, installFetchMock, jsonResponse, setIntersecting,
 } from '../test-utils';
 import { I18nProvider } from '../i18n';
 import { SCAN_MIN_PASSES, SCAN_PASS_MS } from '../components/useFaceScan';
+import { partyPicksScope, rememberPartyPicks } from './partyGuestMemo';
 
 /**
  * Ask for no motion.
@@ -491,6 +492,172 @@ describe('PartyPage (public party landing)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // A guest's own picks for printing: offered only where printing is, held as
+  // ids for this tab only, intersected with what the party serves, and gone
+  // with the grant.
+  describe('print picks', () => {
+    const withVideo = {
+      albumName: 'Beach Party',
+      items: [
+        items.items[0],
+        {
+          id: 'v1', mediaType: 'video',
+          thumbnailUrl: '/api/party/tok-1/media/v1/thumbnail',
+          previewUrl: '/api/party/tok-1/media/v1/preview',
+          downloadUrl: null,
+        },
+      ],
+    };
+    const stored = (printToken = 'print-token') =>
+      window.sessionStorage.getItem(`nubarca.party.picks.${partyPicksScope(printToken)}`);
+
+    it('picks a photo from the grid and the viewer, and leads to the print studio', async () => {
+      installFetchMock({
+        'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 2, printUrl: '/party/print-token/print' })),
+        'GET /api/party/tok-1/items': () => jsonResponse(withVideo),
+      });
+      const user = userEvent.setup();
+      render(wrapper());
+      await screen.findByTestId('party-grid');
+
+      // A video does not print, so it has no pick control.
+      const controls = screen.getAllByTestId('public-gallery-pick');
+      expect(controls).toHaveLength(1);
+      await user.click(controls[0]);
+      expect(controls[0]).toHaveAttribute('aria-pressed', 'true');
+      // Picking never opens the photo.
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByTestId('party-picks-count')).toHaveTextContent('1 foto scelta per la stampa');
+      expect(screen.getByTestId('party-picks-print')).toHaveAttribute('href', '/party/print-token/print');
+      // Ids only: no token, no URL.
+      expect(stored()).toBe('["f1"]');
+
+      // The viewer shows the pick and can take it back.
+      await user.click(screen.getAllByRole('button', { name: /Apri foto/i })[0]);
+      const viewer = await screen.findByRole('dialog', { name: /Visualizzatore foto/i });
+      const unpick = within(viewer).getByRole('button', { name: 'Togli dalle scelte per la stampa' });
+      expect(unpick).toHaveAttribute('aria-pressed', 'true');
+      await user.click(unpick);
+      expect(within(viewer).getByRole('button', { name: 'Scegli per la stampa' }))
+        .toHaveAttribute('aria-pressed', 'false');
+      expect(stored()).toBeNull();
+    });
+
+    it('offers no picking where the party offers no printing', async () => {
+      installFetchMock({
+        'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 1 })),
+        'GET /api/party/tok-1/items': () => jsonResponse(items),
+      });
+      render(wrapper());
+      await screen.findByTestId('party-grid');
+      expect(screen.queryByTestId('public-gallery-pick')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('party-picks-bar')).not.toBeInTheDocument();
+    });
+
+    it('counts only what this party serves, and clears on an explicit Clear', async () => {
+      rememberPartyPicks(partyPicksScope('print-token'), ['from-another-party', 'f1']);
+      installFetchMock({
+        'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 1, printUrl: '/party/print-token/print' })),
+        'GET /api/party/tok-1/items': () => jsonResponse(items),
+      });
+      render(wrapper());
+      expect(await screen.findByTestId('party-picks-count')).toHaveTextContent('1 foto scelta per la stampa');
+      await userEvent.setup().click(screen.getByTestId('party-picks-clear'));
+      expect(screen.queryByTestId('party-picks-bar')).not.toBeInTheDocument();
+      expect(stored()).toBeNull();
+    });
+
+    it('forgets this party\'s picks the moment it stops answering, and only those', async () => {
+      rememberPartyPicks(partyPicksScope('print-token'), ['f1']);
+      rememberPartyPicks(partyPicksScope('other-print-token'), ['f1']);
+      let revoked = false;
+      installFetchMock({
+        'GET /api/party/tok-1': () => (revoked
+          ? errorResponse(404)
+          : jsonResponse(context({ itemCount: 1, printUrl: '/party/print-token/print' }))),
+        'GET /api/party/tok-1/items': () => (revoked ? errorResponse(404) : jsonResponse(items)),
+      });
+      vi.useFakeTimers();
+      try {
+        render(wrapper());
+        await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+        await settle();
+        expect(screen.getByTestId('party-picks-count')).toHaveTextContent('1 foto scelta per la stampa');
+        revoked = true;
+        await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+        await settle();
+        expect(screen.getByText(/non è più disponibile/i)).toBeInTheDocument();
+        expect(stored()).toBeNull();
+        // Another party's picks in the same tab are not this grant's to clear.
+        expect(stored('other-print-token')).toBe('["f1"]');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps a party\'s picks when the same page moves to another party that is unavailable, and back', async () => {
+      // Party A (tok-1) is fine; party B (tok-2) answers 404. One mount, the
+      // route moves A → B → A as a link inside the app would.
+      installFetchMock({
+        'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 1, printUrl: '/party/print-token/print' })),
+        'GET /api/party/tok-1/items': () => jsonResponse(items),
+        'GET /api/party/tok-2': () => errorResponse(404),
+        'GET /api/party/tok-2/items': () => errorResponse(404),
+      });
+      let go: NavigateFunction = () => undefined;
+      function Nav() { go = useNavigate(); return null; }
+      const user = userEvent.setup();
+      render(
+        <I18nProvider>
+          <MemoryRouter initialEntries={['/party/tok-1']}>
+            <Nav />
+            <Routes>
+              <Route path="/party/:token" element={<PartyPage />} />
+            </Routes>
+          </MemoryRouter>
+        </I18nProvider>,
+      );
+      await screen.findByTestId('party-grid');
+      await user.click(screen.getByTestId('public-gallery-pick'));
+      expect(stored()).toBe('["f1"]');
+
+      await act(async () => { go('/party/tok-2'); });
+      expect(await screen.findByText(/non è più disponibile/i)).toBeInTheDocument();
+      // B's absence is not A's revocation.
+      expect(stored()).toBe('["f1"]');
+
+      await act(async () => { go('/party/tok-1'); });
+      expect(await screen.findByTestId('party-picks-count')).toHaveTextContent('1 foto scelta per la stampa');
+      expect(stored()).toBe('["f1"]');
+    });
+
+    it('keeps two parties that serve the same photo apart in one tab', async () => {
+      // Party B already picked f1, which party A serves too.
+      rememberPartyPicks(partyPicksScope('other-print-token'), ['f1']);
+      // A pre-scoping global key is ignored outright.
+      window.sessionStorage.setItem('nubarca.party.picks', JSON.stringify(['f1']));
+      installFetchMock({
+        'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 1, printUrl: '/party/print-token/print' })),
+        'GET /api/party/tok-1/items': () => jsonResponse(items),
+      });
+      const user = userEvent.setup();
+      render(wrapper());
+      await screen.findByTestId('party-grid');
+      const control = screen.getByTestId('public-gallery-pick');
+      expect(control).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.queryByTestId('party-picks-bar')).not.toBeInTheDocument();
+      await user.click(control);
+      await user.click(control);
+      // Unpicking here empties A's picks; B's stay exactly as they were.
+      expect(stored()).toBeNull();
+      expect(stored('other-print-token')).toBe('["f1"]');
+      // Nothing stored carries the print token itself.
+      for (let i = 0; i < window.sessionStorage.length; i += 1) {
+        expect(window.sessionStorage.key(i)).not.toContain('print-token');
+      }
+    });
   });
 
   it('becomes unavailable when the token is revoked during refresh', async () => {

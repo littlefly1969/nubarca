@@ -210,6 +210,12 @@ export function SharedAlbumDetailPage() {
           capabilities={capabilities}
           onItemsChanged={load}
           onNotice={setNotice}
+          cover={{
+            state: { version: current.version, coverFileItemId: current.coverFileItemId },
+            onChange: (next) => setStatus((prev) => prev.kind === 'ready'
+              ? { kind: 'ready', album: { ...prev.album, ...next } }
+              : prev),
+          }}
         />
       )}
 

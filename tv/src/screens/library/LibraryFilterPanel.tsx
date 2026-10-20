@@ -13,6 +13,7 @@ import {
   activeFilterCount,
   clearActiveFilters,
   cloneMediaFilters,
+  defaultOrder,
   DURATION_PRESET_MINUTES,
   isoToDateInput,
   isRelevanceOrdered,
@@ -197,6 +198,8 @@ export function LibraryFilterPanel({ applied, resultCount, onApply, onCancel, on
   // ------------------------------------------------------------------ rows
 
   const draftIdentity: MediaWorkspaceIdentity = { ...applied, filters, sort, direction };
+  // What this source opens in (an album: its owner's date order).
+  const baseOrder = defaultOrder(applied.source);
   const rows = tvFilterRows(draftIdentity, filters);
   // Deterministic and total: the same row when it is still there, else the
   // nearest one, else the primary action. Never the bare container.
@@ -390,7 +393,7 @@ export function LibraryFilterPanel({ applied, resultCount, onApply, onCancel, on
           <FilterRow
             label={t('filters.sort')}
             value={t(`filters.sort.${sort}` as Parameters<typeof t>[0])}
-            active={sort !== 'created'}
+            active={sort !== baseOrder.sort}
             opensEditor={false}
             accessibilityLabel={t('filters.rowA11y', {
               label: t('filters.sort'),
@@ -403,7 +406,7 @@ export function LibraryFilterPanel({ applied, resultCount, onApply, onCancel, on
           <FilterRow
             label={t('filters.direction')}
             value={direction === 'desc' ? t('filters.newest') : t('filters.oldest')}
-            active={direction !== 'desc'}
+            active={direction !== baseOrder.direction}
             opensEditor={false}
             accessibilityLabel={t('filters.rowA11y', {
               label: t('filters.direction'),
@@ -421,8 +424,8 @@ export function LibraryFilterPanel({ applied, resultCount, onApply, onCancel, on
           label={t('filters.resetAll')}
           onPress={() => {
             setFilters(clearActiveFilters(draftIdentity));
-            setSort('created');
-            setDirection('desc');
+            setSort(baseOrder.sort);
+            setDirection(baseOrder.direction);
           }}
           hasTVPreferredFocus={focusKey === 'reset'}
           onFocusChange={(f) => { if (f) focusRef.current = 'reset'; }}

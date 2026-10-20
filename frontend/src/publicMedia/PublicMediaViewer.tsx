@@ -46,6 +46,23 @@ export interface PublicMediaViewerProps {
   onClose(): void;
   onPrevious?: () => void;
   onNext?: () => void;
+  /**
+   * Choosing the photograph on screen, where the viewer is opened to choose
+   * (the print studio): the same choice the grid's round control makes.
+   */
+  selection?: PublicViewerSelection;
+}
+
+export interface PublicViewerSelection {
+  selected: boolean;
+  /** "Scegli questa foto" / "Togli dalla selezione", already localized. */
+  label: string;
+  /** Its place among the chosen ("Posizione 2"), shown while chosen. */
+  position?: string | null;
+  /** Nothing more may be chosen; `note` says why. */
+  disabled?: boolean;
+  note?: string | null;
+  onToggle(): void;
 }
 
 type ShareState =
@@ -55,7 +72,7 @@ type ShareState =
   | { kind: 'failed' };
 
 export function PublicMediaViewer({
-  item, label, downloadLabel, note, onClose, onPrevious, onNext,
+  item, label, downloadLabel, note, onClose, onPrevious, onNext, selection,
 }: PublicMediaViewerProps) {
   const { t } = useI18n();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -186,6 +203,25 @@ export function PublicMediaViewer({
           >
             {t('common.close')}
           </button>
+          {selection && (
+            <button
+              type="button"
+              className="public-viewer-action public-viewer-select"
+              data-testid="public-viewer-select"
+              aria-pressed={selection.selected}
+              disabled={selection.disabled && !selection.selected}
+              onClick={() => { selection.onToggle(); chrome.show(); }}
+            >
+              <span className="public-viewer-select-mark" aria-hidden="true">
+                {selection.selected ? '✓' : ''}
+              </span>
+              {selection.label}
+            </button>
+          )}
+          {selection?.selected && selection.position && (
+            <p className="public-viewer-note" data-testid="public-viewer-position">{selection.position}</p>
+          )}
+          {selection?.note && <p className="public-viewer-note" role="status">{selection.note}</p>}
           {downloadUrl && (
             <a
               className="public-viewer-action public-viewer-action--primary"

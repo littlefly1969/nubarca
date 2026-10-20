@@ -6,6 +6,39 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Selection, lists and album order
+
+- **Tapping a photo always opens it**, even while selecting. The round control
+  on each tile, Ctrl/Cmd, Shift ranges and long press select; the viewer has
+  its own select toggle (and the `x` key). The selection survives tab, album,
+  filter and page changes, and the count opens a tray of the picks.
+- **One selection per account, on every device.** The server keeps it, so what
+  is picked on the laptop is picked on the phone, the browser TV and the
+  Fire TV / Android TV Personal Area.
+- **Lists** (`/lists`): named sets of your own photos that you can create,
+  rename, duplicate and delete. A photo can sit in many lists, and a list is
+  references only, never copies. A list opens in the usual workspace, with
+  album, Trash, Vault and Print actions plus «Rimuovi dalla lista».
+- **On TV**, OK in the grid opens a photo and OK in the photo selects it.
+  LEFT/RIGHT move, PLAY/PAUSE runs the slideshow, and UP opens an action bar.
+  BACK closes the bar, then the viewer, and returns to the same tile.
+- **Print picker:** a tap shows the photo whole, with zoom and next/previous,
+  and it can be chosen from there. With more photos than the format takes,
+  the studio asks which to print instead of choosing for you.
+- **Personal picks in shared albums**, visible only to you and kept on your
+  other devices. From them you can withdraw your own contributions. Party
+  guests can pick photos for printing on the hub, and the picks start the
+  print sheet.
+- **Albums follow the date taken**, newest first, and the owner can turn an
+  album around («Ordina dal meno recente / più recente»). Members, TV and the
+  party wall see the same order. Su/Giù reordering is gone.
+- **«Imposta come copertina dell'album»** is the last action of the viewer
+  inside an album, for the owner and for editors.
+- Three additive migrations (`AddMediaLists`, `AddAlbumScopedSelections`,
+  `AddAlbumSortDirection`), all compatible with the previous image.
+  `PUT /api/shared-albums/{id}/order` and `POST …/items/{id}/move` are removed.
+  The TV app changes arrive with the next TV OTA.
+
 ### Printing: a 20x15 of two 10x15 is two 10x15 files in one print job
 
 - **Two 10x15 photos are no longer always framed.** Each one takes the style

@@ -29,7 +29,10 @@ import {
   PartyPhaseChangeBanner,
 } from '../party/PartyGuestSurfaces';
 import { PRODUCT_NAME } from '../brand/brand';
-import { rememberFaceFilter, rememberPartyHome } from './partyGuestMemo';
+import {
+  forgetPartyPicks, partyPicksScope, printTokenOf, recallPartyPicks, rememberFaceFilter, rememberPartyHome,
+  rememberPartyPicks,
+} from './partyGuestMemo';
 import './PartyGuestHub.css';
 
 // PUBLIC, unauthenticated party album landing. Reached by scanning the QR shown
@@ -290,6 +293,34 @@ export function PartyPage() {
   const [faceFilter, setFaceFilter] = useState<PartyFaceFilter | null>(null);
   // The face-search sheet is opened by its capability card and by nothing else.
   const [faceOpen, setFaceOpen] = useState(false);
+  // The guest's own picks for printing. Anonymous, so they live as long as
+  // this tab's session with the party: ids only, intersected with what the
+  // party serves, and forgotten the moment it stops answering.
+  // They are scoped to THIS party (its print token, digested), learnt once the
+  // context says where the party prints; until then there is nothing to pick.
+  // `owner` is the party page token the scope was learnt under. The route can
+  // move to another party without remounting this page, so a scope is only
+  // ever cleaned up while its own party is the one on screen: a different party
+  // that turns out to be unavailable must never empty this one's picks.
+  const [pickState, setPickState] = useState<{ owner: string | null; scope: string | null; ids: string[] }>(
+    () => ({ owner: token ?? null, scope: null, ids: [] }));
+  useEffect(() => {
+    const owner = token ?? null;
+    setPickState((current) => (current.owner === owner ? current : { owner, scope: null, ids: [] }));
+  }, [token]);
+  const picks = pickState.ids;
+  const setPicks = useCallback((ids: string[]) => {
+    setPickState((current) => ({ ...current, ids }));
+  }, []);
+  useEffect(() => {
+    if (pickState.scope) rememberPartyPicks(pickState.scope, pickState.ids);
+  }, [pickState]);
+  const togglePick = useCallback((id: string) => {
+    setPickState((current) => ({
+      ...current,
+      ids: current.ids.includes(id) ? current.ids.filter((x) => x !== id) : [...current.ids, id],
+    }));
+  }, []);
   // The print studio opens on its own token and cannot see this state, so the
   // guest's search result is left where that page can pick it up. Forgotten
   // again the moment the filter is cleared.
@@ -420,6 +451,11 @@ export function PartyPage() {
     clearPosterParam();
   }, [clearPosterParam, posterParam, posterSlot, state.kind]);
 
+  // Which party token the ready context belongs to. On a move to another party
+  // the old context is still in state for a render, and its print scope must
+  // not be taken for the new party's.
+  const [readyFor, setReadyFor] = useState<string | null>(null);
+
   const load = useCallback((signal?: AbortSignal) => {
     if (!token) {
       setState({ kind: 'unavailable' });
@@ -436,6 +472,7 @@ export function PartyPage() {
           ? (await getPartyItems(token, signal)).items
           : [];
         setState({ kind: 'ready', context, items });
+        setReadyFor(token);
         setShownPhase(context.phase);
         setMovedTo(null);
       })
@@ -514,6 +551,35 @@ export function PartyPage() {
   }, [state.kind, token]);
 
   const readyItems = state.kind === 'ready' ? state.items : null;
+
+  // Revoked, disabled or expired: nothing picked under that grant survives it.
+  // Only THIS party's picks are forgotten: another party's in the same tab stay.
+  useEffect(() => {
+    if (state.kind !== 'unavailable') return;
+    setPickState((current) => {
+      if (current.owner !== (token ?? null) || !current.scope) return current;
+      forgetPartyPicks(current.scope);
+      return { ...current, ids: [] };
+    });
+  }, [state.kind, token]);
+  const printScopeToken = state.kind === 'ready' && readyFor === token
+    ? printTokenOf(state.context.capabilities.printUrl)
+    : null;
+  useEffect(() => {
+    if (!printScopeToken) return;
+    const scope = partyPicksScope(printScopeToken);
+    const owner = token ?? null;
+    setPickState((current) => (current.owner === owner && current.scope === scope
+      ? current
+      : { owner, scope, ids: recallPartyPicks(scope) }));
+  }, [printScopeToken, token]);
+  // Only what this party serves right now counts as picked; a pick from
+  // another party, or of a photo taken down since, matches nothing.
+  const servedPicks = useMemo(() => {
+    const served = new Set((readyItems ?? []).map((item) => item.id));
+    return picks.filter((id) => served.has(id));
+  }, [picks, readyItems]);
+  const pickedSet = useMemo(() => new Set(servedPicks), [servedPicks]);
   useEffect(() => {
     if (!readyItems) return;
     // First sight of the album: everything in it is already "seen".
@@ -879,6 +945,19 @@ export function PartyPage() {
           )}
         </div>
 
+      {printUrl && servedPicks.length > 0 && (
+        <div className="party-guest-hub-picks" data-testid="party-picks-bar">
+          <span data-testid="party-picks-count">{tn(servedPicks.length, 'party.picksCount')}</span>
+          <Link to={printUrl} className="party-guest-hub-picks-print" data-testid="party-picks-print">
+            {t('party.printPicks')}
+          </Link>
+          <button type="button" className="party-guest-hub-picks-clear" data-testid="party-picks-clear"
+            onClick={() => setPicks([])}>
+            {t('party.clearPicks')}
+          </button>
+        </div>
+      )}
+
       {visibleItems.length === 0 ? (
         <div className="party-guest-hub-empty" data-testid="party-empty">
           <span className="party-guest-hub-empty-icon" aria-hidden="true"><PhotoStackIcon /></span>
@@ -898,6 +977,12 @@ export function PartyPage() {
             id: item.id, thumbnailUrl: item.thumbnailUrl, isVideo: item.mediaType === 'video',
           }))}
           onOpen={(index, tile) => openViewer(visibleItems, index, tile)}
+          // Picking is for printing, so it is offered only where printing is.
+          picking={printUrl ? {
+            picked: pickedSet,
+            label: (_item, picked) => t(picked ? 'party.unpick' : 'party.pick'),
+            onToggle: togglePick,
+          } : undefined}
         />
       )}
       </section>
@@ -965,9 +1050,18 @@ export function PartyPage() {
           playbackUrl: item.playbackUrl ?? null,
           downloadUrl: item.downloadUrl,
         };
+        const canPick = state.kind === 'ready' && Boolean(state.context.capabilities.printUrl)
+          && item.mediaType !== 'video';
+        const picked = pickedSet.has(item.id);
         return (
           <PublicMediaViewer
             item={shown}
+            selection={canPick ? {
+              selected: picked,
+              label: t(picked ? 'party.unpick' : 'party.pick'),
+              position: picked ? t('partyPrint.position', { n: servedPicks.indexOf(item.id) + 1 }) : null,
+              onToggle: () => togglePick(item.id),
+            } : undefined}
             label={item.mediaType === 'video' ? t('party.videoViewer') : t('party.photoViewer')}
             onClose={() => setLightbox(null)}
             onPrevious={lightbox.index > 0 ? () => move(-1) : undefined}

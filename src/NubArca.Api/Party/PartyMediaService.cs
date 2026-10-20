@@ -19,7 +19,7 @@ public sealed class PartyMediaService : IPartyMediaService
             // because the party resolved to this album, not because a
             // television was ever enabled for it.
             .Where(a => a.Id == albumId && a.OwnerUserId == ownerUserId)
-            .Select(a => new { a.Name, a.CoverFileItemId })
+            .Select(a => new { a.Name, a.CoverFileItemId, a.SortOldestFirst })
             .FirstOrDefaultAsync(cancellationToken);
         if (album is null)
         {
@@ -30,7 +30,9 @@ public sealed class PartyMediaService : IPartyMediaService
         var count = await members.CountAsync(cancellationToken);
         var configured = album.CoverFileItemId is Guid cover
             && await members.AnyAsync(x => x.Id == cover, cancellationToken) ? cover : (Guid?)null;
-        var fallback = configured ?? await members.OrderBy(x => x.AddedAt).ThenBy(x => x.Id)
+        // No chosen cover (or it is no longer shown): the first of the album's
+        // sequence, as every other album surface derives it.
+        var fallback = configured ?? await InAlbumOrder(members, album.SortOldestFirst)
             .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(cancellationToken);
         return new PartyAlbumHeader(album.Name, count, fallback, configured);
     }
@@ -38,21 +40,17 @@ public sealed class PartyMediaService : IPartyMediaService
     public async Task<IReadOnlyList<PartyMediaItem>?> ListItemsAsync(
         Guid ownerUserId, Guid albumId, CancellationToken cancellationToken = default)
     {
-        var albumOk = await _db.Albums
+        var album = await _db.Albums
             .AsNoTracking()
-            .AnyAsync(a => a.Id == albumId && a.OwnerUserId == ownerUserId, cancellationToken);
-        if (!albumOk)
+            .Where(a => a.Id == albumId && a.OwnerUserId == ownerUserId)
+            .Select(a => new { a.SortOldestFirst })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (album is null)
         {
             return null;
         }
 
-        var rows = await DisplayableMembers(ownerUserId, albumId)
-            // Id is a STABLE tie-break: bulk-added items share AddedAt, and without
-            // a deterministic secondary key each poll could return them in a
-            // different order, so the public party grid would keep reshuffling
-            // ("a slideshow of the whole gallery").
-            .OrderBy(x => x.AddedAt)
-            .ThenBy(x => x.Id)
+        var rows = await InAlbumOrder(DisplayableMembers(ownerUserId, albumId), album.SortOldestFirst)
             .Select(x => new { x.Id, x.MediaCategory, x.DetectedContentType })
             .ToListAsync(cancellationToken);
 
@@ -80,6 +78,16 @@ public sealed class PartyMediaService : IPartyMediaService
         return row is null ? null : Classify(row.MediaCategory, row.DetectedContentType);
     }
 
+    // The album's sequence: date taken (the upload time when a file carries no
+    // date) in the owner's direction. Id is a STABLE tie-break: photos can share
+    // a date, and without a deterministic secondary key each poll could return
+    // them in a different order, so the public party grid would keep
+    // reshuffling ("a slideshow of the whole gallery").
+    private static IQueryable<MemberRow> InAlbumOrder(IQueryable<MemberRow> members, bool oldestFirst) =>
+        oldestFirst
+            ? members.OrderBy(x => x.TakenAt).ThenBy(x => x.Id)
+            : members.OrderByDescending(x => x.TakenAt).ThenByDescending(x => x.Id);
+
     private IQueryable<MemberRow> DisplayableMembers(Guid ownerUserId, Guid albumId) =>
         DisplayableMembers(_db, ownerUserId, albumId);
 
@@ -103,7 +111,8 @@ public sealed class PartyMediaService : IPartyMediaService
                 f => f.Id,
                 (ai, f) => new
                 {
-                    ai.AddedAt, f.Id, f.BlobObjectId, f.OwnerUserId, f.DeletedAt, f.MediaLibraryState,
+                    ai.AddedAt, TakenAt = f.EffectiveDateTaken, f.Id, f.BlobObjectId, f.OwnerUserId,
+                    f.DeletedAt, f.MediaLibraryState,
                     f.Width, f.Height,
                 })
             // Slice 3: a Party surface never shows a file the owner moved out of
@@ -120,6 +129,7 @@ public sealed class PartyMediaService : IPartyMediaService
                 {
                     Id = x.Id,
                     AddedAt = x.AddedAt,
+                    TakenAt = x.TakenAt,
                     MediaCategory = m.MediaCategory,
                     DetectedContentType = m.DetectedContentType,
                     BlobObjectId = x.BlobObjectId,
@@ -142,6 +152,8 @@ public sealed class PartyMediaService : IPartyMediaService
     {
         public Guid Id { get; set; }
         public DateTime AddedAt { get; set; }
+        // FileItem.EffectiveDateTaken: the album's sequence.
+        public DateTime TakenAt { get; set; }
         public string MediaCategory { get; set; } = string.Empty;
         public string? DetectedContentType { get; set; }
         // Owner-private plumbing for server-side callers (the guest book takes

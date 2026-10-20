@@ -168,7 +168,7 @@ export function PersonalAlbumsScreen({
     // Guard against a double SELECT from a fast remote producing two pushes.
     if (openedRef.current) return;
     openedRef.current = true;
-    onOpenAlbum({ id: album.id, name: album.name });
+    onOpenAlbum({ id: album.id, name: album.name, sortDirection: album.sortDirection });
   }, [onOpenAlbum]);
 
   const renderRow = useCallback((

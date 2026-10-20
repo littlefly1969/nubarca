@@ -541,42 +541,10 @@ public static class AlbumSharingEndpoints
             return Respond(result, httpContext, albumId);
         }).WithName("SetSharedAlbumCover").RequireAuthorization();
 
-        app.MapMethods("/api/shared-albums/{albumId:guid}/order", ["PUT"], async (
-            Guid albumId,
-            HttpContext httpContext,
-            [FromServices] IAlbumEditingService editing,
-            [FromBody] ReorderAlbumRequest? body,
-            CancellationToken cancellationToken) =>
-        {
-            if (body?.AlbumItemIds is null)
-                return Results.BadRequest(new { error = "Missing 'albumItemIds'." });
-            var actorUserId = httpContext.GetCurrentUserId()!.Value;
-            var result = await editing.ReorderAsync(
-                actorUserId, albumId, body.ExpectedVersion, body.AlbumItemIds,
-                httpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
-            return Respond(result, httpContext, albumId);
-        }).WithName("ReorderSharedAlbum").RequireAuthorization();
-
-        // ONE item to ONE position — the curation surface's reorder. An O(1)
-        // payload whatever the album's size, reaching positions the caller has
-        // never loaded. The complete-list PUT /order above stays for clients
-        // that predate it.
-        app.MapPost("/api/shared-albums/{albumId:guid}/items/{albumItemId:guid}/move", async (
-            Guid albumId,
-            Guid albumItemId,
-            HttpContext httpContext,
-            [FromServices] IAlbumEditingService editing,
-            [FromBody] MoveAlbumItemRequest? body,
-            CancellationToken cancellationToken) =>
-        {
-            if (body?.TargetIndex is null)
-                return Results.BadRequest(new { error = "Missing 'targetIndex'." });
-            var actorUserId = httpContext.GetCurrentUserId()!.Value;
-            var result = await editing.MoveItemAsync(
-                actorUserId, albumId, body.ExpectedVersion, albumItemId, body.TargetIndex.Value,
-                httpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
-            return Respond(result, httpContext, albumId);
-        }).WithName("MoveSharedAlbumItem").RequireAuthorization();
+        // There is no reorder route. The album's sequence is its photographs by
+        // date taken in the owner's chosen direction (PUT /api/albums/{id}/sort);
+        // the former PUT /order and POST /items/{id}/move are gone with the
+        // curated order they wrote.
 
         // EDITORIAL removal of any item. Distinct from a contributor withdrawing
         // their own — which action happened follows the route invoked, not the
@@ -607,21 +575,6 @@ public static class AlbumSharingEndpoints
         {
             case AlbumEditOutcome.Ok:
                 SetNoStore(httpContext);
-                if (result.Position is not null)
-                {
-                    // A move also says where the item landed, so the client can
-                    // apply it to the rows it holds without re-reading them.
-                    return Results.Ok(new
-                    {
-                        albumId,
-                        version = result.Version,
-                        name = result.Name,
-                        description = result.Description,
-                        coverFileItemId = result.CoverFileItemId,
-                        position = result.Position,
-                        totalCount = result.TotalCount,
-                    });
-                }
                 return Results.Ok(new
                 {
                     albumId,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import {
   ApiError,
@@ -91,6 +91,9 @@ interface Props {
   // finished). The wall re-reads its first page, but only once nobody is
   // looking at a photo or holding a selection, which a refresh would drop.
   refreshToken?: number;
+  // The album page's last viewer action for the item on screen (its «Set as
+  // album cover»). Absent everywhere else, so the library viewer is unchanged.
+  renderViewerTrailingActions?(fileItemId: string): ReactNode;
 }
 
 export function MediaWorkspace({
@@ -103,6 +106,7 @@ export function MediaWorkspace({
   showPhotoPresentation = false,
   preselectedAlbumId,
   refreshToken,
+  renderViewerTrailingActions,
 }: Props) {
   const { t, tn } = useI18n();
   const { invalidateAuth } = useAuth();
@@ -691,6 +695,9 @@ export function MediaWorkspace({
           onIndexChange={viewer.setIndex}
           onNearEnd={() => loadMoreRef.current()}
           selection={viewerSelection}
+          renderTrailingActions={renderViewerTrailingActions
+            ? (vi) => renderViewerTrailingActions(vi.id)
+            : undefined}
           playback={play.active || play.finished
             ? {
               active: play.active,

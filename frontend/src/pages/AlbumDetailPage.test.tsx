@@ -29,6 +29,7 @@ afterEach(() => {
 const album = {
   id: 'album-1', name: 'My Album', description: 'Test description',
   showOnTv: false, createdAt: '2025-07-01T10:00:00Z', updatedAt: '2025-07-01T10:00:00Z',
+  sortDirection: 'desc', version: 3, coverFileItemId: null as string | null,
 };
 const partyOff = {
   albumId: 'album-1', showOnTv: false, partyMode: false, partyUrl: null,
@@ -272,5 +273,84 @@ describe('AlbumDetailPage — one heavy media surface at a time', () => {
     await userEvent.click(screen.getByTestId('album-content-close'));
     expect(await screen.findByText('photo.jpg')).toBeInTheDocument();
     expect(mediaReads()).toBeGreaterThan(whileOpen);
+  });
+});
+
+// The album's sequence is its photographs by date taken; the owner only turns
+// it around, and that choice is the album's for everybody.
+describe('AlbumDetailPage — date order', () => {
+  const mediaReads = (spy: { calls: { method: string; url: string }[] }) =>
+    spy.calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/albums/album-1/media'));
+
+  it('opens on the album’s own direction', async () => {
+    const spy = installFetchMock(baseHandlers({
+      'GET /api/albums/album-1': () => jsonResponse({ ...album, sortDirection: 'asc' }),
+    }));
+    render(wrapper());
+    await screen.findByText('photo.jpg');
+    await waitFor(() => expect(mediaReads(spy).at(-1)!.url).toContain('direction=asc'));
+  });
+
+  it('turns the album around for everybody and follows at once', async () => {
+    const spy = installFetchMock(baseHandlers({
+      'PUT /api/albums/album-1/sort': () => jsonResponse({ ...album, sortDirection: 'asc', version: 4 }),
+    }));
+    render(wrapper());
+    await screen.findByText('photo.jpg');
+
+    await userEvent.click(screen.getByTestId('album-more-actions'));
+    await userEvent.click(screen.getByTestId('album-toggle-order'));
+
+    const put = spy.calls.find((c) => c.method === 'PUT')!;
+    expect(JSON.parse(put.body!)).toEqual({ direction: 'asc' });
+    expect(await screen.findByTestId('album-detail-notice')).toHaveTextContent(/meno recenti, per tutti/i);
+    await waitFor(() => expect(mediaReads(spy).at(-1)!.url).toContain('direction=asc'));
+
+    // The menu now offers the way back.
+    await userEvent.click(screen.getByTestId('album-more-actions'));
+    expect(screen.getByTestId('album-toggle-order')).toHaveTextContent('Ordina dal più recente');
+  });
+
+  it('offers no manual reorder anywhere on the page', async () => {
+    installFetchMock(baseHandlers());
+    render(wrapper());
+    await screen.findByText('photo.jpg');
+    expect(screen.queryByText(/sposta su|sposta giù/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('AlbumDetailPage — cover from the viewer', () => {
+  it('offers «Set as album cover» as the viewer’s last action and adopts the result', async () => {
+    const spy = installFetchMock(baseHandlers({
+      'PUT /api/shared-albums/album-1/cover': () => jsonResponse({
+        albumId: 'album-1', version: 4, name: 'My Album', description: null, coverFileItemId: 'file-1',
+      }),
+    }));
+    render(wrapper());
+    await screen.findByText('photo.jpg');
+    await userEvent.click(screen.getAllByTestId('media-open')[0]);
+    const viewer = await screen.findByTestId('media-viewer');
+
+    const action = within(viewer).getByTestId('viewer-set-album-cover');
+    const buttons = Array.from(action.parentElement!.querySelectorAll('button'));
+    expect(buttons.indexOf(action as HTMLButtonElement)).toBe(buttons.length - 2);
+
+    await userEvent.click(action);
+    const put = spy.calls.find((c) => c.method === 'PUT')!;
+    expect(put.url).toBe('/api/shared-albums/album-1/cover');
+    expect(JSON.parse(put.body!)).toEqual({ expectedVersion: 3, fileItemId: 'file-1' });
+    expect(await within(viewer).findByTestId('viewer-album-cover-current')).toHaveTextContent('Copertina dell’album');
+  });
+
+  it('shows the current cover as such instead of offering it again', async () => {
+    installFetchMock(baseHandlers({
+      'GET /api/albums/album-1': () => jsonResponse({ ...album, coverFileItemId: 'file-1' }),
+    }));
+    render(wrapper());
+    await screen.findByText('photo.jpg');
+    await userEvent.click(screen.getAllByTestId('media-open')[0]);
+    const viewer = await screen.findByTestId('media-viewer');
+    expect(within(viewer).getByTestId('viewer-album-cover-current')).toBeInTheDocument();
+    expect(within(viewer).queryByTestId('viewer-set-album-cover')).not.toBeInTheDocument();
   });
 });
