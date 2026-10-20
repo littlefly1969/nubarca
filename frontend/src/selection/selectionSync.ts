@@ -69,6 +69,11 @@ export function startSelectionSync(
   let stopped = false;
   let listId: string | null = null;
   let knownState: string | null = null;
+  // True from the moment a read of the server's ids starts until one finishes.
+  // `knownState` moves as soon as a new stamp is seen, so without this a read
+  // that failed (offline, a 5xx, a timeout on page 2) would never be retried:
+  // the next poll sees the same stamp and believes the screen already has it.
+  let unpulled = false;
   let queue: Op[] = [];
   // The operation on the wire. A change arriving meanwhile never merges into
   // it (its ids are already sent), and a Clear arriving meanwhile replaces the
@@ -151,6 +156,7 @@ export function startSelectionSync(
   // Read the whole shared selection and adopt it.
   const pull = async () => {
     if (listId === null) return;
+    unpulled = true;
     const ids: string[] = [];
     let cursor: string | null = null;
     do {
@@ -158,11 +164,13 @@ export function startSelectionSync(
       ids.push(...page.ids);
       cursor = page.nextCursor;
     } while (cursor !== null && ids.length < maxIds && !stopped);
-    if (stopped || queue.length > 0) return;
+    // A local change queued meanwhile wins; sending it reconciles with the server.
+    if (stopped || queue.length > 0) { unpulled = false; return; }
     let items: MediaItem[] = [];
     if (transport.items && ids.some((id) => !store.getSnapshot().items.has(id))) {
       try { items = await transport.items(listId, controller.signal); } catch { items = []; }
     }
+    unpulled = false;
     if (stopped || queue.length > 0) return;
     store.adopt(ids, items);
   };
@@ -170,7 +178,7 @@ export function startSelectionSync(
   const load = async () => {
     const summary = await transport.summary(controller.signal);
     listId = summary.id;
-    if (stateOf(summary) !== knownState) {
+    if (stateOf(summary) !== knownState || unpulled) {
       knownState = stateOf(summary);
       if (queue.length === 0) await pull();
     }
@@ -187,7 +195,8 @@ export function startSelectionSync(
         listId = summary.id;
         // A different stamp: somebody else edited it, or one of its files
         // was trashed, vaulted or restored — either way, read it again.
-        if (stateOf(summary) !== knownState && queue.length === 0 && !sending) {
+        // ...or the last read of it failed and the screen never got it.
+        if ((stateOf(summary) !== knownState || unpulled) && queue.length === 0 && !sending) {
           knownState = stateOf(summary);
           await pull();
         }
