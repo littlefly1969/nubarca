@@ -4,6 +4,9 @@ import { HomeScreenAppCanonical, HomeScreenAppHead, homeScreenAppBasename } from
 import { I18nProvider } from './i18n';
 import { ThemeProvider } from './theme';
 import { AuthProvider } from './auth/AuthProvider';
+import { AccountSelectionProvider } from './selection/AccountSelectionProvider';
+import { ListsPage } from './lists/ListsPage';
+import { ListDetailPage } from './lists/ListDetailPage';
 import { PermissionRoute } from './auth/PermissionRoute';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { PERMISSIONS } from '@nubarca/api-client';
@@ -79,6 +82,7 @@ export function App() {
       <ThemeProvider>
       <I18nProvider>
       <AuthProvider>
+      <AccountSelectionProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           {/* PUBLIC password recovery. Unauthenticated by necessity — the
@@ -169,6 +173,8 @@ export function App() {
             <Route path="/help" element={<HelpPage />} />
             <Route path="/albums" element={<AlbumsPage />} />
             <Route path="/albums/:albumId" element={<AlbumDetailPage />} />
+            <Route path="/lists" element={<ListsPage />} />
+            <Route path="/lists/:listId" element={<ListDetailPage key="list" />} />
             {/* THE Party destination. `party.access` alone opens it: which
                 capabilities appear inside a party is the workspace's own
                 decision, and the server gates each of them independently. */}
@@ -391,6 +397,7 @@ export function App() {
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+      </AccountSelectionProvider>
       </AuthProvider>
       </I18nProvider>
       </ThemeProvider>

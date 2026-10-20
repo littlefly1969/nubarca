@@ -159,6 +159,10 @@ export const MEDIA_LIST_PATH = '/api/media';
 export function albumMediaPath(albumId: string): string {
   return `/api/albums/${albumId}/media`;
 }
+/** Route for one owner media list (or the current selection) under the same contract. */
+export function listMediaPath(listId: string): string {
+  return `/api/lists/${listId}/media`;
+}
 
 // ── Semantic search ────────────────────────────────────────────────────────
 // A conceptually DIFFERENT backend operation from physical filtering, and it

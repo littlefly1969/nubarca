@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ApiError, type MediaLibraryBulkResult } from '@nubarca/api-client';
 import { useAuth } from '../../auth/useAuth';
@@ -12,9 +12,11 @@ export interface MoveToExcludedDialogProps {
   count: number;
   onClose(): void;
   execute(): Promise<MediaLibraryBulkResult>;
+  // What the action reaches, when it starts from the account selection.
+  scope?: ReactNode;
 }
 
-export function MoveToExcludedDialog({ count, onClose, execute }: MoveToExcludedDialogProps) {
+export function MoveToExcludedDialog({ count, onClose, execute, scope }: MoveToExcludedDialogProps) {
   const { t, tn } = useI18n();
   const { invalidateAuth } = useAuth();
   const [busy, setBusy] = useState(false);
@@ -76,6 +78,7 @@ export function MoveToExcludedDialog({ count, onClose, execute }: MoveToExcluded
           <p className="ws-confirm-body">{t('moveToExcluded.explainKept')}</p>
           <p className="ws-confirm-body">{t('moveToExcluded.explainHidden')}</p>
         </div>
+        {scope}
 
         {error && (
           <p className="folder-error" role="alert" data-testid="move-to-excluded-error">

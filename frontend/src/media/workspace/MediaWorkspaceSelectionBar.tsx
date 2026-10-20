@@ -27,10 +27,17 @@ interface Props {
   restoreBusy?: boolean;
   onAction(id: MediaSelectionActionId): void;
   onClear(): void;
+  // How many items the current wall has LOADED, for the explicit "select the
+  // loaded items" command (Ctrl/Cmd+A). Absent → the command is not offered.
+  loadedCount?: number;
+  onSelectLoaded?(): void;
+  // Opens the tray listing what is selected. Absent → the count is plain text.
+  onOpenTray?(): void;
 }
 
 export function MediaWorkspaceSelectionBar({
   count, busy, actions, restoreBusy = false, onAction, onClear, active = count > 0,
+  loadedCount, onSelectLoaded, onOpenTray,
 }: Props) {
   const { t, tn } = useI18n();
   if (!active) return null;
@@ -44,11 +51,28 @@ export function MediaWorkspaceSelectionBar({
       aria-label={label}
       data-testid="media-selection-bar"
     >
-      <span className="ws-dock-count" data-testid="media-selection-count">
-        <Icon name="check" size={15} />
-        <span className="ws-dock-count-number" aria-hidden="true">{count}</span>
-        <span className="ws-dock-count-text">{label}</span>
-      </span>
+      {onOpenTray ? (
+        <button type="button" className="ws-dock-count is-button" data-testid="media-selection-count"
+          aria-label={`${label} — ${t('gallerySel.trayOpen')}`} aria-haspopup="dialog" onClick={onOpenTray}>
+          <Icon name="check" size={15} />
+          <span className="ws-dock-count-number" aria-hidden="true">{count}</span>
+          <span className="ws-dock-count-text">{label}</span>
+        </button>
+      ) : (
+        <span className="ws-dock-count" data-testid="media-selection-count">
+          <Icon name="check" size={15} />
+          <span className="ws-dock-count-number" aria-hidden="true">{count}</span>
+          <span className="ws-dock-count-text">{label}</span>
+        </span>
+      )}
+
+      {onSelectLoaded && loadedCount !== undefined && loadedCount > 0 && (
+        <button type="button" className="ws-dock-button is-contextual" data-testid="media-sel-select-loaded"
+          title={t('gallerySel.selectLoadedHint')} disabled={busy} onClick={onSelectLoaded}>
+          <Icon name="check" size={16} />
+          <span className="ws-dock-label">{tn(loadedCount, 'gallerySel.selectLoaded')}</span>
+        </button>
+      )}
 
       <div className="ws-dock-commands">
         {actions.contextual.map((a) => {

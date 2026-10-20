@@ -166,6 +166,14 @@ public interface IFileItemService
         IReadOnlyList<Guid> rankedFileItemIds,
         CancellationToken cancellationToken = default);
 
+    // Up to 100 owner ids → MediaItem DTOs in the supplied order, through the
+    // gallery gate under the given library scope (owner media lists).
+    Task<IReadOnlyList<MediaItem>> ListMediaByIdsAsync(
+        Guid ownerUserId,
+        IReadOnlyList<Guid> orderedFileItemIds,
+        NubArca.Api.MediaLibrary.MediaLibraryScope scope,
+        CancellationToken cancellationToken = default);
+
     // Count of physically filtered candidates that also have an embedding for
     // the given profile (denominator base before Top-K reduction).
     Task<int> CountEmbeddedGalleryCandidatesAsync(

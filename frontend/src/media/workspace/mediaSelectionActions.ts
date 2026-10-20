@@ -25,6 +25,8 @@ import type { MediaSelectionCapabilities } from './mediaSelectionCapabilities';
 export type MediaSelectionActionId =
   | 'restore'
   | 'remove-from-album'
+  | 'remove-from-list'
+  | 'list'
   | 'print'
   | 'personal'
   | 'excluded'
@@ -102,6 +104,13 @@ const ADD_TO: readonly Candidate[] = [
     capability: (c) => c.canAddToAlbum,
   },
   {
+    // An owner list ("Da stampare", "Per la nonna"): references, never copies.
+    id: 'list',
+    labelKey: 'gallery.ws.destList',
+    icon: 'list-add',
+    capability: (c) => c.canAddToList,
+  },
+  {
     id: 'plates',
     labelKey: 'gallery.ws.destPlates',
     icon: 'plates',
@@ -136,6 +145,13 @@ const CONTEXTUAL: readonly Candidate[] = [
     labelKey: 'mediaWs.removeFromAlbum',
     icon: 'album-remove',
     capability: (c) => c.canRemoveFromCurrentAlbum,
+  },
+  {
+    // Takes the picks out of THIS list; the files and every other list stay.
+    id: 'remove-from-list',
+    labelKey: 'mediaLists.removeFromList',
+    icon: 'list-remove',
+    capability: (c) => c.canRemoveFromCurrentList,
   },
   {
     // No permission of its own, as Print Stations has none: whoever owns a

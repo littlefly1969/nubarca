@@ -1259,10 +1259,25 @@ public sealed partial class FileItemService : IFileItemService
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(rankedFileItemIds);
-        if (rankedFileItemIds.Count == 0) return Array.Empty<MediaItem>();
+        return await ListMediaByIdsAsync(
+            ownerUserId, rankedFileItemIds, NubArca.Api.MediaLibrary.MediaLibraryScope.Active, cancellationToken);
+    }
 
-        var ids = rankedFileItemIds.Distinct().Take(100).ToList();
-        var rows = await BuildGalleryQuery(ownerUserId, new ImageFilters(), MediaKindScope.All)
+    // Hydrates up to 100 owner ids into MediaItem DTOs in the supplied order,
+    // through the same gallery gate (owner-scoped, Vault-excluded, not trashed,
+    // media only) under the given library scope. An id the gate refuses is
+    // silently dropped. Shared by semantic ranking and the owner's media lists.
+    public async Task<IReadOnlyList<MediaItem>> ListMediaByIdsAsync(
+        Guid ownerUserId,
+        IReadOnlyList<Guid> orderedFileItemIds,
+        NubArca.Api.MediaLibrary.MediaLibraryScope scope,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(orderedFileItemIds);
+        if (orderedFileItemIds.Count == 0) return Array.Empty<MediaItem>();
+
+        var ids = orderedFileItemIds.Distinct().Take(100).ToList();
+        var rows = await BuildGalleryQuery(ownerUserId, new ImageFilters { Scope = scope }, MediaKindScope.All)
             .Where(f => ids.Contains(f.Id))
             .Select(f => new GalleryRow
             {
@@ -1649,6 +1664,15 @@ public sealed partial class FileItemService : IFileItemService
         {
             query = query.Where(f =>
                 _db.AlbumItems.Any(ai => ai.AlbumId == albumId && ai.FileItemId == f.Id));
+        }
+
+        // Owner media list constraint: same EXISTS shape as the album one.
+        // FileItems are owner-scoped already, and a list only ever references
+        // its owner's files, so a foreign list id matches nothing.
+        if (filters.MediaListId is Guid mediaListId)
+        {
+            query = query.Where(f =>
+                _db.MediaListItems.Any(li => li.ListId == mediaListId && li.FileItemId == f.Id));
         }
 
         // Album membership: "in some album" vs "in no album". A plain EXISTS /

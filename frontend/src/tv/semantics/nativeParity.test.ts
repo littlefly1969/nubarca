@@ -407,6 +407,19 @@ describe('the same remote', () => {
       for (const isVideo of [false, true]) {
         expect(webRemote.mapViewerRemoteEvent(event, isVideo))
           .toBe(fn(native.remote, 'mapViewerRemoteEvent')(event, isVideo));
+        for (const selectable of [false, true]) {
+          expect(webRemote.mapViewerRemoteEvent(event, isVideo, { selectable }))
+            .toBe(fn(native.remote, 'mapViewerRemoteEvent')(event, isVideo, { selectable }));
+        }
+      }
+    }
+  });
+
+  it('offers the same action bar', () => {
+    for (const isVideo of [false, true]) {
+      for (const selectedCount of [0, 2]) {
+        expect(webRemote.viewerBarActions({ isVideo, selectedCount }))
+          .toEqual(fn(native.remote, 'viewerBarActions')({ isVideo, selectedCount }));
       }
     }
   });

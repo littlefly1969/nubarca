@@ -34,11 +34,14 @@ public sealed partial class MediaCollectionQueryService : IMediaCollectionQueryS
 
     private readonly IFileItemService _files;
     private readonly IAlbumService _albums;
+    private readonly MediaLists.IMediaListService? _lists;
 
-    public MediaCollectionQueryService(IFileItemService files, IAlbumService albums)
+    public MediaCollectionQueryService(
+        IFileItemService files, IAlbumService albums, MediaLists.IMediaListService? lists = null)
     {
         _files = files;
         _albums = albums;
+        _lists = lists;
     }
 
     public async Task<MediaCollectionResult> QueryAsync(
@@ -48,9 +51,7 @@ public sealed partial class MediaCollectionQueryService : IMediaCollectionQueryS
     {
         var error = await ValidateAsync(ownerUserId, query, cancellationToken);
         if (error is not null) return error;
-        var albumId = (query.Source as MediaCollectionSource.Album)?.AlbumId;
-
-        var filters = BuildFilters(query, albumId);
+        var filters = BuildFilters(query);
 
         ImageCursor? cursor = null;
         if (!string.IsNullOrWhiteSpace(query.Cursor))
@@ -128,6 +129,13 @@ public sealed partial class MediaCollectionQueryService : IMediaCollectionQueryS
             }
         }
 
+        if (query.Source is MediaCollectionSource.List list
+            && (_lists is null || await _lists.GetAsync(ownerUserId, list.ListId, cancellationToken) is null))
+        {
+            return MediaCollectionResult.Failure(
+                MediaCollectionStatus.AlbumNotFound, "List not found.");
+        }
+
         return null;
     }
 
@@ -135,8 +143,9 @@ public sealed partial class MediaCollectionQueryService : IMediaCollectionQueryS
     // in ONLY for their matching kind, mirroring the compatibility check above —
     // so even a defensively-populated Photo/Video group cannot reach the engine
     // under the wrong kind.
-    private static ImageFilters BuildFilters(MediaCollectionQuery query, Guid? albumId)
+    private static ImageFilters BuildFilters(MediaCollectionQuery query)
     {
+        var albumId = (query.Source as MediaCollectionSource.Album)?.AlbumId;
         var c = query.Common;
         var filters = new ImageFilters
         {
@@ -146,6 +155,7 @@ public sealed partial class MediaCollectionQueryService : IMediaCollectionQueryS
             DateTakenFrom = c.DateTakenFrom,
             DateTakenTo = c.DateTakenTo,
             AlbumId = albumId,
+            MediaListId = (query.Source as MediaCollectionSource.List)?.ListId,
             AlbumMembership = query.Source is MediaCollectionSource.Album
                 ? AlbumMembershipFilter.Any
                 : c.AlbumMembership,

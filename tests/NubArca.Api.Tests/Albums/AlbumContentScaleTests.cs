@@ -17,18 +17,16 @@ using Xunit;
 
 namespace NubArca.Api.Tests.Albums;
 
-// The album curation surface at SCALE: a paged read of the content, a
-// single-item move, and a thumbnail sized for a 56 px row.
+// The album curation surface at SCALE: a paged read of the content in the
+// album's own order (date taken, in the owner's direction, FileItemId breaking
+// ties), and a thumbnail sized for a 56 px row.
 //
 // The datasets are realistic — 0, 1, 81 and 520 items — because the defect
-// these tests exist for only shows at size: the whole album read on open, and
-// the whole id sequence re-sent on every move.
+// these tests exist for only shows at size: the whole album read on open.
 //
-// Two invariants run through all of it:
-//   * a page is never read at one version and continued at another — the
-//     version is the consistency boundary of curation, exactly as for edits;
-//   * a move renumbers only the rows between its two positions, and a stale one
-//     changes nothing.
+// The invariant that runs through all of it: a page is never read at one
+// version and continued at another — the version is the consistency boundary
+// of curation, exactly as for edits, and turning the album around moves it.
 public sealed class AlbumContentScaleTests : IDisposable
 {
     private readonly SqliteWebApplicationFactory _factory = new();
@@ -51,7 +49,7 @@ public sealed class AlbumContentScaleTests : IDisposable
     [InlineData(1)]
     [InlineData(81)]
     [InlineData(520)]
-    public async Task Paging_Visits_Every_Item_Once_In_The_Curated_Order(int size)
+    public async Task Paging_Visits_Every_Item_Once_In_The_Album_Order(int size)
     {
         var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
         var albumId = await CreateAlbumAsync(owner, "Big");
@@ -59,10 +57,37 @@ public sealed class AlbumContentScaleTests : IDisposable
 
         var walk = await WalkAsync(owner, albumId, PageSize);
 
-        // Nothing skipped, nothing repeated, and in exactly the stored order.
+        // Nothing skipped, nothing repeated, and newest first.
         Assert.Equal(await DbOrderAsync(albumId), walk.Ids);
         Assert.Equal(size, walk.Total);
         Assert.Equal(Math.Max(1, (size + PageSize - 1) / PageSize), walk.Pages);
+
+        // Turned around by the owner, the same walk is the exact reverse.
+        await SetDirectionAsync(owner, albumId, "asc");
+        var reversed = await WalkAsync(owner, albumId, PageSize);
+        Assert.Equal(walk.Ids.AsEnumerable().Reverse(), reversed.Ids);
+        Assert.Equal(await DbOrderAsync(albumId), reversed.Ids);
+    }
+
+    [Fact]
+    public async Task Removing_From_A_Large_Album_Rewrites_No_Other_Row_And_Keeps_The_Order()
+    {
+        // The visible order is by date, so a removal no longer renumbers the
+        // album's append order: no other row is read back and rewritten.
+        var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var albumId = await CreateAlbumAsync(owner, "Big");
+        await SeedItemsAsync(albumId, ownerId, 520);
+        var victim = await FileOfAsync((await DbOrderAsync(albumId))[260]);
+        var before = await AppendOrdersAsync(albumId);
+
+        (await owner.DeleteAsync($"/api/albums/{albumId}/content/{victim}")).EnsureSuccessStatusCode();
+
+        var after = await AppendOrdersAsync(albumId);
+        before.Remove(victim);
+        Assert.Equal(before, after);
+        var walk = await WalkAsync(owner, albumId, PageSize);
+        Assert.Equal(await DbOrderAsync(albumId), walk.Ids);
+        Assert.Equal(519, walk.Total);
     }
 
     [Fact]
@@ -110,20 +135,38 @@ public sealed class AlbumContentScaleTests : IDisposable
         Assert.Equal(await DbOrderAsync(albumId), page.Items.Select(ItemId).ToList());
     }
 
-    [Fact]
-    public async Task Rows_That_Share_A_SortOrder_Still_Page_Without_Duplicates_Or_Gaps()
+    [Theory]
+    [InlineData("desc")]
+    [InlineData("asc")]
+    public async Task Photos_Taken_At_The_Same_Moment_Still_Page_Without_Duplicates_Or_Gaps(string direction)
     {
-        // SortOrder is never assumed unique; FileItemId is the final tie-break,
-        // and the keyset must honour it or a page boundary between two equal
-        // rows would drop one of them.
+        // A burst shares its date taken; FileItemId is the final tie-break, and
+        // the keyset must honour it in both directions or a page boundary
+        // between two equal rows would drop one of them.
         var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
         var albumId = await CreateAlbumAsync(owner, "Ties");
-        await SeedItemsAsync(albumId, ownerId, 81, sortOrder: i => i / 3);
+        await SeedItemsAsync(albumId, ownerId, 81, takenAt: i => BaseTakenAt.AddMinutes(i / 3));
+        await SetDirectionAsync(owner, albumId, direction);
 
         var walk = await WalkAsync(owner, albumId, limit: 10);
 
         Assert.Equal(await DbOrderAsync(albumId), walk.Ids);
         Assert.Equal(81, walk.Ids.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task The_Order_Is_The_Date_Taken_Not_The_Order_Items_Were_Added()
+    {
+        var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var albumId = await CreateAlbumAsync(owner, "Shuffled");
+        // Added in one order, taken in a scrambled one.
+        await SeedItemsAsync(albumId, ownerId, 81, takenAt: i => BaseTakenAt.AddDays((i * 37) % 81));
+
+        var walk = await WalkAsync(owner, albumId, PageSize);
+        var taken = await TakenAtAsync(albumId);
+        var dates = walk.Ids.Select(id => taken[id]).ToList();
+        Assert.Equal(dates.OrderByDescending(d => d), dates);
+        Assert.NotEqual(await AddedOrderAsync(albumId), walk.Ids);
     }
 
     [Fact]
@@ -135,9 +178,8 @@ public sealed class AlbumContentScaleTests : IDisposable
 
         var first = await ReadPageAsync(await owner.GetAsync($"/api/albums/{albumId}/content?limit={PageSize}"));
 
-        // Somebody changes the album while the first page is on screen.
-        var ids = await DbOrderAsync(albumId);
-        (await MoveAsync(owner, albumId, ids[70], first.Version, 0)).EnsureSuccessStatusCode();
+        // The owner turns the album around while the first page is on screen.
+        await SetDirectionAsync(owner, albumId, "asc");
 
         // Continuing at the old version is a conflict that names the current
         // one — never a page of the new album appended to rows of the old.
@@ -177,162 +219,8 @@ public sealed class AlbumContentScaleTests : IDisposable
         }
     }
 
-    // ── Single-item move ────────────────────────────────────────────────────
-
-    [Theory]
-    [InlineData(10, 9)]   // up
-    [InlineData(10, 11)]  // down
-    [InlineData(10, 0)]   // to the start
-    [InlineData(10, 80)]  // to the end
-    [InlineData(39, 40)]  // down across the first page boundary
-    [InlineData(40, 39)]  // up across it
-    [InlineData(75, 3)]   // from the last page to the first
-    public async Task A_Move_Lands_Where_Asked_And_Renumbers_Only_Its_Range(int from, int to)
-    {
-        var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
-        var (_, editor) = await _factory.CreateAuthenticatedClientAsync(EditorEmail);
-        var albumId = await CreateAlbumAsync(owner, "Big");
-        await SeedItemsAsync(albumId, ownerId, 81);
-        await InviteAcceptAsync(owner, editor, albumId, EditorEmail, "editor");
-
-        var before = await DbOrderAsync(albumId);
-        var ordersBefore = await DbSortOrdersAsync(albumId);
-        var version = await VersionAsync(editor, albumId);
-
-        var response = await MoveAsync(editor, albumId, before[from], version, to);
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(to, body.GetProperty("position").GetInt32());
-        Assert.Equal(81, body.GetProperty("totalCount").GetInt32());
-        Assert.Equal(version + 1, body.GetProperty("version").GetInt32());
-
-        var expected = before.ToList();
-        expected.RemoveAt(from);
-        expected.Insert(to, before[from]);
-        Assert.Equal(expected, (await WalkAsync(editor, albumId, PageSize)).Ids);
-
-        // Still dense, and nothing outside the range between the two positions
-        // was touched.
-        var ordersAfter = await DbSortOrdersAsync(albumId);
-        Assert.Equal(Enumerable.Range(1, 81), ordersAfter.Values.OrderBy(o => o));
-        var (lo, hi) = (Math.Min(from, to), Math.Max(from, to));
-        for (var i = 0; i < before.Count; i++)
-        {
-            if (i < lo || i > hi)
-            {
-                Assert.Equal(ordersBefore[before[i]], ordersAfter[before[i]]);
-            }
-        }
-    }
-
     [Fact]
-    public async Task Moving_To_The_End_Of_A_Large_Album_Needs_Only_The_Item_And_The_Position()
-    {
-        // "To the end" of 520 items from a list that has read one page: the
-        // client never held the destination, and does not need to.
-        var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
-        var albumId = await CreateAlbumAsync(owner, "Big");
-        await SeedItemsAsync(albumId, ownerId, 520);
-        var first = await ReadPageAsync(await owner.GetAsync($"/api/albums/{albumId}/content?limit={PageSize}"));
-        var moved = ItemId(first.Items[0]);
-
-        var response = await MoveAsync(owner, albumId, moved, first.Version, first.TotalCount - 1);
-        response.EnsureSuccessStatusCode();
-
-        var order = await DbOrderAsync(albumId);
-        Assert.Equal(moved, order[^1]);
-        Assert.Equal(ItemId(first.Items[1]), order[0]);
-    }
-
-    [Fact]
-    public async Task A_Stale_Move_Is_A_Conflict_And_Changes_Nothing()
-    {
-        var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
-        var (_, editor) = await _factory.CreateAuthenticatedClientAsync(EditorEmail);
-        var albumId = await CreateAlbumAsync(owner, "Big");
-        await SeedItemsAsync(albumId, ownerId, 81);
-        await InviteAcceptAsync(owner, editor, albumId, EditorEmail, "editor");
-        var ids = await DbOrderAsync(albumId);
-        var stale = await VersionAsync(editor, albumId);
-
-        (await MoveAsync(owner, albumId, ids[5], stale, 60)).EnsureSuccessStatusCode();
-        var afterWinner = await DbOrderAsync(albumId);
-        var audits = await CountAuditAsync("album.edit_reorder");
-
-        var conflict = await MoveAsync(editor, albumId, ids[20], stale, 0);
-        Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
-        var body = await conflict.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(stale + 1, body.GetProperty("version").GetInt32());
-
-        // The losing writer wrote nothing and audited nothing.
-        Assert.Equal(afterWinner, await DbOrderAsync(albumId));
-        Assert.Equal(audits, await CountAuditAsync("album.edit_reorder"));
-        Assert.Equal(stale + 1, await VersionAsync(editor, albumId));
-    }
-
-    [Fact]
-    public async Task A_Move_Outside_The_Album_Or_Of_A_Foreign_Item_Is_Refused()
-    {
-        var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
-        var albumId = await CreateAlbumAsync(owner, "Big");
-        var otherAlbum = await CreateAlbumAsync(owner, "Other");
-        await SeedItemsAsync(albumId, ownerId, 81);
-        await SeedItemsAsync(otherAlbum, ownerId, 3);
-        var ids = await DbOrderAsync(albumId);
-        var version = await VersionAsync(owner, albumId);
-
-        // Refused, not clamped: a destination nobody asked for is not a move.
-        Assert.Equal(HttpStatusCode.BadRequest, (await MoveAsync(owner, albumId, ids[0], version, 81)).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await MoveAsync(owner, albumId, ids[0], version, -1)).StatusCode);
-        var missingTarget = await owner.PostAsJsonAsync(
-            $"/api/shared-albums/{albumId}/items/{ids[0]}/move", new { expectedVersion = version });
-        Assert.Equal(HttpStatusCode.BadRequest, missingTarget.StatusCode);
-        var foreign = (await DbOrderAsync(otherAlbum))[0];
-        Assert.Equal(HttpStatusCode.NotFound, (await MoveAsync(owner, albumId, foreign, version, 0)).StatusCode);
-
-        // Every refusal left both the order and the version alone.
-        Assert.Equal(ids, await DbOrderAsync(albumId));
-        Assert.Equal(version, await VersionAsync(owner, albumId));
-    }
-
-    [Fact]
-    public async Task Moving_An_Item_Onto_Its_Own_Position_Spends_No_Version()
-    {
-        var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
-        var albumId = await CreateAlbumAsync(owner, "Small");
-        await SeedItemsAsync(albumId, ownerId, 5);
-        var ids = await DbOrderAsync(albumId);
-        var version = await VersionAsync(owner, albumId);
-
-        var response = await MoveAsync(owner, albumId, ids[2], version, 2);
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(version, body.GetProperty("version").GetInt32());
-        Assert.Equal(version, await VersionAsync(owner, albumId));
-    }
-
-    [Fact]
-    public async Task An_Order_Numbered_From_Zero_Is_Renumbered_Once_And_Moves_Correctly()
-    {
-        // A detached copy numbers its items from zero. The first move on such an
-        // album renumbers it in its visible order, then moves.
-        var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
-        var albumId = await CreateAlbumAsync(owner, "Copy");
-        await SeedItemsAsync(albumId, ownerId, 81, sortOrder: i => i);
-        var before = await DbOrderAsync(albumId);
-
-        (await MoveAsync(owner, albumId, before[5], await VersionAsync(owner, albumId), 0))
-            .EnsureSuccessStatusCode();
-
-        var expected = before.ToList();
-        expected.RemoveAt(5);
-        expected.Insert(0, before[5]);
-        Assert.Equal(expected, await DbOrderAsync(albumId));
-        Assert.Equal(Enumerable.Range(1, 81), (await DbSortOrdersAsync(albumId)).Values.OrderBy(o => o));
-    }
-
-    [Fact]
-    public async Task Only_A_Curator_May_Page_Or_Move()
+    public async Task Only_A_Curator_May_Page()
     {
         var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
         var (_, editor) = await _factory.CreateAuthenticatedClientAsync(EditorEmail);
@@ -344,38 +232,25 @@ public sealed class AlbumContentScaleTests : IDisposable
         await InviteAcceptAsync(owner, editor, albumId, EditorEmail, "editor");
         await InviteAcceptAsync(owner, contributor, albumId, ContributorEmail, "contributor");
         await InviteAcceptAsync(owner, viewer, albumId, ViewerEmail, "viewer");
-        var ids = await DbOrderAsync(albumId);
-        var version = await VersionAsync(owner, albumId);
 
-        // The Owner and an Editor read and move through the same routes.
+        // The Owner and an Editor read through the same route.
         foreach (var curator in new[] { owner, editor })
         {
             var page = await curator.GetAsync($"/api/albums/{albumId}/content?limit={PageSize}");
             Assert.Equal(HttpStatusCode.OK, page.StatusCode);
         }
-        (await MoveAsync(editor, albumId, ids[0], version, 1)).EnsureSuccessStatusCode();
-        version += 1;
 
-        // A member who may not curate reads nothing here and moves nothing.
-        foreach (var member in new[] { contributor, viewer })
+        // A member who may not curate reads nothing here, and a stranger cannot
+        // tell the album exists.
+        foreach (var member in new[] { contributor, viewer, stranger })
         {
             Assert.Equal(HttpStatusCode.NotFound,
                 (await member.GetAsync($"/api/albums/{albumId}/content?limit={PageSize}")).StatusCode);
-            Assert.Equal(HttpStatusCode.Forbidden,
-                (await MoveAsync(member, albumId, ids[2], version, 0)).StatusCode);
         }
-
-        // A stranger cannot tell the album exists.
-        Assert.Equal(HttpStatusCode.NotFound,
-            (await stranger.GetAsync($"/api/albums/{albumId}/content?limit={PageSize}")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound,
-            (await MoveAsync(stranger, albumId, ids[2], version, 0)).StatusCode);
-
-        Assert.Equal(version, await VersionAsync(owner, albumId));
     }
 
     [Fact]
-    public async Task An_Unavailable_Item_Stays_On_Its_Page_And_Can_Still_Be_Moved()
+    public async Task An_Unavailable_Item_Keeps_Its_Place_In_The_Date_Order()
     {
         var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
         var albumId = await CreateAlbumAsync(owner, "Big");
@@ -383,19 +258,16 @@ public sealed class AlbumContentScaleTests : IDisposable
         var ids = await DbOrderAsync(albumId);
 
         var walk = await WalkAsync(owner, albumId, PageSize);
-        var row = walk.Rows.Single(r => ItemId(r) == ids[50]);
-        Assert.Equal("unavailable", row.GetProperty("sourceState").GetString());
-
-        // Moderation still reaches it: moved to the front, it is the first row
-        // of the first page.
-        (await MoveAsync(owner, albumId, ids[50], walk.Version, 0)).EnsureSuccessStatusCode();
-        var first = await ReadPageAsync(await owner.GetAsync($"/api/albums/{albumId}/content?limit={PageSize}"));
-        Assert.Equal(ids[50], ItemId(first.Items[0]));
-        Assert.Equal("unavailable", first.Items[0].GetProperty("sourceState").GetString());
+        // Moderation still reaches it, where its date puts it: seeded 51st of 81,
+        // newest first it is the 31st row.
+        Assert.Equal(ids, walk.Ids);
+        var unavailable = walk.Rows.FindIndex(r => r.GetProperty("sourceState").GetString() == "unavailable");
+        Assert.Equal(30, unavailable);
+        Assert.Single(walk.Rows, r => r.GetProperty("sourceState").GetString() == "unavailable");
     }
 
     [Fact]
-    public async Task The_Cover_Survives_Moves_And_Is_Flagged_On_Whichever_Page_Holds_It()
+    public async Task The_Cover_Survives_A_Turnaround_And_Is_Flagged_On_Whichever_Page_Holds_It()
     {
         var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
         var albumId = await CreateAlbumAsync(owner, "Big");
@@ -410,13 +282,14 @@ public sealed class AlbumContentScaleTests : IDisposable
         var walk = await WalkAsync(owner, albumId, PageSize);
         Assert.Equal(new[] { ids[45] }, walk.Rows.Where(r => r.GetProperty("isCover").GetBoolean()).Select(ItemId));
 
-        // Moving the cover item, and moving another item, leave the choice alone.
-        (await MoveAsync(owner, albumId, ids[45], walk.Version, 0)).EnsureSuccessStatusCode();
-        (await MoveAsync(owner, albumId, ids[3], walk.Version + 1, 80)).EnsureSuccessStatusCode();
+        Assert.Equal(1, walk.Rows.FindIndex(r => r.GetProperty("isCover").GetBoolean()) / PageSize);
 
+        // Turning the album around leaves the choice alone; the cover is now on
+        // the first page instead of the second.
+        await SetDirectionAsync(owner, albumId, "asc");
         var first = await ReadPageAsync(await owner.GetAsync($"/api/albums/{albumId}/content?limit={PageSize}"));
         Assert.Equal(coverFile, first.CoverFileItemId);
-        Assert.True(first.Items[0].GetProperty("isCover").GetBoolean());
+        Assert.Equal(new[] { ids[45] }, first.Items.Where(r => r.GetProperty("isCover").GetBoolean()).Select(ItemId));
     }
 
     // ── Curation thumbnails ─────────────────────────────────────────────────
@@ -536,10 +409,8 @@ public sealed class AlbumContentScaleTests : IDisposable
         return new Walk(rows.Select(ItemId).ToList(), rows, pages, version, total);
     }
 
-    private static Task<HttpResponseMessage> MoveAsync(
-        HttpClient client, Guid albumId, Guid albumItemId, int expectedVersion, int targetIndex) =>
-        client.PostAsJsonAsync($"/api/shared-albums/{albumId}/items/{albumItemId}/move",
-            new { expectedVersion, targetIndex });
+    private static async Task SetDirectionAsync(HttpClient owner, Guid albumId, string direction) =>
+        (await owner.PutAsJsonAsync($"/api/albums/{albumId}/sort", new { direction })).EnsureSuccessStatusCode();
 
     private static async Task<int> VersionAsync(HttpClient curator, Guid albumId) =>
         (await ReadPageAsync(await curator.GetAsync($"/api/albums/{albumId}/content?limit=1"))).Version;
@@ -557,7 +428,7 @@ public sealed class AlbumContentScaleTests : IDisposable
     // Realistic volume without hundreds of uploads: one stored image, shared by
     // every file the way exact dedup shares it, each file its own album row.
     private async Task SeedItemsAsync(
-        Guid albumId, Guid ownerId, int count, Func<int, int>? sortOrder = null, int unavailableAt = -1)
+        Guid albumId, Guid ownerId, int count, Func<int, DateTime>? takenAt = null, int unavailableAt = -1)
     {
         if (count == 0)
         {
@@ -603,7 +474,8 @@ public sealed class AlbumContentScaleTests : IDisposable
                 Width = 4000,
                 Height = 3000,
                 CreatedAt = now,
-                EffectiveDateTaken = now,
+                // Distinct by default, the later the seed index the newer.
+                EffectiveDateTaken = takenAt?.Invoke(i) ?? BaseTakenAt.AddMinutes(i),
                 DeletedAt = i == unavailableAt ? now : null,
             });
             db.AlbumItems.Add(new AlbumItem
@@ -613,31 +485,60 @@ public sealed class AlbumContentScaleTests : IDisposable
                 FileItemId = fileId,
                 AddedAt = now.AddSeconds(i),
                 AddedByUserId = ownerId,
-                SortOrder = sortOrder?.Invoke(i) ?? i + 1,
+                SortOrder = i + 1,
             });
         }
         await db.SaveChangesAsync();
     }
 
-    // The order every surface serves: SortOrder, then FileItemId.
+    private static readonly DateTime BaseTakenAt = new(2020, 6, 1, 12, 0, 0, DateTimeKind.Utc);
+
+    // The order every surface serves: date taken in the album's direction, then
+    // FileItemId in the same direction.
     private async Task<List<Guid>> DbOrderAsync(Guid albumId)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        return await db.AlbumItems.AsNoTracking()
+        var oldestFirst = await db.Albums.Where(a => a.Id == albumId).Select(a => a.SortOldestFirst).SingleAsync();
+        var rows = db.AlbumItems.AsNoTracking()
             .Where(ai => ai.AlbumId == albumId)
-            .OrderBy(ai => ai.SortOrder).ThenBy(ai => ai.FileItemId)
-            .Select(ai => ai.Id)
-            .ToListAsync();
+            .Join(db.FileItems.IgnoreQueryFilters(), ai => ai.FileItemId, f => f.Id,
+                (ai, f) => new { ai.Id, ai.FileItemId, f.EffectiveDateTaken });
+        var ordered = oldestFirst
+            ? rows.OrderBy(x => x.EffectiveDateTaken).ThenBy(x => x.FileItemId)
+            : rows.OrderByDescending(x => x.EffectiveDateTaken).ThenByDescending(x => x.FileItemId);
+        return await ordered.Select(x => x.Id).ToListAsync();
     }
 
-    private async Task<Dictionary<Guid, int>> DbSortOrdersAsync(Guid albumId)
+    private async Task<List<Guid>> AddedOrderAsync(Guid albumId)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         return await db.AlbumItems.AsNoTracking()
             .Where(ai => ai.AlbumId == albumId)
-            .ToDictionaryAsync(ai => ai.Id, ai => ai.SortOrder);
+            .OrderBy(ai => ai.SortOrder)
+            .Select(ai => ai.Id)
+            .ToListAsync();
+    }
+
+    private async Task<Dictionary<Guid, int>> AppendOrdersAsync(Guid albumId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.AlbumItems.AsNoTracking()
+            .Where(ai => ai.AlbumId == albumId)
+            .ToDictionaryAsync(ai => ai.FileItemId, ai => ai.SortOrder);
+    }
+
+    private async Task<Dictionary<Guid, DateTime>> TakenAtAsync(Guid albumId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.AlbumItems.AsNoTracking()
+            .Where(ai => ai.AlbumId == albumId)
+            .Join(db.FileItems.IgnoreQueryFilters(), ai => ai.FileItemId, f => f.Id,
+                (ai, f) => new { ai.Id, f.EffectiveDateTaken })
+            .ToDictionaryAsync(x => x.Id, x => x.EffectiveDateTaken);
     }
 
     private async Task<Guid> FileOfAsync(Guid albumItemId)
@@ -648,13 +549,6 @@ public sealed class AlbumContentScaleTests : IDisposable
             .Where(ai => ai.Id == albumItemId)
             .Select(ai => ai.FileItemId)
             .SingleAsync();
-    }
-
-    private async Task<int> CountAuditAsync(string action)
-    {
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        return await db.AuditLogs.CountAsync(a => a.Action == action);
     }
 
     private static async Task<Guid> CreateAlbumAsync(HttpClient owner, string name)

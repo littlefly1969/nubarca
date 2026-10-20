@@ -212,7 +212,8 @@ public sealed class TvPersonalMediaService : ITvPersonalMediaService
                 // cannot reach.
                 a.CoverItems
                     .Select(c => c.Kind == "video" ? PosterUrl(c.FileItemId) : ThumbnailUrl(c.FileItemId))
-                    .ToList()))
+                    .ToList(),
+                a.SortDirection))
             .ToList();
     }
 
@@ -228,14 +229,19 @@ public sealed class TvPersonalMediaService : ITvPersonalMediaService
         var summary = (await _albums.ListAsync(ownerUserId, cancellationToken))
             .FirstOrDefault(a => a.Id == albumId);
         return summary is null
-            ? new TvPersonalAlbumCardDto(detail.Id, detail.Name, 0, 0, 0, [])
+            ? new TvPersonalAlbumCardDto(detail.Id, detail.Name, 0, 0, 0, [], detail.SortDirection)
             : new TvPersonalAlbumCardDto(
                 summary.Id, summary.Name, summary.ItemCount,
                 summary.PhotoCount, summary.VideoCount,
                 summary.CoverItems
                     .Select(c => c.Kind == "video" ? PosterUrl(c.FileItemId) : ThumbnailUrl(c.FileItemId))
-                    .ToList());
+                    .ToList(),
+                detail.SortDirection);
     }
+
+    public async Task<string?> GetAlbumSortDirectionAsync(
+        Guid ownerUserId, Guid albumId, CancellationToken cancellationToken = default) =>
+        (await _albums.GetByIdAsync(albumId, ownerUserId, cancellationToken))?.SortDirection;
 
     // MediaItem → TV DTO. Every URL is rewritten to /api/tv/personal, which
     // re-checks the TV session AND the unlock grant AND current eligibility on

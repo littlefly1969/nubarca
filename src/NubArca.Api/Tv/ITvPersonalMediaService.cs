@@ -57,4 +57,11 @@ public interface ITvPersonalMediaService
     // so album existence never leaks across owners.
     Task<TvPersonalAlbumCardDto?> GetAlbumAsync(
         Guid ownerUserId, Guid albumId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The owner's date order for one of their albums ("desc" or "asc"), or null
+    /// when the album is missing or not theirs.
+    /// </summary>
+    Task<string?> GetAlbumSortDirectionAsync(
+        Guid ownerUserId, Guid albumId, CancellationToken cancellationToken = default);
 }

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import {
   ApiError,
   bulkRemoveAlbumItems,
+  removeMediaListItems,
   restoreToMediaLibrary,
   type FileMetadata,
   type ImageSortDirection,
@@ -16,6 +17,7 @@ import { useSequencePlayback } from '../playback/useSequencePlayback';
 import { MediaMetadataPanel } from '../metadata/MediaMetadataPanel';
 import { useMediaSimilarityActions } from '../viewer/mediaViewerActions';
 import { AlbumPickerModal } from '../../gallery/AlbumPickerModal';
+import { ListPickerModal } from '../../lists/ListPickerModal';
 import { MoveToPersonalDialog } from '../actions/MoveToPersonalDialog';
 import { useMoveToPersonal } from '../actions/useMoveToPersonal';
 import { MoveToExcludedDialog } from '../actions/MoveToExcludedDialog';
@@ -24,6 +26,9 @@ import { usePeopleIndex } from '../../gallery/workspace/usePeopleIndex';
 import { TrashConfirmation } from '../../gallery/workspace/TrashConfirmation';
 import { moveFilesToTrash } from '../../gallery/workspace/bulkTrash';
 import { usePermissions } from '../../auth/usePermissions';
+import { useAccountSelectionStore } from '../../selection/AccountSelectionProvider';
+import { SelectionTray } from '../../selection/SelectionTray';
+import { SelectionScope } from '../../selection/SelectionScope';
 
 // A photo-only bulk destination (Beauty Lab, Plates, …). `run` receives the
 // selected ids; the shell binds the live selection so the page never has to
@@ -86,6 +91,9 @@ interface Props {
   // finished). The wall re-reads its first page, but only once nobody is
   // looking at a photo or holding a selection, which a refresh would drop.
   refreshToken?: number;
+  // The album page's last viewer action for the item on screen (its «Set as
+  // album cover»). Absent everywhere else, so the library viewer is unchanged.
+  renderViewerTrailingActions?(fileItemId: string): ReactNode;
 }
 
 export function MediaWorkspace({
@@ -98,6 +106,7 @@ export function MediaWorkspace({
   showPhotoPresentation = false,
   preselectedAlbumId,
   refreshToken,
+  renderViewerTrailingActions,
 }: Props) {
   const { t, tn } = useI18n();
   const { invalidateAuth } = useAuth();
@@ -106,10 +115,12 @@ export function MediaWorkspace({
   const people = usePeopleIndex();
   const viewportRef = useAppScrollViewport();
 
+  const accountSelection = useAccountSelectionStore();
   const ws = useMediaWorkspace({
     source,
     identity,
     onAuthError: invalidateAuth,
+    selectionStore: accountSelection,
     translate: {
       loadError: t('mediaWs.loadError'),
       loadMoreError: t('mediaWs.loadError'),
@@ -122,10 +133,12 @@ export function MediaWorkspace({
   const refreshNow = ws.refresh;
   useEffect(() => {
     if (refreshToken === seenRefreshToken.current) return;
-    if (viewer.index !== null || selection.count > 0) return;
+    // A refresh no longer drops the selection (it lives in its store), so only
+    // somebody looking at a photo holds it back.
+    if (viewer.index !== null) return;
     seenRefreshToken.current = refreshToken;
     refreshNow();
-  }, [refreshToken, viewer.index, selection.count, refreshNow]);
+  }, [refreshToken, viewer.index, refreshNow]);
   const [visibleKey, setVisibleKey] = useState<string | null>(null);
   const [previousFailed, setPreviousFailed] = useState(false);
   const previousWindowEpoch = useRef(0);
@@ -162,7 +175,9 @@ export function MediaWorkspace({
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [listPickerOpen, setListPickerOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [trayOpen, setTrayOpen] = useState(false);
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
@@ -274,13 +289,40 @@ export function MediaWorkspace({
     }
   }, [source, selection, busy, pruneMoved, reconcile, tn, t, invalidateAuth, onAlbumMembershipChanged]);
 
+  // Takes the picks out of THIS list only. The files, their albums and every
+  // other list they are in stay exactly as they were.
+  const removeFromList = useCallback(async () => {
+    if (source.kind !== 'list') return;
+    const ids = [...selection.selected];
+    if (ids.length === 0 || busy) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await removeMediaListItems(source.listId, ids);
+      if (result.succeeded === ids.length) pruneMoved(ids, tn(result.succeeded, 'mediaLists.removed'));
+      else reconcile(tn(result.succeeded, 'mediaLists.removed'));
+      onAlbumMembershipChanged?.();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
+      setNotice(t('mediaLists.removeError'));
+    } finally {
+      setBusy(false);
+    }
+  }, [source, selection, busy, pruneMoved, reconcile, tn, t, invalidateAuth, onAlbumMembershipChanged]);
+
+  // Every confirmation that acts on the selection says it is the ACCOUNT's
+  // selection and counts what lies outside this view, so an action started
+  // over a list never looks as if it stopped at the list.
+  const onScreen = useMemo(() => new Set(ws.orderedIds), [ws.orderedIds]);
+  const scopeOf = (ids: readonly string[]) => <SelectionScope store={selection.store} ids={ids} onScreen={onScreen} />;
+
   async function confirmTrash() {
     const ids = [...selection.selected];
     if (ids.length === 0) { setTrashOpen(false); return; }
     setBusy(true);
     const result = await moveFilesToTrash(ids, { onAuthError: invalidateAuth });
+    // What moved leaves the wall and the selection; what failed stays picked.
     ws.removeLoadedIds(result.moved);
-    selection.selectAll(result.failed);
     const done = tn(result.moved.length, 'gallery.ws.trash.done');
     setNotice(done);
     announce(done);
@@ -293,7 +335,8 @@ export function MediaWorkspace({
   }, [ws]);
 
   // ---- keyboard: Escape clears selection; Ctrl/Cmd+A selects loaded ---------
-  const anyOverlayOpen = viewer.isOpen || sheetOpen || trashOpen || pickerOpen || moveToPersonal.isOpen || moveToExcluded.isOpen;
+  const anyOverlayOpen = viewer.isOpen || sheetOpen || trashOpen || pickerOpen || listPickerOpen || trayOpen
+    || moveToPersonal.isOpen || moveToExcluded.isOpen;
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape' && !anyOverlayOpen && selection.isSelectionActive) { selection.clear(); return; }
@@ -302,7 +345,8 @@ export function MediaWorkspace({
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
         if (anyOverlayOpen || ws.orderedIds.length === 0) return;
         e.preventDefault();
-        selection.selectAll(ws.orderedIds);
+        // ADDS the loaded items: what was picked on other screens stays picked.
+        selection.addAll(ws.orderedIds);
       }
     }
     window.addEventListener('keydown', onKey);
@@ -421,6 +465,9 @@ export function MediaWorkspace({
   }, [ws.semanticEvidence]);
 
   const selectedItems = ws.selectedItems;
+  const viewerSelection = useMemo(() => ({
+    isSelected: selection.isSelected, toggle: selection.toggle, count: selection.count,
+  }), [selection.isSelected, selection.toggle, selection.count]);
   const capabilities = getMediaSelectionCapabilities({
     items: selectedItems,
     source: source.kind,
@@ -436,7 +483,7 @@ export function MediaWorkspace({
     const supplied = new Set<string>(photoDestinations.map((d) => d.id));
     return {
       ...model,
-      addTo: model.addTo.filter((a) => a.id === 'album' || supplied.has(a.id)),
+      addTo: model.addTo.filter((a) => a.id === 'album' || a.id === 'list' || supplied.has(a.id)),
     };
   }, [capabilities, perms.all, photoDestinations]);
 
@@ -471,6 +518,8 @@ export function MediaWorkspace({
     switch (id) {
       case 'restore': void restoreSelected(); break;
       case 'remove-from-album': void removeFromAlbum(); break;
+      case 'remove-from-list': void removeFromList(); break;
+      case 'list': setListPickerOpen(true); break;
       case 'personal': moveToPersonal.open([...selection.selected]); break;
       case 'excluded': moveToExcluded.open([...selection.selected]); break;
       case 'trash': setTrashOpen(true); break;
@@ -485,7 +534,7 @@ export function MediaWorkspace({
       }
       default: runPhotoDestination(id);
     }
-  }, [actionModel, restoreSelected, removeFromAlbum, moveToPersonal, moveToExcluded, selection, runPhotoDestination,
+  }, [actionModel, restoreSelected, removeFromAlbum, removeFromList, moveToPersonal, moveToExcluded, selection, runPhotoDestination,
     selectedItems, navigate, source, t]);
 
   const semantic = isSemanticActive(identity);
@@ -645,6 +694,10 @@ export function MediaWorkspace({
           onClose={() => { play.stop(); viewer.close(); }}
           onIndexChange={viewer.setIndex}
           onNearEnd={() => loadMoreRef.current()}
+          selection={viewerSelection}
+          renderTrailingActions={renderViewerTrailingActions
+            ? (vi) => renderViewerTrailingActions(vi.id)
+            : undefined}
           playback={play.active || play.finished
             ? {
               active: play.active,
@@ -687,8 +740,15 @@ export function MediaWorkspace({
         actions={actionModel}
         restoreBusy={restoreBusy}
         onAction={runSelectionAction}
-        onClear={selection.clear}
+        onClear={() => { setTrayOpen(false); selection.clear(); }}
+        loadedCount={ws.orderedIds.length}
+        onSelectLoaded={() => selection.addAll(ws.orderedIds)}
+        onOpenTray={() => setTrayOpen(true)}
       />
+
+      {trayOpen && selection.isSelectionActive && (
+        <SelectionTray store={selection.store} onClose={() => setTrayOpen(false)} />
+      )}
 
       {notice && <div className="gallery-notice" role="status" data-testid="ws-notice">{notice}</div>}
 
@@ -699,7 +759,7 @@ export function MediaWorkspace({
         people={people.people}
         // Visual search has no album scope on the unified endpoint, so it is
         // offered only where the workspace can actually route it.
-        showVisualQuery={source.kind === 'library' || identity.mediaKind === 'image'}
+        showVisualQuery={source.kind === 'library' || (source.kind === 'album' && identity.mediaKind === 'image')}
         onApply={applyFilters}
         onClose={() => setSheetOpen(false)}
         returnFocusRef={filtersButtonRef}
@@ -708,6 +768,7 @@ export function MediaWorkspace({
       {trashOpen && (
         <TrashConfirmation
           count={selection.count}
+          scope={scopeOf([...selection.selected])}
           busy={busy}
           onConfirm={confirmTrash}
           onCancel={() => setTrashOpen(false)}
@@ -739,12 +800,27 @@ export function MediaWorkspace({
         />
       )}
 
+      {listPickerOpen && (
+        <ListPickerModal
+          fileItemIds={[...selection.selected]}
+          excludeListId={source.kind === 'list' ? source.listId : undefined}
+          onClose={() => setListPickerOpen(false)}
+          onAdded={(msg) => {
+            // Filed, as with an album: the picks are done with.
+            selection.clear();
+            setListPickerOpen(false);
+            setNotice(msg);
+            announce(msg);
+          }}
+        />
+      )}
+
       {moveToPersonal.isOpen && (
-        <MoveToPersonalDialog fileIds={moveToPersonal.ids} onClose={moveToPersonal.close} execute={moveToPersonal.execute} />
+        <MoveToPersonalDialog fileIds={moveToPersonal.ids} scope={scopeOf(moveToPersonal.ids)} onClose={moveToPersonal.close} execute={moveToPersonal.execute} />
       )}
 
       {moveToExcluded.isOpen && (
-        <MoveToExcludedDialog count={moveToExcluded.ids.length} onClose={moveToExcluded.close} execute={moveToExcluded.execute} />
+        <MoveToExcludedDialog count={moveToExcluded.ids.length} scope={scopeOf(moveToExcluded.ids)} onClose={moveToExcluded.close} execute={moveToExcluded.execute} />
       )}
     </section>
   );

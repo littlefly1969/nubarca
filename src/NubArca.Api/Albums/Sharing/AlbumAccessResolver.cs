@@ -121,50 +121,8 @@ public sealed class AlbumAccessResolver : IAlbumAccessResolver
         // Private Vault needs no predicate of its own: _db.FileItems carries the
         // global `PrivateVaultId == null` query filter, so a vaulted file is not
         // visible to this query at all. See the audit note in AlbumSharingService.
-        var row = await _db.AlbumItems
-            .AsNoTracking()
-            .Where(ai => ai.AlbumId == albumId && ai.FileItemId == fileItemId)
-            .Join(_db.FileItems.AsNoTracking(),
-                ai => ai.FileItemId,
-                f => f.Id,
-                (ai, f) => new
-                {
-                    f.Id,
-                    f.OwnerUserId,
-                    f.BlobObjectId,
-                    f.DeletedAt,
-                    f.MediaLibraryState,
-                    ai.AddedByUserId,
-                })
-            .Where(x => x.DeletedAt == null && x.MediaLibraryState == MediaLibraryState.Active)
-            // SHARE-ALBUM-02. Two shapes are servable, and the second is checked
-            // POSITIVELY rather than by removing the old owner-only predicate:
-            //
-            //   * the ALBUM OWNER's own media — no membership involved, so a
-            //     synthetic owner membership is never required;
-            //
-            //   * a CONTRIBUTION, which must satisfy all of:
-            //       - provenance is coherent: whoever added it owns it. A row
-            //         where these disagree is corrupt (the API cannot create
-            //         one) and is refused rather than guessed at;
-            //       - the source owner still holds an ACCEPTED, unrevoked
-            //         membership on THIS album — any role, so a contributor
-            //         downgraded to Viewer keeps their contribution visible;
-            //       - the source owner's account is still active.
-            //
-            // Revoking a membership already withdraws that member's items in the
-            // same transaction, so this predicate is normally redundant. It is
-            // here as the fail-closed guarantee: under a race, or against
-            // inconsistent data, access ends the moment the source membership
-            // does — without waiting for the withdrawal to land.
-            .Where(x => x.OwnerUserId == grant.AlbumOwnerUserId
-                || (x.AddedByUserId == x.OwnerUserId
-                    && _db.Users.Any(u => u.Id == x.OwnerUserId && u.DisabledAt == null)
-                    && _db.AlbumMemberships.Any(m =>
-                        m.AlbumId == albumId
-                        && m.MemberUserId == x.OwnerUserId
-                        && m.State == AlbumMembershipStates.Accepted
-                        && m.RevokedAt == null)))
+        var row = await ServableRows(albumId, grant.AlbumOwnerUserId)
+            .Where(x => x.Id == fileItemId)
             .Join(_db.BlobMetadata.AsNoTracking(),
                 x => x.BlobObjectId,
                 m => m.BlobObjectId,
@@ -196,5 +154,74 @@ public sealed class AlbumAccessResolver : IAlbumAccessResolver
         _ = SafeContentType.IsTrustedVideo(row.DetectedContentType);
 
         return new SharedMediaGrant(albumId, row.OwnerUserId, row.Id, kind.Value);
+    }
+
+    public IQueryable<Guid> ServableMediaIds(AlbumAccessGrant grant) =>
+        ServableRows(grant.AlbumId, grant.AlbumOwnerUserId)
+            .Join(_db.BlobMetadata.AsNoTracking(),
+                x => x.BlobObjectId,
+                m => m.BlobObjectId,
+                (x, m) => new { x.Id, m.MediaCategory })
+            .Where(x => x.MediaCategory == MediaCategories.Image || x.MediaCategory == MediaCategories.Video)
+            .Select(x => x.Id);
+
+    // The album's items that are servable to a member right now: in the album,
+    // untrashed, in the active library (the global filter already hides the
+    // Vault), and either the owner's own or a still-valid contribution. One
+    // definition, used for a single item and for a whole selection alike.
+    private IQueryable<ServableRow> ServableRows(Guid albumId, Guid albumOwnerUserId) =>
+        _db.AlbumItems
+            .AsNoTracking()
+            .Where(ai => ai.AlbumId == albumId)
+            .Join(_db.FileItems.AsNoTracking(),
+                ai => ai.FileItemId,
+                f => f.Id,
+                (ai, f) => new ServableRow
+                {
+                    Id = f.Id,
+                    OwnerUserId = f.OwnerUserId,
+                    BlobObjectId = f.BlobObjectId,
+                    DeletedAt = f.DeletedAt,
+                    MediaLibraryState = f.MediaLibraryState,
+                    AddedByUserId = ai.AddedByUserId,
+                })
+            .Where(x => x.DeletedAt == null && x.MediaLibraryState == MediaLibraryState.Active)
+            // SHARE-ALBUM-02. Two shapes are servable, and the second is checked
+            // POSITIVELY rather than by removing the old owner-only predicate:
+            //
+            //   * the ALBUM OWNER's own media — no membership involved, so a
+            //     synthetic owner membership is never required;
+            //
+            //   * a CONTRIBUTION, which must satisfy all of:
+            //       - provenance is coherent: whoever added it owns it. A row
+            //         where these disagree is corrupt (the API cannot create
+            //         one) and is refused rather than guessed at;
+            //       - the source owner still holds an ACCEPTED, unrevoked
+            //         membership on THIS album — any role, so a contributor
+            //         downgraded to Viewer keeps their contribution visible;
+            //       - the source owner's account is still active.
+            //
+            // Revoking a membership already withdraws that member's items in the
+            // same transaction, so this predicate is normally redundant. It is
+            // here as the fail-closed guarantee: under a race, or against
+            // inconsistent data, access ends the moment the source membership
+            // does — without waiting for the withdrawal to land.
+            .Where(x => x.OwnerUserId == albumOwnerUserId
+                || (x.AddedByUserId == x.OwnerUserId
+                    && _db.Users.Any(u => u.Id == x.OwnerUserId && u.DisabledAt == null)
+                    && _db.AlbumMemberships.Any(m =>
+                        m.AlbumId == albumId
+                        && m.MemberUserId == x.OwnerUserId
+                        && m.State == AlbumMembershipStates.Accepted
+                        && m.RevokedAt == null)));
+
+    private sealed class ServableRow
+    {
+        public Guid Id { get; init; }
+        public Guid OwnerUserId { get; init; }
+        public Guid BlobObjectId { get; init; }
+        public DateTime? DeletedAt { get; init; }
+        public MediaLibraryState MediaLibraryState { get; init; }
+        public Guid AddedByUserId { get; init; }
     }
 }

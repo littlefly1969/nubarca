@@ -263,7 +263,11 @@ public sealed record SharedAlbumDetail(
     // any editorial mutation, and `canEdit` so a client knows whether to render
     // the controls at all. The server enforces both regardless.
     int Version,
-    bool CanEdit);
+    bool CanEdit,
+    // The chosen cover while this member is shown it (else null: the album
+    // derives one), and the album's date order — "desc" newest first or "asc".
+    Guid? CoverFileItemId,
+    string SortDirection);
 
 // One media item of a shared album. `Kind` is "image" | "video".
 // `DownloadUrl` is null unless the membership permits originals — and the

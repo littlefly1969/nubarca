@@ -46,6 +46,13 @@ public class Album
     // concurrent editor may be looking at.
     public int Version { get; set; } = 1;
 
+    // The album's sequence is its photographs by date taken
+    // (FileItem.EffectiveDateTaken, which falls back to the upload time when a
+    // file carries no date), FileItemId breaking ties. Newest first unless the
+    // owner turned it around; whatever the owner chose is the order every member,
+    // TV and party wall gets. There is no manual order any more.
+    public bool SortOldestFirst { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

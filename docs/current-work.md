@@ -180,8 +180,8 @@ is built is described by `ARCHITECTURE.md`.
   destination, so another jump resumes automatic backfill. File selections
   persist across jumps by identity. Physical cursor type/sort validation lives
   in `ImageCursor.MatchesSort`, shared by ordinary pages and navigation windows.
-  Public/member album projections keep their curated order and expose no new
-  names or capture dates. PostgreSQL CI measures 50k/100k synthetic collections
+  Public/member album projections follow the album's date order and expose no
+  new names or capture dates. PostgreSQL CI measures 50k/100k synthetic collections
   and retains full query plans; see [performance acceptance](media-navigation-performance.md).
 - Library and owner albums share explicit browse/select interaction modes:
   ordinary taps open the viewer, touch/pen long-press selects, and selected ids
@@ -549,8 +549,10 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   with the tab that is open. `kind` is safe precisely because it is nothing new:
   it is answered from the media category the shared item shape already carried.
   A filter that needed owner-private metadata to answer would BE that metadata.
-  The cursor is `(SortOrder, FileItemId)` bound to the kind it was issued for,
-  and it is not a capability: membership is resolved BEFORE it is read, so a
+  The cursor (version 2) is `(EffectiveDateTaken, FileItemId)` plus the album
+  direction, bound to the kind it was issued for — a cursor from before the
+  owner turned the album around, or of the old curated order, is a 400 — and it
+  is not a capability: membership is resolved BEFORE it is read, so a
   stranger's malformed cursor is a 404 rather than the 400 that would confirm
   the album exists.
 - **The curation list reads the album a page at a time, and the version is the
@@ -563,15 +565,120 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   and continues after whichever row is now last. "Re-read after every edit" is
   therefore not the fix it looks like: it is the O(album) cost this replaced. A
   request naming none of `limit`/`cursor`/`expectedVersion` is the legacy
-  whole-album read, kept for clients that predate paging. Reorder is
-  `POST /api/shared-albums/{id}/items/{albumItemId}/move` (item, 0-based
-  target, version). It renumbers one range set-based, keeps the order dense, and
-  first renumbers, once, any album a copy numbered from zero. The complete-list
-  `PUT .../order` remains server-side for older clients; the web no longer calls
-  it. `AlbumSharedContentPanel` is ONE component for Owner and Editor. It is
+  whole-album read, kept for clients that predate paging. There is no reorder:
+  see the album-order bullet below. `AlbumSharedContentPanel` is ONE component
+  for Owner and Editor. It is
   virtualized, with a single Actions control per row. While it is open, the
   page's wall (`MediaWorkspace` / `SharedAlbumBrowser`) is UNMOUNTED, not
   hidden.
+- **A selection lives in a store above the screens, never in a wall.** The
+  web keeps one `MediaSelectionStore` per scope (`AccountSelectionProvider`
+  for the owner's library and albums, keyed on the signed-in user); a new
+  query, album, filter or page never clears it. Tapping a photograph always
+  opens the viewer; the round tile control, Ctrl/Cmd/Shift, long press and the
+  viewer's own toggle (button or `x`) select; Ctrl/Cmd+A ADDS the loaded items.
+  Grid, viewer and tray read the same store. The TV remote contract is
+  `tv/src/video/remoteMap.ts` (`selectable`), ported to the browser and held by
+  `nativeParity.test.ts`: in a viewer opened from a grid OK selects, LEFT/RIGHT
+  move and pause the slideshow, PLAY/PAUSE runs it, UP opens a D-pad action bar
+  with an on-screen Play/Pause, BACK closes the bar, then the viewer. The
+  assigned (unattended) party wall keeps OK = slideshow.
+- **The print picker is a viewer plus a round control, and its choice is the
+  composition's.** In `PrintStudio`'s select step a tile opens the photograph
+  whole in `PublicMediaViewer` (the medium or share/party-scoped preview it was
+  handed, never an original, no download) and its round control chooses it;
+  the viewer chooses too (`selection` prop). The grid stays mounted under the
+  viewer, so closing returns focus to the same tile with scroll and order
+  intact. The choice is local studio state, never the account selection.
+  Arriving with more photographs than the format takes chooses none of them
+  and says so (`partyPrint.chooseFromMore`); exactly as many are taken in
+  their order. One studio serves the owner, a share and a party, so all three
+  paths get it.
+- **The account selection is a server-held list, and lists hold references.**
+  `media_lists` / `media_list_items` (`MediaListService`, `/api/lists`,
+  `/api/selection`): one `CurrentSelection` per owner (filtered unique index)
+  plus named lists. An entry is `(ListId, FileItemId)` — dedup per list, never a
+  copy, a URL or a token; adds are idempotent and only take the owner's own,
+  untrashed, non-Vault media. Visibility is re-derived on every read, so a
+  trashed or vaulted file drops out of every list and comes back on restore;
+  a permanent delete cascades its entries. The web store is mirrored by
+  `selection/selectionSync.ts` (queued local writes, remote reads adopted
+  without echo); the TV Personal Area mirrors the same selection through
+  `/api/tv/personal/selection*` (grant-gated, selection only) and on leaving
+  forgets it on screen with `adopt([])` — never `clear()`, which would wipe it
+  for the account; BACK on the browser TV leaves quick selection and then the
+  gallery, never the picks. Devices follow the list's `stamp` (a digest of the
+  VISIBLE ordered ids), not its `version`: trash, Vault and restore move the
+  stamp without a list write, including equal-count substitutions. The sync
+  never merges a new edit into the request already on the wire, so a Clear
+  made meanwhile is always sent. A destructive confirmation over a list
+  (`SelectionScope`) says it acts on the ACCOUNT selection, counts the picks
+  outside the view and shows them. A list is a workspace source (`{ kind: 'list' }`):
+  every library operation applies, "Remove from list" replaces "Remove from
+  album", and the semantic search paths are not offered there (no list scope).
+  Selection add/remove is not audited (personal UI state); named-list changes
+  are, with counts only.
+- **Shared albums and parties get personal, scoped selections, never the
+  account one.** A member's picks in a shared album are a `media_lists` row of
+  kind `AlbumSelection` keyed on (owner, album) (`AlbumSelectionService`,
+  `/api/shared-albums/{id}/selection*`): every call resolves the album grant
+  first (no grant is the same 404 as no album), only what the album serves the
+  member now can be picked or is shown (`IAlbumAccessResolver.ServableMediaIds`),
+  the list carries the same visible-ids `stamp`, deleting the album cascades,
+  and a revoked membership stops the web sync (`onGone`) and forgets the picks
+  on screen. The browser (`SharedAlbumBrowser`) offers the round control, the
+  viewer toggle and only what the membership may do with the picks (withdraw
+  their own contributions); download stays per item and Editor removal stays in
+  the curation panel. There is deliberately **no print action** on a member's
+  picks: membership carries no print grant (owner print takes only the owner's
+  own files; `AlbumShareAccess.CanPrint` lives on an email + second-factor share
+  link), so a print hand-off would widen the grant. The supported paths are the
+  owner printing from the album, or the owner sending a print-enabled share
+  link. An anonymous party guest has no account, so their print
+  picks are ids in this tab's sessionStorage (`partyGuestMemo`), offered only
+  when the party offers printing, intersected with what the token serves,
+  forgotten when the party stops answering, and preselected by the print
+  studio when they fit the format (exactly N picks for an N-photo format are
+  taken in pick order; more than N leaves the choice to the guest). Picks are
+  stored per party under `nubarca.party.picks.{digest(printToken)}`: hub and
+  studio both derive the scope from the print token (the hub from
+  `capabilities.printUrl`, the studio from its route), the token itself is never
+  stored, a photo two parties share never carries picks across, and a revoked
+  party forgets only its own key. The pre-scoping global key is dropped.
+- **An album is in date order; the owner only chooses the direction.** Every
+  album surface — shared items, the curation list, the owner's wall, mosaics,
+  TV, party wall — sequences by `FileItem.EffectiveDateTaken` (which already
+  falls back to the upload time when a file has no capture date), FileItemId
+  breaking ties in the same direction. `Album.SortOldestFirst` (default false =
+  newest first) is set by the owner only (`PUT /api/albums/{id}/sort`
+  `{direction:'asc'|'desc'}`, audited as `album.update`, bumps the version) and
+  is the album's order for members, TV and party; `AlbumDetail` and
+  `SharedAlbumDetail` carry `sortDirection`, and `AlbumDetail` also `version`
+  and `coverFileItemId`. Manual reorder is gone: `PUT .../order` and
+  `POST .../items/{id}/move` were removed with Up/Down/Start/End (no TV or
+  mobile client called them); `AlbumItem.SortOrder` remains only as the append
+  order, so a rolled-back image still reads valid values; it is no longer
+  renumbered after a removal (holes are harmless, and the old compaction read and
+  rewrote every row of the album per removed item). Print-slot reordering
+  in PrintStudio is unrelated and stays. The ordering runs over the album's
+  primary key and the file key, then sorts per album — a denormalised
+  taken-at index on `album_items` was not added. «Set as album cover» is the
+  viewer's last action for a curator (`AlbumCoverViewerAction`, owner wall and
+  `SharedAlbumBrowser`), through the existing cover route: it adopts the result
+  at once, adopts the server's state on 409 without retrying, and explains a
+  400 (no longer servable). A chosen cover that stops being servable is not
+  returned to members, and the mosaic falls back to the first photo in order.
+  The native TV Personal Area album reuses the library workspace with an album
+  source, whose sort is client-chosen: `AlbumSummary` and the TV album card now
+  carry `sortDirection`, the album opens on `datetaken` in that direction
+  (`defaultOrder` in `tv/src/personal/mediaWorkspaceQuery.ts`, also the filter
+  panel's reset/baseline), an explicit sort is sent as asked, and the viewer's
+  slideshow plays the grid's own items. `GET /api/tv/personal/albums/{id}/media`
+  with neither `sort` nor `direction` defaults to the album's order server-side,
+  for clients that send none. Not yet measured: EXPLAIN on a large album in
+  Postgres, and shared-items cursors issued before this change (a v1 cursor is
+  refused as an invalid cursor and never reinterpreted in the new order; how
+  each client recovers from that refusal has not been exercised).
 - **There is ONE media-selection experience, and it is the Media Library.** A
   shared album's "Add from library" navigates to `/media` with the album in
   transient router state — never a URL, never a second route, never a fork of

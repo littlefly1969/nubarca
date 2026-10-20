@@ -40,17 +40,21 @@ const finishHold = () => act(() => vi.advanceTimersByTime(480));
 
 it('long-press selects the first media and consumes its generated click', () => {
   const { tile, onOpen } = setup();
-  expect(screen.queryByTestId('media-select-control')).not.toBeInTheDocument();
   hold(tile()); finishHold();
   expect(screen.getByTestId('mode')).toHaveTextContent('select');
   expect(screen.getByTestId('count')).toHaveTextContent('1');
-  expect(tile()).toHaveAttribute('aria-pressed', 'true');
+  const controls = () => screen.getAllByTestId('media-select-control');
+  expect(controls()[0]).toHaveAttribute('aria-pressed', 'true');
   fireEvent.pointerUp(tile()); fireEvent.click(tile());
-  expect(tile()).toHaveAttribute('aria-pressed', 'true');
+  expect(controls()[0]).toHaveAttribute('aria-pressed', 'true');
   expect(onOpen).not.toHaveBeenCalled();
-  fireEvent.click(screen.getAllByTestId('media-open')[1]);
+  // In select mode the round control adds…
+  fireEvent.click(controls()[1]);
   expect(screen.getByTestId('count')).toHaveTextContent('2');
-  expect(onOpen).not.toHaveBeenCalled();
+  // …and the photograph itself still opens the viewer.
+  fireEvent.click(screen.getAllByTestId('media-open')[2]);
+  expect(onOpen).toHaveBeenCalledWith('C');
+  expect(screen.getByTestId('count')).toHaveTextContent('2');
 });
 
 it.each(['movement', 'pointercancel', 'scroll', 'blur', 'lostcapture'])(
@@ -82,13 +86,16 @@ it('select mode remains active at zero selected items; Clear returns to browse',
   const { tile, onOpen } = setup();
   fireEvent.click(screen.getByText('Select'));
   expect(screen.getByTestId('mode')).toHaveTextContent('select');
-  fireEvent.click(tile()); fireEvent.click(tile());
+  const control = () => screen.getAllByTestId('media-select-control')[0];
+  fireEvent.click(control()); fireEvent.click(control());
   expect(screen.getByTestId('count')).toHaveTextContent('0');
   expect(screen.getByTestId('mode')).toHaveTextContent('select');
-  expect(onOpen).not.toHaveBeenCalled();
+  // Tapping the photograph opens it, in select mode as in browse mode.
+  fireEvent.click(tile());
+  expect(onOpen).toHaveBeenCalledWith('A');
   fireEvent.click(screen.getByText('Clear'));
   expect(screen.getByTestId('mode')).toHaveTextContent('browse');
-  fireEvent.click(tile()); expect(onOpen).toHaveBeenCalledWith('A');
+  fireEvent.click(tile()); expect(onOpen).toHaveBeenCalledTimes(2);
 });
 
 it('preserves Ctrl/Cmd toggling and Shift range selection', () => {
@@ -107,8 +114,10 @@ it('keeps tile keyboard activation meaningful in both modes', () => {
   expect(onOpen).toHaveBeenCalledWith('A');
   fireEvent.click(screen.getByText('Select'));
   act(() => tile().focus()); fireEvent.click(tile(), { detail: 0 });
-  expect(tile()).toHaveAttribute('aria-pressed', 'true');
-  expect(onOpen).toHaveBeenCalledTimes(1);
+  expect(onOpen).toHaveBeenCalledTimes(2);
+  const control = screen.getAllByTestId('media-select-control')[0];
+  act(() => control.focus()); fireEvent.click(control, { detail: 0 });
+  expect(control).toHaveAttribute('aria-pressed', 'true');
 });
 
 it('cancels pending holds when tiles unmount', () => {

@@ -134,6 +134,17 @@ export interface MediaViewerDetailsContext {
   adoptMetadata: (next: FileMetadata) => void;
 }
 
+// The selection, driven from inside the viewer.
+//
+// Selecting must never cost the ability to LOOK: the photograph stays zoomable
+// and navigable, and the tick placed here is the same tick the grid and the tray
+// show, because all three read one store. Absent → no control at all.
+export interface MediaViewerSelectionBinding {
+  isSelected(id: string): boolean;
+  toggle(id: string): void;
+  count: number;
+}
+
 interface MediaViewerProps {
   items: MediaViewerItem[];
   index: number;
@@ -155,11 +166,15 @@ interface MediaViewerProps {
   renderActions?: (item: MediaViewerItem) => ReactNode;
   // Present only while a caller is driving album Play through this viewer.
   playback?: MediaViewerPlaybackBinding;
+  selection?: MediaViewerSelectionBinding;
+  // Extra entries at the END of the chrome actions, after the details toggle
+  // (e.g. "Set as album cover", which is deliberately the last action).
+  renderTrailingActions?: (item: MediaViewerItem) => ReactNode;
 }
 
 export function MediaViewer({
   items, index, onClose, onIndexChange, onNearEnd, renderDetails,
-  capabilities = OWNER_VIEWER_CAPABILITIES, renderActions, playback,
+  capabilities = OWNER_VIEWER_CAPABILITIES, renderActions, playback, selection, renderTrailingActions,
 }: MediaViewerProps) {
   const { t, formatDate } = useI18n();
   const item = items[index];
@@ -226,7 +241,14 @@ export function MediaViewer({
   // surface the key belongs to (keyboardOwnership). Swipe: one finger, at fit.
   const keyPrev = useCallback(() => { goPrev(); showChrome(); }, [goPrev, showChrome]);
   const keyNext = useCallback(() => { goNext(); showChrome(); }, [goNext, showChrome]);
-  useViewerKeys(rootRef, { onClose, onPrevious: keyPrev, onNext: keyNext });
+  const selectionToggle = selection?.toggle;
+  const toggleCurrent = useCallback(() => {
+    if (item !== undefined && selectionToggle) { selectionToggle(item.id); showChrome(); }
+  }, [item, selectionToggle, showChrome]);
+  useViewerKeys(rootRef, {
+    onClose, onPrevious: keyPrev, onNext: keyNext,
+    onToggleSelect: selectionToggle ? toggleCurrent : undefined,
+  });
   const swipe = useSwipe({ onPrevious: keyPrev, onNext: keyNext, disabled: zoomed });
 
   // A cast that ended (stopped, or the receiver went away) hands its last known
@@ -380,6 +402,27 @@ export function MediaViewer({
                 {t('albumPlay.replayShort')}
               </button>
             )}
+            {selection && (() => {
+              const picked = selection.isSelected(item.id);
+              return (
+                <button
+                  type="button"
+                  className={`media-viewer-select${picked ? ' is-selected' : ''}`}
+                  data-testid="viewer-select-toggle"
+                  aria-pressed={picked}
+                  aria-label={t(picked ? 'mediaWs.deselectAria' : 'mediaWs.selectAria', { name: item.displayName })}
+                  title={t('mediaViewer.selectHint')}
+                  onClick={toggleCurrent}
+                >
+                  <span className="media-viewer-select__mark" aria-hidden="true">{picked ? '✓' : ''}</span>
+                  {selection.count > 0 && (
+                    <span className="media-viewer-select__count" data-testid="viewer-select-count">
+                      {t('mediaViewer.selectedCount', { count: String(selection.count) })}
+                    </span>
+                  )}
+                </button>
+              );
+            })()}
             {renderActions?.(item)}
             {/* Video only in this phase: images are not cast. */}
             {capabilities.cast && item.kind === 'video' && (
@@ -404,6 +447,7 @@ export function MediaViewer({
                 data-testid="viewer-details-toggle"
                 onClick={() => setDetailsOpen((v) => !v)}>ⓘ</button>
             )}
+            {renderTrailingActions?.(item)}
             <button type="button" aria-label={t('common.close')} onClick={onClose}>✕</button>
           </div>
         </div>

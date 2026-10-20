@@ -196,8 +196,12 @@
   }
 }
 
-.party-print-pick {
+.party-print-tile {
   position: relative;
+}
+
+/* The photograph: a tap opens it whole. */
+.party-print-open {
   display: block;
   width: 100%;
   aspect-ratio: 1;
@@ -206,36 +210,65 @@
   border: 2px solid transparent;
   border-radius: 0.7rem;
   background: rgb(10 15 26 / 60%);
-  cursor: pointer;
+  cursor: zoom-in;
 }
 
-.party-print-pick img {
+.party-print-open img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.party-print-pick[aria-pressed='true'] {
+.party-print-tile[data-chosen='true'] .party-print-open {
   border-color: var(--brand-cyan-glow);
 }
 
-.party-print-pick[aria-pressed='true'] img {
+.party-print-tile[data-chosen='true'] .party-print-open img {
   opacity: 0.75;
 }
 
-.party-print-pick-badge {
+/* The round control: chooses, and once chosen shows the photograph's place. */
+.party-print-pick {
   position: absolute;
-  inset-block-start: 0.35rem;
-  inset-inline-start: 0.35rem;
+  inset-block-start: 0.2rem;
+  inset-inline-start: 0.2rem;
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.party-print-pick:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.party-print-pick-badge {
   display: grid;
   place-items: center;
   width: 1.6rem;
   height: 1.6rem;
+  border: 2px solid rgb(255 255 255 / 90%);
   border-radius: 999px;
-  background: var(--brand-cyan-glow);
+  background: rgb(10 15 26 / 45%);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 45%);
   color: var(--brand-midnight-navy);
   font-size: 0.85rem;
   font-weight: 700;
+}
+
+.party-print-pick[aria-pressed='true'] .party-print-pick-badge {
+  border-color: var(--brand-cyan-glow);
+  background: var(--brand-cyan-glow);
+}
+
+.party-print-pick:focus-visible .party-print-pick-badge {
+  outline: 3px solid var(--brand-cyan-glow);
+  outline-offset: 2px;
 }
 
 /* Order ------------------------------------------------------------------ */

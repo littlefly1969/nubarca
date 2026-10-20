@@ -63,7 +63,11 @@ export type IconName =
   | 'print'
   // The upload tray's queue controls.
   | 'pause'
-  | 'play';
+  | 'play'
+  // Owner media lists: a bulleted list, plus/minus for add/remove.
+  | 'list'
+  | 'list-add'
+  | 'list-remove';
 
 const PATHS: Record<IconName, string> = {
   files: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
@@ -114,6 +118,9 @@ const PATHS: Record<IconName, string> = {
   restore: 'M4 10h6V4M4.5 10.5a8 8 0 1 1 .6 6',
   // An album with a minus: membership removed, the media itself untouched.
   'album-remove': 'M4 6h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zM14.5 9h7',
+  list: 'M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01',
+  'list-add': 'M9 6h11M9 12h6M9 18h6M4.5 6h.01M4.5 12h.01M4.5 18h.01M19 13v8M15 17h8',
+  'list-remove': 'M9 6h11M9 12h6M9 18h6M4.5 6h.01M4.5 12h.01M4.5 18h.01M15 17h8',
   more: 'M6 12h.01M12 12h.01M18 12h.01',
   // Four corners opening outward: show the whole photo.
   fit: 'M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5',

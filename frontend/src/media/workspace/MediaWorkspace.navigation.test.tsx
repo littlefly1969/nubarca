@@ -69,7 +69,7 @@ it('preserves long-press selection through a timeline jump and selects a second 
   expect(screen.queryByTestId('media-viewer')).not.toBeInTheDocument();
   await userEvent.click(screen.getByTestId('media-sel-clear'));
   expect(screen.queryByTestId('media-selection-bar')).not.toBeInTheDocument();
-  expect(tileB).not.toHaveAttribute('aria-pressed');
+  expect(tileB).toHaveAttribute('aria-pressed', 'false');
 });
 
 it('resumes automatic previous paging after a failed previous read followed by a successful jump', async () => {

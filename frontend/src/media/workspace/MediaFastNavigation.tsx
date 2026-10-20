@@ -4,7 +4,7 @@ import { Sheet } from '../../components/Overlay';
 import { useAppScrollViewport } from '../../components/appScroll';
 import { useI18n } from '../../i18n';
 import { Icon } from '../../components/icons/Icon';
-import { isSemanticActive, queryFingerprint, queryToWire, type MediaWorkspaceIdentity } from './mediaWorkspaceQuery';
+import { isSemanticActive, navigationSourceOf, queryFingerprint, queryToWire, type MediaWorkspaceIdentity } from './mediaWorkspaceQuery';
 import { navigationIndexAt, navigationLabel } from './mediaNavigation';
 import './MediaFastNavigation.css';
 
@@ -115,7 +115,7 @@ export function MediaFastNavigation({ identity, revision, currentKey, busy, onJu
     let disposed = false;
     const controller = new AbortController();
     const deadline = window.setTimeout(() => controller.abort(), 30_000);
-    void getMediaNavigation(identity.source.kind === 'album' ? identity.source.albumId : null,
+    void getMediaNavigation(navigationSourceOf(identity.source),
       queryToWire(identity, null), controller.signal)
       .then((data) => {
         if (!controller.signal.aborted) setBuckets(Array.isArray(data.buckets) ? data.buckets : []);

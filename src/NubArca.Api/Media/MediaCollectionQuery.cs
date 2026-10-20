@@ -17,6 +17,10 @@ public abstract record MediaCollectionSource
     public sealed record Library : MediaCollectionSource;
 
     public sealed record Album(Guid AlbumId) : MediaCollectionSource;
+
+    // One of the owner's media lists (or the current selection). The list is
+    // owner-validated; a foreign/missing list is a 404 like a foreign album.
+    public sealed record List(Guid ListId) : MediaCollectionSource;
 }
 
 // Common filters — valid for every kind (the only filters offered in "Tutti").
@@ -90,7 +94,7 @@ public sealed record MediaCollectionQuery(
 public enum MediaCollectionStatus
 {
     Ok,
-    AlbumNotFound,      // 404 — foreign/missing album (no existence leak)
+    AlbumNotFound,      // 404 — foreign/missing album or list (no existence leak)
     IncompatibleFilters, // 400 — kind/filter mismatch or album-membership in album
     BadCursor,          // 400 — malformed / wrong sort / wrong filter fingerprint
     InvalidLimit,       // 400 — limit out of [1, 100]

@@ -58,36 +58,36 @@ describe('move-to destinations', () => {
 
 describe('add-to destinations', () => {
   it('offers Album, Plates and Beauty for an all-photo selection with every permission', () => {
-    expect(ids(model([photo, photo]).addTo)).toEqual(['album', 'plates', 'beauty-lab']);
+    expect(ids(model([photo, photo]).addTo)).toEqual(['album', 'list', 'plates', 'beauty-lab']);
   });
 
   it('omits both Laboratory destinations without laboratory access', () => {
     const noLab = ALL.filter((p) => p !== PERMISSIONS.laboratoryAccess);
-    expect(ids(model([photo], noLab).addTo)).toEqual(['album']);
+    expect(ids(model([photo], noLab).addTo)).toEqual(['album', 'list']);
   });
 
   it('offers Plates but not Beauty when only the Plates section is held', () => {
     const platesOnly = [PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryPlates];
-    expect(ids(model([photo], platesOnly).addTo)).toEqual(['album', 'plates']);
+    expect(ids(model([photo], platesOnly).addTo)).toEqual(['album', 'list', 'plates']);
   });
 
   it('offers Beauty but not Plates when only the Aesthetics section is held', () => {
     const aestheticsOnly = [PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryAesthetics];
-    expect(ids(model([photo], aestheticsOnly).addTo)).toEqual(['album', 'beauty-lab']);
+    expect(ids(model([photo], aestheticsOnly).addTo)).toEqual(['album', 'list', 'beauty-lab']);
   });
 
   it('offers no photo-only destination for a video selection', () => {
-    expect(ids(model([video, video]).addTo)).toEqual(['album']);
+    expect(ids(model([video, video]).addTo)).toEqual(['album', 'list']);
   });
 
   it('offers no photo-only destination for a MIXED selection', () => {
     // A photo-only action must never run partially — the videos in the
     // selection have nowhere to go, so the destination is not offered at all.
-    expect(ids(model([photo, video]).addTo)).toEqual(['album']);
+    expect(ids(model([photo, video]).addTo)).toEqual(['album', 'list']);
   });
 
-  it('gives an unpermissioned user only the album destination', () => {
-    expect(ids(model([photo], NONE).addTo)).toEqual(['album']);
+  it('gives an unpermissioned user only the album and list destinations', () => {
+    expect(ids(model([photo], NONE).addTo)).toEqual(['album', 'list']);
   });
 });
 
@@ -113,11 +113,24 @@ describe('contextual actions', () => {
     expect(ids(album.moveTo)).toEqual(['personal', 'excluded', 'trash']);
   });
 
+  it('offers Remove-from-list inside a list, and never Remove-from-album there', () => {
+    const list = model([photo, photo], ALL, { source: 'list' });
+    expect(ids(list.contextual)).toEqual(['remove-from-list', 'print']);
+    expect(ids(list.contextual)).not.toContain('remove-from-album');
+    // Every ordinary operation stays available from a list.
+    expect(ids(list.moveTo)).toEqual(['personal', 'excluded', 'trash']);
+    expect(ids(list.addTo)).toEqual(['album', 'list', 'plates', 'beauty-lab']);
+    // …and a list action never leaks into the library or an album.
+    expect(ids(model([photo]).contextual)).not.toContain('remove-from-list');
+    expect(ids(model([photo], ALL, { source: 'album' }).contextual)).not.toContain('remove-from-list');
+  });
+
   // A print takes one to eight of the user's own photographs to the print studio.
   it.each([
     ['nothing', [], 'library', 'active', false],
     ['one photograph in the library', [photo], 'library', 'active', true],
     ['one photograph in an own album', [photo], 'album', 'active', true],
+    ['one photograph in a list', [photo], 'list', 'active', true],
     ['two photographs', [photo, photo], 'library', 'active', true],
     ['one video', [video], 'library', 'active', false],
     ['a mixed selection (its videos left out)', [photo, video], 'library', 'active', true],

@@ -63,7 +63,7 @@ public class AlbumService : IAlbumService
             throw new DuplicateAlbumNameException(name);
         }
 
-        return new AlbumDetail(album.Id, album.Name, album.Description, album.ShowOnTv, album.CreatedAt, album.UpdatedAt);
+        return DetailOf(album);
     }
 
     public async Task<IReadOnlyList<AlbumSummary>> ListAsync(
@@ -83,6 +83,8 @@ public class AlbumService : IAlbumService
                 a.ShowOnTv,
                 a.CreatedAt,
                 a.UpdatedAt,
+                a.SortOldestFirst,
+                a.CoverFileItemId,
             })
             .ToListAsync(cancellationToken);
 
@@ -101,11 +103,11 @@ public class AlbumService : IAlbumService
             where albumIds.Contains(ai.AlbumId)
             join f in _db.FileItems on ai.FileItemId equals f.Id
             where f.OwnerUserId == ownerUserId && f.DeletedAt == null
-            orderby ai.AddedAt
             select new
             {
                 ai.AlbumId,
                 ai.FileItemId,
+                TakenAt = f.EffectiveDateTaken,
                 f.MediaLibraryState,
                 DetectedType = _db.BlobMetadata
                     .Where(m => m.BlobObjectId == f.BlobObjectId)
@@ -124,7 +126,14 @@ public class AlbumService : IAlbumService
         return albums.Select(a =>
         {
             var members = byAlbum.GetValueOrDefault(a.Id) ?? [];
-            var active = members.Where(m => m.MediaLibraryState == MediaLibraryState.Active).ToList();
+            // The mosaic follows the album's sequence (date taken in the owner's
+            // direction), led by the chosen cover while it is still shown.
+            var active = (a.SortOldestFirst
+                    ? members.OrderBy(m => m.TakenAt).ThenBy(m => m.FileItemId)
+                    : members.OrderByDescending(m => m.TakenAt).ThenByDescending(m => m.FileItemId))
+                .Where(m => m.MediaLibraryState == MediaLibraryState.Active)
+                .OrderBy(m => m.FileItemId == a.CoverFileItemId ? 0 : 1)
+                .ToList();
             var photoCount = active.Count(m => !IsVideo(m.DetectedType, m.MimeType));
             var videoCount = active.Count(m => IsVideo(m.DetectedType, m.MimeType));
             var excludedCount = members.Count(m => m.MediaLibraryState == MediaLibraryState.Excluded);
@@ -143,7 +152,8 @@ public class AlbumService : IAlbumService
                 .ToList();
             return new AlbumSummary(
                 a.Id, a.Name, a.Description, a.ItemCount, a.ShowOnTv, a.CreatedAt, a.UpdatedAt,
-                photoCount, videoCount, excludedCount, cover);
+                photoCount, videoCount, excludedCount, cover,
+                a.SortOldestFirst ? AlbumSortDirections.OldestFirst : AlbumSortDirections.NewestFirst);
         }).ToList();
     }
 
@@ -153,7 +163,9 @@ public class AlbumService : IAlbumService
     {
         return await _db.Albums
             .Where(a => a.Id == albumId && a.OwnerUserId == ownerUserId)
-            .Select(a => new AlbumDetail(a.Id, a.Name, a.Description, a.ShowOnTv, a.CreatedAt, a.UpdatedAt))
+            .Select(a => new AlbumDetail(a.Id, a.Name, a.Description, a.ShowOnTv, a.CreatedAt, a.UpdatedAt,
+                a.SortOldestFirst ? AlbumSortDirections.OldestFirst : AlbumSortDirections.NewestFirst,
+                a.Version, a.CoverFileItemId))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -191,7 +203,7 @@ public class AlbumService : IAlbumService
             throw new DuplicateAlbumNameException(name);
         }
 
-        return new AlbumDetail(album.Id, album.Name, album.Description, album.ShowOnTv, album.CreatedAt, album.UpdatedAt);
+        return DetailOf(album);
     }
 
     public async Task<AlbumDetail?> SetTvVisibilityAsync(
@@ -216,7 +228,7 @@ public class AlbumService : IAlbumService
         // set independently. Party access is revoked by revoking the party.
         await _db.SaveChangesAsync(cancellationToken);
 
-        return new AlbumDetail(album.Id, album.Name, album.Description, album.ShowOnTv, album.CreatedAt, album.UpdatedAt);
+        return DetailOf(album);
     }
 
     // The next append position for a new item. Album membership is small, so a
@@ -377,13 +389,48 @@ public class AlbumService : IAlbumService
         await _db.SaveChangesAsync(cancellationToken);
     }
 
+    private static AlbumDetail DetailOf(Album album) => new(
+        album.Id, album.Name, album.Description, album.ShowOnTv, album.CreatedAt, album.UpdatedAt,
+        album.SortOldestFirst ? AlbumSortDirections.OldestFirst : AlbumSortDirections.NewestFirst,
+        album.Version, album.CoverFileItemId);
+
+    // The owner turns the album's date order around. It is the order every
+    // member, TV and party wall then gets, so the version moves: a curator
+    // looking at the old order learns it changed.
+    public async Task<AlbumDetail?> SetSortDirectionAsync(
+        Guid albumId, Guid ownerUserId, bool oldestFirst,
+        CancellationToken cancellationToken = default)
+    {
+        // One conditional UPDATE, incremented in the database: a curator's edit
+        // claims the version with `WHERE Version = expected` at the same time,
+        // and a read-modify-write here could write back a version that edit had
+        // already used, hiding it from every client that compares versions. The
+        // direction is an absolute value, so setting it again is a no-op and
+        // does not move the version; the owner sends no expected version.
+        var now = _time.GetUtcNow().UtcDateTime;
+        await _db.Albums
+            .Where(a => a.Id == albumId && a.OwnerUserId == ownerUserId && a.SortOldestFirst != oldestFirst)
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(a => a.SortOldestFirst, oldestFirst)
+                      .SetProperty(a => a.UpdatedAt, now)
+                      .SetProperty(a => a.Version, a => a.Version + 1),
+                cancellationToken);
+
+        var album = await _db.Albums.AsNoTracking()
+            .Where(a => a.Id == albumId && a.OwnerUserId == ownerUserId)
+            .FirstOrDefaultAsync(cancellationToken);
+        return album is null ? null : DetailOf(album);
+    }
+
     public async Task<IReadOnlyList<AlbumItemSummary>?> ListItemsAsync(
         Guid albumId, Guid ownerUserId,
         CancellationToken cancellationToken = default)
     {
-        var albumExists = await _db.Albums
-            .AnyAsync(a => a.Id == albumId && a.OwnerUserId == ownerUserId, cancellationToken);
-        if (!albumExists)
+        var album = await _db.Albums
+            .Where(a => a.Id == albumId && a.OwnerUserId == ownerUserId)
+            .Select(a => new { a.SortOldestFirst })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (album is null)
             return null;
 
         // Hidden soft-deleted files from album item views. Slice 3: a file the
@@ -391,7 +438,7 @@ public class AlbumService : IAlbumService
         // row but is suppressed from the album's CONTENT — it reappears here the
         // moment it is restored. (Private Vault content is already hidden by the
         // global query filter on _db.FileItems.)
-        return await _db.AlbumItems
+        var members = _db.AlbumItems
             .Where(ai => ai.AlbumId == albumId)
             .Join(_db.FileItems,
                 ai => ai.FileItemId,
@@ -399,8 +446,11 @@ public class AlbumService : IAlbumService
                 (ai, f) => new { ai, f })
             .Where(x => x.f.OwnerUserId == ownerUserId
                 && x.f.DeletedAt == null
-                && x.f.MediaLibraryState == MediaLibraryState.Active)
-            .OrderBy(x => x.ai.AddedAt)
+                && x.f.MediaLibraryState == MediaLibraryState.Active);
+        // The album's sequence: date taken in the owner's direction.
+        return await (album.SortOldestFirst
+                ? members.OrderBy(x => x.f.EffectiveDateTaken).ThenBy(x => x.f.Id)
+                : members.OrderByDescending(x => x.f.EffectiveDateTaken).ThenByDescending(x => x.f.Id))
             .Select(x => new AlbumItemSummary(
                 x.f.Id,
                 x.f.Name,
@@ -444,7 +494,7 @@ public class AlbumService : IAlbumService
             // adder is always the album owner. A Contributor adds through
             // IAlbumSharingService, never here.
             AddedByUserId = ownerUserId,
-            // New items APPEND to the album's curated order.
+            // New items APPEND to the album's append order (SortOrder).
             SortOrder = await NextSortOrderAsync(albumId, cancellationToken),
         });
         // Adding an item changes the album's representation, so the content

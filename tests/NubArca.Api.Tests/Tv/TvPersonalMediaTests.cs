@@ -2,6 +2,9 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using NubArca.Api.Data;
 using NubArca.Api.Files;
 using NubArca.Api.Tests.Endpoints;
 using NubArca.Api.Tv;
@@ -371,6 +374,71 @@ public sealed class TvPersonalMediaTests : IDisposable
             cookie, HttpMethod.Get, $"/api/tv/personal/albums/{albumId}/media", fresh);
         Assert.Equal(HttpStatusCode.Forbidden, afterChange.StatusCode);
         Assert.Contains("pin_changed", await afterChange.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task An_Album_Opens_In_The_Owners_Date_Order_And_An_Explicit_Sort_Still_Wins()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var albumId = await CreateAlbumAsync(owner, "Ordine");
+        // Uploaded first → taken last, so date order and upload order disagree.
+        var first = await UploadAsync(owner, "first.png", PngBytes(16, 16));
+        var second = await UploadAsync(owner, "second.png", PngBytes(17, 17));
+        var third = await UploadAsync(owner, "third.png", PngBytes(18, 18));
+        await AddToAlbumAsync(owner, albumId, first, second, third);
+        var takenAt = new Dictionary<Guid, DateTime>
+        {
+            [first] = new(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc),
+            [second] = new(2022, 3, 1, 0, 0, 0, DateTimeKind.Utc),
+            [third] = new(2023, 3, 1, 0, 0, 0, DateTimeKind.Utc),
+        };
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            foreach (var file in await db.FileItems.Where(f => takenAt.Keys.Contains(f.Id)).ToListAsync())
+            {
+                file.EffectiveDateTaken = takenAt[file.Id];
+            }
+            await db.SaveChangesAsync();
+        }
+        var cookie = await PairAsync(owner);
+        var grant = await UnlockTokenAsync(cookie);
+
+        async Task<List<Guid>> Ids(string query) =>
+            (await MediaAsync(cookie, grant, query, albumId)).GetProperty("items").EnumerateArray()
+                .Select(i => i.GetProperty("id").GetGuid()).ToList();
+        async Task<string?> CardDirection() =>
+            JsonDocument.Parse(await (await TvSendAsync(cookie, HttpMethod.Get, "/api/tv/personal/albums", grant))
+                .Content.ReadAsStringAsync()).RootElement.EnumerateArray().Single()
+                .GetProperty("sortDirection").GetString();
+
+        // Default: newest taken first, whatever the upload order.
+        Assert.Equal("desc", await CardDirection());
+        Assert.Equal([first, third, second], await Ids(""));
+
+        // The owner turns the album round: the card says so and the TV follows.
+        (await owner.PutAsJsonAsync($"/api/albums/{albumId}/sort", new { direction = "asc" }))
+            .EnsureSuccessStatusCode();
+        Assert.Equal("asc", await CardDirection());
+        var detail = JsonDocument.Parse(await (await TvSendAsync(
+            cookie, HttpMethod.Get, $"/api/tv/personal/albums/{albumId}", grant)).Content.ReadAsStringAsync());
+        Assert.Equal("asc", detail.RootElement.GetProperty("sortDirection").GetString());
+        Assert.Equal([second, third, first], await Ids(""));
+        // The TV's own album default sends the same order explicitly.
+        Assert.Equal([second, third, first], await Ids("?sort=datetaken&direction=asc"));
+
+        // An explicit choice is honoured as asked.
+        Assert.Equal([first, third, second], await Ids("?sort=datetaken&direction=desc"));
+        Assert.Equal([third, second, first], await Ids("?sort=created&direction=desc"));
+
+        // Paging in the album order keeps that order across pages.
+        var page1 = await MediaAsync(cookie, grant, "?limit=2", albumId);
+        var cursor = page1.GetProperty("nextCursor").GetString();
+        var page2 = await MediaAsync(cookie, grant, $"?limit=2&cursor={Uri.EscapeDataString(cursor!)}", albumId);
+        Assert.Equal(
+            [second, third, first],
+            page1.GetProperty("items").EnumerateArray().Concat(page2.GetProperty("items").EnumerateArray())
+                .Select(i => i.GetProperty("id").GetGuid()).ToList());
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────

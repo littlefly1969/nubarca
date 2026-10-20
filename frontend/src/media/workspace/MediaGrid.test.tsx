@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MediaItem } from '@nubarca/api-client';
 import { I18nProvider } from '../../i18n';
 import { MediaGrid } from './MediaGrid';
+import { MediaSelectionStore } from '../../selection/mediaSelectionStore';
 import type { MediaSelection } from '../../gallery/useMediaSelection';
 
 // The grid only lays out once it has measured a real container width. jsdom
@@ -57,8 +58,12 @@ function makeSelection(over: Partial<MediaSelection> = {}): MediaSelection {
     isSelected: () => false,
     clear: vi.fn(),
     selectAll: vi.fn(),
+    addAll: vi.fn(),
+    remove: vi.fn(),
+    toggle: vi.fn(),
     handleTileClick: vi.fn(() => 'open' as const),
     toggleViaControl: vi.fn(),
+    store: new MediaSelectionStore(),
     ...over,
   };
 }

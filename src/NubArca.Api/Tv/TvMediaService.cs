@@ -26,7 +26,7 @@ public sealed class TvMediaService : ITvMediaService
             .Where(a => a.OwnerUserId == ownerUserId && a.ShowOnTv)
             .OrderBy(a => a.Name)
             .ThenBy(a => a.Id)
-            .Select(a => new { a.Id, a.Name })
+            .Select(a => new { a.Id, a.Name, a.SortOldestFirst, a.CoverFileItemId })
             .ToListAsync(cancellationToken);
         if (albums.Count == 0)
         {
@@ -44,7 +44,7 @@ public sealed class TvMediaService : ITvMediaService
             .Join(_db.FileItems.AsNoTracking(),
                 ai => ai.FileItemId,
                 f => f.Id,
-                (ai, f) => new { ai.AlbumId, ai.AddedAt, f.Id, f.BlobObjectId, f.OwnerUserId, f.DeletedAt, f.MediaLibraryState })
+                (ai, f) => new { ai.AlbumId, TakenAt = f.EffectiveDateTaken, f.Id, f.BlobObjectId, f.OwnerUserId, f.DeletedAt, f.MediaLibraryState })
             // Slice 3: files moved out of the media library (Excluded) never
             // appear on TV even while their AlbumItem persists.
             .Where(x => x.OwnerUserId == ownerUserId
@@ -53,16 +53,20 @@ public sealed class TvMediaService : ITvMediaService
             .Join(_db.BlobMetadata.AsNoTracking(),
                 x => x.BlobObjectId,
                 m => m.BlobObjectId,
-                (x, m) => new { x.AlbumId, x.AddedAt, x.Id, m.MediaCategory })
+                (x, m) => new { x.AlbumId, x.TakenAt, x.Id, m.MediaCategory })
             .Where(x => x.MediaCategory == MediaCategories.Image || x.MediaCategory == MediaCategories.Video)
             // Exclude guest uploads awaiting approval / hidden / rejected.
             .Where(x => !_db.PartyUploadItems.Any(pu =>
                 pu.FileItemId == x.Id && pu.Status != PartyUploadStatuses.Approved))
             .ToListAsync(cancellationToken);
 
+        // Each album in its own sequence: date taken in the owner's direction.
+        var oldestFirst = albums.ToDictionary(a => a.Id, a => a.SortOldestFirst);
         var byAlbum = media
             .GroupBy(x => x.AlbumId)
-            .ToDictionary(g => g.Key, g => g.OrderBy(x => x.AddedAt).ThenBy(x => x.Id).ToList());
+            .ToDictionary(g => g.Key, g => (oldestFirst[g.Key]
+                ? g.OrderBy(x => x.TakenAt).ThenBy(x => x.Id)
+                : g.OrderByDescending(x => x.TakenAt).ThenByDescending(x => x.Id)).ToList());
 
         var partyUrls = await _party.GetActivePartyUrlsAsync(ownerUserId, albumIds, cancellationToken);
 
@@ -71,7 +75,11 @@ public sealed class TvMediaService : ITvMediaService
             {
                 byAlbum.TryGetValue(a.Id, out var items);
                 var count = items?.Count ?? 0;
-                var coverId = items is { Count: > 0 } ? items[0].Id : (Guid?)null;
+                // The cover the owner chose while it is still shown here, else
+                // the first of the album's sequence.
+                var coverId = a.CoverFileItemId is Guid chosen && items?.Any(i => i.Id == chosen) == true
+                    ? chosen
+                    : items is { Count: > 0 } ? items[0].Id : (Guid?)null;
                 partyUrls.TryGetValue(a.Id, out var party);
                 return new TvAlbumDto(
                     a.Id,
@@ -93,20 +101,20 @@ public sealed class TvMediaService : ITvMediaService
             .AsNoTracking()
             .Where(a => a.Id == albumId && a.OwnerUserId == ownerUserId
                 && (a.ShowOnTv || a.Id == assignedPartyAlbumId))
-            .Select(a => new { a.Id, a.Name })
+            .Select(a => new { a.Id, a.Name, a.SortOldestFirst })
             .FirstOrDefaultAsync(cancellationToken);
         if (album is null)
         {
             return null;
         }
 
-        var rows = await _db.AlbumItems
+        var query = _db.AlbumItems
             .AsNoTracking()
             .Where(ai => ai.AlbumId == albumId)
             .Join(_db.FileItems.AsNoTracking(),
                 ai => ai.FileItemId,
                 f => f.Id,
-                (ai, f) => new { ai.AddedAt, f.Id, f.Name, f.BlobObjectId, f.OwnerUserId, f.DeletedAt, f.MediaLibraryState, f.Width, f.Height })
+                (ai, f) => new { TakenAt = f.EffectiveDateTaken, f.Id, f.Name, f.BlobObjectId, f.OwnerUserId, f.DeletedAt, f.MediaLibraryState, f.Width, f.Height })
             .Where(x => x.OwnerUserId == ownerUserId
                 && x.DeletedAt == null
                 && x.MediaLibraryState == MediaLibraryState.Active)
@@ -115,7 +123,7 @@ public sealed class TvMediaService : ITvMediaService
                 m => m.BlobObjectId,
                 (x, m) => new
                 {
-                    x.AddedAt, x.Id, x.Name, m.MediaCategory, m.DetectedContentType,
+                    x.TakenAt, x.Id, x.Name, m.MediaCategory, m.DetectedContentType,
                     m.VideoExtractionStatus, m.VideoCodec,
                     // Detected dims are CODED pixels (Image.Identify ignores EXIF
                     // orientation; ffprobe ignores the display matrix). The DTO
@@ -128,13 +136,14 @@ public sealed class TvMediaService : ITvMediaService
             .Where(x => x.MediaCategory == MediaCategories.Image || x.MediaCategory == MediaCategories.Video)
             // Exclude guest uploads awaiting approval / hidden / rejected.
             .Where(x => !_db.PartyUploadItems.Any(pu =>
-                pu.FileItemId == x.Id && pu.Status != PartyUploadStatuses.Approved))
-            // Id is a STABLE tie-break: bulk-added items share AddedAt, and
-            // without a deterministic secondary key each query (every 15s poll)
-            // could return them in a different order, so the TV grid would keep
-            // reshuffling ("a slideshow of the whole gallery").
-            .OrderBy(x => x.AddedAt)
-            .ThenBy(x => x.Id)
+                pu.FileItemId == x.Id && pu.Status != PartyUploadStatuses.Approved));
+        // The album's sequence: date taken in the owner's direction. Id is a
+        // STABLE tie-break: photos can share a date, and without a
+        // deterministic secondary key each query (every 15s poll) could return
+        // them in a different order, so the TV grid would keep reshuffling.
+        var rows = await (album.SortOldestFirst
+                ? query.OrderBy(x => x.TakenAt).ThenBy(x => x.Id)
+                : query.OrderByDescending(x => x.TakenAt).ThenByDescending(x => x.Id))
             .Select(x => new
             {
                 x.Id, x.Name, x.MediaCategory, x.DetectedContentType,

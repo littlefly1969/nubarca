@@ -43,6 +43,9 @@ public class AppDbContext : DbContext
     public DbSet<AlbumShareChallenge> AlbumShareChallenges => Set<AlbumShareChallenge>();
     public DbSet<AlbumShareDevice> AlbumShareDevices => Set<AlbumShareDevice>();
     public DbSet<AlbumItem> AlbumItems => Set<AlbumItem>();
+    // Owner lists of media + the account's current selection (references only).
+    public DbSet<MediaList> MediaLists => Set<MediaList>();
+    public DbSet<MediaListItem> MediaListItems => Set<MediaListItem>();
 
     // SHARE-ALBUM-01: live album shares between authenticated users. One row per
     // (album, invited user); the album OWNER never has a row here and stays

@@ -56,7 +56,12 @@ export function useIdleChrome(resetKey: unknown) {
  */
 export function useViewerKeys(
   rootRef: RefObject<HTMLElement | null>,
-  { onClose, onPrevious, onNext }: { onClose(): void; onPrevious?: () => void; onNext?: () => void },
+  { onClose, onPrevious, onNext, onToggleSelect }: {
+    onClose(): void; onPrevious?: () => void; onNext?: () => void;
+    // "x" selects / deselects the open item (the Google Photos key), when the
+    // viewer carries a selection at all.
+    onToggleSelect?: () => void;
+  },
 ) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -65,10 +70,14 @@ export function useViewerKeys(
       if (isEditableKeyboardTarget(e.target)) return;
       if (e.key === 'ArrowLeft') onPrevious?.();
       else if (e.key === 'ArrowRight') onNext?.();
+      else if ((e.key === 'x' || e.key === 'X') && !e.ctrlKey && !e.metaKey && !e.altKey && onToggleSelect) {
+        e.preventDefault();
+        onToggleSelect();
+      }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [rootRef, onClose, onPrevious, onNext]);
+  }, [rootRef, onClose, onPrevious, onNext, onToggleSelect]);
 }
 
 /**
