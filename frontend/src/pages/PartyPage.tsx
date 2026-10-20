@@ -298,8 +298,16 @@ export function PartyPage() {
   // party serves, and forgotten the moment it stops answering.
   // They are scoped to THIS party (its print token, digested), learnt once the
   // context says where the party prints; until then there is nothing to pick.
-  const [pickState, setPickState] = useState<{ scope: string | null; ids: string[] }>(
-    { scope: null, ids: [] });
+  // `owner` is the party page token the scope was learnt under. The route can
+  // move to another party without remounting this page, so a scope is only
+  // ever cleaned up while its own party is the one on screen: a different party
+  // that turns out to be unavailable must never empty this one's picks.
+  const [pickState, setPickState] = useState<{ owner: string | null; scope: string | null; ids: string[] }>(
+    () => ({ owner: token ?? null, scope: null, ids: [] }));
+  useEffect(() => {
+    const owner = token ?? null;
+    setPickState((current) => (current.owner === owner ? current : { owner, scope: null, ids: [] }));
+  }, [token]);
   const picks = pickState.ids;
   const setPicks = useCallback((ids: string[]) => {
     setPickState((current) => ({ ...current, ids }));
@@ -443,6 +451,11 @@ export function PartyPage() {
     clearPosterParam();
   }, [clearPosterParam, posterParam, posterSlot, state.kind]);
 
+  // Which party token the ready context belongs to. On a move to another party
+  // the old context is still in state for a render, and its print scope must
+  // not be taken for the new party's.
+  const [readyFor, setReadyFor] = useState<string | null>(null);
+
   const load = useCallback((signal?: AbortSignal) => {
     if (!token) {
       setState({ kind: 'unavailable' });
@@ -459,6 +472,7 @@ export function PartyPage() {
           ? (await getPartyItems(token, signal)).items
           : [];
         setState({ kind: 'ready', context, items });
+        setReadyFor(token);
         setShownPhase(context.phase);
         setMovedTo(null);
       })
@@ -543,16 +557,22 @@ export function PartyPage() {
   useEffect(() => {
     if (state.kind !== 'unavailable') return;
     setPickState((current) => {
-      if (current.scope) forgetPartyPicks(current.scope);
-      return { scope: current.scope, ids: [] };
+      if (current.owner !== (token ?? null) || !current.scope) return current;
+      forgetPartyPicks(current.scope);
+      return { ...current, ids: [] };
     });
-  }, [state.kind]);
-  const printScopeToken = state.kind === 'ready' ? printTokenOf(state.context.capabilities.printUrl) : null;
+  }, [state.kind, token]);
+  const printScopeToken = state.kind === 'ready' && readyFor === token
+    ? printTokenOf(state.context.capabilities.printUrl)
+    : null;
   useEffect(() => {
     if (!printScopeToken) return;
     const scope = partyPicksScope(printScopeToken);
-    setPickState((current) => (current.scope === scope ? current : { scope, ids: recallPartyPicks(scope) }));
-  }, [printScopeToken]);
+    const owner = token ?? null;
+    setPickState((current) => (current.owner === owner && current.scope === scope
+      ? current
+      : { owner, scope, ids: recallPartyPicks(scope) }));
+  }, [printScopeToken, token]);
   // Only what this party serves right now counts as picked; a pick from
   // another party, or of a photo taken down since, matches nothing.
   const servedPicks = useMemo(() => {

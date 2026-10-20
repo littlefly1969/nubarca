@@ -161,3 +161,42 @@ test('a file trashed and restored elsewhere leaves and returns on the TV', async
   assert.deepEqual([...store.list()], ['b', 'c']);
   sync.stop();
 });
+
+// A read that fails (offline, a 5xx, page 2 timing out) must be retried on the
+// next poll even though the server's stamp has not changed meanwhile.
+function pagedServer(initial: string[], failAt: string[]) {
+  const { server, transport } = fakeServer(initial);
+  const fails = [...failAt];
+  transport.ids = async (cursor) => {
+    const start = cursor ? Number(cursor) : 0;
+    const at = fails.indexOf(String(start));
+    if (at >= 0) { fails.splice(at, 1); throw new Error('network'); }
+    const next = start + 2 < server.ids.length ? String(start + 2) : null;
+    return { ids: server.ids.slice(start, start + 2), nextCursor: next };
+  };
+  return { server, transport };
+}
+
+test('a failed first read of the ids is retried with the same server stamp', async () => {
+  const { server, transport } = pagedServer(['a', 'b', 'c'], ['0']);
+  const store = new TvSelectionStore();
+  const sync = startTvSelectionSync(store, transport, { debounceMs: 0, pollMs: 0 });
+  await sync.refresh();
+  assert.equal(store.list().length, 0);
+  await sync.refresh();
+  assert.deepEqual([...store.list()], ['a', 'b', 'c']);
+  await sync.flush();
+  assert.deepEqual(server.calls, []);
+  sync.stop();
+});
+
+test('a failed later page is retried, and a partial read is never shown', async () => {
+  const { transport } = pagedServer(['a', 'b', 'c', 'd', 'e'], ['2']);
+  const store = new TvSelectionStore();
+  const sync = startTvSelectionSync(store, transport, { debounceMs: 0, pollMs: 0 });
+  await sync.refresh();
+  assert.equal(store.list().length, 0);
+  await sync.refresh();
+  assert.deepEqual([...store.list()], ['a', 'b', 'c', 'd', 'e']);
+  sync.stop();
+});

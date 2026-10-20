@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useNavigate, type NavigateFunction } from 'react-router';
 import { PartyPage } from './PartyPage';
 import {
   activeIntersectionObservers, errorResponse, installFetchMock, jsonResponse, setIntersecting,
@@ -595,6 +595,42 @@ describe('PartyPage (public party landing)', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it('keeps a party\'s picks when the same page moves to another party that is unavailable, and back', async () => {
+      // Party A (tok-1) is fine; party B (tok-2) answers 404. One mount, the
+      // route moves A → B → A as a link inside the app would.
+      installFetchMock({
+        'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 1, printUrl: '/party/print-token/print' })),
+        'GET /api/party/tok-1/items': () => jsonResponse(items),
+        'GET /api/party/tok-2': () => errorResponse(404),
+        'GET /api/party/tok-2/items': () => errorResponse(404),
+      });
+      let go: NavigateFunction = () => undefined;
+      function Nav() { go = useNavigate(); return null; }
+      const user = userEvent.setup();
+      render(
+        <I18nProvider>
+          <MemoryRouter initialEntries={['/party/tok-1']}>
+            <Nav />
+            <Routes>
+              <Route path="/party/:token" element={<PartyPage />} />
+            </Routes>
+          </MemoryRouter>
+        </I18nProvider>,
+      );
+      await screen.findByTestId('party-grid');
+      await user.click(screen.getByTestId('public-gallery-pick'));
+      expect(stored()).toBe('["f1"]');
+
+      await act(async () => { go('/party/tok-2'); });
+      expect(await screen.findByText(/non è più disponibile/i)).toBeInTheDocument();
+      // B's absence is not A's revocation.
+      expect(stored()).toBe('["f1"]');
+
+      await act(async () => { go('/party/tok-1'); });
+      expect(await screen.findByTestId('party-picks-count')).toHaveTextContent('1 foto scelta per la stampa');
+      expect(stored()).toBe('["f1"]');
     });
 
     it('keeps two parties that serve the same photo apart in one tab', async () => {

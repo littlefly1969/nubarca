@@ -40,6 +40,10 @@ export function startTvSelectionSync(
   let stopped = false;
   let loaded = false;
   let knownState: string | null = null;
+  // True from the moment a read of the server's ids starts until one finishes,
+  // so a read that failed is retried on the next poll even though the stamp
+  // the server reports has not changed (same rule as the web sync).
+  let unpulled = false;
   let queue: Op[] = [];
   // The operation on the wire: never merged into, and never mistaken on its
   // return for a Clear that replaced the queue meanwhile.
@@ -60,6 +64,7 @@ export function startTvSelectionSync(
   };
 
   const pull = async () => {
+    unpulled = true;
     const ids: string[] = [];
     let cursor: string | null = null;
     do {
@@ -67,13 +72,14 @@ export function startTvSelectionSync(
       ids.push(...page.ids);
       cursor = page.nextCursor;
     } while (cursor !== null && ids.length < maxIds && !stopped);
+    unpulled = false;
     if (!stopped && queue.length === 0) store.adopt(ids);
   };
 
   const load = async () => {
     const summary = await transport.summary(controller.signal);
     loaded = true;
-    if (stateOf(summary) !== knownState) {
+    if (stateOf(summary) !== knownState || unpulled) {
       knownState = stateOf(summary);
       if (queue.length === 0) await pull();
     }
@@ -126,7 +132,7 @@ export function startTvSelectionSync(
         if (queue.length > 0) { await send(); return; }
         const summary = await transport.summary(controller.signal);
         loaded = true;
-        if (stateOf(summary) !== knownState && queue.length === 0 && !sending) {
+        if ((stateOf(summary) !== knownState || unpulled) && queue.length === 0 && !sending) {
           knownState = stateOf(summary);
           await pull();
         }

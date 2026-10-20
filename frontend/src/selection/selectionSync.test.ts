@@ -8,12 +8,16 @@ class FakeServer {
   version = 1;
   refused = new Set<string>();
   calls: string[] = [];
+  // Page starts ('0', '2', ...) whose next read fails once, like a dropped request.
+  failIdsAt: string[] = [];
   bump() { this.version++; }
   transport(): SelectionSyncTransport {
     return {
       summary: async () => ({ id: 'sel', version: this.version, count: this.ids.length }),
       ids: async (_list, cursor) => {
         const start = cursor ? Number(cursor) : 0;
+        const at = this.failIdsAt.indexOf(String(start));
+        if (at >= 0) { this.failIdsAt.splice(at, 1); throw new Error('network'); }
         const page = this.ids.slice(start, start + 2);
         const next = start + 2 < this.ids.length ? String(start + 2) : null;
         return { ids: page, nextCursor: next };
@@ -50,6 +54,33 @@ const start = (store: MediaSelectionStore, server: FakeServer, chunk?: number) =
 afterEach(() => { while (handles.length) handles.pop()!.stop(); });
 
 describe('selection sync', () => {
+  it('retries a failed first read of the ids although the server stamp has not changed', async () => {
+    const server = new FakeServer();
+    server.ids = ['a', 'b', 'c'];
+    server.failIdsAt = ['0'];
+    const store = new MediaSelectionStore();
+    const sync = start(store, server);
+    await sync.refresh();
+    expect(store.count).toBe(0);
+    // Same stamp on the server; the read is retried anyway.
+    await sync.refresh();
+    expect(store.getSnapshot().ids).toEqual(['a', 'b', 'c']);
+    await sync.flush();
+    expect(server.calls).toEqual([]);
+  });
+
+  it('retries when a later page of the ids fails, and never adopts a partial read', async () => {
+    const server = new FakeServer();
+    server.ids = ['a', 'b', 'c', 'd', 'e'];
+    server.failIdsAt = ['2'];
+    const store = new MediaSelectionStore();
+    const sync = start(store, server);
+    await sync.refresh();
+    expect(store.count).toBe(0);
+    await sync.refresh();
+    expect(store.getSnapshot().ids).toEqual(['a', 'b', 'c', 'd', 'e']);
+  });
+
   it('loads what the account already picked, without echoing it back', async () => {
     const server = new FakeServer();
     server.ids = ['a', 'b', 'c'];
