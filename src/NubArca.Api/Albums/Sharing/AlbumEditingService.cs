@@ -156,13 +156,13 @@ public sealed class AlbumEditingService : IAlbumEditingService
         _db.AlbumItems.Remove(item);
         await _db.SaveChangesAsync(cancellationToken);
 
-        // The chosen cover cannot outlive the row it pointed at, and the order
-        // is recompacted so no hole survives the removal. Same transaction.
+        // The chosen cover cannot outlive the row it pointed at. Same
+        // transaction. The append order is not renumbered: the album is shown
+        // by date, so a hole in SortOrder changes nothing anyone sees.
         await _db.Albums
             .Where(a => a.Id == albumId && a.CoverFileItemId == fileItemId)
             .ExecuteUpdateAsync(s => s.SetProperty(a => a.CoverFileItemId, (Guid?)null),
                 cancellationToken);
-        await CompactAsync(albumId, cancellationToken);
 
         var album = await _db.Albums.AsNoTracking()
             .FirstAsync(a => a.Id == albumId, cancellationToken);
@@ -256,23 +256,6 @@ public sealed class AlbumEditingService : IAlbumEditingService
             .Select(x => x.FileItemId)
             .ToListAsync(cancellationToken);
         return ids.ToHashSet();
-    }
-
-    private async Task CompactAsync(Guid albumId, CancellationToken cancellationToken)
-    {
-        var ordered = await _db.AlbumItems
-            .Where(ai => ai.AlbumId == albumId)
-            .OrderBy(ai => ai.SortOrder)
-            .ThenBy(ai => ai.FileItemId)
-            .ToListAsync(cancellationToken);
-        var position = 1;
-        var changed = false;
-        foreach (var item in ordered)
-        {
-            if (item.SortOrder != position) { item.SortOrder = position; changed = true; }
-            position += 1;
-        }
-        if (changed) await _db.SaveChangesAsync(cancellationToken);
     }
 
     // WriteAsync, not LogAsync: inside the open transaction, and NOT swallowing.

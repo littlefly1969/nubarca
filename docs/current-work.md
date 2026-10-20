@@ -657,7 +657,9 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   and `coverFileItemId`. Manual reorder is gone: `PUT .../order` and
   `POST .../items/{id}/move` were removed with Up/Down/Start/End (no TV or
   mobile client called them); `AlbumItem.SortOrder` remains only as the append
-  order, so a rolled-back image still reads valid values. Print-slot reordering
+  order, so a rolled-back image still reads valid values; it is no longer
+  renumbered after a removal (holes are harmless, and the old compaction read and
+  rewrote every row of the album per removed item). Print-slot reordering
   in PrintStudio is unrelated and stays. The ordering runs over the album's
   primary key and the file key, then sorts per album — a denormalised
   taken-at index on `album_items` was not added. «Set as album cover» is the

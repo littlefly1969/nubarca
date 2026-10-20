@@ -70,6 +70,27 @@ public sealed class AlbumContentScaleTests : IDisposable
     }
 
     [Fact]
+    public async Task Removing_From_A_Large_Album_Rewrites_No_Other_Row_And_Keeps_The_Order()
+    {
+        // The visible order is by date, so a removal no longer renumbers the
+        // album's append order: no other row is read back and rewritten.
+        var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var albumId = await CreateAlbumAsync(owner, "Big");
+        await SeedItemsAsync(albumId, ownerId, 520);
+        var victim = await FileOfAsync((await DbOrderAsync(albumId))[260]);
+        var before = await AppendOrdersAsync(albumId);
+
+        (await owner.DeleteAsync($"/api/albums/{albumId}/content/{victim}")).EnsureSuccessStatusCode();
+
+        var after = await AppendOrdersAsync(albumId);
+        before.Remove(victim);
+        Assert.Equal(before, after);
+        var walk = await WalkAsync(owner, albumId, PageSize);
+        Assert.Equal(await DbOrderAsync(albumId), walk.Ids);
+        Assert.Equal(519, walk.Total);
+    }
+
+    [Fact]
     public async Task Opening_A_Large_Album_Reads_One_Page_Not_The_Album()
     {
         // The regression this slice exists for: the content endpoint used to
@@ -498,6 +519,15 @@ public sealed class AlbumContentScaleTests : IDisposable
             .OrderBy(ai => ai.SortOrder)
             .Select(ai => ai.Id)
             .ToListAsync();
+    }
+
+    private async Task<Dictionary<Guid, int>> AppendOrdersAsync(Guid albumId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.AlbumItems.AsNoTracking()
+            .Where(ai => ai.AlbumId == albumId)
+            .ToDictionaryAsync(ai => ai.FileItemId, ai => ai.SortOrder);
     }
 
     private async Task<Dictionary<Guid, DateTime>> TakenAtAsync(Guid albumId)

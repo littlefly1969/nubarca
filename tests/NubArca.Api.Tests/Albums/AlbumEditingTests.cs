@@ -249,7 +249,7 @@ public sealed class AlbumEditingTests : IDisposable
     }
 
     [Fact]
-    public async Task Removing_The_Cover_Item_Clears_The_Choice_And_Compacts_The_Order()
+    public async Task Removing_The_Cover_Item_Clears_The_Choice_And_Touches_No_Other_Row()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
         var (_, editor) = await _factory.CreateAuthenticatedClientAsync(EditorEmail);
@@ -264,20 +264,27 @@ public sealed class AlbumEditingTests : IDisposable
             new { expectedVersion = await VersionAsync(editor, albumId), fileItemId = coverFile }))
             .EnsureSuccessStatusCode();
 
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var before = await db.AlbumItems.AsNoTracking()
+            .Where(ai => ai.AlbumId == albumId && ai.FileItemId != coverFile)
+            .ToDictionaryAsync(ai => ai.FileItemId, ai => ai.SortOrder);
+
         var removed = await editor.DeleteAsync(
             $"/api/shared-albums/{albumId}/items/{coverItemId}" +
             $"?expectedVersion={await VersionAsync(editor, albumId)}");
         removed.EnsureSuccessStatusCode();
 
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var album = await db.Albums.AsNoTracking().FirstAsync(a => a.Id == albumId);
         // Cleared in the same transaction — no permanently dangling reference.
         Assert.Null(album.CoverFileItemId);
-        // …and the order has no hole.
-        var orders = await db.AlbumItems.Where(ai => ai.AlbumId == albumId)
-            .Select(ai => ai.SortOrder).OrderBy(o => o).ToListAsync();
-        Assert.Equal([1, 2], orders);
+        // …and the rows left are not renumbered: the visible order is by date,
+        // so SortOrder (the append order) keeps its hole instead of every row of
+        // the album being read and rewritten.
+        var after = await db.AlbumItems.AsNoTracking()
+            .Where(ai => ai.AlbumId == albumId)
+            .ToDictionaryAsync(ai => ai.FileItemId, ai => ai.SortOrder);
+        Assert.Equal(before, after);
     }
 
     [Fact]

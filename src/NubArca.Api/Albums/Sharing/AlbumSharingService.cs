@@ -557,7 +557,6 @@ public sealed class AlbumSharingService : IAlbumSharingService
         }
 
         await ClearCoverIfPointingAtAsync(albumId, fileItemId, cancellationToken);
-        await CompactSortOrderAsync(albumId, cancellationToken);
         await BumpAlbumVersionAsync(albumId, cancellationToken);
         return AlbumItemRemovalResult.Ok;
     }
@@ -603,7 +602,6 @@ public sealed class AlbumSharingService : IAlbumSharingService
             .ExecuteDeleteAsync(cancellationToken);
 
         await ClearCoverIfPointingAtAsync(albumId, fileItemId, cancellationToken);
-        await CompactSortOrderAsync(albumId, cancellationToken);
         await BumpAlbumVersionAsync(albumId, cancellationToken);
 
         return (AlbumItemRemovalResult.Ok, new RemovedAlbumItem(
@@ -801,7 +799,6 @@ public sealed class AlbumSharingService : IAlbumSharingService
         {
             await ClearCoverIfPointingAtAsync(albumId, fileId, cancellationToken);
         }
-        await CompactSortOrderAsync(albumId, cancellationToken);
         await BumpAlbumVersionAsync(albumId, cancellationToken);
 
         return fileIds;
@@ -1190,34 +1187,10 @@ public sealed class AlbumSharingService : IAlbumSharingService
                 s => s.SetProperty(a => a.CoverFileItemId, (Guid?)null),
                 cancellationToken);
 
-    // Renumber the album to a contiguous 1..n in its current order after a
-    // removal. Keeping the sequence dense means a reorder never has to reason
-    // about holes, and two albums with the same visible order always have the
-    // same stored order.
-    private async Task CompactSortOrderAsync(Guid albumId, CancellationToken cancellationToken)
-    {
-        var ordered = await _db.AlbumItems
-            .Where(ai => ai.AlbumId == albumId)
-            .OrderBy(ai => ai.SortOrder)
-            .ThenBy(ai => ai.FileItemId)
-            .ToListAsync(cancellationToken);
-
-        var position = 1;
-        var changed = false;
-        foreach (var item in ordered)
-        {
-            if (item.SortOrder != position)
-            {
-                item.SortOrder = position;
-                changed = true;
-            }
-            position += 1;
-        }
-        if (changed)
-        {
-            await _db.SaveChangesAsync(cancellationToken);
-        }
-    }
+    // No renumbering after a removal. The album's visible sequence is
+    // (EffectiveDateTaken, FileItemId) in the owner's direction, so SortOrder is
+    // only the append order and a hole in it changes nothing anyone sees. The
+    // old compaction loaded and rewrote every row of the album per removal.
 
     // SHARE-ALBUM-03: content mutations move the album's optimistic-concurrency
     // token. Contribution, withdrawal and the automatic withdrawal a revocation
