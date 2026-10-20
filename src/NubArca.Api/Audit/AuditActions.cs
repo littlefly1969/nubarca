@@ -107,6 +107,8 @@ public static class AuditActions
     // name, person name, storage path or blob identity.
     public const string AlbumEditDetails = "album.edit_details";
     public const string AlbumEditCover = "album.edit_cover";
+    // Written by the former manual reorder; no longer emitted, kept so the
+    // trail that already holds it still names a known action.
     public const string AlbumEditReorder = "album.edit_reorder";
     // Editorial removal of ANY item. Distinct from album.contribution_withdraw
     // (the source owner taking their own item back) because they are different

@@ -222,7 +222,7 @@ public sealed class TvMediaBrowsingTests : IDisposable
     }
 
     [Fact]
-    public async Task Tv_Item_Order_Is_Deterministic_When_AddedAt_Ties()
+    public async Task Tv_Item_Order_Is_Deterministic_When_Date_Taken_Ties()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
         var albumId = await CreateAlbumAsync(owner, "On TV");
@@ -230,9 +230,9 @@ public sealed class TvMediaBrowsingTests : IDisposable
         {
             await AddPngAsync(owner, albumId, $"p{i}.png");
         }
-        // Force an AddedAt tie for every item (a bulk add) — the id tie-break
+        // A burst: every photograph taken at the same moment — the id tie-break
         // must still give one deterministic order, so the grid never reshuffles.
-        await SetAllAlbumItemsAddedAtAsync(albumId, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        await SetAllTakenAtAsync(albumId, _ => new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
         await EnableTvAsync(owner, albumId);
 
         var cookie = await PairTvAsync(owner);
@@ -240,7 +240,40 @@ public sealed class TvMediaBrowsingTests : IDisposable
         var second = await OrderedIdsAsync(cookie, albumId);
         Assert.Equal(5, first.Count);
         Assert.Equal(first, second);
-        Assert.Equal(first.OrderBy(id => id, StringComparer.Ordinal).ToList(), first);
+        // Newest first by default, and the tie-break runs the same way.
+        Assert.Equal(first.OrderByDescending(id => id, StringComparer.Ordinal).ToList(), first);
+    }
+
+    [Fact]
+    public async Task Tv_Follows_The_Date_Taken_In_The_Owners_Direction()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var albumId = await CreateAlbumAsync(owner, "On TV");
+        var ids = new List<Guid>();
+        for (var i = 0; i < 4; i++)
+        {
+            ids.Add(await AddPngAsync(owner, albumId, $"p{i}.png"));
+        }
+        // Taken in an order unrelated to the order they were added.
+        var taken = new Dictionary<Guid, DateTime>
+        {
+            [ids[0]] = new(2021, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            [ids[1]] = new(2023, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            [ids[2]] = new(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            [ids[3]] = new(2022, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+        };
+        await SetAllTakenAtAsync(albumId, id => taken[id]);
+        await EnableTvAsync(owner, albumId);
+        var cookie = await PairTvAsync(owner);
+
+        var newest = taken.OrderByDescending(kv => kv.Value).Select(kv => kv.Key.ToString()).ToList();
+        Assert.Equal(newest, await OrderedIdsAsync(cookie, albumId));
+
+        // The owner's choice is the album's default on the television as well.
+        (await owner.PutAsJsonAsync($"/api/albums/{albumId}/sort", new { direction = "asc" }))
+            .EnsureSuccessStatusCode();
+        newest.Reverse();
+        Assert.Equal(newest, await OrderedIdsAsync(cookie, albumId));
     }
 
     [Fact]
@@ -447,14 +480,14 @@ public sealed class TvMediaBrowsingTests : IDisposable
         await db.SaveChangesAsync();
     }
 
-    private async Task SetAllAlbumItemsAddedAtAsync(Guid albumId, DateTime addedAt)
+    private async Task SetAllTakenAtAsync(Guid albumId, Func<Guid, DateTime> takenAt)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var items = await db.AlbumItems.Where(ai => ai.AlbumId == albumId).ToListAsync();
-        foreach (var item in items)
+        var fileIds = await db.AlbumItems.Where(ai => ai.AlbumId == albumId).Select(ai => ai.FileItemId).ToListAsync();
+        foreach (var file in await db.FileItems.Where(f => fileIds.Contains(f.Id)).ToListAsync())
         {
-            item.AddedAt = addedAt;
+            file.EffectiveDateTaken = takenAt(file.Id);
         }
         await db.SaveChangesAsync();
     }

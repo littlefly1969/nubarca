@@ -20,8 +20,9 @@ namespace NubArca.Api.Tests.Albums;
 //
 // The invariant these tests defend: the shared item endpoint may grow a filter
 // and a cursor, and it may not grow a vocabulary. `kind` is answered from the
-// media category the shape already carried; the cursor is `(SortOrder,
-// FileItemId)`, both of which the recipient already holds. Anything that would
+// media category the shape already carried; the cursor is `(date taken,
+// FileItemId, direction)`, the album's own sequence, which the recipient
+// already holds. Anything that would
 // have to consult the owner's library to answer is absent by construction.
 public sealed class SharedAlbumBrowsingTests : IDisposable
 {
@@ -38,7 +39,7 @@ public sealed class SharedAlbumBrowsingTests : IDisposable
     // ── Paging ──────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Paging_Walks_The_Curated_Order_Exactly_Once()
+    public async Task Paging_Walks_The_Date_Order_Exactly_Once()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
         var (_, viewer) = await _factory.CreateAuthenticatedClientAsync(ViewerEmail);
@@ -49,11 +50,18 @@ public sealed class SharedAlbumBrowsingTests : IDisposable
             added.Add(await AddPngAsync(owner, albumId, $"p{i}.png"));
         }
 
+        // Taken in the reverse of the order they were added.
+        for (var i = 0; i < added.Count; i++)
+        {
+            await SetTakenAtAsync(added[i], new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddDays(-i));
+        }
+
         await InviteAndAcceptAsync(owner, viewer, albumId);
 
         var whole = await PageAsync(viewer, albumId);
         var expected = Ids(whole.GetProperty("items"));
         Assert.Equal(5, expected.Count);
+        // Newest first: the first added is the most recently taken.
         Assert.Equal(added, expected);
 
         // Two at a time, following the server's own cursor.
@@ -76,6 +84,82 @@ public sealed class SharedAlbumBrowsingTests : IDisposable
         // Same order, every item once — no gap, no repeat at a page boundary.
         Assert.Equal(expected, walked);
         Assert.Equal(walked.Count, walked.Distinct().Count());
+    }
+
+    [Theory]
+    [InlineData("desc")]
+    [InlineData("asc")]
+    public async Task A_Burst_Taken_At_One_Moment_Pages_Stably_In_Either_Direction(string direction)
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, viewer) = await _factory.CreateAuthenticatedClientAsync(ViewerEmail);
+        var albumId = await CreateAlbumAsync(owner, "Burst");
+        var added = new List<Guid>();
+        for (var i = 0; i < 12; i++)
+        {
+            added.Add(await AddPngAsync(owner, albumId, $"b{i}.png"));
+        }
+        // Three bursts of four: every page boundary falls inside a tie.
+        for (var i = 0; i < added.Count; i++)
+        {
+            await SetTakenAtAsync(added[i], new DateTime(2024, 5, 1, 10, 0, 0, DateTimeKind.Utc).AddMinutes(i / 4));
+        }
+        (await owner.PutAsJsonAsync($"/api/albums/{albumId}/sort", new { direction })).EnsureSuccessStatusCode();
+        await InviteAndAcceptAsync(owner, viewer, albumId);
+
+        var whole = Ids((await PageAsync(viewer, albumId)).GetProperty("items"));
+        var walked = await WalkAsync(viewer, albumId, limit: 3);
+
+        Assert.Equal(whole, walked);
+        Assert.Equal(12, walked.Distinct().Count());
+        // The bursts in the album's direction; inside one, the id decides.
+        var bursts = walked.Select(id => added.IndexOf(id) / 4).ToList();
+        Assert.Equal(direction == "asc" ? bursts.OrderBy(b => b) : bursts.OrderByDescending(b => b), bursts);
+        var firstBurst = walked.Take(4).Select(id => id.ToString()).ToList();
+        Assert.Equal(direction == "asc"
+            ? firstBurst.OrderBy(id => id, StringComparer.Ordinal)
+            : firstBurst.OrderByDescending(id => id, StringComparer.Ordinal), firstBurst);
+    }
+
+    [Fact]
+    public async Task A_Cursor_From_Before_The_Owner_Turned_The_Album_Around_Is_Refused()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, viewer) = await _factory.CreateAuthenticatedClientAsync(ViewerEmail);
+        var albumId = await CreateAlbumAsync(owner, "Turned");
+        for (var i = 0; i < 3; i++)
+        {
+            await AddPngAsync(owner, albumId, $"p{i}.png");
+        }
+        await InviteAndAcceptAsync(owner, viewer, albumId);
+
+        var cursor = (await PageAsync(viewer, albumId, limit: 1)).GetProperty("nextCursor").GetString()!;
+        (await owner.PutAsJsonAsync($"/api/albums/{albumId}/sort", new { direction = "asc" }))
+            .EnsureSuccessStatusCode();
+
+        // Resuming at that boundary in the other direction would skip or repeat:
+        // refused, so the client starts over.
+        Assert.Equal(HttpStatusCode.BadRequest, (await viewer.GetAsync(
+            $"/api/shared-albums/{albumId}/items?cursor={Uri.EscapeDataString(cursor)}")).StatusCode);
+        var detail = await viewer.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}");
+        Assert.Equal("asc", detail.GetProperty("sortDirection").GetString());
+    }
+
+    [Fact]
+    public async Task A_Cursor_Of_The_Old_Curated_Order_Is_Refused()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, viewer) = await _factory.CreateAuthenticatedClientAsync(ViewerEmail);
+        var albumId = await CreateAlbumAsync(owner, "Old");
+        var file = await AddPngAsync(owner, albumId, "a.png");
+        await InviteAndAcceptAsync(owner, viewer, albumId);
+
+        // The shape a client could still hold from before: kind, SortOrder, id.
+        var legacy = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
+                $"{{\"k\":\"all\",\"o\":1,\"i\":\"{file}\"}}"))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        Assert.Equal(HttpStatusCode.BadRequest, (await viewer.GetAsync(
+            $"/api/shared-albums/{albumId}/items?cursor={Uri.EscapeDataString(legacy)}")).StatusCode);
     }
 
     [Fact]
@@ -410,6 +494,33 @@ public sealed class SharedAlbumBrowsingTests : IDisposable
         var response = await client.GetAsync($"/api/shared-albums/{albumId}/items{suffix}");
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    private static async Task<List<Guid>> WalkAsync(HttpClient client, Guid albumId, int limit)
+    {
+        var walked = new List<Guid>();
+        string? cursor = null;
+        var pages = 0;
+        do
+        {
+            var page = await PageAsync(client, albumId, limit: limit, cursor: cursor);
+            walked.AddRange(Ids(page.GetProperty("items")));
+            cursor = page.GetProperty("nextCursor").ValueKind == JsonValueKind.Null
+                ? null
+                : page.GetProperty("nextCursor").GetString();
+            Assert.True(++pages <= 100, "the cursor did not terminate");
+        }
+        while (cursor is not null);
+        return walked;
+    }
+
+    private async Task SetTakenAtAsync(Guid fileItemId, DateTime takenAt)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var file = await db.FileItems.SingleAsync(f => f.Id == fileItemId);
+        file.EffectiveDateTaken = takenAt;
+        await db.SaveChangesAsync();
     }
 
     private static List<Guid> Ids(JsonElement items) =>

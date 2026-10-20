@@ -236,6 +236,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Purely additive. It adds one nullable column, media_lists.AlbumId, with a plain index, a filtered unique index allowing one album-scoped selection per (member, album) (Kind = 2), and a foreign key FROM media_lists TO albums that cascades in that direction only. No existing row is rewritten or backfilled (every existing list keeps AlbumId null) and no delete path on albums gains a restriction: deleting an album, by either application, simply also deletes its members' selections, which are references only. The previous application never writes Kind 2; it lists only named lists and reaches any other list solely by an id that is the member's own and never exposed, so rolling the image back leaves every existing flow unchanged and the album selections are just not offered. Down() first deletes the Kind 2 rows (their items cascade), then drops the column and indexes; no file, blob or album is touched."
+    },
+    "20261019235252_AddAlbumSortDirection": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Purely additive. It adds one non-nullable boolean column, albums.SortOldestFirst, with a database default of false, so every existing album keeps the default newest-first direction without a backfill or a table rewrite (a constant default is a metadata-only change on PostgreSQL 11+). No index, constraint or foreign key is added or altered. The previous application neither reads nor writes the column, and its inserts take the default, so rolling the image back leaves every existing flow working against the upgraded schema; albums are then shown in that application's own order until the new application runs again. album_items.SortOrder is kept and still written on append, so the previous application's curated-order reads and writes remain valid. Down() drops the column, losing only the owners' chosen direction (albums return to newest first); no file, blob or album item is touched."
     }
   }
 }

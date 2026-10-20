@@ -25,10 +25,8 @@ public class AlbumItem
     //
     // The primary key stays (AlbumId, FileItemId) — that is what enforces "one
     // row per file per album" and it is not weakened here. This id exists so a
-    // reorder can name the rows it is reordering unambiguously, rather than
-    // naming files and relying on the album context to disambiguate them. It
-    // also keeps the reorder contract stable if the model ever allows the same
-    // file to appear twice in one album.
+    // curation row (remove, withdraw) is named unambiguously, rather than by
+    // its file and the album context.
     //
     // An alternate key, not the primary key: changing the PK would be a
     // rewrite of a table three other slices already query, for no gain.
@@ -49,18 +47,10 @@ public class AlbumItem
     // owner" special case leaks into the query predicates.
     public Guid AddedByUserId { get; set; }
 
-    // SHARE-ALBUM-03: the item's position in the album's own order.
-    //
-    // Until this slice every surface ordered by AddedAt — which is not an order
-    // anybody chose, and which bulk-adds make ambiguous because they share a
-    // timestamp. SortOrder is the album's curated sequence.
-    //
-    // Backfilled by AddAlbumOrderingAndCover from the previous implicit order
-    // (AddedAt, then FileItemId as the stable tie-break the read paths already
-    // used), so no album visibly reshuffles when this ships. New items append.
-    //
-    // Never assumed contiguous or unique: every read applies FileItemId as a
-    // final tie-break, so two rows that somehow share a SortOrder still produce
-    // a stable, repeatable order rather than one that shuffles per query.
+    // The order items were APPENDED in (max + 1, compacted on removal). It no
+    // longer sequences the album: every surface shows an album's photographs by
+    // FileItem.EffectiveDateTaken in the direction the owner chose
+    // (Album.SortOldestFirst), FileItemId breaking ties. The column stays so a
+    // previous application image still reads and writes a valid value.
     public int SortOrder { get; set; }
 }

@@ -17,6 +17,7 @@ public class AlbumConfiguration : IEntityTypeConfiguration<Album>
         // SHARE-ALBUM-03. Version starts at 1 so a client can never send 0 and
         // accidentally match a freshly-created album.
         builder.Property(a => a.Version).HasDefaultValue(1);
+        builder.Property(a => a.SortOldestFirst).HasDefaultValue(false);
         // CoverFileItemId is deliberately NOT a foreign key — see Album.
         builder.Property(a => a.CreatedAt).HasColumnType("timestamp with time zone");
         builder.Property(a => a.UpdatedAt).HasColumnType("timestamp with time zone");

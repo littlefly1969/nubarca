@@ -61,75 +61,96 @@ public sealed class AlbumEditingTests : IDisposable
     }
 
     [Fact]
-    public async Task Editor_Can_Reorder_And_Every_Surface_Follows()
+    public async Task Every_Surface_Follows_Date_Taken_In_The_Owners_Direction()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
         var (_, editor) = await _factory.CreateAuthenticatedClientAsync(EditorEmail);
         var (_, carol) = await _factory.CreateAuthenticatedClientAsync(OtherEmail);
         var albumId = await CreateAlbumAsync(owner, "Trip");
-        foreach (var n in new[] { "a.png", "b.png", "c.png" })
-        {
-            await AddOwnPngAsync(owner, albumId, n);
-        }
+        // Added in an order that is neither the date order nor its reverse.
+        var b = await AddOwnPngAsync(owner, albumId, "b.png");
+        var c = await AddOwnPngAsync(owner, albumId, "c.png");
+        var a = await AddOwnPngAsync(owner, albumId, "a.png");
+        await SetTakenAsync(a, new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        await SetTakenAsync(b, new DateTime(2021, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        await SetTakenAsync(c, new DateTime(2022, 1, 1, 0, 0, 0, DateTimeKind.Utc));
         await InviteAcceptAsync(owner, editor, albumId, EditorEmail, "editor");
         await InviteAcceptAsync(owner, carol, albumId, OtherEmail, "viewer");
 
-        var before = await SharedItemIdsAsync(editor, albumId);
-        Assert.Equal(3, before.Count);
-        var reversed = before.AsEnumerable().Reverse().ToList();
+        // Default: newest first, for every member and for the curator's view.
+        var newest = new List<Guid> { c, b, a };
+        Assert.Equal(newest, await SharedFileIdsAsync(editor, albumId));
+        Assert.Equal(newest, await SharedFileIdsAsync(carol, albumId));
+        Assert.Equal(newest, await ContentFileIdsAsync(owner, albumId));
+        var shared = await carol.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}");
+        Assert.Equal("desc", shared.GetProperty("sortDirection").GetString());
 
-        var response = await editor.PutAsJsonAsync($"/api/shared-albums/{albumId}/order",
-            new { expectedVersion = await VersionAsync(editor, albumId), albumItemIds = reversed });
-        response.EnsureSuccessStatusCode();
+        // The owner turns it around; it becomes the album's order for everybody.
+        var version = (await owner.GetFromJsonAsync<JsonElement>($"/api/albums/{albumId}"))
+            .GetProperty("version").GetInt32();
+        var flipped = await owner.PutAsJsonAsync($"/api/albums/{albumId}/sort", new { direction = "asc" });
+        flipped.EnsureSuccessStatusCode();
+        var detail = await flipped.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("asc", detail.GetProperty("sortDirection").GetString());
+        Assert.Equal(version + 1, detail.GetProperty("version").GetInt32());
 
-        // The curated order is what the members see…
-        Assert.Equal(reversed, await SharedItemIdsAsync(editor, albumId));
-        Assert.Equal(reversed, await SharedItemIdsAsync(carol, albumId));
-        // …and what the curator's moderation view shows.
-        var content = await owner.GetFromJsonAsync<JsonElement>($"/api/albums/{albumId}/content");
-        Assert.Equal(reversed, content.GetProperty("items").EnumerateArray()
-            .Select(i => i.GetProperty("albumItemId").GetGuid()).ToList());
+        var oldest = new List<Guid> { a, b, c };
+        Assert.Equal(oldest, await SharedFileIdsAsync(editor, albumId));
+        Assert.Equal(oldest, await SharedFileIdsAsync(carol, albumId));
+        Assert.Equal(oldest, await ContentFileIdsAsync(owner, albumId));
+        Assert.Equal("asc", (await carol.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}"))
+            .GetProperty("sortDirection").GetString());
 
-        // Normalized to a contiguous 1..n regardless of what was sent.
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var orders = await db.AlbumItems.Where(ai => ai.AlbumId == albumId)
-            .Select(ai => ai.SortOrder).OrderBy(o => o).ToListAsync();
-        Assert.Equal([1, 2, 3], orders);
+        // Setting the same direction again is not a change.
+        var again = await owner.PutAsJsonAsync($"/api/albums/{albumId}/sort", new { direction = "asc" });
+        Assert.Equal(version + 1, (await again.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("version").GetInt32());
     }
 
     [Fact]
-    public async Task A_Reorder_Must_Be_Exactly_The_Current_Items()
+    public async Task Only_The_Owner_Chooses_The_Direction()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
         var (_, editor) = await _factory.CreateAuthenticatedClientAsync(EditorEmail);
         var albumId = await CreateAlbumAsync(owner, "Trip");
-        foreach (var n in new[] { "a.png", "b.png" }) await AddOwnPngAsync(owner, albumId, n);
-        var otherAlbum = await CreateAlbumAsync(owner, "Other");
-        await AddOwnPngAsync(owner, otherAlbum, "x.png");
+        await AddOwnPngAsync(owner, albumId, "a.png");
         await InviteAcceptAsync(owner, editor, albumId, EditorEmail, "editor");
 
-        var ids = await SharedItemIdsAsync(editor, albumId);
-        var foreignId = (await ItemIdsOfAsync(otherAlbum)).Single();
-
-        // Partial, duplicated, and foreign lists are all refused rather than
-        // interpreted — guessing the rest is how two reorders silently produce
-        // a third order nobody asked for.
-        foreach (var bad in new[]
-                 {
-                     new[] { ids[0] },                      // omission
-                     new[] { ids[0], ids[0] },              // duplicate
-                     new[] { ids[0], foreignId },           // foreign album
-                     Array.Empty<Guid>(),                   // empty
-                 })
+        // An editor curates content, not the album's sequence: the owner's route
+        // does not know them.
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await editor.PutAsJsonAsync($"/api/albums/{albumId}/sort", new { direction = "asc" })).StatusCode);
+        foreach (var bad in new[] { "up", "", "ASCENDING" })
         {
-            var response = await editor.PutAsJsonAsync($"/api/shared-albums/{albumId}/order",
-                new { expectedVersion = await VersionAsync(editor, albumId), albumItemIds = bad });
-            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest,
+                (await owner.PutAsJsonAsync($"/api/albums/{albumId}/sort", new { direction = bad })).StatusCode);
         }
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await owner.PutAsJsonAsync($"/api/albums/{albumId}/sort", new { })).StatusCode);
+        Assert.Equal("desc", (await editor.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}"))
+            .GetProperty("sortDirection").GetString());
+        Assert.Equal(0, await CountAuditAsync("album.update"));
+    }
 
-        // The order and the version are untouched by every refusal.
-        Assert.Equal(ids, await SharedItemIdsAsync(editor, albumId));
+    [Fact]
+    public async Task The_Manual_Reorder_Routes_Are_Gone()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var albumId = await CreateAlbumAsync(owner, "Trip");
+        foreach (var n in new[] { "a.png", "b.png" }) await AddOwnPngAsync(owner, albumId, n);
+        var ids = await ItemIdsOfAsync(albumId);
+        var version = await VersionAsync(owner, albumId);
+
+        var order = await owner.PutAsJsonAsync($"/api/shared-albums/{albumId}/order",
+            new { expectedVersion = version, albumItemIds = ids.AsEnumerable().Reverse().ToList() });
+        Assert.False(order.IsSuccessStatusCode);
+        var move = await owner.PostAsJsonAsync($"/api/shared-albums/{albumId}/items/{ids[0]}/move",
+            new { expectedVersion = version, targetIndex = 1 });
+        Assert.False(move.IsSuccessStatusCode);
+
+        // Nothing moved and nothing was written.
+        Assert.Equal(version, await VersionAsync(owner, albumId));
+        Assert.Equal(0, await CountAuditAsync("album.edit_reorder"));
     }
 
     [Fact]
@@ -162,6 +183,52 @@ public sealed class AlbumEditingTests : IDisposable
             (await cleared.Content.ReadFromJsonAsync<JsonElement>())
                 .GetProperty("coverFileItemId").ValueKind);
         Assert.NotEqual(Guid.Empty, first);
+    }
+
+    [Fact]
+    public async Task A_Cover_That_Becomes_Unavailable_Falls_Back_For_Members()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, viewer) = await _factory.CreateAuthenticatedClientAsync(OtherEmail);
+        var albumId = await CreateAlbumAsync(owner, "Trip");
+        var older = await AddOwnPngAsync(owner, albumId, "a.png");
+        var newer = await AddOwnPngAsync(owner, albumId, "b.png");
+        await SetTakenAsync(older, new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        await SetTakenAsync(newer, new DateTime(2021, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        await InviteAcceptAsync(owner, viewer, albumId, OtherEmail, "viewer");
+        (await owner.PutAsJsonAsync($"/api/shared-albums/{albumId}/cover",
+            new { expectedVersion = await VersionAsync(owner, albumId), fileItemId = older }))
+            .EnsureSuccessStatusCode();
+
+        var detail = await viewer.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}");
+        Assert.Equal(older, detail.GetProperty("coverFileItemId").GetGuid());
+        Assert.Equal(older, await MosaicFirstAsync(viewer, albumId));
+
+        // The owner trashes the chosen cover: members must never be pointed at
+        // it, and the album falls back to its first photograph in order.
+        (await owner.DeleteAsync($"/api/files/{older}")).EnsureSuccessStatusCode();
+        detail = await viewer.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}");
+        Assert.Equal(JsonValueKind.Null, detail.GetProperty("coverFileItemId").ValueKind);
+        Assert.Equal(newer, await MosaicFirstAsync(viewer, albumId));
+    }
+
+    [Fact]
+    public async Task A_Photo_Without_A_Date_Taken_Is_Placed_By_Its_Upload_Time()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, viewer) = await _factory.CreateAuthenticatedClientAsync(OtherEmail);
+        var albumId = await CreateAlbumAsync(owner, "Trip");
+        // Neither upload carries a capture date, so each falls back to the moment
+        // it arrived; the dated one was taken years earlier.
+        var undated = await AddOwnPngAsync(owner, albumId, "undated.png");
+        var dated = await AddOwnPngAsync(owner, albumId, "dated.png");
+        await SetTakenAsync(dated, new DateTime(2015, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        await InviteAcceptAsync(owner, viewer, albumId, OtherEmail, "viewer");
+
+        Assert.Equal(new List<Guid> { undated, dated }, await SharedFileIdsAsync(viewer, albumId));
+        (await owner.PutAsJsonAsync($"/api/albums/{albumId}/sort", new { direction = "asc" }))
+            .EnsureSuccessStatusCode();
+        Assert.Equal(new List<Guid> { dated, undated }, await SharedFileIdsAsync(viewer, albumId));
     }
 
     [Fact]
@@ -303,9 +370,6 @@ public sealed class AlbumEditingTests : IDisposable
                 (await client.PatchAsJsonAsync($"/api/shared-albums/{albumId}",
                     new { expectedVersion = v, name = "Hijacked" })).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden,
-                (await client.PutAsJsonAsync($"/api/shared-albums/{albumId}/order",
-                    new { expectedVersion = v, albumItemIds = ids })).StatusCode);
-            Assert.Equal(HttpStatusCode.Forbidden,
                 (await client.PutAsJsonAsync($"/api/shared-albums/{albumId}/cover",
                     new { expectedVersion = v, fileItemId = (Guid?)null })).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden,
@@ -384,31 +448,6 @@ public sealed class AlbumEditingTests : IDisposable
         // The loser's title was NOT applied.
         var detail = await owner.GetFromJsonAsync<JsonElement>($"/api/albums/{albumId}");
         Assert.Equal("Bob's title", detail.GetProperty("name").GetString());
-    }
-
-    [Fact]
-    public async Task A_Reorder_Loses_To_A_Concurrent_Add_And_Changes_Nothing()
-    {
-        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
-        var (_, editor) = await _factory.CreateAuthenticatedClientAsync(EditorEmail);
-        var albumId = await CreateAlbumAsync(owner, "Trip");
-        foreach (var n in new[] { "a.png", "b.png" }) await AddOwnPngAsync(owner, albumId, n);
-        await InviteAcceptAsync(owner, editor, albumId, EditorEmail, "editor");
-
-        var stale = await VersionAsync(editor, albumId);
-        var order = (await ItemIdsOfAsync(albumId)).AsEnumerable().Reverse().ToList();
-
-        // Somebody adds an item after the editor read the version.
-        await AddOwnPngAsync(owner, albumId, "c.png");
-
-        var response = await editor.PutAsJsonAsync($"/api/shared-albums/{albumId}/order",
-            new { expectedVersion = stale, albumItemIds = order });
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-
-        // Nothing partial: the album still has three items in their original
-        // order, and no reorder audit was written.
-        Assert.Equal(3, (await ItemIdsOfAsync(albumId)).Count);
-        Assert.Equal(0, await CountAuditAsync("album.edit_reorder"));
     }
 
     [Fact]
@@ -566,12 +605,6 @@ public sealed class AlbumEditingTests : IDisposable
                 expectedVersion = await VersionAsync(editor, albumId),
                 fileItemId = items[0].GetProperty("fileItemId").GetGuid(),
             })).EnsureSuccessStatusCode();
-        (await editor.PutAsJsonAsync($"/api/shared-albums/{albumId}/order",
-            new
-            {
-                expectedVersion = await VersionAsync(editor, albumId),
-                albumItemIds = (await ItemIdsOfAsync(albumId)).AsEnumerable().Reverse().ToList(),
-            })).EnsureSuccessStatusCode();
         (await editor.DeleteAsync($"/api/shared-albums/{albumId}/items/" +
             $"{(await ItemIdsOfAsync(albumId))[0]}?expectedVersion={await VersionAsync(editor, albumId)}"))
             .EnsureSuccessStatusCode();
@@ -580,13 +613,12 @@ public sealed class AlbumEditingTests : IDisposable
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var logs = await db.AuditLogs.Where(a => a.Action.StartsWith("album.edit_")).ToListAsync();
 
-        Assert.Equal(4, logs.Count);
-        // The EDITOR is the actor for all four — never the album owner.
+        Assert.Equal(3, logs.Count);
+        // The EDITOR is the actor for all three — never the album owner.
         Assert.All(logs, a => Assert.Equal(editorId, a.UserId));
         Assert.All(logs, a => Assert.Equal(albumId, a.EntityId));
         Assert.Contains(logs, a => a.Action == "album.edit_details");
         Assert.Contains(logs, a => a.Action == "album.edit_cover");
-        Assert.Contains(logs, a => a.Action == "album.edit_reorder");
         Assert.Contains(logs, a => a.Action == "album.edit_remove_item");
 
         foreach (var log in logs)
@@ -748,6 +780,32 @@ public sealed class AlbumEditingTests : IDisposable
     private static async Task<List<Guid>> SharedItemIdsAsync(HttpClient client, Guid albumId) =>
         (await SharedItemsAsync(client, albumId))
             .Select(i => i.GetProperty("albumItemId").GetGuid()).ToList();
+
+    private static async Task<List<Guid>> SharedFileIdsAsync(HttpClient client, Guid albumId) =>
+        (await SharedItemsAsync(client, albumId))
+            .Select(i => i.GetProperty("fileItemId").GetGuid()).ToList();
+
+    private static async Task<List<Guid>> ContentFileIdsAsync(HttpClient client, Guid albumId) =>
+        (await client.GetFromJsonAsync<JsonElement>($"/api/albums/{albumId}/content"))
+            .GetProperty("items").EnumerateArray()
+            .Select(i => i.GetProperty("fileItemId").GetGuid()).ToList();
+
+    // The first photograph the shared-with-me mosaic shows for the album.
+    private static async Task<Guid?> MosaicFirstAsync(HttpClient client, Guid albumId)
+    {
+        var list = await client.GetFromJsonAsync<JsonElement>("/api/shared-albums");
+        var album = list.EnumerateArray().Single(a => a.GetProperty("albumId").GetGuid() == albumId);
+        var tiles = album.GetProperty("coverItems").EnumerateArray().ToList();
+        return tiles.Count == 0 ? null : tiles[0].GetProperty("fileItemId").GetGuid();
+    }
+
+    private async Task SetTakenAsync(Guid fileItemId, DateTime takenAt)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.FileItems.Where(f => f.Id == fileItemId)
+            .ExecuteUpdateAsync(u => u.SetProperty(f => f.EffectiveDateTaken, takenAt));
+    }
 
     private async Task<List<Guid>> ItemIdsOfAsync(Guid albumId)
     {
