@@ -9,6 +9,7 @@ import { PartyPrintPage } from './PartyPrintPage';
 import { containZoom } from '@nubarca/contracts';
 import { photoSlotAspect } from './partyPrintGeometry';
 import { errorResponse, installFetchMock, jsonResponse } from '../test-utils';
+import { partyPicksScope, printTokenOf, rememberPartyPicks } from './partyGuestMemo';
 import { I18nProvider } from '../i18n';
 
 const printCss = readFileSync(
@@ -1445,7 +1446,7 @@ describe('PartyPrintPage (public print studio)', () => {
   // --- Carrying the guest's print picks across -----------------------------
 
   it('starts the sheet with the photographs the guest picked on the hub, in pick order', async () => {
-    window.sessionStorage.setItem('nubarca.party.picks', JSON.stringify(['f3', 'other-party', 'f1']));
+    rememberPartyPicks(partyPicksScope(TOKEN), ['f3', 'other-party', 'f1']);
     const user = setup();
     mount();
     render(wrapper());
@@ -1459,12 +1460,60 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('lets the guest choose among their picks when they are more than the format takes', async () => {
-    window.sessionStorage.setItem('nubarca.party.picks', JSON.stringify(['f1', 'f2', 'f3']));
+    rememberPartyPicks(partyPicksScope(TOKEN), ['f1', 'f2', 'f3']);
     const user = setup();
     mount();
     render(wrapper());
     await chooseFormat(user, 'photo');
     expect(screen.queryAllByRole('button', { name: /Togli dalla selezione/ })).toHaveLength(0);
+  });
+
+  it('takes exactly as many picks as the format, out of a larger catalog, in pick order all the way to the print', async () => {
+    // The hub stores picks under the scope it derives from the print link it was
+    // given; the studio derives the same scope from its own route token.
+    const scope = partyPicksScope(printTokenOf(`/party/${TOKEN}/print`)!);
+    rememberPartyPicks(scope, ['f7', 'f2', 'f9', 'f4']);
+    const user = setup();
+    const mock = mount(onPaper('20x15', ['photo', 'grid4']), {
+      [`POST /api/party/${TOKEN}/print`]: () => jsonResponse({ ...accepted, product: 'grid4' }, 202),
+    });
+    render(wrapper());
+    await chooseFormat(user, 'grid4');
+    // Ten photos are on offer; the four picks are already the selection.
+    expect(screen.getAllByRole('button', { name: /Scegli questa foto|Togli dalla selezione/ })).toHaveLength(10);
+    expect(screen.getAllByRole('button', { name: /Togli dalla selezione/ })).toHaveLength(4);
+    await user.click(next());
+    await user.click(next());
+    for (let i = 0; i < 4; i += 1) await user.click(next());
+    ['f7', 'f2', 'f9', 'f4'].forEach((id, i) => {
+      expect(screen.getByTestId(`party-print-grid-${i}`).querySelector('img')?.getAttribute('src'))
+        .toContain(`/${id}/`);
+    });
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    expect(lastPost(mock.calls).slots.map((slot: { itemId: string }) => slot.itemId))
+      .toEqual(['f7', 'f2', 'f9', 'f4']);
+  });
+
+  it('never uses picks another party left in this tab, even for a photo both parties serve', async () => {
+    // Party B picked f1 and f2 — files this studio serves too.
+    rememberPartyPicks(partyPicksScope('another-print-token'), ['f1', 'f2']);
+    // A pre-scoping global key is ignored outright.
+    window.sessionStorage.setItem('nubarca.party.picks', JSON.stringify(['f3']));
+    const user = setup();
+    mount();
+    render(wrapper());
+    await chooseFormat(user, 'twinStrip4');
+    expect(screen.queryAllByRole('button', { name: /Togli dalla selezione/ })).toHaveLength(0);
+  });
+
+  it('keeps no print token in the stored key or value', () => {
+    rememberPartyPicks(partyPicksScope(TOKEN), ['f1']);
+    for (let i = 0; i < window.sessionStorage.length; i += 1) {
+      const key = window.sessionStorage.key(i)!;
+      expect(key).not.toContain(TOKEN);
+      expect(window.sessionStorage.getItem(key)).not.toContain(TOKEN);
+    }
   });
 
   // --- The way out --------------------------------------------------------

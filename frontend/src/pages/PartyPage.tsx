@@ -30,7 +30,8 @@ import {
 } from '../party/PartyGuestSurfaces';
 import { PRODUCT_NAME } from '../brand/brand';
 import {
-  forgetPartyPicks, recallPartyPicks, rememberFaceFilter, rememberPartyHome, rememberPartyPicks,
+  forgetPartyPicks, partyPicksScope, printTokenOf, recallPartyPicks, rememberFaceFilter, rememberPartyHome,
+  rememberPartyPicks,
 } from './partyGuestMemo';
 import './PartyGuestHub.css';
 
@@ -295,10 +296,22 @@ export function PartyPage() {
   // The guest's own picks for printing. Anonymous, so they live as long as
   // this tab's session with the party: ids only, intersected with what the
   // party serves, and forgotten the moment it stops answering.
-  const [picks, setPicks] = useState<string[]>(() => recallPartyPicks());
-  useEffect(() => { rememberPartyPicks(picks); }, [picks]);
+  // They are scoped to THIS party (its print token, digested), learnt once the
+  // context says where the party prints; until then there is nothing to pick.
+  const [pickState, setPickState] = useState<{ scope: string | null; ids: string[] }>(
+    { scope: null, ids: [] });
+  const picks = pickState.ids;
+  const setPicks = useCallback((ids: string[]) => {
+    setPickState((current) => ({ ...current, ids }));
+  }, []);
+  useEffect(() => {
+    if (pickState.scope) rememberPartyPicks(pickState.scope, pickState.ids);
+  }, [pickState]);
   const togglePick = useCallback((id: string) => {
-    setPicks((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id]));
+    setPickState((current) => ({
+      ...current,
+      ids: current.ids.includes(id) ? current.ids.filter((x) => x !== id) : [...current.ids, id],
+    }));
   }, []);
   // The print studio opens on its own token and cannot see this state, so the
   // guest's search result is left where that page can pick it up. Forgotten
@@ -526,11 +539,20 @@ export function PartyPage() {
   const readyItems = state.kind === 'ready' ? state.items : null;
 
   // Revoked, disabled or expired: nothing picked under that grant survives it.
+  // Only THIS party's picks are forgotten: another party's in the same tab stay.
   useEffect(() => {
     if (state.kind !== 'unavailable') return;
-    forgetPartyPicks();
-    setPicks([]);
+    setPickState((current) => {
+      if (current.scope) forgetPartyPicks(current.scope);
+      return { scope: current.scope, ids: [] };
+    });
   }, [state.kind]);
+  const printScopeToken = state.kind === 'ready' ? printTokenOf(state.context.capabilities.printUrl) : null;
+  useEffect(() => {
+    if (!printScopeToken) return;
+    const scope = partyPicksScope(printScopeToken);
+    setPickState((current) => (current.scope === scope ? current : { scope, ids: recallPartyPicks(scope) }));
+  }, [printScopeToken]);
   // Only what this party serves right now counts as picked; a pick from
   // another party, or of a photo taken down since, matches nothing.
   const servedPicks = useMemo(() => {

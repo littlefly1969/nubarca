@@ -608,8 +608,12 @@ describe('SharedAlbumDetailPage — the member\'s own selection', () => {
   it('offers no withdrawal for picks that are not the member\'s own', async () => {
     mockAlbum([item(), item({ fileItemId: 'f2' })], ALBUM, newPickServer(['f1']));
     renderPage();
-    await screen.findByTestId('shared-album-selection-bar');
+    const bar = await screen.findByTestId('shared-album-selection-bar');
     expect(screen.queryByTestId('shared-sel-withdraw')).not.toBeInTheDocument();
+    // Clear is the only thing a member can do with someone else's files here:
+    // no trash, no vault, and no print — membership carries no print grant
+    // (printing in a shared album is the owner's, or a print-enabled link's).
+    expect(bar.querySelectorAll('button')).toHaveLength(1);
     expect(screen.getByTestId('shared-sel-clear')).toBeInTheDocument();
   });
 

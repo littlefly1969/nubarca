@@ -630,11 +630,22 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   on screen. The browser (`SharedAlbumBrowser`) offers the round control, the
   viewer toggle and only what the membership may do with the picks (withdraw
   their own contributions); download stays per item and Editor removal stays in
-  the curation panel. An anonymous party guest has no account, so their print
+  the curation panel. There is deliberately **no print action** on a member's
+  picks: membership carries no print grant (owner print takes only the owner's
+  own files; `AlbumShareAccess.CanPrint` lives on an email + second-factor share
+  link), so a print hand-off would widen the grant. The supported paths are the
+  owner printing from the album, or the owner sending a print-enabled share
+  link. An anonymous party guest has no account, so their print
   picks are ids in this tab's sessionStorage (`partyGuestMemo`), offered only
   when the party offers printing, intersected with what the token serves,
   forgotten when the party stops answering, and preselected by the print
-  studio when they fit the format.
+  studio when they fit the format (exactly N picks for an N-photo format are
+  taken in pick order; more than N leaves the choice to the guest). Picks are
+  stored per party under `nubarca.party.picks.{digest(printToken)}`: hub and
+  studio both derive the scope from the print token (the hub from
+  `capabilities.printUrl`, the studio from its route), the token itself is never
+  stored, a photo two parties share never carries picks across, and a revoked
+  party forgets only its own key. The pre-scoping global key is dropped.
 - **There is ONE media-selection experience, and it is the Media Library.** A
   shared album's "Add from library" navigates to `/media` with the album in
   transient router state — never a URL, never a second route, never a fork of

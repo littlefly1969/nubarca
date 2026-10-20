@@ -8,6 +8,7 @@ import {
 } from '../test-utils';
 import { I18nProvider } from '../i18n';
 import { SCAN_MIN_PASSES, SCAN_PASS_MS } from '../components/useFaceScan';
+import { partyPicksScope, rememberPartyPicks } from './partyGuestMemo';
 
 /**
  * Ask for no motion.
@@ -509,7 +510,8 @@ describe('PartyPage (public party landing)', () => {
         },
       ],
     };
-    const stored = () => window.sessionStorage.getItem('nubarca.party.picks');
+    const stored = (printToken = 'print-token') =>
+      window.sessionStorage.getItem(`nubarca.party.picks.${partyPicksScope(printToken)}`);
 
     it('picks a photo from the grid and the viewer, and leads to the print studio', async () => {
       installFetchMock({
@@ -555,7 +557,7 @@ describe('PartyPage (public party landing)', () => {
     });
 
     it('counts only what this party serves, and clears on an explicit Clear', async () => {
-      window.sessionStorage.setItem('nubarca.party.picks', JSON.stringify(['from-another-party', 'f1']));
+      rememberPartyPicks(partyPicksScope('print-token'), ['from-another-party', 'f1']);
       installFetchMock({
         'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 1, printUrl: '/party/print-token/print' })),
         'GET /api/party/tok-1/items': () => jsonResponse(items),
@@ -567,15 +569,58 @@ describe('PartyPage (public party landing)', () => {
       expect(stored()).toBeNull();
     });
 
-    it('forgets the picks the moment the party stops answering', async () => {
+    it('forgets this party\'s picks the moment it stops answering, and only those', async () => {
+      rememberPartyPicks(partyPicksScope('print-token'), ['f1']);
+      rememberPartyPicks(partyPicksScope('other-print-token'), ['f1']);
+      let revoked = false;
+      installFetchMock({
+        'GET /api/party/tok-1': () => (revoked
+          ? errorResponse(404)
+          : jsonResponse(context({ itemCount: 1, printUrl: '/party/print-token/print' }))),
+        'GET /api/party/tok-1/items': () => (revoked ? errorResponse(404) : jsonResponse(items)),
+      });
+      vi.useFakeTimers();
+      try {
+        render(wrapper());
+        await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+        await settle();
+        expect(screen.getByTestId('party-picks-count')).toHaveTextContent('1 foto scelta per la stampa');
+        revoked = true;
+        await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+        await settle();
+        expect(screen.getByText(/non è più disponibile/i)).toBeInTheDocument();
+        expect(stored()).toBeNull();
+        // Another party's picks in the same tab are not this grant's to clear.
+        expect(stored('other-print-token')).toBe('["f1"]');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps two parties that serve the same photo apart in one tab', async () => {
+      // Party B already picked f1, which party A serves too.
+      rememberPartyPicks(partyPicksScope('other-print-token'), ['f1']);
+      // A pre-scoping global key is ignored outright.
       window.sessionStorage.setItem('nubarca.party.picks', JSON.stringify(['f1']));
       installFetchMock({
-        'GET /api/party/tok-1': () => errorResponse(404),
-        'GET /api/party/tok-1/items': () => errorResponse(404),
+        'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 1, printUrl: '/party/print-token/print' })),
+        'GET /api/party/tok-1/items': () => jsonResponse(items),
       });
+      const user = userEvent.setup();
       render(wrapper());
-      expect(await screen.findByText(/non è più disponibile/i)).toBeInTheDocument();
-      await waitFor(() => expect(stored()).toBeNull());
+      await screen.findByTestId('party-grid');
+      const control = screen.getByTestId('public-gallery-pick');
+      expect(control).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.queryByTestId('party-picks-bar')).not.toBeInTheDocument();
+      await user.click(control);
+      await user.click(control);
+      // Unpicking here empties A's picks; B's stay exactly as they were.
+      expect(stored()).toBeNull();
+      expect(stored('other-print-token')).toBe('["f1"]');
+      // Nothing stored carries the print token itself.
+      for (let i = 0; i < window.sessionStorage.length; i += 1) {
+        expect(window.sessionStorage.key(i)).not.toContain('print-token');
+      }
     });
   });
 

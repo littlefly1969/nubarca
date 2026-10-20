@@ -72,32 +72,68 @@ export function recallPartyHome(): string | null {
 }
 
 /*
- * The guest's own picks, for printing.
+ * The guest's own picks, for printing — kept PER PARTY.
  *
  * An anonymous guest has no account to hold a selection, so it lives exactly as
  * long as the session that granted it: this tab's sessionStorage, ids only —
- * never a token, never a URL. Like the face filter it is only ever used by
- * intersecting with what the current token serves, and the hub forgets it the
- * moment the party stops answering (revoked, disabled, expired).
+ * never a token, never a URL. One tab can visit two parties, and the same
+ * photograph can be in both, so filtering by what a party serves is not enough:
+ * the picks are stored under a key derived from the party's PRINT token, the
+ * one capability both the hub (its print link) and the studio (its own route)
+ * hold. The key is a one-way digest of it, so the token itself is never
+ * written down, and nothing of party A is shown, printed or forgotten by B.
  */
-const PICKS_KEY = 'nubarca.party.picks';
+const PICKS_PREFIX = 'nubarca.party.picks.';
+// Written by an earlier build without a party scope; never read, only removed.
+const LEGACY_PICKS_KEY = 'nubarca.party.picks';
 const MAX_PICKS = 200;
 
-export function rememberPartyPicks(itemIds: readonly string[]): void {
+// cyrb53 twice with different seeds: 106 bits of a stable, synchronous digest.
+// It only has to tell parties apart and not reveal the token; a print token is
+// already high-entropy and is in the guest's own address bar anyway.
+function digest(text: string): string {
+  const half = (seed: number) => {
+    let h1 = 0xdeadbeef ^ seed;
+    let h2 = 0x41c6ce57 ^ seed;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  };
+  return `${half(1)}${half(2)}`;
+}
+
+/** The scope of one party's picks, from its print token (never stored itself). */
+export function partyPicksScope(printToken: string): string {
+  return digest(printToken);
+}
+
+/** The print token in a hub's print link (`/party/{token}/print`), or null. */
+export function printTokenOf(printUrl: string | null | undefined): string | null {
+  const match = printUrl ? /^\/party\/([^/?#]+)\/print$/.exec(printUrl) : null;
+  return match ? match[1] : null;
+}
+
+export function rememberPartyPicks(scope: string, itemIds: readonly string[]): void {
   try {
+    window.sessionStorage.removeItem(LEGACY_PICKS_KEY);
     if (itemIds.length === 0) {
-      window.sessionStorage.removeItem(PICKS_KEY);
+      window.sessionStorage.removeItem(PICKS_PREFIX + scope);
       return;
     }
-    window.sessionStorage.setItem(PICKS_KEY, JSON.stringify(itemIds.slice(0, MAX_PICKS)));
+    window.sessionStorage.setItem(PICKS_PREFIX + scope, JSON.stringify(itemIds.slice(0, MAX_PICKS)));
   } catch {
     // Without storage the picks simply last as long as the page.
   }
 }
 
-export function recallPartyPicks(): string[] {
+export function recallPartyPicks(scope: string): string[] {
   try {
-    const raw = window.sessionStorage.getItem(PICKS_KEY);
+    const raw = window.sessionStorage.getItem(PICKS_PREFIX + scope);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -107,6 +143,6 @@ export function recallPartyPicks(): string[] {
   }
 }
 
-export function forgetPartyPicks(): void {
-  rememberPartyPicks([]);
+export function forgetPartyPicks(scope: string): void {
+  rememberPartyPicks(scope, []);
 }

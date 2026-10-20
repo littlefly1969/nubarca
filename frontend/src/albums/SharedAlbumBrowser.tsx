@@ -328,6 +328,10 @@ export function SharedAlbumBrowser({
         )}
       </div>
 
+      {/* No print action: album membership carries no print grant (owner print
+          takes only the owner's own files, and AlbumShareAccess.CanPrint lives on
+          an email + second-factor share link). Offering one here would widen what
+          a member may do with files that are not theirs. */}
       {capabilities.personalSelection && picked.ids.length > 0 && (
         <div
           className="shared-album-selection-bar"
