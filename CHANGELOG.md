@@ -4,6 +4,17 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.1 — 2026-10-20
+
+### Every release has its own version number
+
+- **The version goes up with every release.** Each merge into `main` is a
+  release, so each one raises the patch (0.4.1, 0.4.2, …); the minor goes up
+  (0.5.0) only for a more important release. The administration page's update
+  screen therefore always shows a different version for a different release.
+- CI refuses a pull request into `main` whose version is not above `main`'s
+  (`scripts/check-release-version.py`), so the bump cannot be forgotten.
+
 ## 0.4.0 — 2026-10-20
 
 ### Selection, lists and album order
