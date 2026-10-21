@@ -45,25 +45,16 @@ public sealed class MailWorkspace
         {
             return;
         }
-        foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+        // Only the working copy is read-only, and only the worker made it.
+        // Nothing the engine wrote is touched by path: a link it left there
+        // must not lead a chmod (which follows links) to a file elsewhere.
+        // Directory.Delete removes links themselves, never their targets.
+        var source = new FileInfo(SourcePath(runId));
+        if (source.Exists && source.LinkTarget is null)
         {
-            // The working copy is made read-only; clear that before deleting.
-            File.SetAttributes(file, FileAttributes.Normal);
+            source.Attributes = FileAttributes.Normal;
         }
         Directory.Delete(dir, recursive: true);
-    }
-
-    // Resolves an engine-relative file reference ("r42/att-0.bin") strictly
-    // inside `baseDirectory/requestId/`. Anything else is a protocol error.
-    public static string ResolveInside(string baseDirectory, string requestId, string relative)
-    {
-        var requestDir = Path.GetFullPath(Path.Combine(baseDirectory, requestId)) + Path.DirectorySeparatorChar;
-        var full = Path.GetFullPath(Path.Combine(baseDirectory, relative));
-        if (!full.StartsWith(requestDir, StringComparison.Ordinal))
-        {
-            throw new PstEngineException("protocol_error", "The PST engine referenced a file outside its request directory.");
-        }
-        return full;
     }
 
     private string Root => _root

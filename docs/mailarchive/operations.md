@@ -156,6 +156,12 @@ uid 1654 (`unprivileged`). Tests: `tools/nubarca-pst-importer/tests/sandbox.rs`
 root) and `MailArchiveRealEngineTests` (the process exactly as the worker
 starts it: empty environment, flags, confined).
 
+The boundary back into the worker is part of the isolation: what the engine
+writes is read without following links (see Security notes), so a compromised
+parser cannot make the unconfined worker import a file it could not read
+itself (`EngineFilesTests`,
+`A_compromised_engine_cannot_make_the_worker_import_a_file_outside_its_staging`).
+
 Not covered: a kernel exploit reachable through the allowed syscalls (reading
 and writing files, memory management). That boundary is the kernel's.
 
@@ -216,8 +222,17 @@ OLE attachments (described with `unsupported_method`).
 ## Security notes
 
 - The engine opens the working copy read-only; the source FileItem is never
-  touched. Paths returned by the engine are resolved inside the request
-  directory or rejected.
+  touched.
+- The worker reads the engine's output (`message.json`, attachment parts)
+  through `EngineFiles` only: the reference must name a plain path below the
+  request directory, it is opened relative to the staging directory with
+  `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS |
+  RESOLVE_NO_XDEV)` (a per-component `O_NOFOLLOW` walk on kernels without
+  openat2), and the opened descriptor must be a regular file with one link.
+  Everything is then read from that descriptor, so there is no check-then-open
+  window. A link, FIFO, directory or escape fails the message with
+  `unsafe_engine_output` and restarts the engine session; nothing it pointed
+  at is read. Cleaning the staging never follows a link the engine left.
 - No endpoint takes a server path: imports start from a `fileItemId` the
   caller owns.
 - HTML bodies are sanitized on the server with an allow-list (no script,

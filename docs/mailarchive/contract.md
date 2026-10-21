@@ -103,6 +103,10 @@ A long-lived extraction server. Requests on stdin, one JSON per line; one
 response line per request, in order. The engine writes files only below
 `DIR/<requestId>/` (`requestId` matches `^[A-Za-z0-9_-]{1,64}$`, anything else
 is a `bad_request`). The caller deletes that directory after consuming it.
+The caller trusts only the names: `document` and `attachments[].file` must be
+plain relative paths below `<requestId>/`, and each is opened without
+following any link and accepted only as a regular file with one link
+(otherwise the message fails `unsafe_engine_output`).
 
 ```json
 {"op":"extract","requestId":"r42","messageId":"m:00200024"}

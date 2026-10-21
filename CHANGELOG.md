@@ -27,7 +27,9 @@ originating repository and is deliberately not reproduced here.
   has become readable.
 - **The PST is parsed in a sandbox**: as an unprivileged user, with no
   inherited settings, no network, no other programs, access only to its own
-  copy of the PST and its work folder, and memory and CPU limits.
+  copy of the PST and its work folder, and memory and CPU limits. What it
+  produces is read back without following links, so it cannot point
+  NubArca at any other file.
 - Everything stays private to the owner. Operations and limits:
   `docs/mailarchive/operations.md`.
 

@@ -21,6 +21,9 @@ public sealed class FakePstEngine : IPstEngine
     // Folders whose contents `list` cannot enumerate: the folder is reported,
     // then a folder-scoped error, and none of its messages.
     public HashSet<string> UnreadableFolders { get; } = new(StringComparer.Ordinal);
+    // Called with (message key, request directory) after a message's files
+    // are written: lets a test play a compromised parser that leaves links.
+    public Action<string, string>? TamperOutput { get; set; }
 
     public int Extractions { get; private set; }
     public int Lists { get; private set; }
@@ -201,6 +204,7 @@ public sealed class FakePstEngine : IPstEngine
                 files.Add(new PstExtractedAttachmentFile(key, $"{requestId}/{name}", bytes.Length,
                     Convert.ToHexStringLower(SHA256.HashData(bytes))));
             }
+            engine.TamperOutput?.Invoke(messageKey, dir);
             return new PstExtractResponse("extracted", requestId, messageKey, $"{requestId}/message.json", json.Length,
                 files, [], null, null);
         }

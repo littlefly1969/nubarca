@@ -407,6 +407,66 @@ public sealed class MailArchiveImportTests : IDisposable
         Assert.Equal(audit.TotalBlobs, audit.MatchedReferenceCount);
     }
 
+    [SkippableFact]
+    public async Task A_compromised_engine_cannot_make_the_worker_import_a_file_outside_its_staging()
+    {
+        Skip.IfNot(OperatingSystem.IsLinux(), "Engine output is guarded with Linux openat2/O_NOFOLLOW.");
+        var outside = Directory.CreateTempSubdirectory("nubarca-mail-outside-").FullName;
+        try
+        {
+            var secret = Path.Combine(outside, "secret.bin");
+            await File.WriteAllTextAsync(secret, "readable only by the worker");
+            File.SetAttributes(secret, FileAttributes.ReadOnly);
+            var secretSha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(secret)));
+            var decoy = Directory.CreateDirectory(Path.Combine(outside, "decoy")).FullName;
+
+            var engine = FakePstEngine.Sample();
+            engine.TamperOutput = (key, dir) =>
+            {
+                switch (key)
+                {
+                    case "m:00000101": // an attachment replaced by a link to the secret
+                        File.Delete(Path.Combine(dir, "att-0.bin"));
+                        File.CreateSymbolicLink(Path.Combine(dir, "att-0.bin"), secret);
+                        break;
+                    case "m:00000102": // the document itself a link
+                        File.Delete(Path.Combine(dir, "message.json"));
+                        File.CreateSymbolicLink(Path.Combine(dir, "message.json"), secret);
+                        break;
+                    case "m:00000103": // the whole request directory a link elsewhere
+                        foreach (var f in Directory.EnumerateFiles(dir)) File.Copy(f, Path.Combine(decoy, Path.GetFileName(f)), overwrite: true);
+                        Directory.Delete(dir, recursive: true);
+                        Directory.CreateSymbolicLink(dir, decoy);
+                        break;
+                }
+            };
+            var (factory, client, owner, archive) = await ImportedAsync(this, engine);
+
+            var run = archive.LatestRun!;
+            Assert.Equal("partial", run.Status);
+            Assert.Equal(3, run.FailedMessages);
+            Assert.Equal(1, run.ImportedMessages); // m:00000104 is untouched
+            var failures = await InDbAsync(factory, db => db.MailImportItems.AsNoTracking()
+                .Where(i => i.Status == MailImportItemStatuses.Failed).Select(i => i.FailureCode).ToListAsync());
+            Assert.All(failures, code => Assert.Equal(EngineFiles.UnsafeOutput, code));
+
+            // The secret's bytes never became a blob, a file or a message.
+            Assert.False(await InDbAsync(factory, db => db.BlobObjects.AnyAsync(b => b.Sha256 == secretSha)));
+            Assert.Equal(1, archive.MessageCount);
+            // Cleaning the staging removed the links, never what they pointed at.
+            Assert.Equal("readable only by the worker", await File.ReadAllTextAsync(secret));
+            Assert.True(File.GetAttributes(secret).HasFlag(FileAttributes.ReadOnly));
+            Assert.True(File.Exists(Path.Combine(decoy, "message.json")));
+            var audit = await AuditAsync(factory);
+            Assert.Equal(audit.TotalBlobs, audit.MatchedReferenceCount);
+        }
+        finally
+        {
+            foreach (var f in Directory.EnumerateFiles(outside, "*", SearchOption.AllDirectories)) File.SetAttributes(f, FileAttributes.Normal);
+            Directory.Delete(outside, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task Many_same_named_attachments_in_one_folder_get_deterministic_names_without_a_prefix_scan()
     {

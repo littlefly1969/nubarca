@@ -153,8 +153,8 @@ public sealed class MailArchiveRealEngineTests : IDisposable
         Assert.Equal(2, response.Attachments!.Count);
         foreach (var file in response.Attachments)
         {
-            var path = MailWorkspace.ResolveInside(work, "req-0001", file.File);
-            Assert.Equal(file.Sha256, Convert.ToHexStringLower(SHA256.HashData(await File.ReadAllBytesAsync(path))));
+            await using var content = EngineFiles.Open(work, "req-0001", file.File);
+            Assert.Equal(file.Sha256, Convert.ToHexStringLower(await SHA256.HashDataAsync(content)));
         }
         var missing = await session.ExtractAsync("req-0002", "m:7fffffff", CancellationToken.None);
         Assert.Equal("error", missing.Type);

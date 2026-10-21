@@ -472,19 +472,22 @@ public sealed class MailImportRunner
                 return;
             }
 
-            var documentPath = MailWorkspace.ResolveInside(state.ServeDir, requestId, response.Document);
-            var documentInfo = new FileInfo(documentPath);
-            if (!documentInfo.Exists || documentInfo.Length > _options.MaxDocumentBytes)
+            // Read once, through the engine-output guard, into memory (it is
+            // bounded by MaxDocumentBytes): the same bytes are parsed here and
+            // stored as the document blob, never reopened by path.
+            byte[] documentBytes;
+            await using (var stream = EngineFiles.Open(state.ServeDir, requestId, response.Document))
             {
-                await FailItemAsync(state, item, "too_large", "Documento del messaggio oltre il limite.", cancellationToken);
-                return;
+                if (stream.Length > _options.MaxDocumentBytes)
+                {
+                    await FailItemAsync(state, item, "too_large", "Documento del messaggio oltre il limite.", cancellationToken);
+                    return;
+                }
+                documentBytes = new byte[stream.Length];
+                await stream.ReadExactlyAsync(documentBytes, cancellationToken);
             }
 
-            PstMessageDocument? document;
-            await using (var stream = File.OpenRead(documentPath))
-            {
-                document = await JsonSerializer.DeserializeAsync<PstMessageDocument>(stream, PstProtocol.Json, cancellationToken);
-            }
+            var document = JsonSerializer.Deserialize<PstMessageDocument>(documentBytes, PstProtocol.Json);
             if (document is null
                 || document.Format != MailDocumentFormats.Message
                 || document.Version != MailDocumentFormats.CurrentVersion)
@@ -515,7 +518,7 @@ public sealed class MailImportRunner
                 _db.MailMessages.Add(message);
             }
             message.FolderId = folder.Id;
-            MailMessageProjection.Apply(message, document, documentInfo.Length, Now);
+            MailMessageProjection.Apply(message, document, documentBytes.Length, Now);
             await _db.SaveChangesAsync(cancellationToken);
 
             var createdFiles = new List<Guid>();
@@ -530,9 +533,22 @@ public sealed class MailImportRunner
                 return;
             }
 
-            await CompleteMessageAsync(message, item, state.Run, documentPath, cancellationToken);
+            await CompleteMessageAsync(message, item, state.Run, documentBytes, cancellationToken);
             state.Imported++;
             await ScheduleAsync(archive.OwnerUserId, createdFiles, cancellationToken);
+        }
+        catch (PstEngineException ex) when (ex.Code == EngineFiles.UnsafeOutput)
+        {
+            // The engine left a link, FIFO or other non-file where a result
+            // should be: treat it as compromised. Nothing it pointed at was
+            // read; its session is ended and this message is not imported.
+            _logger.LogWarning("MailArchive: rejected unsafe engine output; the engine session is restarted.");
+            if (state.Session is not null)
+            {
+                await state.Session.DisposeAsync();
+                state.Session = null;
+            }
+            await FailItemAsync(state, item, EngineFiles.UnsafeOutput, "Output del motore rifiutato perché non sicuro.", cancellationToken);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -612,12 +628,12 @@ public sealed class MailImportRunner
                 continue;
             }
 
-            var path = MailWorkspace.ResolveInside(state.ServeDir, requestId, extracted.File);
+            var reference = extracted.File;
             var targetFolderId = await AttachmentFolderAsync(state, folder, cancellationToken);
             try
             {
                 var (fileItemId, created) = await EnsureAttachmentFileAsync(
-                    message, link, path, targetFolderId, cancellationToken);
+                    message, link, () => EngineFiles.Open(state.ServeDir, requestId, reference), targetFolderId, cancellationToken);
                 link.FileItemId = fileItemId;
                 link.Status = MailAttachmentStatuses.Linked;
                 link.SkipReason = null;
@@ -646,7 +662,7 @@ public sealed class MailImportRunner
     // (FileItemService.CreateAsync), so after a crash the completed claim
     // names the file that already exists and is adopted, never duplicated.
     private async Task<(Guid FileItemId, bool Created)> EnsureAttachmentFileAsync(
-        MailMessage message, MailAttachment link, string path, Guid? folderId, CancellationToken cancellationToken)
+        MailMessage message, MailAttachment link, Func<Stream> openContent, Guid? folderId, CancellationToken cancellationToken)
     {
         var owner = message.OwnerUserId;
         var key = $"mailarchive:{message.Id:N}:{link.AttachmentKey}";
@@ -676,7 +692,7 @@ public sealed class MailImportRunner
             var name = await FreeNameAsync(owner, folderId, link.OriginalName, message.SourceMessageKey, link.AttachmentKey, cancellationToken);
             try
             {
-                await using var content = File.OpenRead(path);
+                await using var content = openContent();
                 var created = await _files.CreateAsync(
                     owner, folderId, name, link.MimeType, content, cancellationToken,
                     generateSmallThumbnail: false,
@@ -759,13 +775,13 @@ public sealed class MailImportRunner
     // The document blob and the "complete" state commit together: until then
     // the message is invisible, after it the reference is owned by the row.
     private async Task CompleteMessageAsync(
-        MailMessage message, MailImportItem item, MailImportRun run, string documentPath, CancellationToken cancellationToken)
+        MailMessage message, MailImportItem item, MailImportRun run, byte[] documentBytes, CancellationToken cancellationToken)
     {
         var strategy = _db.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
         {
             await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
-            await using var content = File.OpenRead(documentPath);
+            await using var content = new MemoryStream(documentBytes, writable: false);
             var blob = await _blobs.StoreAsync(content, cancellationToken);
             var now = Now;
             var completed = await _db.MailMessages
