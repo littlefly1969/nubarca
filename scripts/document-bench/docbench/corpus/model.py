@@ -94,6 +94,12 @@ class C:
     @property
     def labels(self) -> tuple[str, ...]:
         names = [self.title, *self.categories, *(name for name, _ in self.series)]
+        for _, values in self.series:
+            if self.kind == "pie":
+                total = sum(values) or 1
+                names.extend(f"{100 * v / total:1.0f}%" for v in values)
+            else:
+                names.extend(f"{v:g}" for v in values)
         return tuple(n for n in names if n)
 
 

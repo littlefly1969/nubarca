@@ -1,0 +1,5 @@
+# Generated golden set, run results and caches: never committed.
+golden/
+results/
+.pytest_cache/
+__pycache__/
