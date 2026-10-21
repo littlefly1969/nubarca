@@ -44,54 +44,37 @@ public sealed class PdfExtractionProvider : IDocumentExtractionProvider
         cancellationToken.ThrowIfCancellationRequested();
         var options = request.Options;
 
-        PdfDocument document;
-        try
+        // PARSING IS BOUNDED; RECOGNITION IS BOUNDED PER PAGE. The native text of
+        // every page is read first, inside the parse budget, and only then are
+        // the pages that need OCR rendered and recognized — so a slow OCR run
+        // never counts against the parser's deadline, and a parser that spins
+        // on a pathological file is abandoned rather than awaited.
+        var (parsed, timedOut) = await DocumentParseBudget.RunAsync(
+            token => ParseNative(request.Bytes, options, token),
+            options.EffectiveParseTimeoutSeconds,
+            cancellationToken);
+
+        if (timedOut)
         {
-            document = PdfDocument.Open(request.Bytes.ToArray());
+            return DocumentExtractionOutcome.Unavailable(DocumentExtractionReasons.ParseTimeout);
         }
-        catch (PdfDocumentEncryptedException)
+        if (parsed!.Refusal is { } refusal)
         {
-            // Password-protected. Nothing to extract without a credential
-            // NubArca does not have and must never ask for.
-            return DocumentExtractionOutcome.Rejected(DocumentExtractionReasons.EncryptedDocument);
-        }
-        catch (Exception)
-        {
-            // PdfPig is pre-1.0 and has open issues on malformed input, so its
-            // exceptions are treated as fallible rather than authoritative — and
-            // sanitized, because the message can carry a path.
-            return DocumentExtractionOutcome.Rejected(DocumentExtractionReasons.OfficePackageInvalid);
+            return DocumentExtractionOutcome.Rejected(refusal);
         }
 
-        using (document)
+        var pages = parsed.Pages!;
         {
-            if (document.NumberOfPages > options.EffectiveMaxPdfPages)
-            {
-                return DocumentExtractionOutcome.Rejected(DocumentExtractionReasons.PdfTooManyPages);
-            }
-
             var blocks = new List<ExtractedDocumentBlock>();
             var ordinal = 0;
             var characters = 0;
             var ocrPages = 0;
 
-            for (var number = 1; number <= document.NumberOfPages; number++)
+            for (var number = 1; number <= pages.Count; number++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                string native;
-                try
-                {
-                    var page = document.GetPage(number);
-                    // Content-order extraction: PdfPig recommends it for
-                    // indexing, and reading order is what a chunk should follow.
-                    native = ContentOrderTextExtractor.GetText(page) ?? string.Empty;
-                }
-                catch (Exception)
-                {
-                    native = string.Empty;
-                }
-
+                var native = pages[number - 1];
                 var text = native;
 
                 if (!PdfTextQuality.IsUsable(native))
@@ -159,11 +142,72 @@ public sealed class PdfExtractionProvider : IDocumentExtractionProvider
 
             _log.LogInformation(
                 "document extraction: format=pdf pages={Pages} ocr_pages={OcrPages} chars={Characters}",
-                document.NumberOfPages, ocrPages, characters);
+                pages.Count, ocrPages, characters);
 
             return DocumentExtractionOutcome.Extracted(
                 new DocumentExtractionArtifact(DocumentTextSources.Pdf, blocks, null));
         }
+    }
+
+    /// The native text of every page, or a content verdict. Runs inside the
+    /// parse budget, on a pool thread, and polls its token between pages.
+    private static NativePdf ParseNative(
+        ReadOnlyMemory<byte> bytes, DocumentExtractionOptions options, CancellationToken cancellationToken)
+    {
+        PdfDocument document;
+        try
+        {
+            document = PdfDocument.Open(bytes.ToArray());
+        }
+        catch (PdfDocumentEncryptedException)
+        {
+            // Password-protected. Nothing to extract without a credential
+            // NubArca does not have and must never ask for.
+            return NativePdf.Refused(DocumentExtractionReasons.EncryptedDocument);
+        }
+        catch (Exception)
+        {
+            // A CORRUPT PDF, said as one. PdfPig is pre-1.0 and has open issues
+            // on malformed input, so its exceptions are treated as fallible
+            // rather than authoritative — and sanitized, because the message
+            // can carry a path. (Recorded as OfficePackageInvalid before
+            // `pdf-invalid` existed; both tokens stay readable.)
+            return NativePdf.Refused(DocumentExtractionReasons.PdfInvalid);
+        }
+
+        using (document)
+        {
+            if (document.NumberOfPages > options.EffectiveMaxPdfPages)
+            {
+                return NativePdf.Refused(DocumentExtractionReasons.PdfTooManyPages);
+            }
+
+            var pages = new List<string>(document.NumberOfPages);
+            for (var number = 1; number <= document.NumberOfPages; number++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    var page = document.GetPage(number);
+                    // Content-order extraction: PdfPig recommends it for
+                    // indexing, and reading order is what a chunk should follow.
+                    pages.Add(ContentOrderTextExtractor.GetText(page) ?? string.Empty);
+                }
+                catch (Exception)
+                {
+                    // One unreadable page is an OCR candidate, not a verdict on
+                    // the document.
+                    pages.Add(string.Empty);
+                }
+            }
+
+            return new NativePdf(pages, null);
+        }
+    }
+
+    private sealed record NativePdf(IReadOnlyList<string>? Pages, string? Refusal)
+    {
+        public static NativePdf Refused(string reason) => new(null, reason);
     }
 
     private async Task<(string? Text, string? Reason)> RecognizeAsync(

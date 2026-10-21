@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using NubArca.Api.Ai.Documents.Sources;
 using NubArca.Api.Ai.TextEmbeddings;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
@@ -30,6 +31,56 @@ public sealed record OwnerDocumentIndexOutcome(
     string? EmbeddingReason,
     bool Partial);
 
+/// How indexing ONE source ended, classified for per-phase state.
+///
+/// The classes are the point: `Skipped` is a permanent content verdict about
+/// this revision, `Failed` a retryable failure, `Unavailable` an environment
+/// state (a parser, OCR engine or renderer that is not installed) that must
+/// never be recorded as either. No names, no text — a reason token at most.
+public sealed record OwnerDocumentSourceOutcome(
+    OwnerDocumentSourceOutcomeKind Kind,
+    string? Reason,
+    string Phase,
+    Guid? DocumentTextId,
+    Guid? ExtractionProfileId)
+{
+    public static OwnerDocumentSourceOutcome Unchanged(Guid documentTextId, Guid profileId)
+        => new(OwnerDocumentSourceOutcomeKind.Unchanged, null, DocumentSourcePhases.Chunk, documentTextId, profileId);
+
+    public static OwnerDocumentSourceOutcome Indexed(Guid documentTextId, Guid profileId)
+        => new(OwnerDocumentSourceOutcomeKind.Indexed, null, DocumentSourcePhases.Chunk, documentTextId, profileId);
+
+    public static OwnerDocumentSourceOutcome Skipped(string phase, string reason, Guid profileId)
+        => new(OwnerDocumentSourceOutcomeKind.Skipped, reason, phase, null, profileId);
+
+    public static OwnerDocumentSourceOutcome Failed(string reason)
+        => new(OwnerDocumentSourceOutcomeKind.Failed, reason, DocumentSourcePhases.Extract, null, null);
+
+    public static OwnerDocumentSourceOutcome Unavailable(string reason)
+        => new(OwnerDocumentSourceOutcomeKind.Unavailable, reason, DocumentSourcePhases.Extract, null, null);
+
+    public static OwnerDocumentSourceOutcome NotEligible()
+        => new(OwnerDocumentSourceOutcomeKind.NotEligible, null, DocumentSourcePhases.Extract, null, null);
+
+    /// A current, completed reading exists (and its chunks).
+    public bool HasReading => Kind is OwnerDocumentSourceOutcomeKind.Unchanged or OwnerDocumentSourceOutcomeKind.Indexed;
+}
+
+public enum OwnerDocumentSourceOutcomeKind
+{
+    Unchanged,
+    Indexed,
+    Skipped,
+    Failed,
+    Unavailable,
+    NotEligible,
+}
+
+/// The embed phase for one reading: complete, stopped to yield, or a sanitized
+/// reason the model could not run (an environment state, never a verdict).
+public sealed record OwnerDocumentEmbedOutcome(
+    bool Completed, bool Stopped, int EmbeddingsCreated, string? Reason);
+
 /// Turns one person's eligible documents into their own private corpus.
 ///
 /// The whole pipeline for `user-documents`, and deliberately NOT RagIndexer.
@@ -55,6 +106,7 @@ public sealed class OwnerDocumentIndexer
     private readonly IOptions<DocumentExtractionOptions> _options;
     private readonly TimeProvider _clock;
     private readonly ILogger<OwnerDocumentIndexer> _log;
+    private readonly FileItemDocumentSource _files;
 
     public OwnerDocumentIndexer(
         AppDbContext db,
@@ -74,6 +126,10 @@ public sealed class OwnerDocumentIndexer
         _options = options;
         _clock = clock;
         _log = log;
+        // The `file` kind, built from the same collaborators rather than
+        // injected, so the operator command and every existing caller keep
+        // their constructor while reading through the source seam.
+        _files = new FileItemDocumentSource(db, storage, options);
     }
 
     public async Task<OwnerDocumentIndexOutcome> IndexOwnerAsync(
@@ -87,40 +143,31 @@ public sealed class OwnerDocumentIndexer
             throw new ArgumentException("An owner is required.", nameof(ownerUserId));
         }
 
-        var options = _options.Value;
-        var profile = await ExtractionProfileAsync(cancellationToken);
         var state = new IndexState();
 
-        // KEYSET PAGING, never `ToListAsync()` over a library. A person can have
-        // a hundred thousand files, and each row carries a name and a path.
-        var cursor = Guid.Empty;
+        // KEYSET PAGING, never `ToListAsync()` over a library — the source kind
+        // pages its own candidates. The operator command indexes the `file`
+        // kind, which is the only one this build registers.
+        Guid? cursor = null;
         var seenDocumentTextIds = new List<Guid>();
 
         while (limit is null || state.FilesSeen < limit)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var page = await OwnerDocumentEligibility
-                .Extractable(_db.FileItems.AsNoTracking(), ownerUserId)
-                .Where(f => f.Id > cursor)
-                .OrderBy(f => f.Id)
-                .Select(f => new CandidateFile(
-                    f.Id, f.BlobObjectId, f.Name, f.MimeType, f.SizeBytes))
-                .Take(64)
-                .ToListAsync(cancellationToken);
-
+            var page = await _files.ListCandidatesAsync(ownerUserId, cursor, 64, cancellationToken);
             if (page.Count == 0) break;
 
-            foreach (var file in page)
+            foreach (var candidate in page)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                cursor = file.Id;
+                cursor = candidate.SourceId;
                 if (limit is int cap && state.FilesSeen >= cap) break;
                 state.FilesSeen++;
 
-                var documentTextId = await IndexFileAsync(
-                    ownerUserId, file, profile, options, state, cancellationToken);
-                if (documentTextId is { } id) seenDocumentTextIds.Add(id);
+                var result = await IndexSourceCoreAsync(
+                    _files, ownerUserId, candidate, state, cancellationToken);
+                if (result.DocumentTextId is { } id) seenDocumentTextIds.Add(id);
             }
         }
 
@@ -145,216 +192,217 @@ public sealed class OwnerDocumentIndexer
             embedding.Item1, embedding.Item2, partial);
     }
 
-    private sealed record CandidateFile(
-        Guid Id, Guid BlobObjectId, string Name, string MimeType, long SizeBytes);
-
-    // ---- one document -------------------------------------------------------
-
-    private async Task<Guid?> IndexFileAsync(
-        Guid ownerUserId, CandidateFile file, AiProfile profile,
-        DocumentExtractionOptions options, IndexState state, CancellationToken cancellationToken)
+    /// Extract and chunk ONE source — the unit the background job works in.
+    ///
+    /// The same pipeline the operator command runs, one source at a time, with
+    /// its outcome CLASSIFIED so the caller can record per-phase state: a
+    /// permanent content verdict, a retryable failure and an environment state
+    /// are three different things and must never be written as one another.
+    public Task<OwnerDocumentSourceOutcome> IndexSourceAsync(
+        IOwnerDocumentSource source, Guid ownerUserId, DocumentSourceCandidate candidate,
+        CancellationToken cancellationToken = default)
     {
-        // THE BYTES CHANGED, SO THE OLD READING IS NOT ABOUT THIS FILE ANY MORE.
+        if (ownerUserId == Guid.Empty)
+        {
+            throw new ArgumentException("An owner is required.", nameof(ownerUserId));
+        }
+
+        return IndexSourceCoreAsync(source, ownerUserId, candidate, new IndexState(), cancellationToken);
+    }
+
+    /// Which source a row describes and at which revision, in the shape the
+    /// writes below need. For the `file` kind the revision is the blob id and
+    /// lives in `SourceBlobObjectId`, exactly as before sources existed.
+    private sealed record SourceRef(string Kind, Guid SourceId, string Revision, Guid BlobObjectId)
+    {
+        public bool IsFile => Kind == DocumentSourceKinds.File;
+
+        public bool Describes(DocumentText row)
+            => IsFile ? row.SourceBlobObjectId == BlobObjectId : row.SourceRevision == Revision;
+
+        public void Stamp(DocumentText row)
+        {
+            if (IsFile)
+            {
+                row.FileItemId = SourceId;
+                row.SourceBlobObjectId = BlobObjectId;
+                row.SourceRevision = null;
+            }
+            else
+            {
+                row.SourceKind = Kind;
+                row.SourceId = SourceId;
+                row.SourceRevision = Revision;
+            }
+        }
+    }
+
+    private async Task<OwnerDocumentSourceOutcome> IndexSourceCoreAsync(
+        IOwnerDocumentSource source, Guid ownerUserId, DocumentSourceCandidate candidate,
+        IndexState state, CancellationToken cancellationToken)
+    {
+        var options = _options.Value;
+        var profile = await ExtractionProfileAsync(cancellationToken);
+
+        var isFile = source.Kind == DocumentSourceKinds.File;
+        var blobId = isFile ? FileItemDocumentSource.BlobOf(candidate.RevisionHash) ?? Guid.Empty : Guid.Empty;
+        var reference = new SourceRef(source.Kind, candidate.SourceId, candidate.RevisionHash, blobId);
+
+        // THE BYTES CHANGED, SO THE OLD READING IS NOT ABOUT THIS SOURCE ANY MORE.
         //
         // First, before the size gate, before storage is opened, before anything
         // can fail — because every one of the paths below can return without
         // producing a replacement, and each of them would otherwise leave a
-        // completed extraction of the PREVIOUS blob standing as the current
-        // reading of the file. That is the worst available outcome: the
-        // questioner gets a confident answer, drawn from a document that has
-        // been replaced, with nothing anywhere reporting a problem. A file with
-        // no current row is merely unanswerable, which is recoverable and
-        // visible.
+        // completed extraction of the PREVIOUS revision standing as the current
+        // reading. That is the worst available outcome: the questioner gets a
+        // confident answer, drawn from a document that has been replaced, with
+        // nothing anywhere reporting a problem. A source with no current row is
+        // merely unanswerable, which is recoverable and visible.
         //
-        // Only bytes that DISAGREE are demoted. A newer extraction profile
-        // reading the same unchanged blob must not take a valid document
-        // offline while it works — that case promotes on success and is handled
-        // after extraction.
-        await DemoteSupersededBytesAsync(file.Id, file.BlobObjectId, cancellationToken);
+        // Only revisions that DISAGREE are demoted. A newer extraction profile
+        // reading the same unchanged bytes must not take a valid document
+        // offline while it works — that case promotes on success.
+        await DemoteSupersededRevisionAsync(reference, cancellationToken);
 
-        // SIZE BEFORE BYTES. `FileItem.SizeBytes` is recorded at upload, so an
-        // oversized document is refused without opening the blob at all. A limit
-        // enforced after reading is a report, not a bound.
-        //
-        // The budget is derived from what the file CLAIMS to be, because nothing
-        // about the content is known yet and the read has to be bounded anyway.
-        // It is a resource budget and not a format decision — the bytes still
-        // decide, and `SourceBytesFor(actualFormat)` is re-checked below. Using
-        // the native-text ceiling here instead made the PDF and Office limits
-        // unreachable: a 10 MiB PDF was refused before it was opened, so the
-        // 64 MiB ceilings an operator can configure could never be exercised.
-        var candidateBudget = DocumentFormatProbe.CandidateSourceBudget(
-            file.MimeType, file.Name, options);
-
-        if (file.SizeBytes > candidateBudget)
-        {
-            state.Skip(DocumentExtractionReasons.TooLarge);
-            return null;
-        }
-
-        // NOTHING TO DO, AND NOTHING READ. Same bytes, same reading of them —
+        // NOTHING TO DO, AND NOTHING READ. Same revision, same reading of it —
         // which is exactly the rename-and-move case, because those are DB-only
         // operations that leave the content-addressed blob alone.
         //
-        // Asked of the CURRENT row rather than of this profile's row, and that
-        // distinction is what makes idempotence work at all now that a file's
-        // reading may belong to any of five parsers. Looking up by the profile
-        // the caller happens to hold finds nothing for a DOCX — whose reading
-        // lives under the Word profile — so every rich document in every library
-        // would be re-read, re-parsed and re-chunked on every single pass. The
-        // current row is the authority, and whether it still describes these
-        // bytes is exactly the question being asked.
+        // Asked of the CURRENT row rather than of one profile's row: a source's
+        // reading may belong to any of five parsers, and the current row is the
+        // authority on whether it still describes these bytes.
         var existing = await _db.DocumentTexts
             .FirstOrDefaultAsync(
-                d => d.FileItemId == file.Id && d.IsCurrent, cancellationToken);
+                d => d.SourceKind == reference.Kind && d.SourceId == reference.SourceId && d.IsCurrent,
+                cancellationToken);
 
         // …AND THE ROW MUST BELONG TO THE PARSER THAT OWNS ITS FORMAT TODAY.
         //
-        // Same bytes and a current chunk format are not enough. A row extracted
-        // by an older Word profile satisfies both while describing a reading
-        // this build has replaced, and exiting here would make the upgrade
-        // unreachable in production: every test that exercised it did so by
-        // creating and promoting the second profile by hand, so nothing noticed
-        // that the indexer itself never re-read the blob.
-        //
-        // Decided by IDENTITY, not by time. A newer profile is not "the one with
-        // a later timestamp" — it is the one the current code resolves for this
-        // format, and comparing ids is exactly that question. A clock would
-        // answer a different question and would be wrong whenever profiles were
-        // seeded, restored or backfilled out of order.
+        // Decided by IDENTITY, not by time: a newer profile is the one the
+        // current code resolves for this format, and comparing ids is exactly
+        // that question.
         var currentIsActiveProfile =
             existing is null
             || await IsActiveExtractionProfileAsync(existing, cancellationToken);
 
         if (existing is not null
             && currentIsActiveProfile
-            && existing.SourceBlobObjectId == file.BlobObjectId
+            && reference.Describes(existing)
             && existing.ChunkFormatVersion == OwnerDocumentChunkFormat.Current
             && existing.Status == AiArtifactStatuses.Completed)
         {
             state.Unchanged++;
-            return existing.Id;
+            return OwnerDocumentSourceOutcome.Unchanged(existing.Id, existing.ProfileId);
         }
 
-        var storageKey = await _db.BlobObjects.AsNoTracking()
-            .Where(b => b.Id == file.BlobObjectId)
-            .Select(b => b.StorageKey)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (storageKey is null)
+        var load = await source.LoadAsync(ownerUserId, candidate, cancellationToken);
+        switch (load.Kind)
         {
-            state.Skip("blob-missing");
-            return null;
+            case DocumentSourceLoadKind.NotEligible:
+                return OwnerDocumentSourceOutcome.NotEligible();
+
+            case DocumentSourceLoadKind.Refused:
+                state.Skip(load.Reason!);
+                if (load.RecordVerdict)
+                {
+                    await RecordSkipAsync(ownerUserId, reference, profile, load.Reason!, cancellationToken);
+                }
+                return load.IsPermanent
+                    ? OwnerDocumentSourceOutcome.Skipped(DocumentSourcePhases.Extract, load.Reason!, profile.Id)
+                    : OwnerDocumentSourceOutcome.Failed(load.Reason!);
         }
 
-        byte[] bytes;
-        try
+        DocumentExtractionArtifact artifact;
+        if (load.Kind == DocumentSourceLoadKind.Sections)
         {
-            // Bounded read: the stream is copied into a buffer capped at the
-            // size gate above plus one byte, so a blob whose recorded size lies
-            // cannot become an unbounded allocation.
-            await using var stream = await _storage.OpenReadAsync(storageKey, cancellationToken);
-            using var buffer = new MemoryStream();
-            await CopyBoundedAsync(
-                stream, buffer, (long)candidateBudget + 1, cancellationToken);
-            bytes = buffer.ToArray();
+            // ALREADY STRUCTURED. A kind that knows its own sections (an email's
+            // headers and body) hands them over with their locators; there is
+            // nothing to probe and no parser to run.
+            profile = await ProfileForKeyAsync(load.SectionsProfileKey!, cancellationToken);
+            artifact = new DocumentExtractionArtifact(load.SectionsSource!, load.Sections!, null);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        else
         {
-            // A storage error is not a content verdict, and it must not mark the
-            // document permanently skipped — the next pass tries again.
-            state.Skip("unreadable");
-            return null;
+            var bytes = load.Bytes!;
+            var fileName = load.FileName!;
+            var mimeType = load.MimeType!;
+
+            // THE BYTES DECIDE THE FORMAT, and the format decides the parser.
+            //
+            // Neither the declared MIME type nor the extension is consulted here:
+            // both were used earlier, to decide whether opening the file was
+            // worth doing, and that is the only question they are allowed to
+            // answer.
+            var probe = NativeTextExtractor.IsSupportedContentType(mimeType)
+                ? DocumentProbeResult.Accepted(DocumentFormatKind.NativeText, mimeType)
+                : DocumentFormatProbe.Probe(bytes, fileName, options);
+
+            if (!probe.Ok)
+            {
+                state.Skip(probe.Reason!);
+                await RecordSkipAsync(ownerUserId, reference, profile, probe.Reason!, cancellationToken);
+                return OwnerDocumentSourceOutcome.Skipped(DocumentSourcePhases.Extract, probe.Reason!, profile.Id);
+            }
+
+            var format = probe.Format!.Value;
+
+            // THE PER-FORMAT SOURCE BOUND, checked now that the format is known.
+            // 4 MiB is right for a text file and wrong for an Office package,
+            // which carries images that contribute nothing to extraction and
+            // still count.
+            if (bytes.Length > options.SourceBytesFor(format))
+            {
+                state.Skip(DocumentExtractionReasons.TooLarge);
+                await RecordSkipAsync(
+                    ownerUserId, reference, profile, DocumentExtractionReasons.TooLarge, cancellationToken);
+                return OwnerDocumentSourceOutcome.Skipped(
+                    DocumentSourcePhases.Extract, DocumentExtractionReasons.TooLarge, profile.Id);
+            }
+
+            // THE PARSER IS RESOLVED, NOT BRANCHED ON.
+            var provider = _providers.For(format);
+            if (provider is null)
+            {
+                // No parser compiled in for this family. An installation fact,
+                // not a verdict about the document — the next pass tries again.
+                state.Skip(DocumentExtractionReasons.UnsupportedDocumentFormat);
+                return OwnerDocumentSourceOutcome.Unavailable(DocumentExtractionReasons.UnsupportedDocumentFormat);
+            }
+
+            // THE PROFILE FOLLOWS THE PARSER. One lineage per family, so
+            // improving the spreadsheet reading does not re-extract every Word
+            // document in every library.
+            profile = await ProfileForKeyAsync(provider.ProfileKey, cancellationToken);
+
+            var outcome = await provider.ExtractAsync(
+                new DocumentExtractionRequest(bytes, fileName, probe.CanonicalMimeType ?? mimeType, options),
+                cancellationToken);
+
+            if (!outcome.Ok)
+            {
+                state.Skip(outcome.Reason!);
+
+                // A PERMANENT verdict is recorded; an environment failure is not.
+                // A missing binary or an unloadable native library marking
+                // somebody's documents permanently unreadable is a configuration
+                // mistake becoming data loss.
+                if (!outcome.IsPermanent)
+                {
+                    return DocumentExtractionReasons.IsRetryableFailure(outcome.Reason!)
+                        ? OwnerDocumentSourceOutcome.Failed(outcome.Reason!)
+                        : OwnerDocumentSourceOutcome.Unavailable(outcome.Reason!);
+                }
+
+                // A CONTENT verdict is recorded so the operator can see why, and
+                // stored against the revision that produced it, so replacing the
+                // file with something readable re-opens the question.
+                await RecordSkipAsync(ownerUserId, reference, profile, outcome.Reason!, cancellationToken);
+                return OwnerDocumentSourceOutcome.Skipped(DocumentSourcePhases.Extract, outcome.Reason!, profile.Id);
+            }
+
+            artifact = outcome.Artifact!;
         }
 
-        // THE RECORDED SIZE CAN LIE, so the BYTES THAT ARRIVED are checked too.
-        //
-        // `CopyBoundedAsync` stops at the budget plus one, so a blob larger than
-        // its recorded size yields a buffer one byte over the budget rather than
-        // an unbounded allocation. Parsing that buffer would be exactly the
-        // failure this gate exists to prevent: the first N bytes of somebody's
-        // document, extracted cleanly, and published as the whole of it.
-        if (bytes.Length > candidateBudget)
-        {
-            state.Skip(DocumentExtractionReasons.TooLarge);
-            await RecordSkipAsync(
-                ownerUserId, file, profile, DocumentExtractionReasons.TooLarge, cancellationToken);
-            return null;
-        }
-
-        // THE BYTES DECIDE THE FORMAT, and the format decides the parser.
-        //
-        // Neither the declared MIME type nor the extension is consulted here:
-        // both were used earlier, to decide whether opening the file was worth
-        // doing, and that is the only question they are allowed to answer. A
-        // DOCX renamed `.xlsx` reaching the spreadsheet parser is untrusted
-        // input arriving somewhere written for a different structure.
-        var probe = NativeTextExtractor.IsSupportedContentType(file.MimeType)
-            ? DocumentProbeResult.Accepted(DocumentFormatKind.NativeText, file.MimeType)
-            : DocumentFormatProbe.Probe(bytes, file.Name, options);
-
-        if (!probe.Ok)
-        {
-            state.Skip(probe.Reason!);
-            await RecordSkipAsync(ownerUserId, file, profile, probe.Reason!, cancellationToken);
-            return null;
-        }
-
-        var format = probe.Format!.Value;
-
-        // THE PER-FORMAT SOURCE BOUND, checked now that the format is known.
-        // 4 MiB is right for a text file and wrong for an Office package, which
-        // carries images that contribute nothing to extraction and still count.
-        if (file.SizeBytes > options.SourceBytesFor(format)
-            || bytes.Length > options.SourceBytesFor(format))
-        {
-            state.Skip(DocumentExtractionReasons.TooLarge);
-            await RecordSkipAsync(
-                ownerUserId, file, profile, DocumentExtractionReasons.TooLarge, cancellationToken);
-            return null;
-        }
-
-        // THE PARSER IS RESOLVED, NOT BRANCHED ON. That keeps the indexer an
-        // orchestrator rather than a class that also walks XML, decodes
-        // spreadsheet cells and speaks a subprocess protocol.
-        var provider = _providers.For(format);
-        if (provider is null)
-        {
-            // No parser compiled in for this family. An installation fact, not a
-            // verdict about the document — the next pass tries again.
-            state.Skip(DocumentExtractionReasons.UnsupportedDocumentFormat);
-            return null;
-        }
-
-        // THE PROFILE FOLLOWS THE PARSER. One lineage per family, so improving
-        // the spreadsheet reading does not re-extract every Word document in
-        // every library.
-        profile = await ProfileForAsync(provider, cancellationToken);
-
-        var outcome = await provider.ExtractAsync(
-            new DocumentExtractionRequest(
-                bytes, file.Name, probe.CanonicalMimeType ?? file.MimeType, options),
-            cancellationToken);
-
-        if (!outcome.Ok)
-        {
-            state.Skip(outcome.Reason!);
-
-            // A PERMANENT verdict is recorded; an environment failure is not.
-            // The distinction is the whole reason the outcome carries it: a
-            // missing binary or an unloadable native library marking somebody's
-            // documents permanently unreadable is a configuration mistake
-            // becoming data loss.
-            if (!outcome.IsPermanent) return null;
-            // A CONTENT verdict is recorded so the operator can see why, and so
-            // the next pass does not read the same unreadable bytes again. It is
-            // stored against the blob that produced it, so replacing the file
-            // with something readable re-opens the question.
-            await RecordSkipAsync(
-                ownerUserId, file, profile, outcome.Reason!, cancellationToken);
-            return null;
-        }
-
-        var artifact = outcome.Artifact!;
         var text = DocumentTextCanonicalizer.Canonicalize(artifact.Blocks);
 
         // CHUNKING IS DECIDED BEFORE ANYTHING IS PUBLISHED.
@@ -362,23 +410,23 @@ public sealed class OwnerDocumentIndexer
         // The chunk ceiling is a completeness bound like every other, so a
         // document that needs more chunks than the bound allows is refused —
         // and it has to be refused HERE, before the row is marked Completed and
-        // promoted to current. Discovering it afterwards would leave exactly
-        // what the invariant forbids: a Completed document carrying the first N
-        // chunks of itself, with the rest silently absent and nothing saying so.
+        // promoted to current.
         var planned = PlanChunks(artifact.Blocks, options);
         if (!planned.Ok)
         {
             state.Skip(planned.Reason!);
-            await RecordSkipAsync(ownerUserId, file, profile, planned.Reason!, cancellationToken);
-            return null;
+            await RecordSkipAsync(ownerUserId, reference, profile, planned.Reason!, cancellationToken);
+            return OwnerDocumentSourceOutcome.Skipped(DocumentSourcePhases.Chunk, planned.Reason!, profile.Id);
         }
 
         // Re-resolved for the parser's own profile. The early-exit check above
-        // used the caller's default; the row that is written belongs to the
-        // lineage that produced it.
+        // used the current row; the row that is written belongs to the lineage
+        // that produced it.
         existing = await _db.DocumentTexts
             .FirstOrDefaultAsync(
-                d => d.FileItemId == file.Id && d.ProfileId == profile.Id, cancellationToken);
+                d => d.SourceKind == reference.Kind && d.SourceId == reference.SourceId
+                     && d.ProfileId == profile.Id,
+                cancellationToken);
 
         var now = _clock.GetUtcNow().UtcDateTime;
         var textHash = RagHash.Sha256Hex(text);
@@ -392,11 +440,11 @@ public sealed class OwnerDocumentIndexer
             existing = new DocumentText
             {
                 Id = Guid.NewGuid(),
-                FileItemId = file.Id,
                 OwnerUserId = ownerUserId,
                 ProfileId = profile.Id,
                 CreatedAt = now,
             };
+            reference.Stamp(existing);
             _db.DocumentTexts.Add(existing);
         }
         else
@@ -405,10 +453,10 @@ public sealed class OwnerDocumentIndexer
         }
 
         // OWNER IS RE-ASSERTED from the eligibility query on every pass, never
-        // carried forward from the row. A file that changed hands would
+        // carried forward from the row. A source that changed hands would
         // otherwise keep the previous owner's authority in a cache row.
         existing.OwnerUserId = ownerUserId;
-        existing.SourceBlobObjectId = file.BlobObjectId;
+        reference.Stamp(existing);
         existing.Source = artifact.Source;
         existing.Status = AiArtifactStatuses.Completed;
         existing.ErrorCode = null;
@@ -420,15 +468,13 @@ public sealed class OwnerDocumentIndexer
         state.Extracted++;
 
         // THIS READING BECOMES THE CURRENT ONE, and any other reading of the
-        // same file stops being authority in the same save.
+        // same source stops being authority in the same save.
         //
         // Two statements, one transaction, in this order — the demotion has to
         // be visible to the database before the promotion, or the filtered
-        // unique index sees two current rows for one file and refuses the write.
-        // That refusal is the point: it is the constraint proving there is never
-        // a moment when a question could be answered from two interpretations of
-        // one document at once.
-        await DemoteOtherDerivationsAsync(file.Id, existing.Id, cancellationToken);
+        // unique index sees two current rows for one source and refuses the
+        // write. That refusal is the point.
+        await DemoteOtherDerivationsAsync(reference, existing.Id, cancellationToken);
         existing.IsCurrent = true;
 
         await _db.SaveChangesAsync(cancellationToken);
@@ -440,7 +486,7 @@ public sealed class OwnerDocumentIndexer
             state.Chunked++;
         }
 
-        return existing.Id;
+        return OwnerDocumentSourceOutcome.Indexed(existing.Id, profile.Id);
     }
 
     /// Does this row belong to the extraction profile the current build would
@@ -541,10 +587,9 @@ public sealed class OwnerDocumentIndexer
     /// keyed by, so one profile across every rich format would make an
     /// improvement to the spreadsheet reading re-extract every Word document in
     /// every library — the cost of a change landing on people it did not affect.
-    private async Task<AiProfile> ProfileForAsync(
-        IDocumentExtractionProvider provider, CancellationToken cancellationToken)
+    private async Task<AiProfile> ProfileForKeyAsync(
+        string key, CancellationToken cancellationToken)
     {
-        var key = provider.ProfileKey;
         if (key == DocumentTextSources.NativeProfileKey)
         {
             return await ExtractionProfileAsync(cancellationToken);
@@ -602,13 +647,14 @@ public sealed class OwnerDocumentIndexer
     /// BEFORE the replacement is attempted rather than after it succeeds —
     /// otherwise a parse that never finishes leaves the previous document
     /// answering questions about a file that no longer contains it.
-    private async Task DemoteSupersededBytesAsync(
-        Guid fileItemId, Guid currentBlobObjectId, CancellationToken cancellationToken)
+    private async Task DemoteSupersededRevisionAsync(
+        SourceRef source, CancellationToken cancellationToken)
     {
-        var stale = await _db.DocumentTexts
-            .Where(d => d.FileItemId == fileItemId
-                        && d.IsCurrent
-                        && d.SourceBlobObjectId != currentBlobObjectId)
+        var current = _db.DocumentTexts
+            .Where(d => d.SourceKind == source.Kind && d.SourceId == source.SourceId && d.IsCurrent);
+        var stale = await (source.IsFile
+                ? current.Where(d => d.SourceBlobObjectId != source.BlobObjectId)
+                : current.Where(d => d.SourceRevision != source.Revision))
             .ToListAsync(cancellationToken);
 
         if (stale.Count == 0) return;
@@ -643,10 +689,11 @@ public sealed class OwnerDocumentIndexer
     /// provenance a later extractor upgrade reads, and losing it would make an
     /// upgrade indistinguishable from a first extraction.
     private async Task DemoteOtherDerivationsAsync(
-        Guid fileItemId, Guid keepId, CancellationToken cancellationToken)
+        SourceRef source, Guid keepId, CancellationToken cancellationToken)
     {
         var superseded = await _db.DocumentTexts
-            .Where(d => d.FileItemId == fileItemId && d.Id != keepId && d.IsCurrent)
+            .Where(d => d.SourceKind == source.Kind && d.SourceId == source.SourceId
+                        && d.Id != keepId && d.IsCurrent)
             .ToListAsync(cancellationToken);
 
         if (superseded.Count == 0) return;
@@ -667,19 +714,19 @@ public sealed class OwnerDocumentIndexer
     /// writing a verdict, so a temporarily unreachable disk does not mark a
     /// person's documents unreadable forever.
     private async Task RecordSkipAsync(
-        Guid ownerUserId, CandidateFile file, AiProfile profile, string reason,
+        Guid ownerUserId, SourceRef source, AiProfile profile, string reason,
         CancellationToken cancellationToken)
     {
         var now = _clock.GetUtcNow().UtcDateTime;
         var row = await _db.DocumentTexts.FirstOrDefaultAsync(
-            d => d.FileItemId == file.Id && d.ProfileId == profile.Id, cancellationToken);
+            d => d.SourceKind == source.Kind && d.SourceId == source.SourceId && d.ProfileId == profile.Id,
+            cancellationToken);
 
         if (row is null)
         {
             row = new DocumentText
             {
                 Id = Guid.NewGuid(),
-                FileItemId = file.Id,
                 OwnerUserId = ownerUserId,
                 ProfileId = profile.Id,
                 CreatedAt = now,
@@ -696,7 +743,7 @@ public sealed class OwnerDocumentIndexer
         }
 
         row.OwnerUserId = ownerUserId;
-        row.SourceBlobObjectId = file.BlobObjectId;
+        source.Stamp(row);
         row.Source = DocumentTextSources.Native;
         row.Status = AiArtifactStatuses.Skipped;
         row.ErrorCode = reason;
@@ -719,17 +766,20 @@ public sealed class OwnerDocumentIndexer
         // silently withdraw a working document from its owner's corpus — the
         // upgrade would look like data loss. So the skip is recorded as
         // provenance and the working reading keeps its authority.
-        var readableElsewhere = await _db.DocumentTexts.AnyAsync(
-            d => d.FileItemId == file.Id
+        var otherCurrent = _db.DocumentTexts.Where(
+            d => d.SourceKind == source.Kind
+                 && d.SourceId == source.SourceId
                  && d.Id != row.Id
                  && d.IsCurrent
-                 && d.Status == AiArtifactStatuses.Completed
-                 && d.SourceBlobObjectId == file.BlobObjectId,
-            cancellationToken);
+                 && d.Status == AiArtifactStatuses.Completed);
+        var readableElsewhere = await (source.IsFile
+                ? otherCurrent.Where(d => d.SourceBlobObjectId == source.BlobObjectId)
+                : otherCurrent.Where(d => d.SourceRevision == source.Revision))
+            .AnyAsync(cancellationToken);
 
         if (!readableElsewhere)
         {
-            await DemoteOtherDerivationsAsync(file.Id, row.Id, cancellationToken);
+            await DemoteOtherDerivationsAsync(source, row.Id, cancellationToken);
             row.IsCurrent = true;
         }
 
@@ -847,11 +897,47 @@ public sealed class OwnerDocumentIndexer
             RagDomainKey.UserDocuments, cancellationToken);
         if (!resolution.IsAvailable) return (null, resolution.Reason);
 
+        // A PARTIAL run embeds only what it saw, exactly like the system
+        // indexer: a bounded trial run must not start an hour of inference over
+        // a whole library.
+        var (reason, _) = await EmbedCandidatesAsync(
+            ownerUserId, resolution, partial ? seenDocumentTextIds : null, shouldStop: null,
+            state, cancellationToken);
+        return (resolution.Profile!.Key, reason);
+    }
+
+    /// Passage embeddings for ONE reading's eligible chunks that lack one for
+    /// the resolved profile — the background job's embed phase.
+    ///
+    /// `shouldStop` is polled between chunks, AFTER each vector is saved, so a
+    /// long document yields to foreground work at chunk granularity and the
+    /// next slice resumes exactly where this one stopped (embedded chunks drop
+    /// out of the candidate query on their own).
+    public async Task<OwnerDocumentEmbedOutcome> EmbedDocumentAsync(
+        Guid ownerUserId, Guid documentTextId, TextEmbeddingResolution resolution,
+        Func<bool>? shouldStop = null, CancellationToken cancellationToken = default)
+    {
+        if (!resolution.IsAvailable)
+        {
+            return new OwnerDocumentEmbedOutcome(false, false, 0, resolution.Reason);
+        }
+
+        var state = new IndexState();
+        var (reason, stopped) = await EmbedCandidatesAsync(
+            ownerUserId, resolution, new[] { documentTextId }, shouldStop, state, cancellationToken);
+        return new OwnerDocumentEmbedOutcome(
+            reason is null && !stopped, stopped, state.EmbeddingsCreated, reason);
+    }
+
+    private async Task<(string? Reason, bool Stopped)> EmbedCandidatesAsync(
+        Guid ownerUserId, TextEmbeddingResolution resolution, IReadOnlyList<Guid>? onlyDocumentTextIds,
+        Func<bool>? shouldStop, IndexState state, CancellationToken cancellationToken)
+    {
         var profile = resolution.Profile!;
         var provider = resolution.Provider!;
         var dimension = profile.Dimension!.Value;
         var now = _clock.GetUtcNow().UtcDateTime;
-        var seen = seenDocumentTextIds.ToList();
+        var seen = onlyDocumentTextIds?.ToList();
 
         var cursor = Guid.Empty;
         while (true)
@@ -887,10 +973,7 @@ public sealed class OwnerDocumentIndexer
                                 e => e.DocumentChunkId == r.Chunk.Id && e.ProfileId == profile.Id))
                 .Select(c => new { c.Chunk.Id, c.Chunk.Text, c.Chunk.DocumentTextId });
 
-            // A PARTIAL run embeds only what it saw, exactly like the system
-            // indexer: a bounded trial run must not start an hour of inference
-            // over a whole library.
-            if (partial)
+            if (seen is not null)
             {
                 candidates = candidates.Where(c => seen.Contains(c.DocumentTextId));
             }
@@ -920,18 +1003,18 @@ public sealed class OwnerDocumentIndexer
                     // Resumable: the text is already indexed and lexical
                     // retrieval works on it, the vectors that completed are
                     // kept, and the reason says why it stopped.
-                    return (profile.Key, ex.ReasonCode);
+                    return (ex.ReasonCode, false);
                 }
 
                 if (vector.Length != dimension)
                 {
-                    return (profile.Key, RagFailureReasons.EmbeddingDimensionUnsupported);
+                    return (RagFailureReasons.EmbeddingDimensionUnsupported, false);
                 }
                 // A non-finite component makes every cosine involving this
                 // vector meaningless, and nothing downstream would notice.
                 if (!vector.All(float.IsFinite))
                 {
-                    return (profile.Key, RagFailureReasons.EmbeddingDimensionUnsupported);
+                    return (RagFailureReasons.EmbeddingDimensionUnsupported, false);
                 }
 
                 _db.DocumentChunkEmbeddings.Add(new DocumentChunkEmbedding
@@ -945,10 +1028,12 @@ public sealed class OwnerDocumentIndexer
                 });
                 await _db.SaveChangesAsync(cancellationToken);
                 state.EmbeddingsCreated++;
+
+                if (shouldStop?.Invoke() == true) return (null, true);
             }
         }
 
-        return (profile.Key, null);
+        return (null, false);
     }
 
     // ---- profile ------------------------------------------------------------
@@ -1005,23 +1090,6 @@ public sealed class OwnerDocumentIndexer
         _db.AiProfiles.Add(profile);
         await _db.SaveChangesAsync(cancellationToken);
         return profile;
-    }
-
-    /// Copy at most `limit` bytes. A recorded size is a claim, and this is what
-    /// keeps a wrong one from becoming an unbounded read.
-    private static async Task CopyBoundedAsync(
-        Stream source, Stream destination, long limit, CancellationToken cancellationToken)
-    {
-        var buffer = new byte[81920];
-        long total = 0;
-        while (total < limit)
-        {
-            var wanted = (int)Math.Min(buffer.Length, limit - total);
-            var read = await source.ReadAsync(buffer.AsMemory(0, wanted), cancellationToken);
-            if (read == 0) break;
-            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-            total += read;
-        }
     }
 
     private sealed class IndexState

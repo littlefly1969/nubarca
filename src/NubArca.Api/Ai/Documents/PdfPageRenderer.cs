@@ -19,9 +19,6 @@ public sealed class PdfPageRenderer
 {
     private readonly IOptions<DocumentExtractionOptions> _options;
 
-    /// PDFium is a single native library with process-wide state. One at a time.
-    private static readonly SemaphoreSlim Native = new(1, 1);
-
     public PdfPageRenderer(IOptions<DocumentExtractionOptions> options)
     {
         _options = options;
@@ -52,7 +49,7 @@ public sealed class PdfPageRenderer
 
         var options = _options.Value;
 
-        await Native.WaitAsync(cancellationToken);
+        await PdfiumGate.Native.WaitAsync(cancellationToken);
         try
         {
             // The pixel bound, applied as a DPI the page cannot exceed rather
@@ -99,7 +96,7 @@ public sealed class PdfPageRenderer
         }
         finally
         {
-            Native.Release();
+            PdfiumGate.Native.Release();
         }
     }
 }

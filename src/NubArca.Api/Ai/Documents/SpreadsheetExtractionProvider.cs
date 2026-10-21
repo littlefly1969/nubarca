@@ -28,7 +28,7 @@ public sealed class SpreadsheetExtractionProvider : IDocumentExtractionProvider
 
     public string ProfileKey => DocumentTextSources.SpreadsheetProfileKey;
 
-    public Task<DocumentExtractionOutcome> ExtractAsync(
+    public async Task<DocumentExtractionOutcome> ExtractAsync(
         DocumentExtractionRequest request, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -37,18 +37,25 @@ public sealed class SpreadsheetExtractionProvider : IDocumentExtractionProvider
         archive?.Dispose();
         if (refusal is not null)
         {
-            return Task.FromResult(DocumentExtractionOutcome.Rejected(refusal));
+            return DocumentExtractionOutcome.Rejected(refusal);
         }
 
         try
         {
-            return Task.FromResult(Extract(request, cancellationToken));
+            // BOUNDED: the package walk runs inside the parse budget and is
+            // abandoned, not awaited, past it (see DocumentParseBudget).
+            var (outcome, timedOut) = await DocumentParseBudget.RunAsync(
+                token => Extract(request, token),
+                request.Options.EffectiveParseTimeoutSeconds,
+                cancellationToken);
+            return timedOut
+                ? DocumentExtractionOutcome.Unavailable(DocumentExtractionReasons.ParseTimeout)
+                : outcome!;
         }
         catch (Exception ex) when (ex is OpenXmlPackageException or InvalidDataException
                                        or FileFormatException or ArgumentOutOfRangeException)
         {
-            return Task.FromResult(
-                DocumentExtractionOutcome.Rejected(DocumentExtractionReasons.OfficePackageInvalid));
+            return DocumentExtractionOutcome.Rejected(DocumentExtractionReasons.OfficePackageInvalid);
         }
     }
 
