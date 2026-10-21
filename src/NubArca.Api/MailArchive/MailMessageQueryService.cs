@@ -33,6 +33,32 @@ public sealed class MailMessageQueryService
     public async Task<MailMessagePage?> SearchAsync(Guid owner, MailMessageQuery query, CancellationToken cancellationToken)
     {
         var limit = Math.Clamp(query.Limit <= 0 ? DefaultLimit : query.Limit, 1, MaxLimit);
+        if (Page(owner, query, limit) is not { } page)
+        {
+            return null;
+        }
+        var rows = await page
+            .Select(m => new
+            {
+                m.Id, m.ArchiveId, m.FolderId, m.Subject, m.FromName, m.FromAddress, m.ToSummary,
+                m.SortDate, m.HasAttachments, m.AttachmentCount, m.Preview,
+            })
+            .ToListAsync(cancellationToken);
+
+        var items = rows.Take(limit)
+            .Select(m => new MailMessageSummaryDto(
+                m.Id, m.ArchiveId, m.FolderId, m.Subject, Address(m.FromName, m.FromAddress), m.ToSummary,
+                m.SortDate, m.HasAttachments, m.AttachmentCount, m.Preview))
+            .ToList();
+        var next = rows.Count > limit ? EncodeCursor(rows[limit - 1].SortDate, rows[limit - 1].Id) : null;
+        return new MailMessagePage(items, next);
+    }
+
+    // The filtered, ordered page (one row more than the limit, to know if
+    // there is a next page); null for a malformed cursor. Separate so the
+    // PostgreSQL plan of exactly this query can be measured.
+    internal IQueryable<MailMessage>? Page(Guid owner, MailMessageQuery query, int limit)
+    {
         var messages = _db.MailMessages.AsNoTracking()
             .Where(m => m.OwnerUserId == owner && m.Status == MailMessageStatuses.Complete);
 
@@ -85,24 +111,10 @@ public sealed class MailMessageQueryService
                 || (m.SortDate == cursorDate && m.Id.CompareTo(cursorId) < 0));
         }
 
-        var rows = await messages
+        return messages
             .OrderByDescending(m => m.SortDate)
             .ThenByDescending(m => m.Id)
-            .Take(limit + 1)
-            .Select(m => new
-            {
-                m.Id, m.ArchiveId, m.FolderId, m.Subject, m.FromName, m.FromAddress, m.ToSummary,
-                m.SortDate, m.HasAttachments, m.AttachmentCount, m.Preview,
-            })
-            .ToListAsync(cancellationToken);
-
-        var items = rows.Take(limit)
-            .Select(m => new MailMessageSummaryDto(
-                m.Id, m.ArchiveId, m.FolderId, m.Subject, Address(m.FromName, m.FromAddress), m.ToSummary,
-                m.SortDate, m.HasAttachments, m.AttachmentCount, m.Preview))
-            .ToList();
-        var next = rows.Count > limit ? EncodeCursor(rows[limit - 1].SortDate, rows[limit - 1].Id) : null;
-        return new MailMessagePage(items, next);
+            .Take(limit + 1);
     }
 
     public async Task<MailMessageDetailDto?> GetAsync(Guid owner, Guid messageId, CancellationToken cancellationToken)

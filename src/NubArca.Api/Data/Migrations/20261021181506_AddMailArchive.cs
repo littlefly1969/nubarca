@@ -11,6 +11,9 @@ namespace NubArca.Api.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.AlterDatabase()
+                .Annotation("Npgsql:PostgresExtension:pg_trgm", ",,");
+
             migrationBuilder.CreateTable(
                 name: "mail_archives",
                 columns: table => new
@@ -154,6 +157,8 @@ namespace NubArca.Api.Data.Migrations
                     AttachmentsReused = table.Column<int>(type: "integer", nullable: false),
                     AttachmentsSkipped = table.Column<int>(type: "integer", nullable: false),
                     ScanErrors = table.Column<int>(type: "integer", nullable: false),
+                    ScannedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    ScanIssuesJson = table.Column<string>(type: "text", nullable: true),
                     ErrorCode = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
                     ErrorMessage = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
@@ -362,6 +367,27 @@ namespace NubArca.Api.Data.Migrations
                 columns: new[] { "OwnerUserId", "SortDate", "Id" });
 
             migrationBuilder.CreateIndex(
+                name: "ix_mail_messages_search_from_trgm",
+                table: "mail_messages",
+                column: "SearchFrom")
+                .Annotation("Npgsql:IndexMethod", "gin")
+                .Annotation("Npgsql:IndexOperators", new[] { "gin_trgm_ops" });
+
+            migrationBuilder.CreateIndex(
+                name: "ix_mail_messages_search_recipients_trgm",
+                table: "mail_messages",
+                column: "SearchRecipients")
+                .Annotation("Npgsql:IndexMethod", "gin")
+                .Annotation("Npgsql:IndexOperators", new[] { "gin_trgm_ops" });
+
+            migrationBuilder.CreateIndex(
+                name: "ix_mail_messages_search_subject_trgm",
+                table: "mail_messages",
+                column: "SearchSubject")
+                .Annotation("Npgsql:IndexMethod", "gin")
+                .Annotation("Npgsql:IndexOperators", new[] { "gin_trgm_ops" });
+
+            migrationBuilder.CreateIndex(
                 name: "ux_mail_messages_archive_source",
                 table: "mail_messages",
                 columns: new[] { "ArchiveId", "SourceMessageKey" },
@@ -391,6 +417,9 @@ namespace NubArca.Api.Data.Migrations
 
             migrationBuilder.DropTable(
                 name: "mail_archives");
+
+            migrationBuilder.AlterDatabase()
+                .OldAnnotation("Npgsql:PostgresExtension:pg_trgm", ",,");
         }
     }
 }

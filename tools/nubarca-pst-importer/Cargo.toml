@@ -24,6 +24,12 @@ serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.145"
 sha2 = "=0.10.9"
 
+# Self-confinement (src/sandbox.rs). Linux only: the product ships the Linux binary.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "=0.2.191"
+landlock = "=0.4.4"
+seccompiler = "=0.5.0"
+
 [dev-dependencies]
 tempfile = "=3.23.0"
 # Dev-only: writes synthetic fixture PSTs at test time. Never linked into the binary.

@@ -12,7 +12,7 @@ using NubArca.Api.Data;
 namespace NubArca.Api.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261021125706_AddMailArchive")]
+    [Migration("20261021181506_AddMailArchive")]
     partial class AddMailArchive
     {
         /// <inheritdoc />
@@ -23,6 +23,7 @@ namespace NubArca.Api.Data.Migrations
                 .HasAnnotation("ProductVersion", "10.0.4")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
+            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "pg_trgm");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("NubArca.Api.Domain.AccessRole", b =>
@@ -4014,6 +4015,12 @@ namespace NubArca.Api.Data.Migrations
                     b.Property<int>("ScanErrors")
                         .HasColumnType("integer");
 
+                    b.Property<string>("ScanIssuesJson")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ScannedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("SkippedDeletedMessages")
                         .HasColumnType("integer");
 
@@ -4150,6 +4157,24 @@ namespace NubArca.Api.Data.Migrations
 
                     b.HasIndex("BlobObjectId")
                         .HasDatabaseName("ix_mail_messages_blob_object");
+
+                    b.HasIndex("SearchFrom")
+                        .HasDatabaseName("ix_mail_messages_search_from_trgm");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("SearchFrom"), "gin");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("SearchFrom"), new[] { "gin_trgm_ops" });
+
+                    b.HasIndex("SearchRecipients")
+                        .HasDatabaseName("ix_mail_messages_search_recipients_trgm");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("SearchRecipients"), "gin");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("SearchRecipients"), new[] { "gin_trgm_ops" });
+
+                    b.HasIndex("SearchSubject")
+                        .HasDatabaseName("ix_mail_messages_search_subject_trgm");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("SearchSubject"), "gin");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("SearchSubject"), new[] { "gin_trgm_ops" });
 
                     b.HasIndex("ArchiveId", "SourceMessageKey")
                         .IsUnique()

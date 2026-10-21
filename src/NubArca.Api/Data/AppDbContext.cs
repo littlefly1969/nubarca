@@ -311,5 +311,8 @@ public class AppDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+        // MailArchive's substring search indexes (MailMessageConfiguration).
+        // pg_trgm is a trusted extension: the database owner may create it.
+        modelBuilder.HasPostgresExtension("pg_trgm");
     }
 }

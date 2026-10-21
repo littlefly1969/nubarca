@@ -28,7 +28,13 @@ public sealed record MailRunDto(
     string? ErrorMessage,
     DateTime CreatedAt,
     DateTime? StartedAt,
-    DateTime? CompletedAt);
+    DateTime? CompletedAt,
+    int ScanErrors,
+    IReadOnlyList<MailScanIssueDto> ScanIssues);
+
+// One folder or message the scan could not enumerate. FolderPath is by name
+// (null when the engine could not place it); never a PST node id.
+public sealed record MailScanIssueDto(string Scope, string Code, IReadOnlyList<string>? FolderPath);
 
 public sealed record MailArchiveDto(
     Guid Id,

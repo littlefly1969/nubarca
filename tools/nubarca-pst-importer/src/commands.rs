@@ -15,6 +15,7 @@ use crate::model::{
     ListErrorEvent, MessageEvent, ProbeEvent, RequestErrorEvent, Source, PROTOCOL,
 };
 use crate::normalize::{extract_message, Extraction};
+use crate::sandbox;
 use crate::{Command, Invocation};
 
 /// Longest accepted `serve` request line.
@@ -88,8 +89,54 @@ impl Session {
 
 pub fn run(inv: Invocation) -> io::Result<u8> {
     let mut out = Out::new();
+    // The directory the command writes into must exist before the sandbox
+    // closes the filesystem around it.
+    let write_dir = match &inv.command {
+        Command::Serve { work_dir } | Command::SandboxCheck { work_dir, .. } => {
+            Some(work_dir.clone())
+        }
+        Command::Extract { out_dir, .. } => {
+            if let Err(e) = fs::create_dir_all(out_dir) {
+                return out.fatal(&ItemError::io(&e, "cannot create output directory"));
+            }
+            Some(out_dir.clone())
+        }
+        Command::Probe | Command::List => None,
+    };
+    let policy = sandbox::Policy {
+        read_files: vec![inv.pst.clone()],
+        write_dir,
+        max_memory_bytes: inv.limits.max_memory_bytes,
+        max_cpu_seconds: inv.limits.max_cpu_seconds,
+        max_file_bytes: inv
+            .limits
+            .max_attachment_bytes
+            .max(inv.limits.max_document_bytes as u64)
+            .saturating_add(1 << 20),
+        require_landlock: inv.limits.landlock_required,
+        run_as: inv.limits.run_as,
+    };
+    let report = match sandbox::enter(&policy) {
+        Ok(report) => report,
+        Err(sandbox::SandboxError(message)) => {
+            return out.fatal(&ItemError::new(Code::SandboxUnavailable, message))
+        }
+    };
     match inv.command {
-        Command::Probe => probe(&inv.pst, &mut out),
+        Command::Probe => probe(&inv.pst, &report, &mut out),
+        Command::SandboxCheck {
+            ref work_dir,
+            ref outside_read,
+            ref outside_dir,
+        } => {
+            out.emit(&SandboxCheckEvent {
+                kind: "sandbox",
+                report: &report,
+                checks: sandbox::check(work_dir, outside_read, outside_dir),
+            })?;
+            out.flush()?;
+            Ok(EXIT_OK)
+        }
         Command::List => list(&inv.pst, &inv.limits, &mut out),
         Command::Serve { ref work_dir } => serve(&inv.pst, work_dir, &inv.limits, &mut out),
         Command::Extract {
@@ -99,7 +146,15 @@ pub fn run(inv: Invocation) -> io::Result<u8> {
     }
 }
 
-fn probe(pst: &Path, out: &mut Out) -> io::Result<u8> {
+#[derive(Serialize)]
+struct SandboxCheckEvent<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    report: &'a sandbox::Report,
+    checks: sandbox::Checks,
+}
+
+fn probe(pst: &Path, report: &sandbox::Report, out: &mut Out) -> io::Result<u8> {
     let mut session = match Session::open(pst) {
         Ok(s) => s,
         Err(e) => return out.fatal(&e),
@@ -116,6 +171,7 @@ fn probe(pst: &Path, out: &mut Out) -> io::Result<u8> {
         encryption: header.encryption.as_str(),
         store_display_name: name.as_deref(),
         file_size: header.file_size,
+        sandbox: report,
     })?;
     out.flush()?;
     Ok(EXIT_OK)

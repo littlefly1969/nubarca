@@ -92,6 +92,9 @@ export function MailRunPanel({ run: initial, onTerminal }: MailRunPanelProps) {
         <dt>{t('mail.run.alreadyPresent')}</dt><dd>{n(run.alreadyPresentMessages)}</dd>
         <dt>{t('mail.run.skippedDeleted')}</dt><dd>{n(run.skippedDeletedMessages)}</dd>
         <dt>{t('mail.run.failed')}</dt><dd>{n(run.failedMessages)}</dd>
+        {run.scanErrors > 0 && (
+          <><dt>{t('mail.run.scanErrors')}</dt><dd data-testid="mail-run-scan-errors">{n(run.scanErrors)}</dd></>
+        )}
         <dt>{t('mail.run.attachmentsCreated')}</dt><dd>{n(run.attachmentsCreated)}</dd>
         <dt>{t('mail.run.attachmentsReused')}</dt><dd>{n(run.attachmentsReused)}</dd>
         <dt>{t('mail.run.attachmentsSkipped')}</dt><dd>{n(run.attachmentsSkipped)}</dd>
@@ -103,6 +106,26 @@ export function MailRunPanel({ run: initial, onTerminal }: MailRunPanelProps) {
         </p>
       )}
       {run.errorMessage && <p className="inline-error" role="alert">{run.errorMessage}</p>}
+      {run.scanErrors > 0 && !active && (
+        <div className="mail-scan-issues" data-testid="mail-run-scan-issues">
+          <p className="muted">{t('mail.run.scanIncomplete')}</p>
+          {run.scanIssues.length > 0 && (
+            <ul>
+              {run.scanIssues.map((issue, i) => (
+                <li key={i}>
+                  {issue.folderPath && issue.folderPath.length > 0
+                    ? issue.folderPath.join(' / ')
+                    : t(issue.scope === 'folder' ? 'mail.run.scanIssueFolder' : 'mail.run.scanIssueMessage')}
+                  {' '}<code>{issue.code}</code>
+                </li>
+              ))}
+            </ul>
+          )}
+          {run.scanErrors > run.scanIssues.length && (
+            <p className="muted">{t('mail.run.scanIssuesMore', { count: n(run.scanErrors - run.scanIssues.length) })}</p>
+          )}
+        </div>
+      )}
       {pollError && <p className="muted" role="status">{t('mail.run.pollError')}</p>}
       {actionError && <p className="inline-error" role="alert">{actionError}</p>}
 

@@ -39,6 +39,8 @@ pub struct ProbeEvent<'a> {
     pub encryption: &'static str,
     pub store_display_name: Option<&'a str>,
     pub file_size: u64,
+    /// The confinement this very process runs under (src/sandbox.rs).
+    pub sandbox: &'a crate::sandbox::Report,
 }
 
 #[derive(Serialize)]

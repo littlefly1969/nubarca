@@ -14,6 +14,7 @@ using NubArca.Api.MailArchive;
 using NubArca.Api.Storage;
 using NubArca.Api.Tests.Endpoints;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NubArca.Api.Tests.MailArchive;
 
@@ -26,6 +27,9 @@ public sealed class MailArchiveImportTests : IDisposable
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly List<SqliteWebApplicationFactory> _factories = [];
+    private readonly ITestOutputHelper _output;
+
+    public MailArchiveImportTests(ITestOutputHelper output) => _output = output;
 
     public void Dispose()
     {
@@ -158,8 +162,8 @@ public sealed class MailArchiveImportTests : IDisposable
         var files = await InDbAsync(factory, db => db.FileItems.AsNoTracking()
             .Where(f => f.OwnerUserId == owner && f.DeletedAt == null && !f.Name.EndsWith(".pst"))
             .ToListAsync());
-        Assert.Equal(5, files.Count); // report.pdf, logo.png, report (2).pdf, dentro.txt, foto.jpg
-        Assert.Contains(files, f => f.Name == "report (2).pdf");
+        Assert.Equal(5, files.Count); // report.pdf, logo.png, report (00000101-2).pdf, dentro.txt, foto.jpg
+        Assert.Contains(files, f => f.Name == "report (00000101-2).pdf");
         var folderNames = await InDbAsync(factory, db => db.Folders.AsNoTracking()
             .Where(f => f.OwnerUserId == owner).Select(f => f.Name).ToListAsync());
         Assert.Contains("Posta", folderNames);
@@ -206,7 +210,7 @@ public sealed class MailArchiveImportTests : IDisposable
         Assert.True(logo.Inline);
         Assert.Contains($"src=\"/api/files/{logo.FileItemId}/content\"", html);
         Assert.Equal(["report.pdf", "logo.png", "report.pdf"], detail.Attachments.Select(a => a.Name));
-        Assert.Equal("report (2).pdf", detail.Attachments[2].CurrentFileName);
+        Assert.Equal("report (00000101-2).pdf", detail.Attachments[2].CurrentFileName);
 
         // Attachments open through the ordinary file endpoint.
         var content = await client.GetAsync($"/api/files/{detail.Attachments[0].FileItemId}/content");
@@ -346,6 +350,104 @@ public sealed class MailArchiveImportTests : IDisposable
     }
 
     [Fact]
+    public async Task A_partial_scan_is_not_final_and_the_next_run_scans_again_after_the_source_is_fixed()
+    {
+        // Run 1: the "Progetti" folder cannot be enumerated, so its message is
+        // missing from the manifest.
+        var engine = FakePstEngine.Sample();
+        engine.UnreadableFolders.Add("f:00000003");
+        var (factory, client, _, archive) = await ImportedAsync(this, engine);
+
+        var first = archive.LatestRun!;
+        Assert.Equal("partial", first.Status);
+        Assert.Equal("scan_errors", first.ErrorCode);
+        Assert.Equal(1, first.ScanErrors);
+        var issue = Assert.Single(first.ScanIssues);
+        Assert.Equal("folder", issue.Scope);
+        Assert.Equal("corrupt", issue.Code);
+        Assert.Equal(["Top of Outlook data file", "Posta in arrivo", "Progetti"], issue.FolderPath);
+        Assert.Equal(3, first.TotalMessages);
+        Assert.Equal(3, first.ImportedMessages);
+        Assert.Equal(0, first.FailedMessages);
+        Assert.Equal(3, archive.MessageCount);
+        Assert.Null(await InDbAsync(factory, db => db.MailArchives.Where(a => a.Id == archive.Id)
+            .Select(a => a.ScanCompletedAt).FirstAsync()));
+
+        // The source (here: the parser) is fixed; the re-import scans again
+        // instead of trusting the partial manifest.
+        engine.UnreadableFolders.Clear();
+        Assert.Equal(HttpStatusCode.Accepted, (await client.PostAsync($"/api/mail/archives/{archive.Id}/import", null)).StatusCode);
+        await RunJobsAsync(factory);
+        var fixedArchive = await GetAsync<MailArchiveDto>(client, $"/api/mail/archives/{archive.Id}");
+        var second = fixedArchive.LatestRun!;
+        Assert.Equal(2, engine.Lists);
+        Assert.Equal("succeeded", second.Status);
+        Assert.Null(second.ErrorCode);
+        Assert.Equal(0, second.ScanErrors);
+        Assert.Empty(second.ScanIssues);
+        Assert.Equal(4, second.TotalMessages);
+        Assert.Equal(1, second.ImportedMessages);
+        Assert.Equal(3, second.AlreadyPresentMessages);
+        Assert.Equal(4, fixedArchive.MessageCount);
+        Assert.Single((await GetAsync<MailMessagePage>(client, $"/api/mail/messages?archiveId={archive.Id}&subject=incorporato")).Items);
+
+        // The first run keeps its own record of what it could not read.
+        var firstAgain = await GetAsync<MailRunDto>(client, $"/api/mail/runs/{first.Id}");
+        Assert.Equal(1, firstAgain.ScanErrors);
+        Assert.Single(firstAgain.ScanIssues);
+
+        // Now the scan is exhaustive: a third run does not list again.
+        Assert.Equal(HttpStatusCode.Accepted, (await client.PostAsync($"/api/mail/archives/{archive.Id}/import", null)).StatusCode);
+        await RunJobsAsync(factory);
+        Assert.Equal(2, engine.Lists);
+        var third = (await GetAsync<MailArchiveDto>(client, $"/api/mail/archives/{archive.Id}")).LatestRun!;
+        Assert.Equal("succeeded", third.Status);
+        Assert.Equal(4, third.AlreadyPresentMessages);
+        var audit = await AuditAsync(factory);
+        Assert.Equal(audit.TotalBlobs, audit.MatchedReferenceCount);
+    }
+
+    [Fact]
+    public async Task Many_same_named_attachments_in_one_folder_get_deterministic_names_without_a_prefix_scan()
+    {
+        const int count = 300;
+        var engine = new FakePstEngine();
+        engine.Folders.Add(new FakeFolder("f:00000001", null, "Posta in arrivo", ["Posta in arrivo"], 0));
+        for (var i = 0; i < count; i++)
+        {
+            var id = $"m:{0x10000 + i * 0x20:x8}";
+            engine.Messages.Add(new FakeMessage(id, "f:00000001",
+                FakePstEngine.Doc(id, "f:00000001", $"Firma {i}", "ada@example.test", "Ada",
+                    to: [("bob@example.test", "Bob")], received: "2024-03-01T10:00:00Z", text: "x",
+                    attachments: [FakePstEngine.Att("0", "image001.png", "image/png")]),
+                new() { ["0"] = FakePstEngine.Bytes($"signature-{i}") }));
+        }
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var (factory, _, owner, archive) = await ImportedAsync(this, engine);
+        stopwatch.Stop();
+        Assert.Equal("succeeded", archive.LatestRun!.Status);
+        Assert.Equal(count, archive.LatestRun.ImportedMessages);
+
+        var names = await InDbAsync(factory, db => db.FileItems.AsNoTracking()
+            .Where(f => f.OwnerUserId == owner && f.DeletedAt == null && f.Name.StartsWith("image001"))
+            .Select(f => new { f.Name, f.ParentFolderId }).ToListAsync());
+        Assert.Equal(count, names.Count);
+        Assert.Single(names.Select(n => n.ParentFolderId).Distinct());
+        Assert.Equal(count, names.Select(n => n.Name).Distinct(StringComparer.Ordinal).Count());
+        Assert.Single(names, n => n.Name == "image001.png");
+        // Every other name is the source-tagged one, never the "(N)" fallback.
+        Assert.All(names.Where(n => n.Name != "image001.png"),
+            n => Assert.Matches(@"^image001 \([0-9a-f]{8}-0\)\.png$", n.Name));
+        // And the link keeps the original name.
+        Assert.Equal(count, await InDbAsync(factory, db => db.MailAttachments.CountAsync(a => a.OriginalName == "image001.png")));
+
+        _output.WriteLine(
+            $"{count} same-named attachments in one folder: {stopwatch.ElapsedMilliseconds} ms end to end "
+            + $"({stopwatch.Elapsed.TotalMilliseconds / count:F1} ms/message, SQLite test host)");
+    }
+
+    [Fact]
     public async Task Same_pst_uploaded_twice_is_one_archive_and_a_different_pst_is_independent()
     {
         var (factory, client, _, archive) = await ImportedAsync(this);
@@ -399,7 +501,7 @@ public sealed class MailArchiveImportTests : IDisposable
         var names = await InDbAsync(factory, db => db.FileItems.AsNoTracking()
             .Where(f => f.OwnerUserId == owner && f.DeletedAt == null && !f.Name.EndsWith(".pst"))
             .Select(f => f.Name).OrderBy(n => n).ToListAsync());
-        Assert.Equal(["dentro.txt", "foto.jpg", "logo.png", "report (2).pdf", "report.pdf"], names);
+        Assert.Equal(["dentro.txt", "foto.jpg", "logo.png", "report (00000101-2).pdf", "report.pdf"], names);
         var audit = await AuditAsync(factory);
         Assert.Equal(audit.TotalBlobs, audit.MatchedReferenceCount);
     }

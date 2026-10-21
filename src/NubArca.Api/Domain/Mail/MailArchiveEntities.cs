@@ -70,6 +70,14 @@ public class MailImportRun
     public int AttachmentsSkipped { get; set; }
     // Folders/messages the engine could not even enumerate during the scan.
     public int ScanErrors { get; set; }
+    // Set once THIS run has scanned (exhaustively or not), so a sliced run does
+    // not rescan on every continuation. The archive's ScanCompletedAt is set
+    // only by an EXHAUSTIVE scan; a partial one leaves it null and the next
+    // run scans again (the scan is an idempotent upsert of the manifest).
+    public DateTime? ScannedAt { get; set; }
+    // The scan's errors, bounded (MailScanIssues.Max): scope, code and the
+    // folder path by name. Never a NID, never content.
+    public string? ScanIssuesJson { get; set; }
 
     // Sanitized: a stable code and a short message, never an exception text
     // carrying a path, a key or message content.
@@ -224,6 +232,8 @@ public static class MailMessageStatuses
 {
     public const string Importing = "importing";
     public const string Complete = "complete";
+    // Held only inside the delete transaction (the row claim); never committed.
+    public const string Deleting = "deleting";
 }
 
 public static class MailDocumentFormats

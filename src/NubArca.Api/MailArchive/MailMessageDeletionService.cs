@@ -37,9 +37,18 @@ public sealed class MailMessageDeletionService
             var message = await _db.MailMessages
                 .FirstOrDefaultAsync(m => m.Id == messageId && m.OwnerUserId == owner
                     && m.Status == MailMessageStatuses.Complete, cancellationToken);
-            if (message is null)
+            // Claim the row before touching anything: a conditional UPDATE
+            // takes the row lock, so of two concurrent deletes exactly one
+            // proceeds; the other waits, then matches nothing and reports
+            // AlreadyDeleted instead of colliding on the tombstone. The
+            // transient status is never committed (the row is deleted below).
+            var claimed = message is null ? 0 : await _db.MailMessages
+                .Where(m => m.Id == messageId && m.OwnerUserId == owner && m.Status == MailMessageStatuses.Complete)
+                .ExecuteUpdateAsync(s => s.SetProperty(m => m.Status, MailMessageStatuses.Deleting), cancellationToken);
+            if (message is null || claimed == 0)
             {
                 await tx.RollbackAsync(cancellationToken);
+                _db.ChangeTracker.Clear();
                 var tombstoned = await _db.MailDeletionTombstones.AsNoTracking()
                     .AnyAsync(t => t.OwnerUserId == owner && t.DeletedMessageId == messageId, cancellationToken);
                 return tombstoned ? MailDeleteOutcome.AlreadyDeleted : MailDeleteOutcome.NotFound;

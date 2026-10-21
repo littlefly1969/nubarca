@@ -332,7 +332,11 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   reference. Do not "simplify" a message into a FileItem, add an update route,
   or call `ReleaseAsync` for an attachment link. Deleting a message writes a
   tombstone and keeps its attachments. PST import has its own job
-  (`mail.import`) and service, never `AdminImportService`. See
+  (`mail.import`) and service, never `AdminImportService`. A scan with
+  errors is never final (only an error-free scan sets `ScanCompletedAt`), and
+  the PST engine always confines itself (empty environment, unprivileged
+  uid, Landlock, seccomp, rlimits): do not pass it the worker's environment
+  or skip the sandbox to "fix" an import. See
   `docs/mailarchive/operations.md`.
 - **The Party workspace is SEVEN sections, and the same seven in every phase.**
   Riepilogo, Esperienza, Ospiti, Foto, Attività, Schermi e stampa,

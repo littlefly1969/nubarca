@@ -431,7 +431,8 @@ public sealed class MailArchiveService
             run.SkippedDeletedMessages, run.FailedMessages,
             run.AttachmentsCreated, run.AttachmentsReused, run.AttachmentsSkipped,
             cancellationRequested && MailImportRunStatuses.IsActive(run.Status),
-            run.ErrorCode, run.ErrorMessage, run.CreatedAt, run.StartedAt, run.CompletedAt);
+            run.ErrorCode, run.ErrorMessage, run.CreatedAt, run.StartedAt, run.CompletedAt,
+            run.ScanErrors, MailScanIssues.Parse(run.ScanIssuesJson));
     }
 
     internal static IReadOnlyList<string> ParsePath(string json)

@@ -170,6 +170,12 @@ public sealed partial class ProcessPstEngine : IPstEngine
                 var line = await _process.ReadLineAsync(timeout.Token)
                     ?? throw new PstEngineException("engine_exited", "The PST engine exited during extraction.");
                 var response = Parse<PstExtractResponse>(line);
+                if (response.Type == "fatal")
+                {
+                    // The session could not start (e.g. the sandbox refused).
+                    _broken = true;
+                    throw new PstEngineException(response.Code ?? "fatal", Sanitize(response.Message));
+                }
                 if (response.RequestId != requestId)
                 {
                     throw new PstEngineException("protocol_error", "The PST engine answered another request.");
@@ -207,6 +213,54 @@ public sealed partial class ProcessPstEngine : IPstEngine
         }
     }
 
+    // The PST is untrusted input, so the parser starts with NOTHING from
+    // this process: an empty environment (no connection string, token or
+    // proxy setting reaches it) and the limit and sandbox flags under which
+    // it confines itself before parsing (tools/nubarca-pst-importer
+    // src/sandbox.rs: rlimits, an unprivileged uid, no_new_privs, no
+    // capabilities, seccomp without network or exec, Landlock to the PST and
+    // its work dir).
+    internal static ProcessStartInfo CreateStartInfo(MailArchiveOptions options, IReadOnlyList<string> args)
+    {
+        var info = new ProcessStartInfo(options.ImporterPath)
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardInputEncoding = new UTF8Encoding(false),
+            WorkingDirectory = "/",
+        };
+        info.Environment.Clear();
+        foreach (var arg in args)
+        {
+            info.ArgumentList.Add(arg);
+        }
+        info.ArgumentList.Add("--max-attachment-bytes");
+        info.ArgumentList.Add(options.MaxAttachmentBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        info.ArgumentList.Add("--max-body-bytes");
+        info.ArgumentList.Add(options.MaxBodyBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        info.ArgumentList.Add("--max-document-bytes");
+        info.ArgumentList.Add(options.MaxDocumentBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        info.ArgumentList.Add("--max-embedded-depth");
+        info.ArgumentList.Add(options.MaxEmbeddedDepth.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        info.ArgumentList.Add("--max-attachments-per-message");
+        info.ArgumentList.Add(options.MaxAttachmentsPerMessage.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        info.ArgumentList.Add("--max-memory-bytes");
+        info.ArgumentList.Add(options.MaxEngineMemoryBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        info.ArgumentList.Add("--max-cpu-seconds");
+        info.ArgumentList.Add(options.MaxEngineCpuSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        info.ArgumentList.Add("--landlock");
+        info.ArgumentList.Add(options.RequireFilesystemSandbox ? "required" : "best-effort");
+        if (!string.IsNullOrWhiteSpace(options.EngineRunAs))
+        {
+            info.ArgumentList.Add("--run-as");
+            info.ArgumentList.Add(options.EngineRunAs.Trim());
+        }
+        return info;
+    }
+
     // One child process: argument list (never a shell), stdout read as bounded
     // UTF-8 lines, stderr drained so the pipe never fills (logged at debug,
     // truncated: the engine never writes content there).
@@ -238,31 +292,7 @@ public sealed partial class ProcessPstEngine : IPstEngine
 
         public static EngineProcess Start(MailArchiveOptions options, ILogger logger, IReadOnlyList<string> args)
         {
-            var info = new ProcessStartInfo(options.ImporterPath)
-            {
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardInputEncoding = new UTF8Encoding(false),
-            };
-            foreach (var arg in args)
-            {
-                info.ArgumentList.Add(arg);
-            }
-            info.ArgumentList.Add("--max-attachment-bytes");
-            info.ArgumentList.Add(options.MaxAttachmentBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            info.ArgumentList.Add("--max-body-bytes");
-            info.ArgumentList.Add(options.MaxBodyBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            info.ArgumentList.Add("--max-document-bytes");
-            info.ArgumentList.Add(options.MaxDocumentBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            info.ArgumentList.Add("--max-embedded-depth");
-            info.ArgumentList.Add(options.MaxEmbeddedDepth.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            info.ArgumentList.Add("--max-attachments-per-message");
-            info.ArgumentList.Add(options.MaxAttachmentsPerMessage.ToString(System.Globalization.CultureInfo.InvariantCulture));
-
-            var process = Process.Start(info)
+            var process = Process.Start(CreateStartInfo(options, args))
                 ?? throw new PstEngineException("engine_unavailable", "The PST engine could not be started.");
             return new EngineProcess(process, logger);
         }

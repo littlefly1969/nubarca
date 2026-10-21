@@ -57,6 +57,8 @@ public class MailImportRunConfiguration : IEntityTypeConfiguration<MailImportRun
         builder.Property(r => r.Phase).HasMaxLength(32);
         builder.Property(r => r.ErrorCode).HasMaxLength(64);
         builder.Property(r => r.ErrorMessage).HasMaxLength(300);
+        builder.Property(r => r.ScanIssuesJson).HasColumnType("text");
+        builder.Property(r => r.ScannedAt).HasColumnType("timestamp with time zone");
         builder.Property(r => r.CreatedAt).HasColumnType("timestamp with time zone");
         builder.Property(r => r.StartedAt).HasColumnType("timestamp with time zone");
         builder.Property(r => r.CompletedAt).HasColumnType("timestamp with time zone");
@@ -180,6 +182,19 @@ public class MailMessageConfiguration : IEntityTypeConfiguration<MailMessage>
             .HasDatabaseName("ix_mail_messages_archive_date");
         builder.HasIndex(m => m.BlobObjectId)
             .HasDatabaseName("ix_mail_messages_blob_object");
+        // Structured search is substring search (`LIKE '%x%'`) over these
+        // lower-cased columns: trigram GIN indexes make it an index scan on
+        // PostgreSQL for terms of three characters or more. Owner scoping is
+        // the query's other predicate (combined by a bitmap AND).
+        builder.HasIndex(m => m.SearchSubject)
+            .HasMethod("gin").HasOperators("gin_trgm_ops")
+            .HasDatabaseName("ix_mail_messages_search_subject_trgm");
+        builder.HasIndex(m => m.SearchFrom)
+            .HasMethod("gin").HasOperators("gin_trgm_ops")
+            .HasDatabaseName("ix_mail_messages_search_from_trgm");
+        builder.HasIndex(m => m.SearchRecipients)
+            .HasMethod("gin").HasOperators("gin_trgm_ops")
+            .HasDatabaseName("ix_mail_messages_search_recipients_trgm");
 
         builder.HasOne<Domain.Mail.MailArchive>()
             .WithMany()

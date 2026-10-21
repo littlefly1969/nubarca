@@ -22,7 +22,13 @@ public sealed record PstProbe(
     string? Format,
     string? Encryption,
     string? StoreDisplayName,
-    long? FileSize);
+    long? FileSize,
+    PstSandboxReport? Sandbox = null);
+
+// How the engine process confined itself (tools/nubarca-pst-importer
+// src/sandbox.rs). Landlock: full | partial | unavailable.
+public sealed record PstSandboxReport(
+    bool Rlimits, bool NoNewPrivs, string? Capabilities, bool Seccomp, string? Landlock, string? User = null);
 
 // One NDJSON line of `list`. `Type` is folder | message | error | end | fatal.
 public sealed record PstListEvent(

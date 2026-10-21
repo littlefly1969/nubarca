@@ -42,6 +42,16 @@ export interface MailRun {
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  /** Folders or messages the scan could not enumerate; > 0 makes the run partial and the next run scans again. */
+  scanErrors: number;
+  scanIssues: MailScanIssue[];
+}
+
+/** One unreadable folder or message found by the scan (path by name; null when the engine could not place it). */
+export interface MailScanIssue {
+  scope: 'folder' | 'message';
+  code: string;
+  folderPath: string[] | null;
 }
 
 export interface MailArchive {

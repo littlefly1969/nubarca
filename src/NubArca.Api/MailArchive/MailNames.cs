@@ -40,6 +40,28 @@ public static class MailNames
         return Segment(candidate, $"allegato-{key}");
     }
 
+    // "report.pdf" + m:00200044 + "1" → "report (00200044-1).pdf": unique per
+    // archive, because the message key is. Still within the length limit.
+    public static string SourceTagged(string name, string messageKey, string attachmentKey)
+    {
+        var node = messageKey.StartsWith("m:", StringComparison.Ordinal) ? messageKey[2..] : messageKey;
+        var tag = $" ({node}-{attachmentKey})";
+        var dot = name.LastIndexOf('.');
+        var extension = dot > 0 && name.Length - dot <= 16 ? name[dot..] : string.Empty;
+        var stem = extension.Length > 0 ? name[..dot] : name;
+        var room = MaxNameLength - extension.Length - tag.Length;
+        if (stem.Length > room)
+        {
+            var cut = Math.Max(1, room);
+            if (char.IsHighSurrogate(stem[cut - 1]))
+            {
+                cut--;
+            }
+            stem = stem[..cut];
+        }
+        return stem + tag + extension;
+    }
+
     // Shortens the stem, never the extension.
     private static string Truncate(string name)
     {

@@ -14,6 +14,7 @@ pub enum Code {
     IoError,
     BadRequest,
     LimitExceeded,
+    SandboxUnavailable,
 }
 
 impl Code {
@@ -26,6 +27,7 @@ impl Code {
             Code::IoError => "io_error",
             Code::BadRequest => "bad_request",
             Code::LimitExceeded => "limit_exceeded",
+            Code::SandboxUnavailable => "sandbox_unavailable",
         }
     }
 }

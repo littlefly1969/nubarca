@@ -72,6 +72,59 @@ public sealed class MailArchiveRealEngineTests : IDisposable
     }
 
     [SkippableFact]
+    public async Task The_engine_started_by_dotnet_has_an_empty_environment_and_runs_confined()
+    {
+        var binary = RequireBinary();
+        Skip.IfNot(OperatingSystem.IsLinux(), "The engine sandbox is Linux-only.");
+        var root = TempDirectory();
+        var work = Directory.CreateDirectory(Path.Combine(root, "work")).FullName;
+        var outside = Directory.CreateDirectory(Path.Combine(root, "outside")).FullName;
+        var secret = Path.Combine(outside, "secret.txt");
+        await File.WriteAllTextAsync(secret, "not for the parser");
+
+        // A secret in this process's environment, as the worker has its
+        // connection string: it must not reach the parser.
+        Environment.SetEnvironmentVariable("NUBARCA_SANDBOX_CANARY", "Password=not-for-the-parser");
+        try
+        {
+            var info = ProcessPstEngine.CreateStartInfo(
+                new MailArchiveOptions { ImporterPath = binary, RequireFilesystemSandbox = false },
+                ["sandbox-check", "--pst", Fixture, "--work-dir", work, "--outside-read", secret, "--outside-dir", outside]);
+            Assert.Empty(info.Environment);
+            Assert.Equal("/", info.WorkingDirectory);
+
+            using var process = System.Diagnostics.Process.Start(info)!;
+            var stdout = await process.StandardOutput.ReadToEndAsync();
+            await process.WaitForExitAsync();
+            Assert.Equal(0, process.ExitCode);
+            var evt = JsonDocument.Parse(stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries)[0]).RootElement;
+            Assert.Equal("sandbox", evt.GetProperty("type").GetString());
+
+            var report = evt.GetProperty("report");
+            Assert.True(report.GetProperty("rlimits").GetBoolean());
+            Assert.True(report.GetProperty("noNewPrivs").GetBoolean());
+            // Never parses as root: a root worker hands it to EngineRunAs.
+            Assert.Contains(report.GetProperty("user").GetString(), new[] { "switched", "unprivileged" });
+            Assert.Contains("--run-as", info.ArgumentList);
+            Assert.True(report.GetProperty("seccomp").GetBoolean());
+            var checks = evt.GetProperty("checks");
+            Assert.Empty(checks.GetProperty("environment").EnumerateArray());
+            Assert.Equal("denied", checks.GetProperty("network").GetString());
+            Assert.Equal("denied", checks.GetProperty("exec").GetString());
+            Assert.Equal("allowed", checks.GetProperty("writeInside").GetString());
+            if (report.GetProperty("landlock").GetString() != "unavailable")
+            {
+                Assert.Equal("denied", checks.GetProperty("readOutside").GetString());
+                Assert.Equal("denied", checks.GetProperty("writeOutside").GetString());
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("NUBARCA_SANDBOX_CANARY", null);
+        }
+    }
+
+    [SkippableFact]
     public async Task Process_engine_speaks_the_protocol_with_the_real_binary()
     {
         var binary = RequireBinary();
@@ -163,7 +216,7 @@ public sealed class MailArchiveRealEngineTests : IDisposable
                 .Select(f => f.Name).ToListAsync();
             // logo.png, report.pdf, notes.txt twice, empty.txt, data.bin and the international one.
             Assert.Equal(7, files.Count);
-            Assert.Contains("notes (2).txt", files);
+            Assert.Contains("notes (00200044-1).txt", files);
         }
 
         // The engine opened its copy read-only: the uploaded original is byte-identical.

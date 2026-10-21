@@ -8,6 +8,14 @@ pub struct Limits {
     pub max_embedded_depth: u32,
     pub max_folder_depth: u32,
     pub max_attachments_per_message: usize,
+    /// Sandbox (see `sandbox.rs`): address-space and CPU-time ceilings,
+    /// 0 = no limit, and whether a kernel without Landlock is refused.
+    pub max_memory_bytes: u64,
+    pub max_cpu_seconds: u64,
+    pub landlock_required: bool,
+    /// When started as root: the unprivileged uid:gid to switch to before
+    /// parsing. Ignored when not root (already unprivileged).
+    pub run_as: Option<(u32, u32)>,
 }
 
 impl Default for Limits {
@@ -19,6 +27,10 @@ impl Default for Limits {
             max_embedded_depth: 3,
             max_folder_depth: 64,
             max_attachments_per_message: 500,
+            max_memory_bytes: 2_147_483_648,
+            max_cpu_seconds: 0,
+            landlock_required: false,
+            run_as: None,
         }
     }
 }
@@ -41,6 +53,27 @@ impl Limits {
             "--max-folder-depth" => self.max_folder_depth = as_u32(parse()?)?,
             "--max-attachments-per-message" => {
                 self.max_attachments_per_message = as_usize(parse()?)?
+            }
+            "--max-memory-bytes" => self.max_memory_bytes = parse()?,
+            "--max-cpu-seconds" => self.max_cpu_seconds = parse()?,
+            "--landlock" => {
+                self.landlock_required = match value {
+                    "required" => true,
+                    "best-effort" => false,
+                    _ => return Err("--landlock expects required or best-effort".into()),
+                }
+            }
+            "--run-as" => {
+                let ids = value
+                    .split_once(':')
+                    .and_then(|(u, g)| Some((u.parse::<u32>().ok()?, g.parse::<u32>().ok()?)));
+                self.run_as = match ids {
+                    Some((0, _)) | Some((_, 0)) => {
+                        return Err("--run-as must name a non-root uid:gid".into())
+                    }
+                    Some(ids) => Some(ids),
+                    None => return Err("--run-as expects UID:GID".into()),
+                }
             }
             _ => return Ok(false),
         }

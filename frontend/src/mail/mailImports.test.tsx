@@ -236,4 +236,29 @@ describe('run progress panel', () => {
     expect(table).toHaveTextContent('17');
     expect(table).toHaveTextContent('corrupt');
   });
+
+  it('shows an incomplete scan with the unreadable folders and that it will be repeated', () => {
+    renderPanel(run({
+      status: 'partial', phase: null, failedMessages: 0, errorCode: 'scan_errors',
+      errorMessage: '3 elementi del PST non sono leggibili.', completedAt: '2026-10-01T11:00:00Z',
+      scanErrors: 3,
+      scanIssues: [
+        { scope: 'folder', code: 'corrupt', folderPath: ['Top', 'Progetti'] },
+        { scope: 'message', code: 'corrupt', folderPath: null },
+      ],
+    }));
+    expect(screen.getByTestId('mail-run-scan-errors')).toHaveTextContent('3');
+    const issues = screen.getByTestId('mail-run-scan-issues');
+    expect(issues).toHaveTextContent('la prossima importazione la ripeterà');
+    expect(issues).toHaveTextContent('Top / Progetti');
+    expect(issues).toHaveTextContent('Messaggio non identificato');
+    expect(issues).toHaveTextContent('e altri 1');
+    expect(screen.queryByTestId('mail-run-failures-toggle')).toBeNull();
+  });
+
+  it('shows no scan section for an exhaustive scan', () => {
+    renderPanel(run({ status: 'succeeded', phase: null, failedMessages: 0, completedAt: '2026-10-01T11:00:00Z' }));
+    expect(screen.queryByTestId('mail-run-scan-errors')).toBeNull();
+    expect(screen.queryByTestId('mail-run-scan-issues')).toBeNull();
+  });
 });

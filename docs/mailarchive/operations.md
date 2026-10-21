@@ -56,6 +56,10 @@ Section `MailArchive` (environment form `MailArchive__Key`):
 | `ListTimeoutMinutes` | 120 | Whole-archive scan. |
 | `ScanBatchSize` | 500 | Rows per scan commit. |
 | `AttachmentRootFolderName` | `Posta` | Top folder for attachment files. |
+| `MaxEngineMemoryBytes` | 2 GiB | Engine address-space ceiling (`RLIMIT_AS`); 0 = none. |
+| `MaxEngineCpuSeconds` | 3600 | Engine CPU time per process (`RLIMIT_CPU`; one `serve` session covers a whole slice); 0 = none. |
+| `RequireFilesystemSandbox` | `true` | Refuse to parse without Landlock: the run fails `sandbox_unavailable`. `false` only on a kernel without Landlock, after reading "Parser isolation". |
+| `EngineRunAs` | `65534:65534` | `uid:gid` the engine switches to when the worker runs as root. Empty = no switch. |
 
 ### Large PST files
 
@@ -87,12 +91,22 @@ small and are not counted against the quota.
 A run that ends `partial` lists its failed messages (folder path, position,
 code). Re-import retries only those.
 
+A run can also end `partial` because the **scan** was incomplete (`errorCode`
+`scan_errors`): some folder or message could not be enumerated. The run panel
+shows how many and which folders. Such a scan is never trusted as final: the
+next re-import scans the PST again and imports whatever has become readable
+(for example after an engine upgrade); messages already imported are not
+touched. Only a scan without errors is final, and later runs then skip it.
+
 ## Health checks
 
 ```bash
 $DC exec api dotnet NubArca.Api.dll storage blobs audit-references   # message documents are counted
-$DC exec api /opt/nubarca/bin/nubarca-pst-importer probe --pst <a PST inside the container>
+$DC exec api /opt/nubarca/bin/nubarca-pst-importer probe --pst <a PST inside the container> --run-as 65534:65534
 ```
+
+The probe's `sandbox` field reports the confinement in effect; every run also
+logs it (worker log, `MailArchive engine sandbox: …`).
 
 `GET /api/mail/status` answers `available`, `disabled` or `importer_missing`.
 
@@ -102,6 +116,63 @@ Migration `AddMailArchive` is additive (see `deploy/migration-policy.json`).
 While the previous application runs against the upgraded schema, do **not** run
 its `storage blobs repair-references`: it does not know `mail_messages` and
 would release the message documents.
+
+## Parser isolation
+
+The PST is untrusted input parsed by native code, so the engine is confined
+before it reads the first byte. Layers, all applied by the engine itself
+(`tools/nubarca-pst-importer/src/sandbox.rs`) on every invocation:
+
+| Layer | What it enforces | If unavailable |
+|---|---|---|
+| Empty environment | The worker starts it with **no** environment variable and `/` as working directory: no connection string, secret, token or proxy setting is inherited. | — (always) |
+| Unprivileged user | Started as root (the container default), it hands its work directory to `EngineRunAs` (65534 = `nobody`) and switches real, effective and saved uid/gid, dropping supplementary groups. It then checks it can still read the PST copy and write its directory, or fails up front. | fatal `sandbox_unavailable` |
+| No privileges | Capability bounding and ambient sets emptied, every capability cleared, `PR_SET_NO_NEW_PRIVS`. | fatal |
+| Filesystem (Landlock ABI 3) | Read: only the run's PST working copy. Read/write: only its own work directory (`<WorkRoot>/runs/<run>/serve`, or the extract out dir). Everything else, including other runs and the storage objects, is denied. | fatal by default (`RequireFilesystemSandbox`) |
+| Network and processes (seccomp) | `socket`, `connect`, `bind`, `listen`, `accept`, `execve`, `fork`/`clone`, `ptrace`, `mount`, `unshare`, `bpf`, `io_uring`, module and key syscalls answer `EPERM`. | fatal |
+| Resources (rlimits) | Address space `MaxEngineMemoryBytes`, CPU `MaxEngineCpuSeconds`, file size (largest attachment/document + 1 MiB), 64 descriptors, no core dumps. Each message also has the `ExtractTimeoutSeconds` watchdog (the process is killed). | fatal |
+
+Requirements: Linux ≥ 5.13 with Landlock enabled (`lsm=…,landlock`; ABI 3
+needs 6.2, older kernels report `partial`) and Docker's default seccomp profile,
+which allows the `landlock_*` and `seccomp` syscalls. The work root must be
+traversable by `EngineRunAs` (directories `0755` or `0711` up to it); the
+default `<Storage:RootPath>/mail-work` is, unless the storage root itself is
+`0700`. In that case either open the traversal bit on the storage root or
+point `MailArchive__WorkRootPath` to a dedicated volume.
+
+Verify on the host, inside the api container:
+
+```bash
+$DC exec api sh -c 'd=$(mktemp -d) && mkdir $d/work $d/outside && chmod 755 $d && echo x > $d/outside/secret && \
+  cp /dev/null $d/x.pst && /opt/nubarca/bin/nubarca-pst-importer sandbox-check --pst $d/x.pst \
+  --work-dir $d/work --outside-read $d/outside/secret --outside-dir $d/outside --landlock required --run-as 65534:65534; rm -rf $d'
+```
+
+Expected: `"user":"switched"`, `"landlock":"full"`, every check `denied` except
+`writeInside`, and `"environment":[]`. Measured on Docker 29 with the
+`mcr.microsoft.com/dotnet/aspnet:10.0` image, both as root (`switched`) and as
+uid 1654 (`unprivileged`). Tests: `tools/nubarca-pst-importer/tests/sandbox.rs`
+(each layer from inside the real binary, including the uid switch when run as
+root) and `MailArchiveRealEngineTests` (the process exactly as the worker
+starts it: empty environment, flags, confined).
+
+Not covered: a kernel exploit reachable through the allowed syscalls (reading
+and writing files, memory management). That boundary is the kernel's.
+
+## Search
+
+The quick search (`q`) and the field filters look in the subject, the sender
+and the recipients (To/Cc/Bcc, name and address); the message **body is not
+searched** yet. Matching is a case-insensitive substring. On PostgreSQL each of
+the three columns has a trigram GIN index (`pg_trgm`, created by the
+`AddMailArchive` migration; a trusted extension, no superuser needed), and the
+owner filter is applied in the same query. Measured on PostgreSQL 16 with
+100,000 messages over two owners: every case is a Bitmap Index Scan on the
+trigram index (a BitmapOr of the three for `q`), 4–8 ms execution, 16–23 ms
+end to end through EF; no sequential scan
+(`MailArchivePostgresTests.Search_on_postgres_uses_the_trigram_indexes_and_stays_owner_scoped`).
+Terms shorter than three characters cannot use a trigram index and scan the
+owner's messages.
 
 ## Measured performance (engine, release build, 4-core Xeon 2.8 GHz)
 
@@ -119,6 +190,13 @@ messages before PostgreSQL tuning.
 
 Attachment bytes are streamed block by block, so engine memory does not grow
 with attachment size. The .NET side processes one message at a time.
+
+Attachment names: a clash in the target folder costs at most two indexed
+lookups (the original name, then the source-derived name), independent of how
+many same-named files the folder holds. 300 messages each with an
+`image001.png` in one folder: all imported with unique names, no fallback scan,
+about 94 ms per message end to end on the SQLite test host (including file
+creation and the post-ingestion pipeline).
 
 ## Compatibility
 

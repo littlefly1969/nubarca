@@ -46,15 +46,34 @@ part, `--max-document-bytes` [33554432], `--max-embedded-depth` [3],
 Exceeding a limit is a classified per-item outcome, never a crash and never
 unbounded memory.
 
+Every invocation also confines itself before the PST is parsed
+(`src/sandbox.rs`; operations.md "Parser isolation"):
+`--max-memory-bytes` [2147483648] address space, `--max-cpu-seconds` [0 = none],
+`--landlock required|best-effort` [best-effort], `--run-as UID:GID` [none; when
+started as root, switch to this non-root user]. A layer that cannot be applied
+is the fatal code `sandbox_unavailable` (exit 2): rlimits, the uid switch,
+`no_new_privs` and seccomp always; Landlock only with `required`.
+
+`sandbox-check --pst FILE --work-dir DIR --outside-read FILE --outside-dir DIR`
+(verification only) enters the sandbox, then attempts what it forbids and prints
+one line:
+
+```json
+{"type":"sandbox","report":{"rlimits":true,"user":"switched","noNewPrivs":true,"capabilities":"dropped","seccomp":true,"landlock":"full"},"checks":{"network":"denied","exec":"denied","readOutside":"denied","writeOutside":"denied","writeInside":"allowed","environment":[]}}
+```
+
 ### 2.1 `probe --pst FILE`
 
 One line:
 
 ```json
-{"type":"probe","protocol":"nubarca-pst/1","format":"unicode","encryption":"none","storeDisplayName":"Personal Folders","fileSize":271360}
+{"type":"probe","protocol":"nubarca-pst/1","format":"unicode","encryption":"none","storeDisplayName":"Personal Folders","fileSize":271360,"sandbox":{"rlimits":true,"user":"switched","noNewPrivs":true,"capabilities":"dropped","seccomp":true,"landlock":"full"}}
 ```
 
 `format`: `unicode` | `ansi`. `encryption`: `none` | `permute` | `cyclic`.
+`sandbox` is the report of the confinement the invocation runs under: `user`
+`switched` | `unprivileged` | `root`; `capabilities` `dropped` | `none_held`;
+`landlock` `full` | `partial` | `unavailable`.
 
 ### 2.2 `list --pst FILE`
 
@@ -70,6 +89,13 @@ before children, then each folder's messages in contents-table order:
 
 `parentFolderId` is `null` only for the IPM subtree root. `error.scope`:
 `folder` | `message`. A `list` that cannot finish prints `fatal`.
+
+A scan with `errors > 0` is **partial**: the manifest may miss folders or
+messages, so the backend never treats it as final. The run records the count
+and up to 100 issues (scope, code, folder path by name, never the node id),
+ends `partial` with `errorCode` `scan_errors`, and the next run scans again
+(new messages are added to the manifest; existing ones keep their ordinal).
+Only a scan without errors sets the archive's `ScanCompletedAt`.
 
 ### 2.3 `serve --pst FILE --work-dir DIR`
 
@@ -188,7 +214,8 @@ and `skipped_deleted` are final for that fingerprint.
 
 Status: `queued` | `running` | `succeeded` | `partial` | `failed` |
 `cancelled`. Phase while running: `preparing` | `scanning` | `importing` |
-`finalizing`. `partial` = finished with at least one failed message.
+`finalizing`. `partial` = finished with at least one failed message or an
+incomplete scan (`scanErrors > 0`).
 
 ## 4. Immutability strategy (gate)
 
@@ -234,6 +261,8 @@ type MailRun = {
   cancellationRequested: boolean;
   errorCode: string | null; errorMessage: string | null;
   createdAt: string; startedAt: string | null; completedAt: string | null;
+  scanErrors: number;
+  scanIssues: { scope: 'folder' | 'message'; code: string; folderPath: string[] | null }[];
 };
 
 type MailArchive = {
@@ -292,7 +321,7 @@ type MailFileOrigin = { messageId: string; archiveId: string; archiveName: strin
 | `GET /api/mail/runs/{id}` | `MailRun` |
 | `GET /api/mail/runs/{id}/failures?cursor=` | `{ items: [{ folderPath: string[]; position: number; code: string; message: string | null }], nextCursor }` |
 | `POST /api/mail/runs/{id}/cancel` | `202 MailRun`; `409 not_active` |
-| `GET /api/mail/messages` | `MailMessagePage`. Query: `archiveId`, `folderId`, `q` (subject/from/recipients), `from`, `to` (any recipient), `subject`, `after`, `before` (ISO dates, inclusive/exclusive), `hasAttachments`, `cursor`, `limit` (1–100, default 50). Order: date desc, then id. Keyset cursor (opaque). |
+| `GET /api/mail/messages` | `MailMessagePage`. Query: `archiveId`, `folderId`, `q` (subject, sender or any recipient — the body is not searched yet), `from`, `to` (any recipient), `subject`, `after`, `before` (ISO dates, inclusive/exclusive), `hasAttachments`, `cursor`, `limit` (1–100, default 50). Order: date desc, then id. Keyset cursor (opaque). |
 | `GET /api/mail/messages/{id}` | `MailMessageDetail` |
 | `DELETE /api/mail/messages/{id}` | `204` (also when already deleted by this owner) |
 | `GET /api/mail/file-origins/{fileItemId}` | `{ items: MailFileOrigin[] }` (empty when the file has no live origin) |
@@ -308,7 +337,11 @@ the HTML in a sandboxed `iframe` (`sandbox="allow-same-origin"`, never
 
 - Each extracted attachment becomes a normal `FileItem` through
   `IFileItemService.CreateAsync` under `Posta/<archive name>/<PST folder path>/`
-  (name clash ⇒ `name (2).ext`), followed by the normal post-ingestion pipeline
+  under its original name; on a clash, a name derived from its source
+  (`report (00200044-1).pdf`: message node, attachment key), deterministic and
+  unique per archive, found in at most two indexed lookups; only if that is
+  taken too (a file the owner created) the `name (N).ext` scan. The original
+  name stays on `mail_attachments`. Followed by the normal post-ingestion pipeline
   (previews, document extraction and indexing as for any upload).
 - Crash safety: each attachment is ingested under an `UploadOperation` claim
   keyed `mailarchive:<messageRowId>:<attachmentKey>`; `CreateAsync` completes
@@ -316,7 +349,9 @@ the HTML in a sandboxed `iframe` (`sandbox="allow-same-origin"`, never
   import adopts the file instead of creating a second one.
 - The normalized document is stored and the message flips to `complete` in
   ONE transaction (blob reference + row state). Until then it is invisible.
-- Deleting a message, in ONE transaction: write the tombstone, delete its
+- Deleting a message, in ONE transaction: claim the row (a conditional
+  `UPDATE … SET Status='deleting' WHERE Status='complete'`; of concurrent
+  deletes exactly one matches, the others answer `AlreadyDeleted`), write the tombstone, delete its
   `mail_attachments` rows, mark the manifest item `deleted`, delete the
   message row, release its document blob reference (janitor grace applies).
   Attachment `FileItem`s and their blob references are untouched.

@@ -30,6 +30,8 @@ export function run(overrides: Partial<MailRun> = {}): MailRun {
     createdAt: '2026-10-01T10:00:00Z',
     startedAt: '2026-10-01T10:00:01Z',
     completedAt: null,
+    scanErrors: 0,
+    scanIssues: [],
     ...overrides,
   };
 }

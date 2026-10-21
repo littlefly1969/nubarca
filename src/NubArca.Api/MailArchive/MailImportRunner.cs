@@ -89,15 +89,25 @@ public sealed class MailImportRunner
             await SetPhaseAsync(run, MailImportPhases.Preparing, cancellationToken);
             var pstPath = await EnsureWorkingCopyAsync(run, archive, cancellationToken);
 
+            // Every run probes: it is cheap, and it is where the engine reports
+            // (or refuses, with `sandbox_unavailable`) its confinement.
+            var probe = await _engine.ProbeAsync(pstPath, cancellationToken);
+            if (probe.Sandbox is { } sandbox)
+            {
+                _logger.LogInformation(
+                    "MailArchive engine sandbox: user={User} seccomp={Seccomp} landlock={Landlock} capabilities={Capabilities} rlimits={Rlimits}.",
+                    sandbox.User, sandbox.Seccomp, sandbox.Landlock, sandbox.Capabilities, sandbox.Rlimits);
+            }
             if (archive.Format is null)
             {
-                var probe = await _engine.ProbeAsync(pstPath, cancellationToken);
                 archive.Format = probe.Format;
                 archive.UpdatedAt = Now;
                 await _db.SaveChangesAsync(cancellationToken);
             }
 
-            if (archive.ScanCompletedAt is null)
+            // A run scans unless an earlier run already scanned EXHAUSTIVELY;
+            // a partial scan is repeated by the next run, never trusted.
+            if (archive.ScanCompletedAt is null && run.ScannedAt is null)
             {
                 await SetPhaseAsync(run, MailImportPhases.Scanning, cancellationToken);
                 await ScanAsync(run, archive, pstPath, cancellationToken);
@@ -127,7 +137,8 @@ public sealed class MailImportRunner
         {
             await FailRunAsync(run, ex.Code, ex.Message);
         }
-        catch (PstEngineException ex) when (ex.Code is "not_pst" or "unsupported_format" or "corrupt_header" or "encrypted" or "protocol_mismatch")
+        catch (PstEngineException ex) when (ex.Code is "not_pst" or "unsupported" or "unsupported_format" or "corrupt"
+            or "corrupt_header" or "encrypted" or "protocol_mismatch" or "sandbox_unavailable")
         {
             await FailRunAsync(run, ex.Code, PstProcessMessage(ex));
         }
@@ -209,6 +220,7 @@ public sealed class MailImportRunner
 
         var batch = new List<(string MessageKey, string FolderKey)>(_options.ScanBatchSize);
         var scanErrors = 0;
+        var issues = new List<MailScanIssueDto>();
 
         await foreach (var evt in _engine.ListAsync(pstPath, cancellationToken))
         {
@@ -247,15 +259,32 @@ public sealed class MailImportRunner
                     break;
                 case "error":
                     scanErrors++;
+                    if (issues.Count < MailScanIssues.Max)
+                    {
+                        // Placed by the folder's names when the engine names a
+                        // folder we know; the node id itself is never kept.
+                        IReadOnlyList<string>? path = evt.Scope == "folder" && evt.Id is not null
+                            && folders.TryGetValue(evt.Id, out var known)
+                                ? MailArchiveService.ParsePath(known.PathJson)
+                                : null;
+                        issues.Add(new MailScanIssueDto(
+                            evt.Scope == "folder" ? "folder" : "message",
+                            Truncate(evt.Code, 32) ?? "corrupt",
+                            path));
+                    }
                     break;
             }
         }
         nextOrdinal = await FlushScanBatchAsync(archive, batch, nextOrdinal, cancellationToken);
 
         archive.FolderCount = folders.Count;
-        archive.ScanCompletedAt = Now;
+        // Only an exhaustive scan is final. With errors the manifest may miss
+        // folders or messages, so the next run scans again.
+        archive.ScanCompletedAt = scanErrors == 0 ? Now : null;
         archive.UpdatedAt = Now;
         run.ScanErrors = scanErrors;
+        run.ScanIssuesJson = issues.Count == 0 ? null : JsonSerializer.Serialize(issues, MailScanIssues.Json);
+        run.ScannedAt = Now;
         run.UpdatedAt = Now;
         await _db.SaveChangesAsync(cancellationToken);
     }
@@ -644,7 +673,7 @@ public sealed class MailImportRunner
                     continue;
             }
 
-            var name = await FreeNameAsync(owner, folderId, link.OriginalName, cancellationToken);
+            var name = await FreeNameAsync(owner, folderId, link.OriginalName, message.SourceMessageKey, link.AttachmentKey, cancellationToken);
             try
             {
                 await using var content = File.OpenRead(path);
@@ -668,8 +697,26 @@ public sealed class MailImportRunner
         throw new IOException("Attachment name kept colliding.");
     }
 
-    private async Task<string> FreeNameAsync(Guid owner, Guid? folderId, string requested, CancellationToken cancellationToken)
+    // The file name an attachment gets, in at most two indexed lookups in the
+    // common case: its own name when free, otherwise a name made unique by
+    // where it came from ("image001 (00200044-1).png": message node, then
+    // attachment key), stable across re-imports and crashes. Only if even that
+    // is taken (another archive with the same display name, or a file the
+    // owner created) does it fall back to a prefix scan. The original name is
+    // kept on the MailAttachment link either way.
+    private async Task<string> FreeNameAsync(
+        Guid owner, Guid? folderId, string requested, string messageKey, string attachmentKey,
+        CancellationToken cancellationToken)
     {
+        if (!await NameTakenAsync(owner, folderId, requested, cancellationToken))
+        {
+            return requested;
+        }
+        var sourceTagged = MailNames.SourceTagged(requested, messageKey, attachmentKey);
+        if (!await NameTakenAsync(owner, folderId, sourceTagged, cancellationToken))
+        {
+            return sourceTagged;
+        }
         var dot = requested.LastIndexOf('.');
         var stem = dot > 0 ? requested[..dot] : requested;
         var prefix = stem + " (";
@@ -680,6 +727,11 @@ public sealed class MailImportRunner
             .ToListAsync(cancellationToken);
         return OwnerUploadIngestion.NextFreeName(requested, taken);
     }
+
+    private Task<bool> NameTakenAsync(Guid owner, Guid? folderId, string name, CancellationToken cancellationToken) =>
+        _db.FileItems.AsNoTracking().AnyAsync(
+            f => f.OwnerUserId == owner && f.ParentFolderId == folderId && f.DeletedAt == null && f.Name == name,
+            cancellationToken);
 
     // Posta/<archive>/<PST folder path> in the owner's Files, created on
     // demand and cached per slice. A folder the owner deleted is recreated.

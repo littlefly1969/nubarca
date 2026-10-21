@@ -12,15 +12,22 @@ originating repository and is deliberately not reproduced here.
   Importazioni**. The import runs in the background, shows its progress and
   failures, can be stopped and resumed, and never imports a message twice.
 - **Read your mail** in the mail view (folder tree, message list, reader) or
-  as documents, and **search** by sender, recipient, subject, text, dates and
-  attachments. HTML mail is cleaned and shown without scripts or remote
-  images.
+  as documents, and **search** by sender, recipient, subject, dates and
+  attachments (the quick search covers subject, sender and recipients; the
+  message body is not searched yet). HTML mail is cleaned and shown without
+  scripts or remote images.
 - **Attachments become normal files** under `Posta/<archivio>/…` in Files,
   with the usual dedup. A file opened from Files shows the email it came
   from.
 - **Imported mail cannot be changed**, only read, searched and deleted.
   Deleting a message keeps its attachments, and importing the same PST again
   does not bring it back.
+- **A PST that cannot be fully read** ends "completed with errors" and lists
+  the unreadable folders; the next import reads it again and picks up what
+  has become readable.
+- **The PST is parsed in a sandbox**: as an unprivileged user, with no
+  inherited settings, no network, no other programs, access only to its own
+  copy of the PST and its work folder, and memory and CPU limits.
 - Everything stays private to the owner. Operations and limits:
   `docs/mailarchive/operations.md`.
 

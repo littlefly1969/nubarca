@@ -18,6 +18,9 @@ public sealed class FakePstEngine : IPstEngine
     public Func<string, Exception?>? BeforeExtract { get; set; }
     // Per-message engine error responses (code), instead of an extraction.
     public Dictionary<string, string> ErrorFor { get; } = new();
+    // Folders whose contents `list` cannot enumerate: the folder is reported,
+    // then a folder-scoped error, and none of its messages.
+    public HashSet<string> UnreadableFolders { get; } = new(StringComparer.Ordinal);
 
     public int Extractions { get; private set; }
     public int Lists { get; private set; }
@@ -124,20 +127,30 @@ public sealed class FakePstEngine : IPstEngine
     {
         AssertReadable(pstPath);
         Lists++;
+        var errors = 0;
+        var listed = 0;
         foreach (var folder in Folders)
         {
             yield return new PstListEvent("folder", folder.Id, folder.ParentId, folder.Name, folder.Path, folder.Depth,
                 "IPF.Note", Messages.Count(m => m.FolderId == folder.Id), null, null, null, null, null, null, null, null);
+            if (UnreadableFolders.Contains(folder.Id))
+            {
+                errors++;
+                yield return new PstListEvent("error", null, null, null, null, null, null, null, null,
+                    "folder", folder.Id, "corrupt", "contents table unreadable", null, null, null);
+                continue;
+            }
             foreach (var message in Messages.Where(m => m.FolderId == folder.Id))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                listed++;
                 yield return new PstListEvent("message", folder.Id, null, null, null, null, null, null, message.Id,
                     null, null, null, null, null, null, null);
             }
         }
         await Task.Yield();
         yield return new PstListEvent("end", null, null, null, null, null, null, null, null, null, null, null, null,
-            Folders.Count, Messages.Count, 0);
+            Folders.Count, listed, errors);
     }
 
     public Task<IPstExtractionSession> StartSessionAsync(string pstPath, string workDir, CancellationToken cancellationToken)

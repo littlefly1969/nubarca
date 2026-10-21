@@ -10,7 +10,9 @@ using NubArca.Api.Jobs;
 using NubArca.Api.MailArchive;
 using NubArca.Api.Storage;
 using NubArca.Api.Tests.Integration;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NubArca.Api.Tests.MailArchive;
 
@@ -24,8 +26,13 @@ namespace NubArca.Api.Tests.MailArchive;
 public sealed class MailArchivePostgresTests : IAsyncLifetime
 {
     private readonly PostgresContainerFixture _fixture;
+    private readonly ITestOutputHelper _output;
 
-    public MailArchivePostgresTests(PostgresContainerFixture fixture) => _fixture = fixture;
+    public MailArchivePostgresTests(PostgresContainerFixture fixture, ITestOutputHelper output)
+    {
+        _fixture = fixture;
+        _output = output;
+    }
 
     public async Task InitializeAsync()
     {
@@ -117,5 +124,197 @@ public sealed class MailArchivePostgresTests : IAsyncLifetime
             var audit = await scope.ServiceProvider.GetRequiredService<BlobReferenceAuditService>().AuditAsync();
             Assert.Equal(audit.TotalBlobs, audit.MatchedReferenceCount);
         }
+    }
+
+    private (WebApplicationFactory<Program> Factory, IDisposable Base) NewFactory(FakePstEngine engine)
+    {
+        var baseFactory = new PostgresWebApplicationFactory(_fixture.ConnectionString!, new Dictionary<string, string?>());
+        var factory = baseFactory.WithWebHostBuilder(b => b.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IPstEngine>();
+            services.AddSingleton<IPstEngine>(engine);
+        }));
+        return (factory, baseFactory);
+    }
+
+    private static async Task<(Guid Owner, Guid ArchiveId)> ImportSampleAsync(WebApplicationFactory<Program> factory)
+    {
+        var owner = Guid.NewGuid();
+        Guid pstId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Users.Add(new User { Id = owner, Email = $"mail-{owner:N}@example.com", DisplayName = "Owner", CreatedAt = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+            await using var bytes = new MemoryStream(FakePstEngine.Bytes("!BDN" + owner.ToString("N")));
+            pstId = (await scope.ServiceProvider.GetRequiredService<IFileItemService>()
+                .CreateAsync(owner, null, "archivio.pst", "application/vnd.ms-outlook", bytes)).Id;
+        }
+        MailStartResult started;
+        using (var scope = factory.Services.CreateScope())
+        {
+            started = await scope.ServiceProvider.GetRequiredService<MailArchiveService>().StartFromFileAsync(owner, pstId, CancellationToken.None);
+        }
+        for (var i = 0; i < 200; i++)
+        {
+            using var scope = factory.Services.CreateScope();
+            if (await scope.ServiceProvider.GetRequiredService<JobProcessor>().ProcessAvailableAsync(10) == 0) break;
+        }
+        return (owner, started.Archive!.Id);
+    }
+
+    [SkippableFact]
+    public async Task Parallel_deletes_of_the_same_message_delete_once_and_release_the_document_blob_once()
+    {
+        Skip.IfNot(_fixture.Available, "Docker is not available; integration test skipped.");
+        var (factory, baseFactory) = NewFactory(FakePstEngine.Sample());
+        using var _ = baseFactory;
+        var (owner, archiveId) = await ImportSampleAsync(factory);
+
+        List<(Guid Id, Guid Blob)> messages;
+        Dictionary<Guid, long> attachmentRefs;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            messages = (await db.MailMessages.AsNoTracking().Where(m => m.ArchiveId == archiveId)
+                .Select(m => new { m.Id, Blob = m.BlobObjectId!.Value }).ToListAsync())
+                .Select(m => (m.Id, m.Blob)).ToList();
+            attachmentRefs = await db.BlobObjects.AsNoTracking()
+                .Where(b => db.FileItems.Where(f => f.OwnerUserId == owner && f.Name != "archivio.pst").Select(f => f.BlobObjectId).Contains(b.Id))
+                .ToDictionaryAsync(b => b.Id, b => b.ReferenceCount);
+        }
+        Assert.Equal(4, messages.Count);
+        Assert.NotEmpty(attachmentRefs);
+
+        foreach (var (messageId, blobId) in messages)
+        {
+            // Eight truly concurrent DELETEs of one message, each on its own
+            // connection and transaction.
+            using var gate = new SemaphoreSlim(0);
+            var racers = Enumerable.Range(0, 8).Select(_ => Task.Run(async () =>
+            {
+                using var scope = factory.Services.CreateScope();
+                var service = scope.ServiceProvider.GetRequiredService<MailMessageDeletionService>();
+                await gate.WaitAsync();
+                return await service.DeleteAsync(owner, messageId, CancellationToken.None);
+            })).ToList();
+            gate.Release(racers.Count);
+            var outcomes = await Task.WhenAll(racers);
+
+            Assert.Equal(1, outcomes.Count(o => o == MailDeleteOutcome.Deleted));
+            Assert.All(outcomes.Where(o => o != MailDeleteOutcome.Deleted), o => Assert.Equal(MailDeleteOutcome.AlreadyDeleted, o));
+
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.False(await db.MailMessages.AnyAsync(m => m.Id == messageId));
+            Assert.Equal(1, await db.MailDeletionTombstones.CountAsync(t => t.DeletedMessageId == messageId));
+            Assert.Equal(0L, await db.BlobObjects.Where(b => b.Id == blobId).Select(b => b.ReferenceCount).FirstAsync());
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            // Attachment files and their blobs are untouched by any delete.
+            var after = await db.BlobObjects.AsNoTracking().Where(b => attachmentRefs.Keys.Contains(b.Id))
+                .ToDictionaryAsync(b => b.Id, b => b.ReferenceCount);
+            Assert.Equal(attachmentRefs, after);
+            Assert.Equal(4, await db.MailDeletionTombstones.CountAsync());
+            Assert.False(await db.MailMessages.AnyAsync(m => m.Status == MailMessageStatuses.Deleting));
+            var archive = await scope.ServiceProvider.GetRequiredService<MailArchiveService>().GetArchiveAsync(owner, archiveId, CancellationToken.None);
+            Assert.Equal(0, archive!.MessageCount);
+            var audit = await scope.ServiceProvider.GetRequiredService<BlobReferenceAuditService>().AuditAsync();
+            Assert.Equal(audit.TotalBlobs, audit.MatchedReferenceCount);
+        }
+    }
+
+    [SkippableFact]
+    public async Task Search_on_postgres_uses_the_trigram_indexes_and_stays_owner_scoped()
+    {
+        Skip.IfNot(_fixture.Available, "Docker is not available; integration test skipped.");
+        var (factory, baseFactory) = NewFactory(FakePstEngine.Sample());
+        using var _ = baseFactory;
+        var (owner, archiveId) = await ImportSampleAsync(factory);
+        var (other, otherArchiveId) = await ImportSampleAsync(factory);
+        const int seeded = 50_000;
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            // Synthetic rows cloned from one imported message (search reads
+            // only the row, never the document), for both owners.
+            foreach (var (o, a) in new[] { (owner, archiveId), (other, otherArchiveId) })
+            {
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO mail_messages ("Id", "OwnerUserId", "ArchiveId", "FolderId", "SourceMessageKey", "Status",
+                        "BlobObjectId", "DocumentFormat", "DocumentVersion", "DocumentSizeBytes", "MessageClass", "Subject",
+                        "FromName", "FromAddress", "ToSummary", "Preview", "SortDate", "HasAttachments", "AttachmentCount",
+                        "SearchSubject", "SearchFrom", "SearchRecipients", "CreatedAt")
+                    SELECT gen_random_uuid(), m."OwnerUserId", m."ArchiveId", m."FolderId", 'm:seed' || g, m."Status",
+                        NULL, m."DocumentFormat", m."DocumentVersion", 0, m."MessageClass", 'Seed ' || g,
+                        m."FromName", 'sender' || (g % 500) || '@example.test', m."ToSummary", NULL,
+                        timestamptz '2020-01-01' + (g || ' minutes')::interval, false, 0,
+                        'newsletter numero ' || g || ' ' || md5(g::text), 'sender' || (g % 500) || '@example.test',
+                        'team' || (g % 50) || '@example.test', now()
+                    FROM generate_series(1, {seeded}) g,
+                        LATERAL (SELECT * FROM mail_messages WHERE "ArchiveId" = {a} AND "OwnerUserId" = {o} LIMIT 1) m
+                    """);
+            }
+            await db.Database.ExecuteSqlRawAsync("ANALYZE mail_messages;");
+        }
+
+        var cases = new (string Label, MailMessageQuery Query, string Index)[]
+        {
+            ("subject", new MailMessageQuery(null, null, null, null, null, "trimestrale", null, null, null, null, 50), "ix_mail_messages_search_subject_trgm"),
+            ("from", new MailMessageQuery(null, null, null, "carla@example", null, null, null, null, null, null, 50), "ix_mail_messages_search_from_trgm"),
+            ("to", new MailMessageQuery(null, null, null, null, "bob@example", null, null, null, null, null, 50), "ix_mail_messages_search_recipients_trgm"),
+            ("q", new MailMessageQuery(null, null, "relazione", null, null, null, null, null, null, null, 50), "ix_mail_messages_search_subject_trgm"),
+        };
+        foreach (var (label, query, index) in cases)
+        {
+            using var scope = factory.Services.CreateScope();
+            var service = scope.ServiceProvider.GetRequiredService<MailMessageQueryService>();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var page = await service.SearchAsync(owner, query, CancellationToken.None);
+            stopwatch.Stop();
+            Assert.NotEmpty(page!.Items);
+            // Owner scoping: the other owner's identical messages never appear.
+            Assert.All(page.Items, m => Assert.Equal(archiveId, m.ArchiveId));
+
+            var plan = await ExplainAsync(db, service.Page(owner, query, 50)!.ToQueryString());
+            _output.WriteLine($"[{label}] {stopwatch.ElapsedMilliseconds} ms over {2 * seeded + 8} rows\n{plan}");
+            Assert.Contains(index, plan);
+            Assert.DoesNotContain("Seq Scan on mail_messages", plan);
+        }
+    }
+
+    // EXPLAIN ANALYZE of the SQL EF generated, with its parameters inlined
+    // as untyped literals (PostgreSQL infers their types as it would bind them).
+    private static async Task<string> ExplainAsync(AppDbContext db, string queryString)
+    {
+        var lines = queryString.Split('\n');
+        var sql = string.Join('\n', lines.Where(l => !l.StartsWith("-- ")));
+        var parameters = lines.Where(l => l.StartsWith("-- @"))
+            .Select(l => System.Text.RegularExpressions.Regex.Match(l, @"^-- (@\w+)='(.*)'(?: \(.*\))?\s*$"))
+            .Where(m => m.Success)
+            .Select(m => (Name: m.Groups[1].Value, Value: m.Groups[2].Value))
+            .OrderByDescending(p => p.Name.Length);
+        foreach (var (name, value) in parameters)
+        {
+            sql = System.Text.RegularExpressions.Regex.Replace(sql, System.Text.RegularExpressions.Regex.Escape(name) + @"\b",
+                "'" + value.Replace("'", "''") + "'");
+        }
+        var connection = db.Database.GetDbConnection();
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "EXPLAIN (ANALYZE, BUFFERS) " + sql;
+        var plan = new System.Text.StringBuilder();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            plan.AppendLine(reader.GetString(0));
+        }
+        return plan.ToString();
     }
 }
