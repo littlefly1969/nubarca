@@ -326,6 +326,14 @@ is built is described by `ARCHITECTURE.md`.
 
 These describe current behaviour, not history. Each is easy to "fix" wrongly.
 
+- **MailArchive messages are not FileItems, and that is the immutability
+  guarantee.** A `mail_messages` row owns its document blob (audited, released
+  on hard delete); attachments are ordinary FileItems linked by id with no blob
+  reference. Do not "simplify" a message into a FileItem, add an update route,
+  or call `ReleaseAsync` for an attachment link. Deleting a message writes a
+  tombstone and keeps its attachments. PST import has its own job
+  (`mail.import`) and service, never `AdminImportService`. See
+  `docs/mailarchive/operations.md`.
 - **The Party workspace is SEVEN sections, and the same seven in every phase.**
   Riepilogo, Esperienza, Ospiti, Foto, Attività, Schermi e stampa,
   Impostazioni — plus Live, the one section that appears while the party is

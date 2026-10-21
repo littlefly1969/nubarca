@@ -4,6 +4,26 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.2 — 2026-10-21
+
+### MailArchive: Outlook PST archives
+
+- **Import an Outlook PST** you have uploaded to Files from **Posta →
+  Importazioni**. The import runs in the background, shows its progress and
+  failures, can be stopped and resumed, and never imports a message twice.
+- **Read your mail** in the mail view (folder tree, message list, reader) or
+  as documents, and **search** by sender, recipient, subject, text, dates and
+  attachments. HTML mail is cleaned and shown without scripts or remote
+  images.
+- **Attachments become normal files** under `Posta/<archivio>/…` in Files,
+  with the usual dedup. A file opened from Files shows the email it came
+  from.
+- **Imported mail cannot be changed**, only read, searched and deleted.
+  Deleting a message keeps its attachments, and importing the same PST again
+  does not bring it back.
+- Everything stays private to the owner. Operations and limits:
+  `docs/mailarchive/operations.md`.
+
 ## 0.4.0 — 2026-10-20
 
 ### Selection, lists and album order

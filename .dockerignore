@@ -37,3 +37,6 @@ models/
 graphify-out/
 .claude/
 .codex/
+
+# The PST engine's local cargo output; the image builds its own.
+tools/nubarca-pst-importer/target/
