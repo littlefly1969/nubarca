@@ -43,8 +43,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -308,6 +309,12 @@ def main() -> int:
 
     c = CANDIDATES[args.model]
     source, revision = (args.source, None) if args.source else (c.checkpoint, c.revision)
+    if args.source:
+        # A dry-run checkpoint (e.g. a tiny random model of the same
+        # architecture) has its own width; keep the Matryoshka cut in scale.
+        hidden = json.loads((Path(args.source) / "config.json").read_text())["hidden_size"]
+        cuts = tuple(hidden * d // c.hidden for d in c.dimensions)
+        c = replace(c, hidden=hidden, dimensions=cuts)
     target = args.output.resolve() / c.model_dir
 
     if not args.verify_only:
