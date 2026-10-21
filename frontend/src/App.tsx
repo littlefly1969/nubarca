@@ -63,6 +63,7 @@ import { PartyMessagesPage } from './pages/PartyMessagesPage';
 import { PartyGuestbookPage } from './pages/PartyGuestbookPage';
 import { PartyGuestbookPublicPage } from './pages/PartyGuestbookPublicPage';
 import { BeautyLabUploadPage } from './pages/BeautyLabUploadPage';
+import { MailPage } from './mail/MailPage';
 
 export function App() {
   // Inside a party's or a shared album's app (/party/app/<key>/…,
@@ -175,6 +176,11 @@ export function App() {
             <Route path="/albums/:albumId" element={<AlbumDetailPage />} />
             <Route path="/lists" element={<ListsPage />} />
             <Route path="/lists/:listId" element={<ListDetailPage key="list" />} />
+            {/* MailArchive: the owner's imported PST archives, read-only. The
+                message route is the same page with its reader open, so a file's
+                "Origine email" link lands inside the section, not beside it. */}
+            <Route path="/mail" element={<MailPage />} />
+            <Route path="/mail/messages/:messageId" element={<MailPage />} />
             {/* THE Party destination. `party.access` alone opens it: which
                 capabilities appear inside a party is the workspace's own
                 decision, and the server gates each of them independently. */}

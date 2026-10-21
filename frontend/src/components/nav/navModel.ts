@@ -56,6 +56,9 @@ const MAIN: NavItem[] = [
   // The owner's own lists ("Da stampare", "Per la nonna"): references to media,
   // never copies. Core personal cloud, so not gated.
   { to: '/lists', labelKey: 'nav.lists', icon: 'list' },
+  // MailArchive: the owner's imported Outlook archives. Owner-private and part
+  // of the personal archive, so not gated; the server authorizes every call.
+  { to: '/mail', labelKey: 'nav.mail', icon: 'mail' },
   { to: '/people', labelKey: 'nav.people', icon: 'people', permission: PERMISSIONS.peopleAccess },
   // Party is a first-class destination now, not a mode hidden inside an album's
   // settings. It needs only the PRODUCT permission: which capabilities appear

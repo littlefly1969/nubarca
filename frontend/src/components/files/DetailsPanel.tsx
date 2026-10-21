@@ -16,6 +16,7 @@ import { formatDate, formatSize } from '../format';
 import { ShareLinkPanel } from '../ShareLinkPanel';
 import { GallerySettingsPanel } from '../GallerySettingsPanel';
 import { DestinationPicker } from './DestinationPicker';
+import { MailFileOriginSection } from '../../mail/MailFileOriginSection';
 import { downloadUrl, typeLabel, type Entry } from './types';
 
 export interface DetailsOutcome {
@@ -220,6 +221,10 @@ export function DetailsPanel({ entry, currentParentId, onClose, onOutcome, onOpe
             <dt>Added</dt>
             <dd>{formatDate(isFolder ? entry.folder.createdAt : entry.file.createdAt)}</dd>
           </dl>
+
+          {/* MailArchive: the e-mail(s) this file arrived attached to. Renders
+              nothing for a file that did not come from a mailbox. */}
+          {!isFolder && <MailFileOriginSection fileItemId={entry.id} />}
 
           <div className="details-actions">
             <button type="button" className="row-action-primary" onClick={() => onOpen(entry)}>
