@@ -91,7 +91,13 @@ def page_truth(doc: Doc, number: int) -> PageTruth:
         lines = block_lines(block)
         kind = type(block).__name__
         if lines:
-            blocks.append({"kind": kind, "text": "\n".join(lines)})
+            entry = {"kind": kind, "text": "\n".join(lines)}
+            if isinstance(block, H):
+                entry["level"] = block.level
+            elif isinstance(block, T):
+                entry["header_rows"] = block.header_rows
+                entry["caption"] = block.caption
+            blocks.append(entry)
         body_lines.extend(lines)
         if isinstance(block, T):
             tree = table_tree(block)
