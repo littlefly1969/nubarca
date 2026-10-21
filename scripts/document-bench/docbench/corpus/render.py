@@ -23,7 +23,7 @@ from reportlab.pdfbase.ttfonts import TTFont  # noqa: E402
 from reportlab.pdfgen import canvas  # noqa: E402
 
 from .model import C, Doc, F, H, L, N, P, T, as_cell  # noqa: E402
-from .truth import BULLET, ordered_blocks  # noqa: E402
+from .truth import BULLET, block_lines, ordered_blocks  # noqa: E402
 
 rl_config.invariant = 1
 
@@ -213,7 +213,7 @@ class PageWriter:
         col.y = tops[-1] - 8 * self.scale
 
 
-def _draw_page(c: canvas.Canvas, doc: Doc, number: int, size: tuple[float, float]) -> None:
+def _draw_page(c: canvas.Canvas, doc: Doc, number: int, size: tuple[float, float]) -> list[dict]:
     page = doc.pages[number - 1]
     slide = doc.layout == "slide"
     scale = 1.6 if slide else 1.0
@@ -236,10 +236,23 @@ def _draw_page(c: canvas.Canvas, doc: Doc, number: int, size: tuple[float, float
         columns = [_Column(MARGIN, content_w, top)]
 
     notes = [b for b in page.blocks if isinstance(b, N)]
+    regions: list[dict] = []
+
+    def region(block, x0, top_y, x1, bottom_y):
+        # Fractions of the page, origin top-left: the crop box for region-mode OCR.
+        entry = {"kind": type(block).__name__, "text": "\n".join(block_lines(block)),
+                 "bbox": [round(x0 / w, 5), round((h - top_y) / h, 5),
+                          round(x1 / w, 5), round((h - bottom_y) / h, 5)]}
+        for attr in ("table_id", "formula_id", "chart_id"):
+            if hasattr(block, attr):
+                entry[attr] = getattr(block, attr)
+        regions.append(entry)
+
     for block in ordered_blocks(doc, page):
         if isinstance(block, N):
             continue
         col = columns[getattr(block, "column", 0)] if len(columns) > 1 else columns[0]
+        block_top = col.y
         if isinstance(block, H):
             size = (13.0 if block.level == 1 else 11.0)
             if slide and block.level == 1:
@@ -272,6 +285,7 @@ def _draw_page(c: canvas.Canvas, doc: Doc, number: int, size: tuple[float, float
             writer.image(col, chart_png(block), 230 if not slide else 330)
             if block.caption:
                 writer.text(col, block.caption, ITALIC, 8.5, 6)
+        region(block, col.x, block_top + 2, col.x + col.width, col.y)
 
     if notes:
         lowest = min(col.y for col in columns)
@@ -283,6 +297,8 @@ def _draw_page(c: canvas.Canvas, doc: Doc, number: int, size: tuple[float, float
         if lowest - needed < writer.bottom:
             raise LayoutOverflow(f"{doc.doc_id}: footnotes overflow page {number}")
         y = writer.bottom + needed
+        for note in notes:
+            region(note, MARGIN, y, MARGIN + content_w, writer.bottom)
         c.setLineWidth(0.4)
         c.line(MARGIN, y, MARGIN + 120, y)
         y -= 4
@@ -294,6 +310,7 @@ def _draw_page(c: canvas.Canvas, doc: Doc, number: int, size: tuple[float, float
     if doc.footer:
         c.setFont(FONT, 7.5)
         c.drawCentredString(w / 2, MARGIN - 18, doc.footer_text(number))
+    return regions
 
 
 def page_size(doc: Doc) -> tuple[float, float]:
@@ -304,8 +321,10 @@ def page_size(doc: Doc) -> tuple[float, float]:
     return A4
 
 
-def render_pdf(doc: Doc, path: Path) -> None:
-    """The canonical layout PDF: real text layer, embedded fonts, no clipping."""
+def render_pdf(doc: Doc, path: Path) -> dict[int, list[dict]]:
+    """The canonical layout PDF: real text layer, embedded fonts, no clipping.
+
+    Returns each page's block regions (for region-mode OCR)."""
     register_fonts()
     size = page_size(doc)
     c = canvas.Canvas(str(path), pagesize=size, invariant=1, pageCompression=1)
@@ -313,7 +332,9 @@ def render_pdf(doc: Doc, path: Path) -> None:
     c.setAuthor("NubArca document-bench (synthetic)")
     c.setCreator("docbench golden-v1")
     c.setProducer("docbench")
+    regions = {}
     for n in range(1, len(doc.pages) + 1):
-        _draw_page(c, doc, n, size)
+        regions[n] = _draw_page(c, doc, n, size)
         c.showPage()
     c.save()
+    return regions

@@ -93,9 +93,11 @@ def generate(out: Path, variants=VARIANTS, only: set[str] | None = None) -> dict
         (out / sub).mkdir(exist_ok=True)
     docs = [d for d in ALL_DOCS if not only or d.doc_id in only]
     doc_rows = []
+    regions: dict[tuple[str, int], list[dict]] = {}
     for doc in docs:
         layout = out / "layout" / f"{doc.doc_id}.pdf"
-        render_pdf(doc, layout)
+        for n, page_regions in render_pdf(doc, layout).items():
+            regions[(doc.doc_id, n)] = page_regions
         stored = STORED_VARIANT[doc.format]
         pdf = pdfium.PdfDocument(str(layout))
         pages_dir = out / "pages" / doc.doc_id
@@ -134,6 +136,8 @@ def generate(out: Path, variants=VARIANTS, only: set[str] | None = None) -> dict
         })
 
     page_rows = [asdict(t) for t in all_page_truths(docs)]
+    for row in page_rows:
+        row["regions"] = regions[(row["doc_id"], row["page"])]
     ids = {d.doc_id for d in docs}
     query_rows = []
     for q in QUERIES:
