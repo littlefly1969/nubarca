@@ -111,6 +111,12 @@ would release the message documents.
 | `serve`, all 20,000 messages + 2,000 attachments | 6.3 s (~3,190 msg/s) | 11.2 MiB |
 | One 256 MiB attachment, streamed and hashed | 1.8 s (140 MiB/s) | 4.1 MiB |
 
+End to end through the API, job and storage (real binary, SQLite test host,
+same machine): 2,000 messages in 53 folders with 200 attachments imported in
+27 s, about 74 messages/s. The cost is the per-message transaction and
+document blob, not the engine; expect roughly 20–25 minutes per 100,000
+messages before PostgreSQL tuning.
+
 Attachment bytes are streamed block by block, so engine memory does not grow
 with attachment size. The .NET side processes one message at a time.
 

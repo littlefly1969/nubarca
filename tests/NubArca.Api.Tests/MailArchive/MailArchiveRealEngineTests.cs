@@ -177,6 +177,45 @@ public sealed class MailArchiveRealEngineTests : IDisposable
         }
     }
 
+    // Opt-in end-to-end measurement: NUBARCA_MAIL_VOLUME_PST names a generated
+    // PST (`cargo run -p nubarca-pst-fixture-gen -- volume <out> <messages>`).
+    [SkippableFact]
+    [Trait("Category", "External")]
+    public async Task Volume_import_end_to_end_with_the_real_binary()
+    {
+        var binary = RequireBinary();
+        var volume = Environment.GetEnvironmentVariable("NUBARCA_MAIL_VOLUME_PST");
+        Skip.If(string.IsNullOrWhiteSpace(volume) || !File.Exists(volume), "NUBARCA_MAIL_VOLUME_PST is not set.");
+        var factory = new SqliteWebApplicationFactory(
+            new Dictionary<string, string?> { ["MailArchive:ImporterPath"] = binary }, poolHost: false);
+        _disposables.Add(factory);
+        factory.EnsureDatabaseCreated();
+        var (_, client) = await factory.CreateAuthenticatedClientAsync();
+        var part = new StreamContent(File.OpenRead(volume!));
+        part.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.ms-outlook");
+        var upload = await client.PostAsync("/api/files", new MultipartFormDataContent { { part, "file", "volume.pst" } });
+        upload.EnsureSuccessStatusCode();
+        var pst = (await upload.Content.ReadFromJsonAsync<FileSummary>())!;
+        var started = (await (await client.PostAsJsonAsync("/api/mail/archives", new { fileItemId = pst.Id }))
+            .Content.ReadFromJsonAsync<MailStartImportResponse>(Json))!;
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        for (var i = 0; i < 100_000; i++)
+        {
+            using var scope = factory.Services.CreateScope();
+            if (await scope.ServiceProvider.GetRequiredService<JobProcessor>().ProcessAvailableAsync(10) == 0)
+            {
+                break;
+            }
+        }
+        clock.Stop();
+        var archive = (await client.GetFromJsonAsync<MailArchiveDto>($"/api/mail/archives/{started.Archive.Id}", Json))!;
+        Assert.Equal("succeeded", archive.LatestRun!.Status);
+        Console.WriteLine($"MAILVOLUME messages={archive.MessageCount} folders={archive.FolderCount} " +
+            $"attachments={archive.LatestRun.AttachmentsCreated + archive.LatestRun.AttachmentsReused} seconds={clock.Elapsed.TotalSeconds:F1} " +
+            $"msgPerSecond={archive.MessageCount / clock.Elapsed.TotalSeconds:F0} peakWorkingSetMiB={System.Diagnostics.Process.GetCurrentProcess().PeakWorkingSet64 / 1048576}");
+    }
+
     private sealed class DeleteOnDispose(string path) : IDisposable
     {
         public void Dispose()
