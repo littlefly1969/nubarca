@@ -1072,6 +1072,77 @@ namespace NubArca.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("NubArca.Api.Domain.Ai.DocumentSourceState", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("FormatVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Phase")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid?>("ProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReasonCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceKind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("SourceRevision")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerUserId", "Phase", "Status")
+                        .HasDatabaseName("ix_document_source_states_owner_phase_status");
+
+                    b.HasIndex("SourceKind", "SourceId", "Phase")
+                        .IsUnique()
+                        .HasDatabaseName("ux_document_source_states_source_phase");
+
+                    b.ToTable("document_source_states", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_document_source_states_attempts_non_negative", "\"Attempts\" >= 0");
+                        });
+                });
+
             modelBuilder.Entity("NubArca.Api.Domain.Ai.DocumentText", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1090,7 +1161,7 @@ namespace NubArca.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
-                    b.Property<Guid>("FileItemId")
+                    b.Property<Guid?>("FileItemId")
                         .HasColumnType("uuid");
 
                     b.Property<bool>("IsCurrent")
@@ -1114,6 +1185,20 @@ namespace NubArca.Api.Data.Migrations
                     b.Property<Guid>("SourceBlobObjectId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceKind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("file");
+
+                    b.Property<string>("SourceRevision")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -1132,9 +1217,7 @@ namespace NubArca.Api.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("FileItemId")
-                        .IsUnique()
-                        .HasDatabaseName("ux_document_texts_current_per_file")
-                        .HasFilter("\"IsCurrent\"");
+                        .HasDatabaseName("ix_document_texts_file");
 
                     b.HasIndex("OwnerUserId")
                         .HasDatabaseName("ix_document_texts_owner");
@@ -1144,13 +1227,20 @@ namespace NubArca.Api.Data.Migrations
                     b.HasIndex("SourceBlobObjectId")
                         .HasDatabaseName("ix_document_texts_source_blob");
 
-                    b.HasIndex("FileItemId", "ProfileId")
+                    b.HasIndex("SourceKind", "SourceId")
                         .IsUnique()
-                        .HasDatabaseName("ux_document_texts_file_profile");
+                        .HasDatabaseName("ux_document_texts_current_per_source")
+                        .HasFilter("\"IsCurrent\"");
+
+                    b.HasIndex("SourceKind", "SourceId", "ProfileId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_document_texts_source_profile");
 
                     b.ToTable("document_texts", null, t =>
                         {
                             t.HasCheckConstraint("ck_document_texts_char_count_non_negative", "\"CharCount\" IS NULL OR \"CharCount\" >= 0");
+
+                            t.HasCheckConstraint("ck_document_texts_file_source", "\"SourceKind\" <> 'file' OR (\"FileItemId\" IS NOT NULL AND \"FileItemId\" = \"SourceId\")");
                         });
                 });
 
@@ -8053,13 +8143,21 @@ namespace NubArca.Api.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("NubArca.Api.Domain.Ai.DocumentSourceState", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("NubArca.Api.Domain.Ai.DocumentText", b =>
                 {
                     b.HasOne("NubArca.Api.Domain.FileItem", null)
                         .WithMany()
                         .HasForeignKey("FileItemId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("NubArca.Api.Domain.User", null)
                         .WithMany()
