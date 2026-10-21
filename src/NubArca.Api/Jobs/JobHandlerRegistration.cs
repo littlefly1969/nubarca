@@ -33,6 +33,7 @@ public static class JobHandlerRegistration
         services.AddScoped<IJobHandler, PhotoExportBuildJobHandler>();
         services.AddScoped<IJobHandler, PlateAnalysisJobHandler>();
         services.AddScoped<IJobHandler, AestheticAnalysisJobHandler>();
+        services.AddScoped<IJobHandler, MailImportJobHandler>();
         return services;
     }
 }

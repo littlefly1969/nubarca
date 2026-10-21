@@ -296,6 +296,18 @@ public class AppDbContext : DbContext
     public DbSet<RagChunk> RagChunks => Set<RagChunk>();
     public DbSet<RagChunkEmbedding> RagChunkEmbeddings => Set<RagChunkEmbedding>();
 
+    // MAILARCHIVE-01: owner-private PST archives. Messages are NOT FileItems:
+    // a message row owns its normalized document blob (counted by the blob
+    // reference audit); attachments are ordinary FileItems linked by
+    // mail_attachments. See docs/mailarchive/contract.md.
+    public DbSet<Domain.Mail.MailArchive> MailArchives => Set<Domain.Mail.MailArchive>();
+    public DbSet<Domain.Mail.MailImportRun> MailImportRuns => Set<Domain.Mail.MailImportRun>();
+    public DbSet<Domain.Mail.MailImportItem> MailImportItems => Set<Domain.Mail.MailImportItem>();
+    public DbSet<Domain.Mail.MailFolder> MailFolders => Set<Domain.Mail.MailFolder>();
+    public DbSet<Domain.Mail.MailMessage> MailMessages => Set<Domain.Mail.MailMessage>();
+    public DbSet<Domain.Mail.MailAttachment> MailAttachments => Set<Domain.Mail.MailAttachment>();
+    public DbSet<Domain.Mail.MailDeletionTombstone> MailDeletionTombstones => Set<Domain.Mail.MailDeletionTombstone>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
