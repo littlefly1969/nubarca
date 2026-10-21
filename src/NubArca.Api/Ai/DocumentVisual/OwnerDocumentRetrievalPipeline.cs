@@ -6,8 +6,9 @@ namespace NubArca.Api.Ai.DocumentVisual;
 /// One question, answered from one person's documents, by both signals.
 ///
 /// Bounded TEXT evidence and two mode tokens. There is deliberately no field
-/// for a visual unit, a page, a score or a file id: what leaves this pipeline is
-/// what may reach a prompt, and nothing else needs to.
+/// for a visual unit or a visual score: a visual hit only ever names files to
+/// scope a text pass. Each evidence item carries its own TEXT provenance (file,
+/// page, typed locator) from the chunk it came from.
 public sealed record OwnerDocumentRetrievalResult(
     IReadOnlyList<RagEvidence> Evidence,
     RagRetrievalOutcome Outcome,
