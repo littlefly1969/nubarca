@@ -41,6 +41,7 @@ internal static class DocumentsCliCommands
             "visual-index" => VisualIndexAsync(args, sp, stdout, stderr),
             "visual-status" => VisualStatusAsync(args, sp, stdout, stderr),
             "visual-evaluate" => VisualEvaluateAsync(args, sp, stdout, stderr),
+            "query" => DocumentsQueryCliCommand.RunAsync(args, sp, stdout, stderr),
             _ => Usage(stderr),
         };
 
@@ -50,6 +51,8 @@ internal static class DocumentsCliCommands
             "usage: documents <index|status|visual-index|visual-status> --owner <user-id> "
             + "[--limit N] [--embed]");
         stderr.WriteLine("       documents visual-seed-profiles");
+        stderr.WriteLine(
+            "       documents query --owner <user-id> [--limit N] [--expect name[,name]] \"<question>\"");
         stderr.WriteLine(
             "       documents visual-evaluate --owner <user-id> --queries <file> [--expect <file>]");
         return Task.FromResult(2);
