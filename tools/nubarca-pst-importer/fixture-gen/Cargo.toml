@@ -1,0 +1,21 @@
+[package]
+name = "nubarca-pst-fixture-gen"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "Dev-only generator of synthetic PST fixtures for nubarca-pst-importer tests"
+publish = false
+
+[lib]
+name = "nubarca_pst_fixture_gen"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nubarca-pst-fixture-gen"
+path = "src/main.rs"
+
+[dependencies]
+# MIT fork of outlook-pst that can CREATE Unicode PSTs. Its library is also
+# named `outlook_pst`, so it is renamed here; it is used only by this dev crate.
+pst_writer = { package = "outlook-pst-rw", version = "=1.2.14" }
+sha2 = "=0.10.9"
