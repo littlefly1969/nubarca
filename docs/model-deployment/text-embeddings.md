@@ -196,6 +196,20 @@ For each candidate, the script:
 5. Prints the SHA-256 of every produced file. Record those hashes next to the
    installation's model inventory.
 
+The script itself has been dry-run, but **not against real weights**. The run
+used `--source` on tiny, randomly initialised Qwen3 and ModernBERT checkpoints
+with the same architectures and the same tokenizer post-processors. Versions:
+torch 2.14.1, transformers 5.20.2, sentence-transformers 6.2.0, onnxruntime
+1.31.0. That run checked three things:
+
+- The export produced the declared inputs and no KV inputs.
+- Parity held at cosine 1.000000, including a passage longer than ModernBERT's
+  local attention window.
+- The Matryoshka cut path worked.
+
+Only the real export on the target server proves anything about the real
+checkpoints.
+
 Then, on the server:
 
 1. Copy the model directory under `Ai__Onnx__ModelDir`, following

@@ -132,6 +132,10 @@ PASSAGES = [
     "To reset the administrator password, hold the reset button for ten "
     "seconds, then sign in with the default credentials printed on the label.",
 ]
+# One passage of a few hundred tokens: longer than ModernBERT's 128-token local
+# attention window, so the parity check exercises the sliding-window path and
+# any sequence-length assumption the tracer baked into the graph.
+PASSAGES.append(" ".join(PASSAGES) * 4)
 PARITY_MIN_COSINE = 0.999
 
 
