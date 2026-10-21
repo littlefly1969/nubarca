@@ -566,6 +566,88 @@ public sealed class MailArchiveImportTests : IDisposable
         Assert.Equal(audit.TotalBlobs, audit.MatchedReferenceCount);
     }
 
+    private static FakePstEngine PlainMessages(int count)
+    {
+        var engine = new FakePstEngine();
+        engine.Folders.Add(new FakeFolder("f:00000001", null, "Posta in arrivo", ["Posta in arrivo"], 0));
+        for (var i = 0; i < count; i++)
+        {
+            var id = $"m:{0x10000 + i * 0x20:x8}";
+            engine.Messages.Add(new FakeMessage(id, "f:00000001",
+                FakePstEngine.Doc(id, "f:00000001", $"Messaggio {i}", "ada@example.test", "Ada",
+                    to: [("bob@example.test", "Bob")], received: "2024-03-01T10:00:00Z", text: $"testo {i}"),
+                new()));
+        }
+        return engine;
+    }
+
+    [Fact]
+    public async Task A_crash_while_completing_a_group_commits_none_of_it_and_the_retry_imports_each_message_once()
+    {
+        // 60 attachment-free messages: groups of 25 are completed in one
+        // transaction each. The 30th document blob dies: the first group is
+        // committed, the second is not, and its checkpoint never moved.
+        var engine = PlainMessages(60);
+        var stored = 0;
+        var factory = NewFactory(engine, services =>
+        {
+            services.RemoveAll<IBlobService>();
+            services.AddScoped<IBlobService>(sp => new CrashOnceOnDocumentBlobService(
+                ActivatorUtilities.CreateInstance<BlobService>(sp), () => ++stored == 30));
+        });
+        var (_, client) = await factory.CreateAuthenticatedClientAsync();
+        var started = await StartAsync(client, await UploadPstAsync(client));
+
+        await RunJobsAsync(factory);
+        var midway = await InDbAsync(factory, db => db.MailMessages.CountAsync(m => m.ArchiveId == started.Archive.Id));
+        Assert.Equal(25, midway);
+        Assert.Equal(25, await InDbAsync(factory, db => db.MailImportItems
+            .CountAsync(i => i.ArchiveId == started.Archive.Id && i.Status == MailImportItemStatuses.Imported)));
+
+        await InDbAsync(factory, db => db.BackgroundJobs
+            .Where(j => j.Status == JobStatuses.Queued)
+            .ExecuteUpdateAsync(s => s.SetProperty(j => j.AvailableAt, DateTime.UtcNow.AddMinutes(-1))));
+        await RunJobsAsync(factory);
+
+        var archive = await GetAsync<MailArchiveDto>(client, $"/api/mail/archives/{started.Archive.Id}");
+        Assert.Equal("succeeded", archive.LatestRun!.Status);
+        Assert.Equal(60, archive.MessageCount);
+        var keys = await InDbAsync(factory, db => db.MailMessages.AsNoTracking()
+            .Where(m => m.ArchiveId == started.Archive.Id)
+            .Select(m => m.SourceMessageKey).ToListAsync());
+        Assert.Equal(60, keys.Distinct(StringComparer.Ordinal).Count());
+        var audit = await AuditAsync(factory);
+        Assert.Equal(audit.TotalBlobs, audit.MatchedReferenceCount);
+    }
+
+    [Fact]
+    public async Task Groups_never_run_past_the_slice_budget()
+    {
+        var engine = PlainMessages(10);
+        var factory = NewFactory(engine, settings: new() { ["Jobs:MaintenanceSliceItemBudget"] = "3" });
+        var (_, client) = await factory.CreateAuthenticatedClientAsync();
+        var started = await StartAsync(client, await UploadPstAsync(client));
+
+        // One slice at a time: each imports at most three messages.
+        var imported = 0;
+        for (var slice = 0; slice < 20 && imported < 10; slice++)
+        {
+            using (var scope = factory.Services.CreateScope())
+            {
+                await scope.ServiceProvider.GetRequiredService<JobProcessor>().ProcessAvailableAsync(1);
+            }
+            var now = await InDbAsync(factory, db => db.MailMessages.CountAsync(m => m.ArchiveId == started.Archive.Id));
+            Assert.InRange(now - imported, 0, 3);
+            imported = now;
+        }
+
+        await RunJobsAsync(factory);
+        var archive = await GetAsync<MailArchiveDto>(client, $"/api/mail/archives/{started.Archive.Id}");
+        Assert.Equal("succeeded", archive.LatestRun!.Status);
+        Assert.Equal(10, archive.MessageCount);
+        Assert.Equal(10, engine.Extractions);
+    }
+
     [Fact]
     public async Task A_lost_link_is_adopted_from_the_completed_upload_claim()
     {

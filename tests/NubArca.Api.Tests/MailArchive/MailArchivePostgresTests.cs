@@ -289,6 +289,70 @@ public sealed class MailArchivePostgresTests : IAsyncLifetime
         }
     }
 
+    // Opt-in end-to-end measurement on PostgreSQL with the real engine:
+    // NUBARCA_MAIL_VOLUME_PST names a generated PST
+    // (`cargo run -p nubarca-pst-fixture-gen -- volume <out> <messages>`) and
+    // NUBARCA_PST_IMPORTER_BIN (or the release build) the engine.
+    [SkippableFact]
+    public async Task Volume_import_end_to_end_on_postgres()
+    {
+        Skip.IfNot(_fixture.Available, "Docker is not available; integration test skipped.");
+        var volume = Environment.GetEnvironmentVariable("NUBARCA_MAIL_VOLUME_PST");
+        Skip.If(string.IsNullOrWhiteSpace(volume) || !File.Exists(volume), "NUBARCA_MAIL_VOLUME_PST is not set.");
+        var binary = Environment.GetEnvironmentVariable("NUBARCA_PST_IMPORTER_BIN") is { Length: > 0 } configured
+            ? configured
+            : Path.Combine(RepositoryRoot(), "tools", "nubarca-pst-importer", "target", "release", "nubarca-pst-importer");
+        Skip.IfNot(File.Exists(binary), "nubarca-pst-importer is not built.");
+
+        using var factory = new PostgresWebApplicationFactory(_fixture.ConnectionString!,
+            new Dictionary<string, string?> { ["MailArchive:ImporterPath"] = binary });
+        var owner = Guid.NewGuid();
+        Guid pstId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Users.Add(new User { Id = owner, Email = $"mail-{owner:N}@example.com", DisplayName = "Owner", CreatedAt = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+            await using var bytes = File.OpenRead(volume!);
+            pstId = (await scope.ServiceProvider.GetRequiredService<IFileItemService>()
+                .CreateAsync(owner, null, "volume.pst", "application/vnd.ms-outlook", bytes)).Id;
+        }
+        MailStartResult started;
+        using (var scope = factory.Services.CreateScope())
+        {
+            started = await scope.ServiceProvider.GetRequiredService<MailArchiveService>().StartFromFileAsync(owner, pstId, CancellationToken.None);
+        }
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        for (var i = 0; i < 100_000; i++)
+        {
+            using var scope = factory.Services.CreateScope();
+            if (await scope.ServiceProvider.GetRequiredService<JobProcessor>().ProcessAvailableAsync(10) == 0) break;
+        }
+        clock.Stop();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var archive = (await scope.ServiceProvider.GetRequiredService<MailArchiveService>()
+                .GetArchiveAsync(owner, started.Archive!.Id, CancellationToken.None))!;
+            Assert.Equal("succeeded", archive.LatestRun!.Status);
+            _output.WriteLine($"MAILVOLUME-PG messages={archive.MessageCount} folders={archive.FolderCount} "
+                + $"attachments={archive.LatestRun.AttachmentsCreated + archive.LatestRun.AttachmentsReused} "
+                + $"seconds={clock.Elapsed.TotalSeconds:F1} msgPerSecond={archive.MessageCount / clock.Elapsed.TotalSeconds:F0}");
+            var audit = await scope.ServiceProvider.GetRequiredService<BlobReferenceAuditService>().AuditAsync();
+            Assert.Equal(audit.TotalBlobs, audit.MatchedReferenceCount);
+        }
+    }
+
+    private static string RepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "NubArca.sln")))
+        {
+            directory = directory.Parent;
+        }
+        return directory?.FullName ?? throw new InvalidOperationException("could not locate the repository root");
+    }
+
     // EXPLAIN ANALYZE of the SQL EF generated, with its parameters inlined
     // as untyped literals (PostgreSQL infers their types as it would bind them).
     private static async Task<string> ExplainAsync(AppDbContext db, string queryString)

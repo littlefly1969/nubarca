@@ -98,6 +98,12 @@ public sealed class JobContext
             || (_sliceItemBudget is int budget && processedThisSlice >= budget)
             || (_sliceDeadline is DateTimeOffset deadline && _clock.GetUtcNow() >= deadline);
 
+    // How many more items this slice may process (null = unbounded), for a
+    // handler that commits a batch of items at once: a batch never runs past
+    // the budget, so ShouldYield still bounds the slice.
+    public int? RemainingSliceItems(long processedThisSlice)
+        => _sliceItemBudget is int budget ? (int)Math.Max(0, budget - processedThisSlice) : null;
+
     // Set by a sliceable handler when it stops at a safe checkpoint with more
     // work remaining. The processor then re-queues THIS row (one logical job,
     // one row) instead of marking it succeeded: Status → queued, SliceNumber++,

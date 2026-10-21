@@ -23,7 +23,12 @@ namespace NubArca.Api.MailArchive;
 public sealed class MailImportRunner
 {
     private const int PageSize = 100;
-    private const int CounterFlushEvery = 20;
+    // Items are marked, processed and committed in groups: one round trip
+    // marks a group as importing, and its messages without attachments are
+    // completed together in one transaction (see FlushPendingAsync). A
+    // message with attachments still commits on its own, after its files.
+    private const int GroupSize = 25;
+    private const long PendingBytesLimit = 16L * 1024 * 1024;
     private static readonly TimeSpan AttachmentClaimLease = TimeSpan.FromMinutes(30);
 
     private readonly AppDbContext _db;
@@ -379,8 +384,11 @@ public sealed class MailImportRunner
                         && keys.Contains(t.SourceMessageKey))
                     .Select(t => t.SourceMessageKey)
                     .ToListAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+                var existing = await _db.MailMessages
+                    .Where(m => m.ArchiveId == archive.Id && keys.Contains(m.SourceMessageKey))
+                    .ToDictionaryAsync(m => m.SourceMessageKey, StringComparer.Ordinal, cancellationToken);
 
-                foreach (var item in page)
+                for (var start = 0; start < page.Count;)
                 {
                     if (context.ShouldYield(processedThisSlice))
                     {
@@ -388,13 +396,22 @@ public sealed class MailImportRunner
                         return false;
                     }
 
-                    await ProcessItemAsync(state, item, tombstoned.Contains(item.SourceMessageKey), cancellationToken);
-                    checkpoint.LastOrdinal = item.Ordinal;
-                    processedThisSlice++;
-                    if (++state.SinceFlush >= CounterFlushEvery)
+                    var size = Math.Min(GroupSize, context.RemainingSliceItems(processedThisSlice) ?? GroupSize);
+                    var group = page.Skip(start).Take(size).ToList();
+                    start += group.Count;
+                    foreach (var item in await PrepareGroupAsync(state, group, tombstoned, existing, cancellationToken))
                     {
-                        await FlushCountersAsync(state, context, cancellationToken);
+                        await ProcessItemAsync(state, item, existing.GetValueOrDefault(item.SourceMessageKey), cancellationToken);
+                        if (state.PendingBytes >= PendingBytesLimit)
+                        {
+                            await FlushPendingAsync(state, cancellationToken);
+                        }
                     }
+                    // The checkpoint only ever moves past committed work.
+                    await FlushPendingAsync(state, cancellationToken);
+                    checkpoint.LastOrdinal = group[^1].Ordinal;
+                    processedThisSlice += group.Count;
+                    await FlushCountersAsync(state, context, cancellationToken);
                 }
                 _db.ChangeTracker.Clear();
                 _db.Attach(run);
@@ -410,38 +427,48 @@ public sealed class MailImportRunner
         }
     }
 
-    private async Task ProcessItemAsync(ImportState state, MailImportItem item, bool tombstoned, CancellationToken cancellationToken)
+    // Settles what needs no extraction (tombstoned, already complete) and
+    // marks the rest of the group as importing, all in one SaveChanges.
+    // Returns the items still to extract, in order.
+    private async Task<List<MailImportItem>> PrepareGroupAsync(
+        ImportState state, List<MailImportItem> group, HashSet<string> tombstoned,
+        Dictionary<string, MailMessage> existing, CancellationToken cancellationToken)
+    {
+        var work = new List<MailImportItem>(group.Count);
+        foreach (var item in group)
+        {
+            if (tombstoned.Contains(item.SourceMessageKey))
+            {
+                item.Status = MailImportItemStatuses.SkippedDeleted;
+                Decide(item, state.Run, MailImportOutcomes.SkippedDeleted);
+                continue;
+            }
+            if (existing.TryGetValue(item.SourceMessageKey, out var message) && message.Status == MailMessageStatuses.Complete)
+            {
+                // Completed earlier (an earlier slice, or a crash after the commit).
+                item.Status = MailImportItemStatuses.Imported;
+                item.MessageId = message.Id;
+                if (item.LastRunId != state.Run.Id)
+                {
+                    Decide(item, state.Run, MailImportOutcomes.AlreadyPresent);
+                }
+                continue;
+            }
+            // Attempts count tries, informationally: a group interrupted by a
+            // crash or a yield counts once more for the items it did not reach.
+            item.Status = MailImportItemStatuses.Importing;
+            item.Attempts++;
+            item.LastRunId = state.Run.Id;
+            item.UpdatedAt = Now;
+            work.Add(item);
+        }
+        await _db.SaveChangesAsync(cancellationToken);
+        return work;
+    }
+
+    private async Task ProcessItemAsync(ImportState state, MailImportItem item, MailMessage? message, CancellationToken cancellationToken)
     {
         var archive = state.Archive;
-        if (tombstoned)
-        {
-            item.Status = MailImportItemStatuses.SkippedDeleted;
-            Decide(item, state.Run, MailImportOutcomes.SkippedDeleted);
-            await _db.SaveChangesAsync(cancellationToken);
-            return;
-        }
-
-        var message = await _db.MailMessages
-            .FirstOrDefaultAsync(m => m.ArchiveId == archive.Id && m.SourceMessageKey == item.SourceMessageKey, cancellationToken);
-        if (message?.Status == MailMessageStatuses.Complete)
-        {
-            // Completed earlier (an earlier slice, or a crash after the commit).
-            item.Status = MailImportItemStatuses.Imported;
-            item.MessageId = message.Id;
-            if (item.LastRunId != state.Run.Id)
-            {
-                Decide(item, state.Run, MailImportOutcomes.AlreadyPresent);
-            }
-            await _db.SaveChangesAsync(cancellationToken);
-            return;
-        }
-
-        item.Status = MailImportItemStatuses.Importing;
-        item.Attempts++;
-        item.LastRunId = state.Run.Id;
-        item.UpdatedAt = Now;
-        await _db.SaveChangesAsync(cancellationToken);
-
         var requestId = $"i{item.Ordinal}";
         var requestDir = Path.Combine(state.ServeDir, requestId);
         try
@@ -501,6 +528,25 @@ public sealed class MailImportRunner
                 && !state.Folders.TryGetValue(item.SourceFolderKey, out folder))
             {
                 await FailItemAsync(state, item, "folder_missing", "Cartella di origine sconosciuta.", cancellationToken);
+                return;
+            }
+
+            if (message is null && MailMessageProjection.FlattenAttachments(document).Count == 0)
+            {
+                // Nothing to link: completed with its group, in one transaction.
+                var pending = new MailMessage
+                {
+                    Id = Guid.NewGuid(),
+                    OwnerUserId = archive.OwnerUserId,
+                    ArchiveId = archive.Id,
+                    SourceMessageKey = item.SourceMessageKey,
+                    Status = MailMessageStatuses.Importing,
+                    CreatedAt = Now,
+                    FolderId = folder.Id,
+                };
+                MailMessageProjection.Apply(pending, document, documentBytes.Length, Now);
+                state.Pending.Add((item, pending, documentBytes));
+                state.PendingBytes += documentBytes.Length;
                 return;
             }
 
@@ -811,6 +857,48 @@ public sealed class MailImportRunner
         item.LastOutcome = MailImportOutcomes.Imported;
     }
 
+    // Completes the group's attachment-free messages together: their document
+    // blobs, rows (born complete) and manifest items commit in ONE
+    // transaction, so either all of them are imported or none is and the
+    // group is simply redone (the checkpoint has not moved past it).
+    private async Task FlushPendingAsync(ImportState state, CancellationToken cancellationToken)
+    {
+        if (state.Pending.Count == 0)
+        {
+            return;
+        }
+        var strategy = _db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+            var now = Now;
+            foreach (var (item, message, bytes) in state.Pending)
+            {
+                await using var content = new MemoryStream(bytes, writable: false);
+                var blob = await _blobs.StoreAsync(content, cancellationToken);
+                message.BlobObjectId = blob.Id;
+                message.Status = MailMessageStatuses.Complete;
+                message.ImportedAt = now;
+                if (_db.Entry(message).State == EntityState.Detached)
+                {
+                    _db.MailMessages.Add(message);
+                }
+                item.Status = MailImportItemStatuses.Imported;
+                item.MessageId = message.Id;
+                item.LastRunId = state.Run.Id;
+                item.LastOutcome = MailImportOutcomes.Imported;
+                item.FailureCode = null;
+                item.FailureMessage = null;
+                item.UpdatedAt = now;
+            }
+            await _db.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+        });
+        state.Imported += state.Pending.Count;
+        state.Pending.Clear();
+        state.PendingBytes = 0;
+    }
+
     private async Task ScheduleAsync(Guid owner, List<Guid> fileItemIds, CancellationToken cancellationToken)
     {
         foreach (var id in fileItemIds)
@@ -847,7 +935,6 @@ public sealed class MailImportRunner
 
     private async Task FlushCountersAsync(ImportState state, JobContext context, CancellationToken cancellationToken)
     {
-        state.SinceFlush = 0;
         var run = state.Run;
         run.ProcessedMessages = await _db.MailImportItems.CountAsync(i => i.ArchiveId == run.ArchiveId
             && (i.LastRunId == run.Id || i.Status == MailImportItemStatuses.Imported
@@ -977,7 +1064,8 @@ public sealed class MailImportRunner
         public Dictionary<string, MailFolder> Folders { get; } = folders;
         public Dictionary<Guid, Guid?> AttachmentFolders { get; } = new();
         public IPstExtractionSession? Session { get; set; }
-        public int SinceFlush { get; set; }
+        public List<(MailImportItem Item, MailMessage Message, byte[] Bytes)> Pending { get; } = [];
+        public long PendingBytes { get; set; }
         public int Imported { get; set; }
         public int Failed { get; set; }
     }
