@@ -8786,6 +8786,34 @@ video.lightbox-image {
 .help-ai-composer textarea { width: 100%; padding: 0.5rem; resize: vertical; }
 .help-ai-composer button { align-self: flex-start; }
 
+/* Documenti: search inside the owner's own documents. Phone first — the query
+   box and each result are full width; a passage's location badges wrap. */
+.documents-page { max-width: 52rem; }
+.documents-header h1 { margin-bottom: 0.25rem; }
+.documents-indexing { font-size: 0.85rem; }
+.documents-search { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: end; margin: 1rem 0; }
+.documents-search label { flex-basis: 100%; }
+.documents-search input { flex: 1 1 16rem; min-width: 0; padding: 0.5rem 0.65rem; }
+/* The retrieval mode is said, not shouted: one quiet line above the results. */
+.documents-mode { font-size: 0.8rem; margin: 0 0 0.25rem; }
+.documents-count { font-size: 0.85rem; margin: 0 0 0.5rem; }
+.documents-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.75rem; }
+.documents-result {
+  padding: 0.75rem; border-radius: 8px;
+  border: 1px solid var(--border, #e5e7eb);
+}
+.documents-result-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+.documents-result-name { font-size: 1rem; margin: 0; overflow-wrap: anywhere; }
+.documents-open { flex: none; font-size: 0.85rem; }
+.documents-passages { list-style: none; padding: 0; margin: 0.5rem 0 0; display: grid; gap: 0.5rem; }
+.documents-passage-meta { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; font-size: 0.8rem; }
+.documents-badge {
+  padding: 0.1rem 0.45rem; border-radius: 999px;
+  border: 1px solid var(--border, #e5e7eb); background: var(--surface-muted, rgba(0,0,0,0.03));
+}
+.documents-section { color: var(--text-muted, #6b7280); overflow-wrap: anywhere; }
+.documents-snippet { margin: 0.25rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
 /* Print Foundation: dense owner dashboard; the agent itself has no GUI. */
 .print-station-create { display: flex; align-items: end; gap: .75rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .print-station-create label { display: grid; gap: .3rem; min-width: min(22rem, 100%); }

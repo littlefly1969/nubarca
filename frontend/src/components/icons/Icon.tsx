@@ -67,7 +67,9 @@ export type IconName =
   // Owner media lists: a bulleted list, plus/minus for add/remove.
   | 'list'
   | 'list-add'
-  | 'list-remove';
+  | 'list-remove'
+  // The owner's document search: a page with text lines.
+  | 'document';
 
 const PATHS: Record<IconName, string> = {
   files: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
@@ -121,6 +123,7 @@ const PATHS: Record<IconName, string> = {
   list: 'M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01',
   'list-add': 'M9 6h11M9 12h6M9 18h6M4.5 6h.01M4.5 12h.01M4.5 18h.01M19 13v8M15 17h8',
   'list-remove': 'M9 6h11M9 12h6M9 18h6M4.5 6h.01M4.5 12h.01M4.5 18h.01M15 17h8',
+  document: 'M6 3h8l4 4v14H6zM14 3v4h4M9 11h6M9 14h6M9 17h4',
   more: 'M6 12h.01M12 12h.01M18 12h.01',
   // Four corners opening outward: show the whole photo.
   fit: 'M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5',
