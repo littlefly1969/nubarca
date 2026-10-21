@@ -316,6 +316,14 @@ call at all, at either trust level — sending a third party a question plus thr
 irrelevant paragraphs buys a boundary crossing and the answer most likely to be
 wrong.
 
+That cosine floor belongs to the **profile** that scored the candidates, because
+cosine is not calibrated across checkpoints. A text-embedding catalog entry may
+carry its own `MinimumVectorScore`; without one the configured
+`Rag:MinimumVectorScore` (0.80, set for `multilingual-e5-small`) applies. The
+benchmark candidates carry `1.0`, a placeholder that keeps semantic-only
+evidence off until their floor is measured on the golden set
+([text-embeddings.md](model-deployment/text-embeddings.md)).
+
 Retrieval modes are observable: `lexical`, `hybrid`, or
 `lexical-fallback-<reason>`. A degraded run says it is degraded.
 
@@ -376,6 +384,13 @@ ASYMMETRIC: `query: ` and `passage: ` prefixes force the query/passage seam to
 be real from the first commit. Those prefixes are MODEL syntax and are applied by
 the provider — RAG states semantic intent (`Query` or `Passage`), never a
 literal string.
+
+It is still the default. Qwen3-Embedding-0.6B (1024 and Matryoshka 768) and
+Granite Embedding R2 (311M, 97M) are catalogued as opt-in benchmark candidates,
+with the provider support they need (last-token pooling, Matryoshka truncation,
+position ids, a guaranteed trailing EOS, refusal of KV-cache graphs). Choosing
+one awaits a measurement on the target server; see
+[model-deployment/text-embeddings.md](model-deployment/text-embeddings.md).
 
 A missing model file is an availability condition with a reason code, and
 retrieval degrades to lexical.
