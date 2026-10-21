@@ -173,3 +173,4 @@ class PageTruth:
     tables: list[dict] = field(default_factory=list)
     formulas: list[dict] = field(default_factory=list)
     ignorable: list[str] = field(default_factory=list)
+    notes: str = ""  # PPTX speaker notes: extracted text, never on the page image

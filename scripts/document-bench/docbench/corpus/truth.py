@@ -116,6 +116,7 @@ def page_truth(doc: Doc, number: int) -> PageTruth:
         tables=tables,
         formulas=formulas,
         ignorable=ignorable,
+        notes=page.notes,
     )
 
 
