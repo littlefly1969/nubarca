@@ -71,7 +71,8 @@ public sealed class OwnerDocumentCorpusSource
             .OrderBy(r => r.Name).ThenBy(r => r.Ordinal)
             .Select(r => new Row(
                 r.ChunkId, r.Ordinal, r.Heading, r.Text, r.Name, r.DocumentTextId,
-                r.FileItemId, r.OwnerUserId));
+                r.FileItemId, r.OwnerUserId,
+                r.Page, r.LocatorKind, r.LocatorIndex, r.LocatorLabel));
 
         var rows = await (limit is { } cap ? query.Take(cap) : query)
             .ToListAsync(cancellationToken);
@@ -119,8 +120,16 @@ public sealed class OwnerDocumentCorpusSource
                 OwnerUserId: row.OwnerUserId,
                 // The file this chunk belongs to, so the visual candidate
                 // expansion can narrow THIS index rather than build a second
-                // one. Internal, like the owner: it never leaves retrieval.
-                FileItemId: row.FileItemId));
+                // one. Internal, like the owner — except to its own owner's
+                // search, which uses it to open the file.
+                FileItemId: row.FileItemId,
+                // WHERE in the document, as the extractor recorded it. Typed,
+                // never a formatted string: the citation builder and the
+                // search endpoint each render it in their own words.
+                Page: row.Page,
+                LocatorKind: row.LocatorKind,
+                LocatorIndex: row.LocatorIndex,
+                LocatorLabel: row.LocatorLabel));
         }
 
         return new RagCorpus(RagDomainKey.UserDocuments, PrivateRevision, chunks);
@@ -191,6 +200,10 @@ public sealed class OwnerDocumentCorpusSource
                 // The LIVE owner. Read off the FileItem the predicate matched,
                 // so it is the same value the boundary was enforced with.
                 OwnerUserId = r.File.OwnerUserId,
+                Page = r.Chunk.Page,
+                LocatorKind = r.Chunk.LocatorKind,
+                LocatorIndex = r.Chunk.LocatorIndex,
+                LocatorLabel = r.Chunk.LocatorLabel,
             });
 
     /// The revision token a private corpus carries.
@@ -212,11 +225,16 @@ public sealed class OwnerDocumentCorpusSource
         public Guid DocumentTextId { get; init; }
         public Guid FileItemId { get; init; }
         public Guid OwnerUserId { get; init; }
+        public int? Page { get; init; }
+        public string? LocatorKind { get; init; }
+        public int? LocatorIndex { get; init; }
+        public string? LocatorLabel { get; init; }
     }
 
     private sealed record Row(
         Guid ChunkId, int Ordinal, string? Heading, string? Text,
-        string Name, Guid DocumentTextId, Guid FileItemId, Guid OwnerUserId);
+        string Name, Guid DocumentTextId, Guid FileItemId, Guid OwnerUserId,
+        int? Page, string? LocatorKind, int? LocatorIndex, string? LocatorLabel);
 }
 
 /// Safe counts about one owner's private corpus. Numbers only — never a name,

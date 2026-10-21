@@ -55,9 +55,22 @@ public sealed record RagIndexedChunk(
     /// lets that be a filter on an already-built, already-owner-eligible corpus
     /// instead of a second read with a second copy of the boundary.
     ///
-    /// Internal, like `OwnerUserId`: never a response field, never a citation,
-    /// never in a prompt.
-    Guid? FileItemId = null);
+    /// Internal, like `OwnerUserId`: never a citation and never in a prompt.
+    /// The ONE place it leaves retrieval is the owner's own document search,
+    /// which returns the caller's own FileItemId so the UI can open the file —
+    /// a reviewed exception, see docs/rag-platform.md "Search returns the
+    /// owner's own file id".
+    Guid? FileItemId = null,
+
+    /// WHERE in its document this chunk sits, copied from `DocumentChunk`.
+    /// `Page` is a real PDF page and nothing else; the locator triple is the
+    /// typed position in the document's own units (page / section / sheet /
+    /// slide). Null for every system domain and for native text. See
+    /// docs/rag-platform.md "Location is typed".
+    int? Page = null,
+    string? LocatorKind = null,
+    int? LocatorIndex = null,
+    string? LocatorLabel = null);
 
 /// A domain's complete lexical corpus at one revision.
 ///

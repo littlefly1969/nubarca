@@ -131,7 +131,19 @@ public sealed record RagEvidence(
     /// part of an HTTP response, a citation, a log line or a prompt. An owner id
     /// reaching a model would be a stable identifier for a person attached to
     /// text about them.
-    Guid? OwnerUserId = null);
+    Guid? OwnerUserId = null,
+
+    /// WHICH FILE, for an owner-scoped domain. Internal provenance, never a
+    /// citation or a prompt field; the owner's own document search is the one
+    /// reviewed place it reaches a response, and only to its own owner.
+    Guid? FileItemId = null,
+
+    /// WHERE in that file, copied from the chunk. `Page` is a real PDF page
+    /// only; the locator triple is the typed page/section/sheet/slide.
+    int? Page = null,
+    string? LocatorKind = null,
+    int? LocatorIndex = null,
+    string? LocatorLabel = null);
 
 /// Why a retrieval returned what it did.
 ///
