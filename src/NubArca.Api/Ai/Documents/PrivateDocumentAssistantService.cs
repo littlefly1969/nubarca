@@ -11,9 +11,21 @@ namespace NubArca.Api.Ai.Documents;
 /// turn and rewrite the instructions the model was given.
 public sealed record PrivateDocumentTurn(bool FromUser, string Text);
 
-/// A citation a person can act on. The document's NAME and the SECTION it came
-/// from, and nothing else — no id of any kind, no path, no score.
-public sealed record PrivateDocumentCitation(string Document, string? Section);
+/// A citation a person can act on. The document's NAME, the SECTION it came
+/// from, and WHERE in the document — a real PDF page, or the typed locator
+/// (page / section / sheet / slide) the extractor recorded. Nothing else: no id
+/// of any kind, no path, no score.
+///
+/// The locator is a position, not a handle: "page 4" or "slide 7 — Launch
+/// plan" lets a person open their document at the right place, and addresses
+/// nothing for anybody who does not already have the document.
+public sealed record PrivateDocumentCitation(
+    string Document,
+    string? Section,
+    int? Page = null,
+    string? LocatorKind = null,
+    int? LocatorIndex = null,
+    string? LocatorLabel = null);
 
 public sealed record PrivateDocumentAnswer(
     bool Ok,
@@ -40,7 +52,9 @@ public sealed record PrivateDocumentStatus(
     /// into `SemanticEnabled` because the two degrade independently and a
     /// person should be able to see which signal they are getting.
     bool VisualEnabled = false,
-    string? VisualReason = null);
+    string? VisualReason = null,
+    /// How much of the library is searchable yet. Counts only.
+    Rag.Retrieval.OwnerDocumentIndexingSummary? Indexing = null);
 
 /// "Answer from MY documents", and the smallest set of things that can do it.
 ///
@@ -124,6 +138,10 @@ public sealed class PrivateDocumentAssistantService
         var stats = _corpus is null
             ? Rag.Retrieval.OwnerDocumentCorpusStats.Empty
             : await _corpus.GetStatsAsync(ownerUserId, cancellationToken);
+        var indexing = _corpus is null
+            ? Rag.Retrieval.OwnerDocumentIndexingSummary.Empty
+            : await _corpus.GetIndexingSummaryAsync(
+                ownerUserId, semantic.Enabled ? semantic.ProfileKey : null, cancellationToken);
 
         // A CHEAP PROBE, not a search: this asks the visual retriever for its
         // own readiness by running the resolution it would run, and never
@@ -153,8 +171,11 @@ public sealed class PrivateDocumentAssistantService
             // A person whose Office renderer is not deployed still gets full
             // text answers, and folding the two into one "AI is working" flag
             // would make that indistinguishable from everything being fine.
-            VisualEnabled: visual is not null,
-            VisualReason: visual);
+            //
+            // `visual` is the REASON the pass cannot run, so null means ready.
+            VisualEnabled: visual is null,
+            VisualReason: visual,
+            Indexing: indexing);
     }
 
     public async Task<PrivateDocumentAnswer> AskAsync(
@@ -287,10 +308,18 @@ public sealed class PrivateDocumentAssistantService
         // no DocumentTextId, no chunk id, no blob hash, no storage key, no
         // score — a citation exists so somebody can open the document, not so a
         // client can address it.
+        //
+        // Plus WHERE: the PDF page or the typed slide/sheet/section locator, so
+        // "the contract says…" can be checked on the page it came from.
         var sources = evidence
             .Select(e => new PrivateDocumentCitation(
-                e.Title, string.IsNullOrWhiteSpace(e.Section) ? null : e.Section))
-            .DistinctBy(s => (s.Document, s.Section))
+                e.Title,
+                string.IsNullOrWhiteSpace(e.Section) ? null : e.Section,
+                e.Page,
+                e.LocatorKind,
+                e.LocatorIndex,
+                string.IsNullOrWhiteSpace(e.LocatorLabel) ? null : e.LocatorLabel))
+            .Distinct()
             .ToList();
 
         return new PrivateDocumentAnswer(true, result.Text, null, sources);
@@ -370,6 +399,12 @@ public sealed class PrivateDocumentAssistantService
             var heading = string.IsNullOrEmpty(item.Section)
                 ? item.Title
                 : $"{item.Title} — {item.Section}";
+            // WHERE, so the model can say "page 4" instead of inventing one.
+            if (DocumentLocationText.Describe(
+                    item.Page, item.LocatorKind, item.LocatorIndex, item.LocatorLabel) is { } where)
+            {
+                heading = $"{heading} — {where}";
+            }
             prompt.AppendLine($"[{heading}]");
             prompt.AppendLine(item.Text);
         }

@@ -70,7 +70,12 @@ public sealed record RagIndexedChunk(
     int? Page = null,
     string? LocatorKind = null,
     int? LocatorIndex = null,
-    string? LocatorLabel = null);
+    string? LocatorLabel = null,
+
+    /// The chunk's position in its document (`DocumentChunk.Ordinal`). A
+    /// position, not an id: it lets a result say "the third passage" and a
+    /// benchmark compare runs, and addresses nothing on its own.
+    int? Ordinal = null);
 
 /// A domain's complete lexical corpus at one revision.
 ///

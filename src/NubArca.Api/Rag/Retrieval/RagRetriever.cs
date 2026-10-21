@@ -446,7 +446,8 @@ public sealed class RagRetriever : IRagRetriever
                 Page: chunk.Page,
                 LocatorKind: chunk.LocatorKind,
                 LocatorIndex: chunk.LocatorIndex,
-                LocatorLabel: chunk.LocatorLabel));
+                LocatorLabel: chunk.LocatorLabel,
+                Ordinal: chunk.Ordinal));
         }
 
         return evidence;

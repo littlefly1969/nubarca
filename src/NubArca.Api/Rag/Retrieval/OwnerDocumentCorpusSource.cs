@@ -129,7 +129,8 @@ public sealed class OwnerDocumentCorpusSource
                 Page: row.Page,
                 LocatorKind: row.LocatorKind,
                 LocatorIndex: row.LocatorIndex,
-                LocatorLabel: row.LocatorLabel));
+                LocatorLabel: row.LocatorLabel,
+                Ordinal: row.Ordinal));
         }
 
         return new RagCorpus(RagDomainKey.UserDocuments, PrivateRevision, chunks);
@@ -165,6 +166,53 @@ public sealed class OwnerDocumentCorpusSource
             .Where(r => _db.DocumentChunkEmbeddings.Any(
                 e => e.DocumentChunkId == r.ChunkId && e.ProfileId == profileId))
             .LongCountAsync(cancellationToken);
+    }
+
+    /// How far this owner's library is from being searchable. COUNTS ONLY.
+    ///
+    /// `CandidateFiles` are files the owner may have as knowledge AND NubArca
+    /// can read (OwnerDocumentEligibility.Extractable). `IndexedFiles` are those
+    /// whose CURRENT completed reading is of the file's CURRENT bytes — a file
+    /// whose content changed since it was read counts as not indexed, because
+    /// it is not answerable until it is read again. `EmbeddedChunks` is null
+    /// when no embedding profile is active, so "semantic is off" never reads
+    /// as "nothing embedded yet".
+    public async Task<OwnerDocumentIndexingSummary> GetIndexingSummaryAsync(
+        Guid ownerUserId, string? embeddingProfileKey, CancellationToken cancellationToken = default)
+    {
+        if (ownerUserId == Guid.Empty) return OwnerDocumentIndexingSummary.Empty;
+
+        var candidates = OwnerDocumentEligibility.Extractable(_db.FileItems.AsNoTracking(), ownerUserId);
+        var candidateFiles = await candidates.CountAsync(cancellationToken);
+        var indexedFiles = await candidates
+            .Where(f => _db.DocumentTexts.Any(d =>
+                d.FileItemId == f.Id
+                && d.OwnerUserId == ownerUserId
+                && d.IsCurrent
+                && d.Status == AiArtifactStatuses.Completed
+                && d.SourceBlobObjectId == f.BlobObjectId))
+            .CountAsync(cancellationToken);
+
+        var stats = await GetStatsAsync(ownerUserId, cancellationToken);
+
+        long? embedded = null;
+        if (!string.IsNullOrWhiteSpace(embeddingProfileKey))
+        {
+            var profileId = await _db.AiProfiles.AsNoTracking()
+                .Where(p => p.Key == embeddingProfileKey)
+                .Select(p => (Guid?)p.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+            embedded = profileId is { } id
+                ? await CountEmbeddedAsync(ownerUserId, id, cancellationToken)
+                : 0;
+        }
+
+        return new OwnerDocumentIndexingSummary(
+            candidateFiles,
+            indexedFiles,
+            Math.Max(0, candidateFiles - indexedFiles),
+            stats.Chunks,
+            embedded);
     }
 
     /// This corpus's projection of the ONE shared private boundary.
@@ -242,4 +290,15 @@ public sealed class OwnerDocumentCorpusSource
 public sealed record OwnerDocumentCorpusStats(int Documents, int Chunks)
 {
     public static readonly OwnerDocumentCorpusStats Empty = new(0, 0);
+}
+
+/// Indexing progress for one owner, for the UI. Numbers only.
+public sealed record OwnerDocumentIndexingSummary(
+    int CandidateFiles,
+    int IndexedFiles,
+    int NotIndexedFiles,
+    int Chunks,
+    long? EmbeddedChunks)
+{
+    public static readonly OwnerDocumentIndexingSummary Empty = new(0, 0, 0, 0, null);
 }

@@ -167,6 +167,10 @@ public static class RagServiceRegistration
         services.AddScoped(sp => new Ai.DocumentVisual.OwnerDocumentRetrievalPipeline(
             sp.GetRequiredService<IRagRetriever>(),
             sp.GetService<Ai.DocumentVisual.IOwnerDocumentVisualRetriever>()));
+        // The owner's own document search: the same pipeline, grouped by file
+        // with provenance, and no model. Shared by the endpoint and the
+        // `documents query` diagnostic.
+        services.AddScoped<Ai.Documents.OwnerDocumentSearchService>();
         services.AddScoped<Ai.DocumentVisual.DocumentVisualEvaluator>();
 
         services.AddScoped<RagDatabaseServices>();

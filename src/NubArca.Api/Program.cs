@@ -529,6 +529,22 @@ builder.Services.AddRateLimiter(options =>
                     AutoReplenishment = true,
                 }));
 
+    // Owner document search: per USER, its own bucket. No model is called, but
+    // each search scans one person's corpus and may embed the query locally.
+    options.AddPolicy(
+        NubArca.Api.Endpoints.OwnerDocumentSearchEndpoints.SearchRateLimitPolicy,
+        httpContext =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: httpContext.User?.Identity?.Name
+                    ?? httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 60,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true,
+                }));
+
     options.AddPolicy(VaultUnlockRateLimitPolicy, httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -1687,6 +1703,7 @@ app.MapAdminAiEndpoints();
 app.MapPeopleEndpoints();
 app.MapHelpEndpoints();
 app.MapPrivateDocumentAssistantEndpoints();
+app.MapOwnerDocumentSearchEndpoints();
 
 // Media Library (gallery membership rules + per-file exclusion) and Photo
 // Organizer (owner-scoped date-taken reorganization) endpoints live in

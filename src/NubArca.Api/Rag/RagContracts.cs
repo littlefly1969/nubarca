@@ -143,7 +143,8 @@ public sealed record RagEvidence(
     int? Page = null,
     string? LocatorKind = null,
     int? LocatorIndex = null,
-    string? LocatorLabel = null);
+    string? LocatorLabel = null,
+    int? Ordinal = null);
 
 /// Why a retrieval returned what it did.
 ///
