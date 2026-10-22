@@ -1957,6 +1957,15 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   unless `Ai:Enabled` and `Ai:DocumentExtractionEnabled`. A missing model is
   `pending` with a reason, never `failed`/`skipped`; cancellation is never
   permanent. `documents backfill` / `documents progress` are the operator verbs.
+- **The document pipeline's keys now reach production, all off.**
+  `docker-compose.prod.yml` forwards `Ai__DocumentExtraction__{Ocr*,ParseTimeoutSeconds}`,
+  `Ai__DocumentIndexing__*`, `Rag__Domains__user-documents__*` (`.env` spells it
+  `user_documents`) and `Ai__Onnx__OpenVino__RagTextDevice` to api and worker,
+  and `Assistant__PrivateKnowledgeModel` + a `documents-local` profile to the api
+  only. The Office renderer stays out of the four-file release stack until it is
+  CI-built and digest-pinned. Phases, rollback and memory budget:
+  docs/document-intelligence/deployment-runbook.md; tonight's bench:
+  docs/document-intelligence/tonight-server-bench.md.
 - **A visual hit finds where to look; an eligible current text chunk is still
   what NubArca may say.** Visual document retrieval renders an owner's pages,
   embeds them locally under a DOCUMENT-specific SigLIP2 profile (shared weights
