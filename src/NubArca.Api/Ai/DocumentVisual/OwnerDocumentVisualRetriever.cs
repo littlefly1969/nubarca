@@ -45,9 +45,6 @@ public static class DocumentVisualModes
 
     /// Dense cosine, ranked in process over this owner's bounded corpus.
     public const string DenseExact = "dense-exact";
-
-    /// Dense candidates reranked by exact MaxSim over stored multi-vectors.
-    public const string LateInteraction = "dense+late-interaction";
 }
 
 public interface IOwnerDocumentVisualRetriever
@@ -93,7 +90,6 @@ public sealed class OwnerDocumentVisualRetriever : IOwnerDocumentVisualRetriever
     private readonly DocumentVisualVectorIndexService _accelerator;
     private readonly IAiVectorSerializer _serializer;
     private readonly IOptions<DocumentVisualOptions> _options;
-    private readonly VisualLateInteractionReranker _late;
     private readonly ILogger<OwnerDocumentVisualRetriever> _log;
 
     public OwnerDocumentVisualRetriever(
@@ -103,7 +99,6 @@ public sealed class OwnerDocumentVisualRetriever : IOwnerDocumentVisualRetriever
         DocumentVisualVectorIndexService accelerator,
         IAiVectorSerializer serializer,
         IOptions<DocumentVisualOptions> options,
-        VisualLateInteractionReranker late,
         ILogger<OwnerDocumentVisualRetriever> log)
     {
         _db = db;
@@ -112,7 +107,6 @@ public sealed class OwnerDocumentVisualRetriever : IOwnerDocumentVisualRetriever
         _accelerator = accelerator;
         _serializer = serializer;
         _options = options;
-        _late = late;
         _log = log;
     }
 
@@ -198,19 +192,6 @@ public sealed class OwnerDocumentVisualRetriever : IOwnerDocumentVisualRetriever
                 take, options, cancellationToken);
 
         if (reason is not null) return DocumentVisualRetrievalResult.Unavailable(reason);
-
-        // OPTIONAL SECOND STAGE. Late interaction reranks dense candidates and
-        // never replaces them: if no profile is promoted, or its worker is not
-        // reachable, the dense order stands. Raw dense cosines and MaxSim scores
-        // are never summed — the reranker returns an ORDER, and rank is all that
-        // survives into fusion.
-        var reranked = await _late.RerankAsync(
-            query.OwnerUserId, text, scored, cancellationToken);
-        if (reranked is not null)
-        {
-            scored = reranked;
-            mode = DocumentVisualModes.LateInteraction;
-        }
 
         // A SORTED CORPUS IS NOT A SET OF MATCHES.
         //
@@ -356,3 +337,6 @@ public sealed class OwnerDocumentVisualRetriever : IOwnerDocumentVisualRetriever
         return dot / (Math.Sqrt(normA) * Math.Sqrt(normB));
     }
 }
+
+/// One dense candidate: a rendered unit, the file it belongs to, its cosine.
+public sealed record DocumentVisualCandidate(Guid VisualUnitId, Guid FileItemId, double Score);

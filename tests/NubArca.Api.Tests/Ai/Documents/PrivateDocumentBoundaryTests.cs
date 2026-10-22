@@ -193,7 +193,7 @@ public sealed class PrivateDocumentBoundaryTests : IAsyncLifetime
         Build(external: true);
         var client = await SeedAndLoginAsync();
 
-        var response = await client.GetAsync("/api/assistant/documents/status");
+        var response = await client.GetAsync("/api/documents/status");
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.Contains("\"enabled\":false", body, StringComparison.Ordinal);

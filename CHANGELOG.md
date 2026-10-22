@@ -4,6 +4,40 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.6 — 2026-10-22
+
+### Help assistant and system RAG removed
+
+- **The Help assistant is gone**: the "Ask NubArca" page (`/help`) and its
+  menu link, `/api/help/ai/*`, the product-help corpus built into the API image
+  (`help-knowledge build`), `Assistant__HelpModel`, the `help-default` Compose
+  profile and the legacy `ExternalHelp__*` settings. The document assistant and
+  the Assistant substrate stay, still off by default.
+- **The system RAG index is gone**: the `product-help` and
+  `nubarca-repository` domains, the Git repository reader, the system indexer,
+  its cache and evaluator, and the `rag` CLI. Document search keeps its own
+  tables and does not change. `rag seed-profiles` and `rag validate-model` are
+  now `documents seed-profiles` and `documents validate-model`.
+- **Semantic document search needs its per-domain keys.** The installation-wide
+  `Rag__SemanticEnabled` / `Rag__TextEmbeddingProfileKey` are removed; they were
+  never inherited by `user-documents`, so nothing that worked stops working.
+  The document assistant's bounds moved from `Assistant:Help:*` to
+  `Assistant:Bounds:*`.
+- **The late-interaction visual reranker is gone** (the ColVision seam,
+  `MaxSim`, the `LateInteractionEnabled` / `LateProfileKey` settings and the
+  multi-vector ceilings). It was measured and never promoted; dense visual
+  retrieval is unchanged.
+- **The AI tags/captions skeletons are gone**: `Ai__TagsEnabled`, the
+  `ai-tags-generate-backfill` job and the tagging/captioning backend seams. A
+  queued job of that type fails as `UnknownJobType`.
+- **The documents status endpoint moved** from `/api/assistant/documents/status`
+  to `/api/documents/status`, with the same `document-search.access` check.
+- **Migration `RemoveSystemRagIndex` drops** `rag_sources`,
+  `rag_domain_sources`, `rag_chunks`, `rag_chunk_embeddings` and the
+  `rag_chunk_embedding_vectors_384` mirror. It deletes only the system index,
+  which held product documentation and repository code, never user data. It is
+  not an automatic migration: it runs through the manual, backed-up path.
+
 ## 0.4.5 — 2026-10-22
 
 ### Aesthetics Lab removed

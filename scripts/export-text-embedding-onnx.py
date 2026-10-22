@@ -34,8 +34,8 @@ queries and passages. The script exits non-zero otherwise.
 Run it in a controlled model-preparation environment (NOT inside the API
 container) with: torch, transformers>=4.51, sentence-transformers>=3,
 onnx, onnxruntime, tokenizers. Then copy the model directory under
-Ai__Onnx__ModelDir and run `rag seed-profiles` and
-`rag validate-model --profile <profile>`; see
+Ai__Onnx__ModelDir and run `documents seed-profiles` and
+`documents validate-model --profile <profile>`; see
 docs/model-deployment/text-embeddings.md.
 """
 

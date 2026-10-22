@@ -63,8 +63,7 @@ public sealed record PrivateDocumentStatus(
 
 /// "Answer from MY documents", and the smallest set of things that can do it.
 ///
-/// LOOK AT THE CONSTRUCTOR — the same reading that makes HelpAssistantService
-/// reviewable. A text model runtime, the retriever, the model resolver, the
+/// LOOK AT THE CONSTRUCTOR. A text model runtime, the retriever, the model resolver, the
 /// corpus source for counts, a logger. There is no file service, no folder
 /// service, no storage service, no people or face service, no album service, no
 /// media search, no metadata service, and no `IServiceProvider` to go looking
@@ -74,8 +73,7 @@ public sealed record PrivateDocumentStatus(
 /// THREE THINGS ARE NOT PARAMETERS, and that is the design:
 ///
 ///  - the DOMAIN is the constant `user-documents`. There is no request field, no
-///    configuration key and no code path that points this at Product Help or at
-///    the repository;
+///    configuration key and no code path that points it anywhere else;
 ///  - the OWNER is the authenticated caller, passed in by the endpoint from the
 ///    request's identity. It is never read from the body;
 ///  - the MODEL is `Assistant__PrivateKnowledgeModel`, which the resolver
@@ -98,10 +96,8 @@ public sealed class PrivateDocumentAssistantService
 
     /// NULL on a host with no database, which is a real configuration rather
     /// than a broken one — the same shape `RagDatabaseServices` has, and for the
-    /// same reason. Help survives it by answering from the corpus bundled in the
-    /// image; private documents cannot, because a person's own documents live
-    /// nowhere else. So the feature reports itself unavailable instead of the
-    /// application refusing to start.
+    /// same reason: a person's own documents live nowhere else. So the feature
+    /// reports itself unavailable instead of the application refusing to start.
     ///
     /// Registered through an explicit factory rather than as a nullable
     /// constructor parameter the container fills in: the built-in container has
@@ -215,7 +211,7 @@ public sealed class PrivateDocumentAssistantService
             return PrivateDocumentAnswer.Failed(AssistantFailureReasons.PrivateModelNotLocal);
         }
 
-        var bounds = _resolver.HelpBounds;
+        var bounds = _resolver.Bounds;
         var trimmed = (question ?? string.Empty).Trim();
         if (trimmed.Length == 0)
         {
@@ -336,7 +332,7 @@ public sealed class PrivateDocumentAssistantService
     /// characters, newest first. The browser owns this conversation, so an
     /// oversized history is a request shape rather than an impossibility.
     private static IReadOnlyList<AssistantMessage> BoundedHistory(
-        IReadOnlyList<PrivateDocumentTurn> history, AssistantHelpOptions bounds)
+        IReadOnlyList<PrivateDocumentTurn> history, AssistantBoundsOptions bounds)
     {
         if (history.Count == 0 || bounds.EffectiveHistoryTurns == 0)
         {

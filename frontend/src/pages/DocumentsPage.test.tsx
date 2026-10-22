@@ -70,7 +70,7 @@ const OK_RESULT = {
 
 function renderPage(handlers: Record<string, unknown> = {}) {
   const mock = installFetchMock({
-    'GET /api/assistant/documents/status': () => jsonResponse(STATUS),
+    'GET /api/documents/status': () => jsonResponse(STATUS),
     'POST /api/documents/search': () => jsonResponse(OK_RESULT),
     ...handlers,
   });

@@ -364,7 +364,7 @@ public sealed class OwnerDocumentSearchTests : IAsyncLifetime
     {
         await BuildAsync();
 
-        var response = await _clientA.GetAsync("/api/assistant/documents/status");
+        var response = await _clientA.GetAsync("/api/documents/status");
         var body = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(body).RootElement;
 

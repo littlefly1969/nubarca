@@ -165,7 +165,6 @@ public sealed class AiCliTests : IDisposable
             "ai-faces-detect-backfill",
             "ai-faces-embeddings-backfill",
             "ai-faces-cluster-backfill",
-            "ai-tags-generate-backfill",
         };
 
         foreach (var name in names)

@@ -278,10 +278,6 @@ services:
       Ai__DocumentVisual__Enabled: ${Ai__DocumentVisual__Enabled:-false}
       Ai__DocumentVisual__RenderOfficeEnabled: ${Ai__DocumentVisual__RenderOfficeEnabled:-false}
       Ai__DocumentVisual__OfficeRendererSocketPath: ${Ai__DocumentVisual__OfficeRendererSocketPath:-}
-      # Late interaction is enabled only if a candidate model cleared the
-      # measured quality/resource/licence gate. No model ships promoted.
-      Ai__DocumentVisual__LateInteractionEnabled: ${Ai__DocumentVisual__LateInteractionEnabled:-false}
-      Ai__DocumentVisual__LateProfileKey: ${Ai__DocumentVisual__LateProfileKey:-}
       # API: query embedding, the documents CLI (`$DC exec api …`) and, if
       # Jobs__WorkerEnabled, the in-process job runner all read these.
       # ---- owner-document pipeline (Document Intelligence v1) ----------------
@@ -305,10 +301,9 @@ services:
       Ai__DocumentIndexing__MaxAttemptsPerSource: ${Ai__DocumentIndexing__MaxAttemptsPerSource:-3}
       Ai__DocumentIndexing__ParallelTextAndVisualModels: ${Ai__DocumentIndexing__ParallelTextAndVisualModels:-false}
       # Semantic retrieval for the owner-private `user-documents` domain. It
-      # never inherits an installation-wide Rag__* value, so it must name its
-      # own profile. The Compose VARIABLE uses `user_documents` because a
-      # hyphen cannot appear in an interpolation name; the container KEY keeps
-      # the domain's real name (same convention as help-default below).
+      # must name its own profile. The Compose VARIABLE uses `user_documents`
+      # because a hyphen cannot appear in an interpolation name; the container
+      # KEY keeps the domain's real name.
       Rag__Domains__user-documents__SemanticEnabled: ${Rag__Domains__user_documents__SemanticEnabled:-false}
       Rag__Domains__user-documents__TextEmbeddingProfileKey: ${Rag__Domains__user_documents__TextEmbeddingProfileKey:-}
       # OpenVINO device for the text-embedding tower; read only under the
@@ -320,7 +315,6 @@ services:
       Ai__FaceDetectionEnabled: ${Ai__FaceDetectionEnabled:-false}
       Ai__FaceEmbeddingsEnabled: ${Ai__FaceEmbeddingsEnabled:-false}
       Ai__FaceClusteringEnabled: ${Ai__FaceClusteringEnabled:-false}
-      Ai__TagsEnabled: ${Ai__TagsEnabled:-false}
       # Video semantic processing is explicitly opt-in. Keep both switches
       # mirrored on api and worker: the API previews/enqueues; the worker
       # executes FFmpeg segmentation and frame embedding jobs.
@@ -415,37 +409,24 @@ services:
       # changing it silently invalidates existing tombstones. Blank = built-in
       # dev fallback (fine for a fresh deploy; set a real secret in .env).
       DeletedContent__Pepper: ${DeletedContent__Pepper:-}
-      # ---- optional Help assistant -------------------------------------------
+      # ---- optional document assistant ---------------------------------------
       #
-      # An assistant that explains NubArca as a PRODUCT. OFF unless an operator
-      # enables it and names a model profile; an incomplete profile leaves it
-      # disabled rather than half configured. See docs/help-assistant.md.
+      # Answers questions from an owner's OWN documents. OFF unless an operator
+      # enables it and names a LocalTrusted model profile; an incomplete
+      # profile leaves it disabled rather than half configured.
       #
-      # TRUST IS EXPLICIT and never inferred from the URL. `External` means the
-      # question leaves this installation and requires https:// plus a key;
-      # `LocalTrusted` is the operator asserting the endpoint is theirs, and may
-      # be plaintext and authless. An unknown or missing value is invalid, not
-      # "probably local".
+      # TRUST IS EXPLICIT and never inferred from the URL. `LocalTrusted` is the
+      # operator asserting the endpoint is theirs, and may be plaintext and
+      # authless; an `External` profile is refused for this feature. An unknown
+      # or missing value is invalid, not "probably local".
       #
-      # API ONLY, deliberately. The worker runs no Help endpoint and has no
-      # reason to hold a third-party credential: a key that exists in two
-      # containers is a key with two ways to leak, and the worker's logs and
-      # crash dumps are a second surface for nothing gained.
+      # API ONLY, deliberately. The worker runs no assistant endpoint and has no
+      # reason to hold a model credential.
       Assistant__Enabled: ${Assistant__Enabled:-false}
-      Assistant__HelpModel: ${Assistant__HelpModel:-}
-      Assistant__Models__help-default__Protocol: ${Assistant__Models__help_default__Protocol:-OpenAiCompatible}
-      Assistant__Models__help-default__Trust: ${Assistant__Models__help_default__Trust:-}
-      Assistant__Models__help-default__BaseUrl: ${Assistant__Models__help_default__BaseUrl:-}
-      Assistant__Models__help-default__ApiKey: ${Assistant__Models__help_default__ApiKey:-}
-      Assistant__Models__help-default__Model: ${Assistant__Models__help_default__Model:-}
-      Assistant__Models__help-default__Label: ${Assistant__Models__help_default__Label:-}
-      Assistant__Models__help-default__TimeoutSeconds: ${Assistant__Models__help_default__TimeoutSeconds:-30}
-      Assistant__Models__help-default__MaxOutputTokens: ${Assistant__Models__help_default__MaxOutputTokens:-800}
       # The model that may read an owner's OWN documents
       # (POST /api/assistant/documents/chat). Unset → no private answers.
       # It must resolve to a LocalTrusted profile; an External one is refused
-      # at configuration time, never at request time. It may name help-default
-      # when that profile is LocalTrusted, or the dedicated profile below.
+      # at configuration time, never at request time.
       Assistant__PrivateKnowledgeModel: ${Assistant__PrivateKnowledgeModel:-}
       Assistant__Models__documents-local__Protocol: ${Assistant__Models__documents_local__Protocol:-OpenAiCompatible}
       Assistant__Models__documents-local__Trust: ${Assistant__Models__documents_local__Trust:-}
@@ -455,16 +436,6 @@ services:
       Assistant__Models__documents-local__Label: ${Assistant__Models__documents_local__Label:-}
       Assistant__Models__documents-local__TimeoutSeconds: ${Assistant__Models__documents_local__TimeoutSeconds:-30}
       Assistant__Models__documents-local__MaxOutputTokens: ${Assistant__Models__documents_local__MaxOutputTokens:-800}
-      # Legacy, kept so an installation configured before named profiles keeps
-      # working. Adapted into ONE External profile, and only when Assistant__* is
-      # absent. Deprecated: migrate to the block above.
-      ExternalHelp__Enabled: ${ExternalHelp__Enabled:-false}
-      ExternalHelp__BaseUrl: ${ExternalHelp__BaseUrl:-}
-      ExternalHelp__ApiKey: ${ExternalHelp__ApiKey:-}
-      ExternalHelp__Model: ${ExternalHelp__Model:-}
-      ExternalHelp__ProviderLabel: ${ExternalHelp__ProviderLabel:-External AI}
-      ExternalHelp__TimeoutSeconds: ${ExternalHelp__TimeoutSeconds:-30}
-      ExternalHelp__MaxOutputTokens: ${ExternalHelp__MaxOutputTokens:-800}
     volumes:
       - storage-data:/var/lib/nubarca/storage
       - dataprotection-keys:/var/lib/nubarca/dataprotection-keys
@@ -607,10 +578,6 @@ services:
       Ai__DocumentVisual__Enabled: ${Ai__DocumentVisual__Enabled:-false}
       Ai__DocumentVisual__RenderOfficeEnabled: ${Ai__DocumentVisual__RenderOfficeEnabled:-false}
       Ai__DocumentVisual__OfficeRendererSocketPath: ${Ai__DocumentVisual__OfficeRendererSocketPath:-}
-      # Late interaction is enabled only if a candidate model cleared the
-      # measured quality/resource/licence gate. No model ships promoted.
-      Ai__DocumentVisual__LateInteractionEnabled: ${Ai__DocumentVisual__LateInteractionEnabled:-false}
-      Ai__DocumentVisual__LateProfileKey: ${Ai__DocumentVisual__LateProfileKey:-}
       # Worker: it RUNS `ai.documents.index` (extract → OCR → chunk → embed →
       # visual), so it must see the same values as the api.
       # ---- owner-document pipeline (Document Intelligence v1) ----------------
@@ -634,10 +601,9 @@ services:
       Ai__DocumentIndexing__MaxAttemptsPerSource: ${Ai__DocumentIndexing__MaxAttemptsPerSource:-3}
       Ai__DocumentIndexing__ParallelTextAndVisualModels: ${Ai__DocumentIndexing__ParallelTextAndVisualModels:-false}
       # Semantic retrieval for the owner-private `user-documents` domain. It
-      # never inherits an installation-wide Rag__* value, so it must name its
-      # own profile. The Compose VARIABLE uses `user_documents` because a
-      # hyphen cannot appear in an interpolation name; the container KEY keeps
-      # the domain's real name (same convention as help-default below).
+      # must name its own profile. The Compose VARIABLE uses `user_documents`
+      # because a hyphen cannot appear in an interpolation name; the container
+      # KEY keeps the domain's real name.
       Rag__Domains__user-documents__SemanticEnabled: ${Rag__Domains__user_documents__SemanticEnabled:-false}
       Rag__Domains__user-documents__TextEmbeddingProfileKey: ${Rag__Domains__user_documents__TextEmbeddingProfileKey:-}
       # OpenVINO device for the text-embedding tower; read only under the
@@ -649,7 +615,6 @@ services:
       Ai__FaceDetectionEnabled: ${Ai__FaceDetectionEnabled:-false}
       Ai__FaceEmbeddingsEnabled: ${Ai__FaceEmbeddingsEnabled:-false}
       Ai__FaceClusteringEnabled: ${Ai__FaceClusteringEnabled:-false}
-      Ai__TagsEnabled: ${Ai__TagsEnabled:-false}
       # Must match the API settings above; video jobs execute in this service.
       Ai__VideoSegmentation__Enabled: ${Ai__VideoSegmentation__Enabled:-false}
       Ai__VideoVisualEmbeddings__Enabled: ${Ai__VideoVisualEmbeddings__Enabled:-false}

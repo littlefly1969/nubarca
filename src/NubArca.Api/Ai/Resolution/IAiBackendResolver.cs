@@ -60,10 +60,6 @@ public interface IAiBackendResolver
                 (await ResolveForProfileKeyAsync<IFaceDetector>(key, cancellationToken)).Resolution,
             AiCapabilities.FaceEmbedding =>
                 (await ResolveForProfileKeyAsync<IFaceEmbedder>(key, cancellationToken)).Resolution,
-            AiCapabilities.Tagging =>
-                (await ResolveForProfileKeyAsync<IAiTagger>(key, cancellationToken)).Resolution,
-            AiCapabilities.Captioning =>
-                (await ResolveForProfileKeyAsync<IImageCaptioner>(key, cancellationToken)).Resolution,
             _ => await GetCapabilityAvailabilityAsync(capability, cancellationToken),
         };
     }

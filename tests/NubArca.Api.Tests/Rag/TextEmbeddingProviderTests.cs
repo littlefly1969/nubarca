@@ -13,7 +13,7 @@ namespace NubArca.Api.Tests.Rag;
 //
 // The contract is tested with the deterministic provider, which needs no
 // weights and runs in microseconds. The ONNX provider's model-dependent
-// behaviour is validated by `rag validate-model` against real weights — the
+// behaviour is validated by `documents validate-model` against real weights — the
 // tests here cover what CAN be asserted without them: readiness reasons, the
 // query/passage preprocessing seam, and the truncation rule.
 public sealed class TextEmbeddingProviderTests

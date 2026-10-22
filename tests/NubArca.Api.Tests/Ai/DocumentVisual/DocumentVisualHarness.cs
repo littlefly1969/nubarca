@@ -330,12 +330,6 @@ internal sealed class DocumentVisualHarness : IDisposable
             new DocumentVisualVectorIndexService(Db, Serializer),
             Serializer,
             accessor,
-            new VisualLateInteractionReranker(
-                Db,
-                new AiProfileRegistry(Db, TimeProvider.System),
-                Serializer,
-                accessor,
-                NullLogger<VisualLateInteractionReranker>.Instance),
             NullLogger<OwnerDocumentVisualRetriever>.Instance);
     }
 

@@ -4,6 +4,7 @@ using NubArca.Api.Ai;
 using NubArca.Api.Ai.DocumentVisual;
 using NubArca.Api.Ai.Documents;
 using NubArca.Api.Ai.Documents.Indexing;
+using NubArca.Api.Ai.TextEmbeddings;
 using NubArca.Api.Data;
 using NubArca.Api.Domain.Ai;
 using NubArca.Api.Jobs;
@@ -14,12 +15,6 @@ using NubArca.Api.Rag.Retrieval;
 namespace NubArca.Api.Cli;
 
 /// Operator commands for the owner-private document corpus.
-///
-/// SEPARATE FROM `rag`, and that separation is the point. `rag index --domain
-/// user-documents` does not exist and must not: the `rag` verbs operate on
-/// installation-wide knowledge with no owner, and giving them an `--owner` flag
-/// would make "which corpus does this command touch" a question about arguments
-/// rather than about which command was typed.
 ///
 /// Every verb that reads or indexes in this process REQUIRES `--owner`. The one
 /// exception is `backfill --all-owners`, which does not walk anybody's documents
@@ -41,6 +36,8 @@ internal static class DocumentsCliCommands
             "status" => StatusAsync(args, sp, stdout, stderr),
             "backfill" => BackfillAsync(args, sp, stdout, stderr),
             "progress" => ProgressAsync(args, sp, stdout, stderr),
+            "seed-profiles" => SeedProfilesAsync(sp, stdout),
+            "validate-model" => ValidateModelAsync(args, sp, stdout, stderr),
             "visual-seed-profiles" => VisualSeedAsync(sp, stdout),
             "visual-index" => VisualIndexAsync(args, sp, stdout, stderr),
             "visual-status" => VisualStatusAsync(args, sp, stdout, stderr),
@@ -57,6 +54,8 @@ internal static class DocumentsCliCommands
         stderr.WriteLine(
             "       documents backfill (--owner <user-id> | --all-owners) [--retry-failed] [--limit N]");
         stderr.WriteLine("       documents progress [--owner <user-id>]");
+        stderr.WriteLine("       documents seed-profiles");
+        stderr.WriteLine("       documents validate-model [--profile <key>]");
         stderr.WriteLine("       documents visual-seed-profiles");
         stderr.WriteLine(
             "       documents query --owner <user-id> [--limit N] [--expect name[,name]] \"<question>\"");
@@ -102,10 +101,6 @@ internal static class DocumentsCliCommands
             stdout.WriteLine($"embedding_reason={outcome.EmbeddingReason}");
         }
 
-        // Within this process the corpus just changed under a cache built from
-        // the old signature. Private indexes are not cached, but the system ones
-        // share the process — clearing is cheap and keeps one rule.
-        sp.GetRequiredService<RagLexicalIndexCache>().Clear();
         return 0;
     }
 
@@ -269,6 +264,92 @@ internal static class DocumentsCliCommands
     }
 
 
+    // ---- documents seed-profiles --------------------------------------------
+
+    /// Create the text-embedding model/profile rows document search can use.
+    /// Explicit, never on startup, and creating them enables nothing: semantic
+    /// search still needs `Rag__Domains__user-documents__SemanticEnabled` and a
+    /// profile key.
+    private static async Task<int> SeedProfilesAsync(IServiceProvider sp, TextWriter stdout)
+    {
+        var result = await sp.GetRequiredService<IAiProfileRegistry>()
+            .SeedRagTextEmbeddingProfilesAsync();
+        stdout.WriteLine($"models_created={result.ModelsCreated}");
+        stdout.WriteLine($"profiles_created={result.ProfilesCreated}");
+        stdout.WriteLine($"deterministic_profile={DeterministicTextEmbeddingProvider.ProfileKey}");
+        stdout.WriteLine($"onnx_profile={RagTextEmbeddingModels.MultilingualE5SmallProfileKey}");
+        return 0;
+    }
+
+    // ---- documents validate-model -------------------------------------------
+
+    /// Proves a locally installed text-embedding model actually works, before an
+    /// operator turns semantic document search on. It asserts CONTRACT — the
+    /// model loads, the tokenizer loads, both input kinds produce the profile's
+    /// dimension, the vectors are finite and normalized, the same text is
+    /// deterministic, and different texts are not identical. It deliberately
+    /// asserts nothing about semantic quality.
+    ///
+    /// `--profile` wins; otherwise the profile `user-documents` is configured
+    /// with.
+    private static async Task<int> ValidateModelAsync(
+        string[] args, IServiceProvider sp, TextWriter stdout, TextWriter stderr)
+    {
+        var key = Arg(args, "--profile");
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            key = sp.GetRequiredService<IRagSemanticProfileResolver>()
+                .Resolve(RagDomainKey.UserDocuments).ProfileKey;
+        }
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            stderr.WriteLine(
+                "documents validate-model: --profile is required when user-documents has no "
+                + "text-embedding profile configured.");
+            return 2;
+        }
+
+        var resolution = await sp.GetRequiredService<TextEmbeddingResolver>().ResolveProfileAsync(key);
+        stdout.WriteLine($"profile={key}");
+        if (!resolution.IsAvailable)
+        {
+            stdout.WriteLine($"available=false reason={resolution.Reason}");
+            return 1;
+        }
+
+        var profile = resolution.Profile!;
+        var provider = resolution.Provider!;
+        stdout.WriteLine($"available=true dimension={profile.Dimension}");
+
+        var query = await provider.EmbedAsync(profile, "dove trovo il contratto?", TextEmbeddingInputKind.Query);
+        var passage = await provider.EmbedAsync(
+            profile, "Il contratto di locazione decorre dal primo marzo.",
+            TextEmbeddingInputKind.Passage);
+        var repeat = await provider.EmbedAsync(profile, "dove trovo il contratto?", TextEmbeddingInputKind.Query);
+
+        var ok = true;
+        ok &= Check(stdout, "query_dimension", query.Dimension == profile.Dimension);
+        ok &= Check(stdout, "passage_dimension", passage.Dimension == profile.Dimension);
+        ok &= Check(stdout, "finite", query.Vector.All(float.IsFinite) && passage.Vector.All(float.IsFinite));
+        ok &= Check(stdout, "normalized", Math.Abs(Norm(query.Vector) - 1.0) < 0.01);
+        ok &= Check(stdout, "deterministic", query.Vector.SequenceEqual(repeat.Vector));
+        ok &= Check(stdout, "distinct", !query.Vector.SequenceEqual(passage.Vector));
+        return ok ? 0 : 1;
+    }
+
+    private static bool Check(TextWriter stdout, string name, bool ok)
+    {
+        stdout.WriteLine($"{name}={(ok ? "ok" : "FAILED")}");
+        return ok;
+    }
+
+    private static double Norm(float[] vector)
+    {
+        double sum = 0;
+        foreach (var value in vector) sum += (double)value * value;
+        return Math.Sqrt(sum);
+    }
+
     // ---- documents visual-seed-profiles -------------------------------------
 
     /// Create the document-visual model/profile rows. Explicit, never on
@@ -359,9 +440,6 @@ internal static class DocumentsCliCommands
 
         stdout.WriteLine(
             $"office_renderer_enabled={(options.RenderOfficeEnabled ? "true" : "false")}");
-        stdout.WriteLine(
-            $"late_interaction_ready={(options.LateInteractionEnabled
-                && sp.GetService<IVisualLateInteractionProvider>() is not null ? "true" : "false")}");
 
         if (resolution.Profile is { } profile)
         {
@@ -473,7 +551,7 @@ internal static class DocumentsCliCommands
         foreach (var query in comparison.Regressed) stdout.WriteLine($"  regressed_query={query}");
 
         // THE PROMOTION SIGNAL, printed rather than decided. Whether a
-        // late-interaction profile is worth enabling is an operator's call
+        // candidate visual profile is worth enabling is an operator's call
         // against their own corpus, licence and hardware; this command's job is
         // to make the numbers visible, not to flip a switch.
         var delta = comparison.Candidate.VisualNdcgAtFive - comparison.Baseline.VisualNdcgAtFive;

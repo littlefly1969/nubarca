@@ -4,12 +4,10 @@ namespace NubArca.Api.Tests.Ai.DocumentVisual;
 
 /// THE VISUAL GOLDEN CORPUS, declared once.
 ///
-/// Two lanes measure visual retrieval and they must measure the SAME thing: the
-/// fast suite, with deterministic vectors, proving the plumbing; and the Phase-0
-/// lane, with real SigLIP2 and a real late-interaction candidate, proving
-/// whether the models earn their cost. Two copies of a benchmark are two
-/// benchmarks, and the one that drifts is always the one nobody is watching — so
-/// the questions and the documents live here and both lanes build from them.
+/// Every lane that measures visual retrieval must measure the SAME thing, so
+/// the questions and the documents live here and each lane builds from them.
+/// Two copies of a benchmark are two benchmarks, and the one that drifts is
+/// always the one nobody is watching.
 ///
 /// The corpus is SYNTHETIC and non-secret on purpose: a benchmark made of real
 /// private documents could not be committed, and one written to match its own

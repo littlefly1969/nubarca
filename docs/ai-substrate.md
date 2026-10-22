@@ -34,7 +34,7 @@ AI is **off by default**. Defaults:
 | `Ai:TimeoutSeconds` | `30` |
 | `Ai:ComputeSliceSeconds` | `30` |
 | `Ai:ComputeSliceItemBudget` | `100` |
-| `Ai:ImageEmbeddingsEnabled` … `Ai:TagsEnabled` | `false` |
+| `Ai:ImageEmbeddingsEnabled` … `Ai:FaceClusteringEnabled` | `false` |
 | `Ai:Onnx:ModelDir` | *(empty)* |
 | `Ai:External:BaseUrl` / `Ai:External:ApiKeyRef` | *(empty)* |
 
@@ -157,8 +157,10 @@ similarity, or UI.
 - **Skeleton jobs** (Compute band, priority 200), registered + enqueueable:
   `ai.photos.embeddings.backfill`, `ai.documents.extract.backfill`,
   `ai.documents.embeddings.backfill`, `ai.faces.detect.backfill`,
-  `ai.faces.embeddings.backfill`, `ai.faces.cluster.backfill`,
-  `ai.tags.generate.backfill`. They share one flag-only `AiBackfillJobPayload`
+  `ai.faces.embeddings.backfill`, `ai.faces.cluster.backfill`. (The
+  `ai.tags.generate.backfill` skeleton, `Ai:TagsEnabled` and the
+  tagging/captioning backend interfaces were removed in 0.4.6; a queued job of
+  that type now fails permanently as `UnknownJobType`.) They share one flag-only `AiBackfillJobPayload`
   (optional profile **key**, never a GUID) and a versioned `AiBackfillCheckpoint`
   (defined for Phase 1; 0C handlers do not continue).
 

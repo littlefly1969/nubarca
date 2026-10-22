@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Domain;
 using NubArca.Api.Domain.Ai;
-using NubArca.Api.Domain.Rag;
 using NubArca.Api.Domain.Print;
 
 namespace NubArca.Api.Data;
@@ -272,15 +271,6 @@ public class AppDbContext : DbContext
     // PlateFaceRedactionBox / PlateRedactedMedia.
     public DbSet<PlateFaceRedactionBox> PlateFaceRedactionBoxes => Set<PlateFaceRedactionBox>();
     public DbSet<PlateRedactedMedia> PlateRedactedMedia => Set<PlateRedactedMedia>();
-
-    // The generic RAG substrate: source identity, domain membership, passage,
-    // canonical embedding. SYSTEM knowledge (product help, the NubArca
-    // repository) — deliberately not the owner-private document tables above,
-    // whose ownership and privacy semantics are a user's own files.
-    public DbSet<RagSource> RagSources => Set<RagSource>();
-    public DbSet<RagDomainSource> RagDomainSources => Set<RagDomainSource>();
-    public DbSet<RagChunk> RagChunks => Set<RagChunk>();
-    public DbSet<RagChunkEmbedding> RagChunkEmbeddings => Set<RagChunkEmbedding>();
 
     // MAILARCHIVE-01: owner-private PST archives. Messages are NOT FileItems:
     // a message row owns its normalized document blob (counted by the blob

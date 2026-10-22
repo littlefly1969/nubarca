@@ -15,8 +15,6 @@ public sealed class AiStatusService : IAiStatusService
         AiCapabilities.DocumentEmbedding,
         AiCapabilities.FaceDetection,
         AiCapabilities.FaceEmbedding,
-        AiCapabilities.Tagging,
-        AiCapabilities.Captioning,
     };
 
     private readonly IOptions<AiOptions> _options;

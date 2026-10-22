@@ -109,18 +109,6 @@ public sealed record FaceEmbedAttempt(AiEmbeddingResult? Embedding, FaceEmbedOut
     public static FaceEmbedAttempt Ok(AiEmbeddingResult embedding) => new(embedding, FaceEmbedOutcome.Ok);
 }
 
-public interface IImageCaptioner : IAiBackend
-{
-    Task<AiCaptionResult> CaptionImageAsync(
-        ReadOnlyMemory<byte> imageBytes, AiProfile profile, CancellationToken cancellationToken = default);
-}
-
-public interface IAiTagger : IAiBackend
-{
-    Task<AiTaggingResult> TagImageAsync(
-        ReadOnlyMemory<byte> imageBytes, AiProfile profile, CancellationToken cancellationToken = default);
-}
-
 // ---- result types -------------------------------------------------------
 
 // A raw embedding vector + the space it lives in. Never serialized to a DTO as
@@ -144,8 +132,5 @@ public sealed record DetectedFace(
 
 public sealed record AiFaceDetectionResult(IReadOnlyList<DetectedFace> Faces);
 
-public sealed record AiCaptionResult(string Caption);
 
-public sealed record AiTag(string Label, double? Confidence);
 
-public sealed record AiTaggingResult(IReadOnlyList<AiTag> Tags);

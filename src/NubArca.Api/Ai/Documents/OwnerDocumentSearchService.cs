@@ -208,7 +208,7 @@ public sealed class OwnerDocumentSearchService
 
         var hits = retrieval.Outcome == RagRetrievalOutcome.Strong && retrieval.Evidence.Count > 0
             ? Group(ownerUserId, retrieval.Evidence,
-                RagQueryShape.For(text, expandAliases: false).AllTerms, documents)
+                RagQueryShape.For(text).AllTerms, documents)
             : new List<OwnerDocumentSearchHit>();
 
         // EXPLORATION IS NOT AN ANSWER. Pages that look like the question but

@@ -83,7 +83,7 @@ export interface DocumentsStatus {
 }
 
 export function getDocumentsStatus(signal?: AbortSignal): Promise<DocumentsStatus> {
-  return api<DocumentsStatus>('/api/assistant/documents/status', { signal });
+  return api<DocumentsStatus>('/api/documents/status', { signal });
 }
 
 /**

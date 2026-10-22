@@ -17,9 +17,9 @@ namespace NubArca.Api.Assistant;
 /// own prompt, and a gate that runs before it is a statement about the evidence
 /// itself.
 ///
-/// It also checks the evidence, not only the request. A caller asking for
-/// `product-help` and receiving a chunk stamped `nubarca-repository` is a bug in
-/// retrieval, and this is where that bug stops being a leak: every item has to
+/// It also checks the evidence, not only the request. A caller asking for one
+/// domain and receiving a chunk stamped with another is a bug in retrieval, and
+/// this is where that bug stops being a leak: every item has to
 /// carry the domain that was asked for, and that domain has to be allowed.
 public static class AssistantRagPolicy
 {
@@ -40,8 +40,8 @@ public static class AssistantRagPolicy
                 domain.ExternalGenerationAllowed && domain.PrivacyClass == RagPrivacyClass.Public,
 
             // The operator asserts control of this endpoint. That covers
-            // knowledge about their own installation, and — since Slice 3 — the
-            // OWNER'S OWN documents, which is the entire point of a local model:
+            // knowledge about their own installation, and the OWNER'S OWN
+            // documents, which is the entire point of a local model:
             // a person's private text may be read by something running on their
             // own hardware and by nothing else.
             //

@@ -45,7 +45,6 @@ public sealed class AiOptionsTests
         Assert.False(options.FaceDetectionEnabled);
         Assert.False(options.FaceEmbeddingsEnabled);
         Assert.False(options.FaceClusteringEnabled);
-        Assert.False(options.TagsEnabled);
     }
 
     [Fact]

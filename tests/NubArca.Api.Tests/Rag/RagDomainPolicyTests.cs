@@ -9,72 +9,11 @@ namespace NubArca.Api.Tests.Rag;
 //
 // This is the file that decides where evidence may travel, so it is asserted
 // directly rather than inferred from what a retrieval happened to return: a test
-// that only checks "the repository chunk did not appear in the prompt" passes
-// for the wrong reason on any day retrieval finds nothing.
+// that only checks "the chunk did not appear in the prompt" passes for the
+// wrong reason on any day retrieval finds nothing.
 public sealed class RagDomainPolicyTests
 {
     private static readonly IRagDomainRegistry Registry = RagDomainRegistry.Instance;
-
-    [Fact]
-    public void ProductHelp_IsPublicSystemDomain()
-    {
-        var domain = Registry.GetRequired(RagDomains.ProductHelp);
-
-        Assert.Equal(RagDomainScope.System, domain.Scope);
-        Assert.Equal(RagPrivacyClass.Public, domain.PrivacyClass);
-        Assert.False(domain.RequiresOwner);
-        Assert.True(domain.ExternalGenerationAllowed);
-    }
-
-    [Fact]
-    public void Repository_IsSystemInternalDomain()
-    {
-        var domain = Registry.GetRequired(RagDomains.NubArcaRepository);
-
-        Assert.Equal(RagDomainScope.System, domain.Scope);
-        Assert.Equal(RagPrivacyClass.SystemInternal, domain.PrivacyClass);
-        Assert.False(domain.RequiresOwner);
-
-        // Deliberate, and the single most load-bearing assertion in this file.
-        // NubArca is public on GitHub TODAY. That is a fact about this month's
-        // hosting, not a property of the domain: the same code has to stay
-        // correct for an installation carrying local patches, for a private
-        // fork, and for whatever system-internal domain is added next.
-        Assert.False(domain.ExternalGenerationAllowed);
-    }
-
-    [Fact]
-    public void External_CannotUseRepositoryDomain()
-    {
-        var repository = Registry.GetRequired(RagDomains.NubArcaRepository);
-
-        Assert.False(AssistantRagPolicy.MayGroundOn(AssistantModelTrust.External, repository));
-        Assert.Equal(
-            RagFailureReasons.DomainNotAllowed,
-            AssistantRagPolicy.Refuse(
-                AssistantModelTrust.External, repository, Array.Empty<RagEvidence>()));
-    }
-
-    [Fact]
-    public void External_CanUseProductHelp()
-    {
-        var help = Registry.GetRequired(RagDomains.ProductHelp);
-
-        Assert.True(AssistantRagPolicy.MayGroundOn(AssistantModelTrust.External, help));
-        Assert.Null(AssistantRagPolicy.Refuse(
-            AssistantModelTrust.External, help, new[] { Evidence(RagDomainKey.ProductHelp) }));
-    }
-
-    [Fact]
-    public void LocalTrusted_CanUseRepositoryDomain()
-    {
-        var repository = Registry.GetRequired(RagDomains.NubArcaRepository);
-
-        Assert.True(AssistantRagPolicy.MayGroundOn(AssistantModelTrust.LocalTrusted, repository));
-        Assert.Null(AssistantRagPolicy.Refuse(
-            AssistantModelTrust.LocalTrusted, repository,
-            new[] { Evidence(RagDomainKey.NubArcaRepository) }));
-    }
 
     [Fact]
     public void ManagedLocal_GetsNothing()
@@ -94,7 +33,10 @@ public sealed class RagDomainPolicyTests
     {
         Assert.False(Registry.TryGet("private-library", out _));
         Assert.False(Registry.TryGet(string.Empty, out _));
-        Assert.False(Registry.TryGet("PRODUCT-HELP", out _));  // keys are ordinal
+        Assert.False(Registry.TryGet("USER-DOCUMENTS", out _));  // keys are ordinal
+        // The removed system domains are not quietly still answerable.
+        Assert.False(Registry.TryGet("product-help", out _));
+        Assert.False(Registry.TryGet("nubarca-repository", out _));
         Assert.Throws<RagDomainUnknownException>(() => Registry.GetRequired("nope"));
     }
 
@@ -141,7 +83,7 @@ public sealed class RagDomainPolicyTests
 
         // …and two reads return the same objects, so there is no per-call
         // resolution that could ever differ.
-        Assert.Same(Registry.GetRequired(RagDomains.ProductHelp), RagDomainRegistry.ProductHelp);
+        Assert.Same(Registry.GetRequired(RagDomains.UserDocuments), RagDomainRegistry.UserDocuments);
         Assert.Same(Registry.List(), Registry.List());
     }
 
@@ -159,14 +101,9 @@ public sealed class RagDomainPolicyTests
         Assert.True(owned.RequiresOwner);
         Assert.False(owned.ExternalGenerationAllowed);
 
-        // Every OTHER domain is installation-wide and needs no owner, so the
-        // owner requirement cannot be satisfied by accident somewhere else.
-        Assert.All(Registry.List().Where(d => d.Key != RagDomains.UserDocuments), d =>
-        {
-            Assert.Equal(RagDomainScope.System, d.Scope);
-            Assert.NotEqual(RagPrivacyClass.OwnerPrivate, d.PrivacyClass);
-            Assert.False(d.RequiresOwner);
-        });
+        // And it is the only domain: there is no system knowledge base left
+        // for evidence to come from.
+        Assert.Single(Registry.List());
     }
 
     [Fact]
@@ -255,27 +192,23 @@ public sealed class RagDomainPolicyTests
         // future caller: retrieval refuses before it reads anything, so a
         // forgotten owner is a rejected request rather than a broad answer.
         Assert.True(Registry.GetRequired(RagDomains.UserDocuments).RequiresOwner);
-        Assert.Null(new RagQuery(RagDomainKey.UserDocuments, "qualsiasi domanda", 5, 4000).OwnerUserId);
+        Assert.Null(new RagQuery(RagDomainKey.UserDocuments, "qualsiasi domanda", null, 5, 4000).OwnerUserId);
     }
 
     [Fact]
-    public void Evidence_From_Another_Domain_Is_Refused_Even_When_Both_Are_Allowed()
+    public void Evidence_From_Another_Domain_Is_Refused()
     {
-        // Both domains are readable by a LocalTrusted model. Retrieval still
-        // must not hand a caller that asked for `product-help` a chunk stamped
-        // `nubarca-repository`: the requested domain is what the operation was
-        // reviewed against.
-        var help = Registry.GetRequired(RagDomains.ProductHelp);
+        // Retrieval must not hand a caller that asked for `user-documents` a
+        // chunk stamped with any other domain, even one carrying the right
+        // owner: the requested domain is what the operation was reviewed
+        // against.
+        var owned = RagDomainRegistry.UserDocuments;
+        var owner = Guid.NewGuid();
+        var foreign = OwnedEvidence(owner) with { Domain = new RagDomainKey("other-domain") };
 
         Assert.Equal(
             RagFailureReasons.DomainNotAllowed,
             AssistantRagPolicy.Refuse(
-                AssistantModelTrust.LocalTrusted, help,
-                new[] { Evidence(RagDomainKey.ProductHelp), Evidence(RagDomainKey.NubArcaRepository) }));
+                AssistantModelTrust.LocalTrusted, owned, new[] { OwnedEvidence(owner), foreign }, owner));
     }
-
-    private static RagEvidence Evidence(RagDomainKey domain) => new(
-        Id: "x#1", Domain: domain, Path: "p", Title: "t", Section: "s", Text: "body",
-        Feature: "f", SourceKind: RagSourceKinds.UserGuide, Audience: RagAudiences.User,
-        Intent: RagIntents.HowTo, Language: RagLanguages.Italian, Score: 1.0);
 }

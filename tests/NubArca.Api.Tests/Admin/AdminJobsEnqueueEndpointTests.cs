@@ -96,9 +96,9 @@ public sealed class AdminJobsEnqueueEndpointTests : IDisposable
         // The test host runs with AI + the ffmpeg/HLS providers off, so those
         // commands must come back disabled with a stable reason code (never a
         // silently-enqueued no-op).
-        var tags = commands.Single(c => c.GetProperty("key").GetString() == "ai-tags-generate-backfill");
-        Assert.False(tags.GetProperty("available").GetBoolean());
-        Assert.False(string.IsNullOrWhiteSpace(tags.GetProperty("disabledReason").GetString()));
+        var cluster = commands.Single(c => c.GetProperty("key").GetString() == "ai-faces-cluster-backfill");
+        Assert.False(cluster.GetProperty("available").GetBoolean());
+        Assert.False(string.IsNullOrWhiteSpace(cluster.GetProperty("disabledReason").GetString()));
 
         var hls = commands.Single(c => c.GetProperty("key").GetString() == "media-video-hls-backfill");
         Assert.False(hls.GetProperty("available").GetBoolean());

@@ -25,7 +25,6 @@ export * from './mediaLibrary';
 export * from './mediaDuplicates';
 export * from './privateVault';
 export * from './plates';
-export * from './help';
 export * from './documents';
 export * from './people';
 export * from './adminFaceAI';

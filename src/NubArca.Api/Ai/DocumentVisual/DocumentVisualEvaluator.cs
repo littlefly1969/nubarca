@@ -48,11 +48,10 @@ public sealed record DocumentVisualComparison(
 ///
 /// The claim this slice makes is `text + visual > text alone`, and a claim like
 /// that is either measured or it is marketing. So the harness runs the SAME
-/// pipeline the Assistant runs, three times over one golden set:
+/// pipeline the Assistant runs, twice over one golden set:
 ///
 ///     text-only
 ///     dense-visual-expanded
-///     dense + late-interaction-expanded   (when a profile is promoted)
 ///
 /// and reports each separately, plus which queries were RECOVERED and which
 /// REGRESSED. Aggregates hide the interesting half: a change that gains two

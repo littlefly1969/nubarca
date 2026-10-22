@@ -490,26 +490,9 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true,
             }));
 
-    // Optional Help: a per-USER budget, not per-IP. Every request costs an
-    // outbound call — to a paid third party, or to an endpoint with finite GPU —
-    // and the callers here are authenticated, so the account is the meaningful
-    // subject.
-    options.AddPolicy(NubArca.Api.Endpoints.HelpEndpoints.HelpChatRateLimitPolicy, httpContext =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: httpContext.User?.Identity?.Name
-                ?? httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 20,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-                AutoReplenishment = true,
-            }));
-
-    // Private documents: a per-USER budget, like Help, and a SEPARATE bucket.
-    // These answers run local inference on the operator's own hardware — a
-    // different cost with a different shape — and one bucket would let a busy
-    // Help user starve somebody asking about their own manual, or the reverse.
+    // Private documents: a per-USER budget, not per-IP. Every answer runs
+    // local inference on the operator's own hardware, and the callers here are
+    // authenticated, so the account is the meaningful subject.
     options.AddPolicy(
         NubArca.Api.Endpoints.PrivateDocumentAssistantEndpoints.PrivateChatRateLimitPolicy,
         httpContext =>
@@ -1246,9 +1229,9 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // jobs. AiOptions is bound above (outside this block) so it always resolves.
     builder.Services.AddAiSubstrate();
 
-    // RAG persistence: the indexed corpus, canonical chunk embeddings, the
-    // pgvector accelerator and the indexer. Inert until an operator runs
-    // `rag index`; semantic retrieval stays off until `Rag:SemanticEnabled`.
+    // Owner-private document retrieval and indexing. Inert unless document AI
+    // is enabled; semantic retrieval stays off until
+    // `Rag:Domains:user-documents:SemanticEnabled`.
     builder.Services.AddRagDatabase();
 
     // Slice 93: web remote-staging upload (resumable browser chunks into
@@ -1333,41 +1316,25 @@ builder.Services.Configure<NubArca.Api.Plates.PlatesFaceRedactionOptions>(
 builder.Services.Configure<AiOptions>(
     builder.Configuration.GetSection(AiOptions.SectionName));
 
-// The Assistant substrate and the optional Help feature. Disabled by default;
-// the registration is unconditional so the status endpoint can answer
-// "not enabled" without the container failing to build a service.
-//
-// Nothing registered here can read library content — see HelpAssistantService's
-// constructor. That holds for a LocalTrusted model too: trust decides what a
-// model is ELIGIBLE for, and Help's own operation policy is public product
-// knowledge, whichever side of the boundary the endpoint is on.
+// The Assistant substrate. Disabled by default; the registration is
+// unconditional so the status endpoint can answer "not enabled" without the
+// container failing to build a service.
 builder.Services.Configure<NubArca.Api.Assistant.AssistantOptions>(
     builder.Configuration.GetSection(NubArca.Api.Assistant.AssistantOptions.SectionName));
-// Legacy `ExternalHelp__*`, adapted into one External profile when the
-// `Assistant` section is absent. A deprecation path, not the configuration
-// model — see ExternalHelpOptions.
-builder.Services.Configure<NubArca.Api.Help.ExternalHelpOptions>(
-    builder.Configuration.GetSection(NubArca.Api.Help.ExternalHelpOptions.SectionName));
 builder.Services.AddSingleton<NubArca.Api.Assistant.AssistantModelResolver>();
 builder.Services.AddHttpClient<NubArca.Api.Assistant.IAssistantTextModel,
     NubArca.Api.Assistant.OpenAiCompatibleTextModel>();
 
-// The RAG substrate: named domains, their code-defined privacy policy, and the
-// generic retriever every consumer goes through. `product-help` is one domain
-// and Help is one consumer — the platform is not Help-shaped, so the semantic
-// layer landed BEHIND IRagRetriever rather than beside it.
-//
-// Registered unconditionally: the Product Help corpus ships in the image, so an
-// installation with no database still answers product questions lexically. The
-// indexed corpus and the vector table are added inside the Postgres block.
+// The retrieval substrate: the code-defined domain policy and the retriever
+// document search and the document assistant go through. The owner's corpus
+// and the indexing pipeline are added inside the Postgres block.
 builder.Services.Configure<NubArca.Api.Rag.RagOptions>(
     builder.Configuration.GetSection(NubArca.Api.Rag.RagOptions.SectionName));
 builder.Services.AddRagSubstrate();
-builder.Services.AddScoped<NubArca.Api.Help.HelpAssistantService>();
 
 // Owner-private documents. Bounds for local text extraction, and the one
 // service that answers "from MY documents" — LocalTrusted only, owner derived
-// server-side. Registered unconditionally like Help: with no configured private
+// server-side. Registered unconditionally: with no configured private
 // model it resolves as disabled and presents no surface implying otherwise.
 builder.Services.Configure<NubArca.Api.Ai.Documents.DocumentExtractionOptions>(
     builder.Configuration.GetSection(
@@ -1671,7 +1638,6 @@ app.MapAdminAiEndpoints();
 // owner-private/Vault-exclusion behavior; see that file for the
 // implementation.
 app.MapPeopleEndpoints();
-app.MapHelpEndpoints();
 app.MapPrivateDocumentAssistantEndpoints();
 // Owner's own document-indexing progress (counts only).
 app.MapDocumentIndexingEndpoints();

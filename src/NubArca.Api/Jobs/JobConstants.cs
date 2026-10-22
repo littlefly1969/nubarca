@@ -60,7 +60,6 @@ public static class JobTypes
     public const string AiFacesDetectBackfill = "ai.faces.detect.backfill";
     public const string AiFacesEmbeddingsBackfill = "ai.faces.embeddings.backfill";
     public const string AiFacesClusterBackfill = "ai.faces.cluster.backfill";
-    public const string AiTagsGenerateBackfill = "ai.tags.generate.backfill";
 
     // Owner-private document indexing (Document Intelligence v1): extraction /
     // OCR → chunking → text embeddings → visual index, per source, with

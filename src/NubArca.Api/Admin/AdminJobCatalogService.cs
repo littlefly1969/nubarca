@@ -260,7 +260,6 @@ public sealed class AdminJobCatalogService
             FaceDetectionEnabled: ai.FaceDetectionEnabled,
             FaceEmbeddingsEnabled: ai.FaceEmbeddingsEnabled,
             FaceClusteringEnabled: ai.FaceClusteringEnabled,
-            TagsEnabled: ai.TagsEnabled,
             VideoHlsEnabled: media.VideoHlsEnabled,
             VideoProbeEnabled: media.VideoMetadataProbeEnabled,
             FfmpegPosterEnabled: string.Equals(

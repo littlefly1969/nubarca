@@ -1,6 +1,8 @@
 # Document Intelligence v1 — Architecture Baseline Inventory
 
 Recorded at `682a01c` (NubArca 0.4.0) by reading the code; nothing in this inventory was run in production. Implemented ≠ enabled ≠ operative: section 2 separates them. Line numbers refer to that commit.
+
+> **Historical snapshot.** Since 0.4.6 the Help assistant, the `product-help` and `nubarca-repository` domains, the `rag_*` tables, the `rag` CLI (its `seed-profiles` and `validate-model` moved under `documents`), the late-interaction reranker and the AI tags/captions skeletons no longer exist, and the status endpoint is `GET /api/documents/status`. References to them below describe 0.4.0.
 ---
 
 ## 0. One-paragraph summary
@@ -149,7 +151,7 @@ Memory note: `PdfVisualRenderer.RenderAsync` accumulates **all page PNGs in a Li
 - CLI `documents status --owner` (`src/Cli/DocumentsCliCommands.cs:101-173`): counts per extraction profile, OCR readiness, embedded/missing.
 - CLI `documents visual-status --owner` (l.237-310): `dense_visual_ready`, per-renderer readiness, `office_renderer_enabled`, `late_interaction_ready`, accelerator stats.
 - CLI `rag validate-model`, `rag domains`.
-- HTTP `GET /api/assistant/documents/status` (`src/Endpoints/PrivateDocumentAssistantEndpoints.cs:43-65`): enabled, modelBoundary, knowledgeAvailable, semanticEnabled, embeddingProfile, documents, chunks, reason. **Drops `VisualEnabled/VisualReason`** that the service computes (`PrivateDocumentAssistantService.cs:42-43,156-157`).
+- HTTP `GET /api/documents/status` (`src/Endpoints/PrivateDocumentAssistantEndpoints.cs:43-65`): enabled, modelBoundary, knowledgeAvailable, semanticEnabled, embeddingProfile, documents, chunks, reason. **Drops `VisualEnabled/VisualReason`** that the service computes (`PrivateDocumentAssistantService.cs:42-43,156-157`).
 - `text_private_ready` named in docs is not a field anywhere (guess: docs vocabulary only).
 
 ### 1.15 Assistant private-documents chat
@@ -290,7 +292,7 @@ Cheapest seam for emails (assessment only):
 
 ## 6. Search surface today
 
-- **No document search endpoint.** The only document-facing HTTP endpoints are `GET /api/assistant/documents/status` and `POST /api/assistant/documents/chat` (`PrivateDocumentAssistantEndpoints.cs:43,67`). The chat returns generated text + `[{document, section}]`; no chunk text, no page, no file id, no score.
+- **No document search endpoint.** The only document-facing HTTP endpoints are `GET /api/documents/status` and `POST /api/assistant/documents/chat` (`PrivateDocumentAssistantEndpoints.cs:43,67`). The chat returns generated text + `[{document, section}]`; no chunk text, no page, no file id, no score.
 - `GET /api/search?q=` (`Program.cs:1748-1763`) is **filename/MIME substring search** over FileItems (`FileItemService.cs:640-660`), not content.
 - `rag query` CLI is system-domain diagnostic; there is no `documents query` CLI. `documents visual-evaluate` is the only CLI that runs private retrieval and it prints metrics, not results.
 - Frontend: nothing (§1.16).

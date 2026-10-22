@@ -1,53 +1,40 @@
 using Microsoft.Extensions.Options;
 using NubArca.Api.Ai.TextEmbeddings;
 using NubArca.Api.Rag.Domains;
-using NubArca.Api.Rag.Storage;
 
 namespace NubArca.Api.Rag.Retrieval;
 
-/// The half of retrieval that needs PostgreSQL: the indexed corpus, the vector
-/// table, and the profile resolution that connects them.
+/// The half of retrieval that needs PostgreSQL: the owner's document corpus and
+/// the owner-scoped vector search over it.
 ///
-/// Grouped into one optional dependency rather than four nullable ones, because
-/// they are absent TOGETHER or not at all. A host with no connection string
-/// still answers Product Help questions from the corpus bundled in the image —
-/// lexically, with no index and no vectors — and saying that once here is
-/// clearer than four null checks that each look like they could vary
-/// independently.
+/// Grouped into one optional dependency rather than two nullable ones, because
+/// they are absent TOGETHER or not at all: a host with no AppDbContext has no
+/// documents to retrieve from.
 public sealed record RagDatabaseServices(
-    DatabaseRagCorpusSource Corpus,
-    RagVectorRetriever Vectors,
-    TextEmbeddingResolver Embeddings,
-    RagVectorIndexService VectorIndex,
-    OwnerDocumentCorpusSource? OwnerDocuments = null,
-    OwnerDocumentVectorRetriever? OwnerVectors = null);
+    OwnerDocumentCorpusSource OwnerDocuments,
+    OwnerDocumentVectorRetriever OwnerVectors);
 
-/// The domain-general retriever: lexical, semantic when configured, fused.
+/// The retriever: lexical, semantic when configured, fused.
 ///
 /// Every caller in the product goes through here, and every policy decision that
 /// governs retrieval is made here rather than by the caller:
 ///
 ///  - the DOMAIN is resolved through the code registry, so an unknown key fails
 ///    closed instead of resolving to a permissive default;
-///  - an owner-scoped domain refuses a query with no owner, today, while no such
-///    domain exists — so the check is already there when one does;
-///  - `product-help` refuses a corpus built from a different revision than the
-///    running build, because Help that describes a feature this installation
-///    does not have is worse than no Help;
+///  - an owner-scoped domain refuses a query with no owner before it reads
+///    anything;
 ///  - evidence is stamped with the domain that produced it, which is what lets
 ///    the Assistant refuse a prompt whose evidence does not match what it asked
 ///    for.
 ///
 /// Semantic retrieval is optional everywhere. Disabled, unconfigured, model
-/// missing, pgvector missing and dimension unsupported all produce the same
-/// shape of answer: lexical results, and a mode string saying the semantic path
-/// did not run and why.
+/// missing and dimension unsupported all produce the same shape of answer:
+/// lexical results, and a mode string saying the semantic path did not run and
+/// why.
 public sealed class RagRetriever : IRagRetriever
 {
     private readonly IRagDomainRegistry _domains;
     private readonly RagDatabaseServices? _database;
-    private readonly BundledProductHelpCorpusSource _bundled;
-    private readonly RagLexicalIndexCache _cache;
     private readonly IOptions<RagOptions> _options;
     private readonly IRagSemanticProfileResolver _semantic;
     private readonly ILogger<RagRetriever> _log;
@@ -55,27 +42,16 @@ public sealed class RagRetriever : IRagRetriever
     public RagRetriever(
         IRagDomainRegistry domains,
         RagDatabaseServices? database,
-        BundledProductHelpCorpusSource bundled,
-        RagLexicalIndexCache cache,
         IOptions<RagOptions> options,
         IRagSemanticProfileResolver semantic,
         ILogger<RagRetriever> log)
     {
         _domains = domains;
         _database = database;
-        _bundled = bundled;
-        _cache = cache;
         _options = options;
         _semantic = semantic;
         _log = log;
     }
-
-    /// The revision this process was built from, or empty outside an image.
-    /// The same environment variable the deploy gates read, so "knowledge
-    /// revision == running revision" compares against the SAME provenance the
-    /// rest of the system uses.
-    public static string RunningRevision
-        => Environment.GetEnvironmentVariable("NUBARCA_GIT_SHA") ?? string.Empty;
 
     public async Task<RagRetrievalResult> RetrieveAsync(
         RagQuery query, CancellationToken cancellationToken = default)
@@ -112,50 +88,28 @@ public sealed class RagRetriever : IRagRetriever
             return RagRetrievalResult.Unavailable(
                 query.Domain, built.Reason ?? RagFailureReasons.IndexUnavailable);
         }
-        if (index.Corpus.IsMixedRevision)
-        {
-            // An interrupted reindex left this domain describing two commits at
-            // once. Answering from it would mix two releases in one context.
-            _log.LogWarning(
-                "rag: {Domain} index holds more than one revision; retrieval disabled until a "
-                + "complete reindex finishes", domain.Key);
-            return RagRetrievalResult.Unavailable(query.Domain, RagFailureReasons.MixedRevisionIndex);
-        }
-        if (!AcceptsRevision(domain, index.Corpus.Revision))
-        {
-            _log.LogWarning(
-                "rag: {Domain} index revision does not match the running build; retrieval disabled",
-                domain.Key);
-            return RagRetrievalResult.Unavailable(query.Domain, RagFailureReasons.RevisionMismatch);
-        }
 
         var ranking = RagRankingProfiles.For(query.Domain);
-        var shape = RagQueryShape.For(text, ranking.ExpandAliases);
+        var shape = RagQueryShape.For(text);
         var lexical = index.Search(
             shape, options.EffectiveLexicalCandidates, query.AllowedSourceIds, query.AllowedSourceKinds);
 
-        // PER DOMAIN. The repository stays lexical while Help is hybrid, because
-        // that is what the two of them measured — and skipping the vector path
-        // here rather than inside it keeps a disabled domain from paying for an
-        // embedding call it is going to discard.
+        // Skipping the vector path here rather than inside it keeps a disabled
+        // domain from paying for an embedding call it is going to discard.
         var semanticEnabled = _semantic.Resolve(query.Domain).Enabled;
-        var semantic = (semanticEnabled, _database, domain.RequiresOwner) switch
+        var semantic = (semanticEnabled, _database) switch
         {
-            // Owner-scoped: exact cosine over THIS owner's eligible vectors. A
-            // separate retriever rather than a WHERE clause on the shared one,
-            // because "approximate index plus an owner predicate" is not an
+            // Exact cosine over THIS owner's eligible vectors. A separate
+            // retriever rather than a WHERE clause on a shared one, because
+            // "approximate index plus an owner predicate" is not an
             // owner-prefiltered search — see OwnerDocumentVectorRetriever.
-            (true, { OwnerVectors: { } ownerVectors }, true) =>
+            (true, { OwnerVectors: { } ownerVectors }) =>
                 await ownerVectors.SearchAsync(
                     index, query.OwnerUserId ?? Guid.Empty, text,
                     options.EffectiveVectorCandidates, query.AllowedSourceIds, query.AllowedSourceKinds,
                     cancellationToken),
 
-            (true, { } services, false) =>
-                await services.Vectors.SearchAsync(
-                    index, text, options.EffectiveVectorCandidates, cancellationToken),
-
-            (true, _, _) => RagVectorSearchOutcome.Unavailable(RagFailureReasons.IndexUnavailable),
+            (true, _) => RagVectorSearchOutcome.Unavailable(RagFailureReasons.IndexUnavailable),
             _ => RagVectorSearchOutcome.Unavailable(RagFailureReasons.EmbeddingDisabled),
         };
 
@@ -189,80 +143,8 @@ public sealed class RagRetriever : IRagRetriever
                 semantic.ProfileKey, index.Corpus.Revision);
     }
 
-    public async Task<RagDomainStatus> GetStatusAsync(
-        RagDomainKey domain, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
-    {
-        if (!_domains.TryGet(domain.Value, out var definition))
-        {
-            return new RagDomainStatus(domain, false, null, 0, 0, null, 0, 0, false,
-                RagFailureReasons.DomainUnknown);
-        }
-
-        // Status is a READ of the same corpus, so it obeys the same rule: an
-        // owner-scoped domain has no installation-wide status to report, and
-        // asking without an owner answers `rag_owner_required` rather than
-        // reporting somebody's counts to whoever asked.
-        if (definition.RequiresOwner && (ownerUserId is not { } o || o == Guid.Empty))
-        {
-            return new RagDomainStatus(domain, false, null, 0, 0, null, 0, 0, false,
-                RagFailureReasons.OwnerRequired);
-        }
-
-        var built = await BuildIndexAsync(definition, ownerUserId, cancellationToken);
-        var index = built.Index;
-        var revision = index?.Corpus.Revision;
-        var mixed = index?.Corpus.IsMixedRevision == true;
-        var available = index is { IsEmpty: false }
-                        && !mixed
-                        && AcceptsRevision(definition, revision ?? string.Empty);
-
-        var resolution = _database is null
-            ? TextEmbeddingResolution.Unavailable(RagFailureReasons.IndexUnavailable)
-            : await _database.Embeddings.ResolveAsync(domain, cancellationToken);
-        long embeddings = 0, vectors = 0;
-        var semanticAvailable = false;
-        if (resolution.IsAvailable && _database is not null)
-        {
-            // Canonical and accelerated counted SEPARATELY, and both scoped to
-            // this domain. Reporting one number for both would hide the only
-            // discrepancy `rag coverage` exists to surface: embeddings that
-            // exist but were never mirrored into the vector table.
-            embeddings = await _database.VectorIndex.CountCanonicalAsync(
-                domain.Value, resolution.Profile!.Id, cancellationToken);
-            vectors = await _database.VectorIndex.CountIndexedAsync(
-                domain.Value, resolution.Profile.Id, cancellationToken);
-            semanticAvailable = await _database.VectorIndex.IsBackendAvailableAsync(
-                resolution.Profile.Dimension, cancellationToken);
-        }
-
-        var reason = available
-            ? (semanticAvailable ? null : resolution.Reason ?? RagFailureReasons.PgvectorUnavailable)
-            : index is null or { IsEmpty: true }
-                ? built.Reason ?? RagFailureReasons.IndexUnavailable
-                : mixed
-                    ? RagFailureReasons.MixedRevisionIndex
-                    : RagFailureReasons.RevisionMismatch;
-
-        return new RagDomainStatus(
-            domain,
-            available,
-            string.IsNullOrEmpty(revision) ? null : revision,
-            index?.Corpus.Chunks.Select(c => c.SourceKey).Distinct(StringComparer.Ordinal).Count() ?? 0,
-            index?.ChunkCount ?? 0,
-            resolution.Profile?.Key,
-            embeddings,
-            vectors,
-            semanticAvailable,
-            reason);
-    }
-
     // ---- corpus ------------------------------------------------------------
 
-    /// The database index wins when it has content; the bundled Product Help
-    /// corpus is the fallback. Only the database index can carry embeddings, so
-    /// preferring it is also what makes semantic Help possible at all — and
-    /// falling back is what keeps Help working on an installation that has never
-    /// run `rag index`.
     /// An index, or the sanitized reason there is none.
     ///
     /// The reason exists because "empty" and "too large to hold" are opposite
@@ -279,93 +161,44 @@ public sealed class RagRetriever : IRagRetriever
     private async Task<IndexOutcome> BuildIndexAsync(
         RagDomainDefinition domain, Guid? ownerUserId, CancellationToken cancellationToken)
     {
-        var key = domain.DomainKey;
+        // AN OWNER-SCOPED INDEX IS BUILT FRESH, EVERY TIME, AND NEVER CACHED.
+        //
+        // A cache keyed by (domain, owner) would keep every questioner's private
+        // index resident for the life of the process — an unbounded map of
+        // people's documents, held in memory, that nothing evicts. And it would
+        // make "which index does this caller get" a question answered by a cache
+        // key, where being wrong once means answering one person from another's
+        // documents. Building it per question costs a scan of ONE person's text.
+        if (!domain.RequiresOwner) return IndexOutcome.None;
+        if (ownerUserId is not { } owner || owner == Guid.Empty) return IndexOutcome.None;
+        if (_database?.OwnerDocuments is not { } documents) return IndexOutcome.None;
 
-        // AN OWNER-SCOPED DOMAIN IS BUILT FRESH, EVERY TIME, AND NEVER CACHED.
+        // THE CEILING IS ENFORCED BEFORE THE INDEX IS BUILT, NOT AFTER.
         //
-        // The cache is keyed by domain, and widening that key to (domain, owner)
-        // would be two lines and two problems. It would keep every questioner's
-        // private index resident for the life of the process — an unbounded map
-        // of people's documents, held in memory, that nothing evicts. And it
-        // would make "which index does this caller get" a question answered by
-        // a cache key, where being wrong once means answering one person from
-        // another's documents.
+        // A private corpus is assembled per request from one person's rows, so
+        // without this it would read an unbounded corpus straight into memory,
+        // once per question, on a shared process.
         //
-        // Building it per question costs a scan of ONE person's text. That is a
-        // corpus of hundreds to a few thousand chunks, not the twenty-three
-        // thousand the repository domain has, and it is the right trade for the
-        // one domain where a cache-key bug is a privacy incident.
-        if (domain.RequiresOwner)
+        // Read max + 1 and refuse at max + 1. That is what makes the bound
+        // detectable rather than invisible: `Take(max)` would silently hand back
+        // an arbitrary alphabetical prefix of somebody's library, and an answer
+        // drawn from a fraction of a person's documents is indistinguishable, to
+        // them, from an answer drawn from all of them. A refusal is legible; a
+        // quiet truncation is a wrong answer with a confident tone.
+        var ceiling = _options.Value.EffectiveMaxIndexedChunks;
+        var corpus = await documents.LoadAsync(owner, ceiling + 1, cancellationToken);
+        if (corpus.Chunks.Count > ceiling)
         {
-            if (ownerUserId is not { } owner || owner == Guid.Empty) return IndexOutcome.None;
-            if (_database?.OwnerDocuments is not { } documents) return IndexOutcome.None;
-
-            // THE CEILING IS ENFORCED BEFORE THE INDEX IS BUILT, NOT AFTER.
-            //
-            // Every other domain is bounded at INDEX time, by RagIndexer, which
-            // refuses a corpus past `MaxIndexedChunks`. A private corpus never
-            // passes through the indexer at all — it is assembled per request
-            // from one person's rows — so without this it was the one path that
-            // read an unbounded corpus straight into memory, once per question,
-            // on a shared process.
-            //
-            // Read max + 1 and refuse at max + 1. That is what makes the bound
-            // detectable rather than invisible: `Take(max)` would silently hand
-            // back an arbitrary alphabetical prefix of somebody's library, and
-            // an answer drawn from a fraction of a person's documents is
-            // indistinguishable, to them, from an answer drawn from all of them.
-            // A refusal is legible; a quiet truncation is a wrong answer with a
-            // confident tone.
-            var ceiling = _options.Value.EffectiveMaxIndexedChunks;
-            var corpus = await documents.LoadAsync(owner, ceiling + 1, cancellationToken);
-            if (corpus.Chunks.Count > ceiling)
-            {
-                // Count only — never the owner, never a name, never a title.
-                _log.LogWarning(
-                    "rag: {Domain} corpus exceeds the configured chunk ceiling ({Ceiling}); "
-                    + "retrieval refused", domain.Key, ceiling);
-                return IndexOutcome.Refused(RagFailureReasons.CorpusTooLarge);
-            }
-
-            return corpus.IsEmpty
-                ? IndexOutcome.None
-                : IndexOutcome.Built(new RagLexicalIndex(corpus, RagRankingProfiles.For(key)));
+            // Count only — never the owner, never a name, never a title.
+            _log.LogWarning(
+                "rag: {Domain} corpus exceeds the configured chunk ceiling ({Ceiling}); "
+                + "retrieval refused", domain.Key, ceiling);
+            return IndexOutcome.Refused(RagFailureReasons.CorpusTooLarge);
         }
 
-        if (_database is { } services)
-        {
-            var databaseSignature = await services.Corpus.GetSignatureAsync(key, cancellationToken);
-            if (databaseSignature != "empty")
-            {
-                return IndexOutcome.Built(await _cache.GetOrBuildAsync(
-                    key, databaseSignature, ct => services.Corpus.LoadAsync(key, ct), cancellationToken));
-            }
-        }
-
-        var bundledSignature = await _bundled.GetSignatureAsync(key, cancellationToken);
-        if (bundledSignature == "empty") return IndexOutcome.None;
-
-        return IndexOutcome.Built(await _cache.GetOrBuildAsync(
-            key, bundledSignature, ct => _bundled.LoadAsync(key, ct), cancellationToken));
-    }
-
-    /// REVISION GATE, for the domain that ships with a release.
-    ///
-    /// Help answering from a newer `main` would tell an operator to click
-    /// something their installation does not have. An UNKNOWN running revision —
-    /// a development run outside the image — cannot be compared, so the corpus
-    /// is accepted; a KNOWN one that disagrees is refused.
-    ///
-    /// The repository domain is deliberately NOT gated. It is a development and
-    /// diagnostics corpus whose whole point is being able to ask about a
-    /// checkout, including one that is not what is running; its revision is
-    /// REPORTED on every answer instead.
-    private static bool AcceptsRevision(RagDomainDefinition domain, string corpusRevision)
-    {
-        if (domain.Key != RagDomains.ProductHelp) return true;
-        var running = RunningRevision;
-        if (string.IsNullOrEmpty(running)) return true;
-        return string.Equals(corpusRevision, running, StringComparison.Ordinal);
+        return corpus.IsEmpty
+            ? IndexOutcome.None
+            : IndexOutcome.Built(new RagLexicalIndex(corpus, RagRankingProfiles.For(domain.DomainKey)));
     }
 
     // ---- the evidence gate --------------------------------------------------
@@ -440,10 +273,10 @@ public sealed class RagRetriever : IRagRetriever
                 // derived independently, which is the only version of the check
                 // that can fail when something is wrong.
                 //
-                // A system chunk carries null and stays null. The gate refuses
-                // unstamped evidence for an owner-scoped domain, so a system
-                // chunk that reached a private result fails there rather than
-                // being relabelled with the caller's id on the way past.
+                // An unstamped chunk carries null and stays null. The gate
+                // refuses unstamped evidence for an owner-scoped domain, so such
+                // a chunk fails there rather than being relabelled with the
+                // caller's id on the way past.
                 OwnerUserId: chunk.OwnerUserId,
                 // Provenance, copied from the chunk like the owner: which
                 // source and where in it. Null for every system domain.

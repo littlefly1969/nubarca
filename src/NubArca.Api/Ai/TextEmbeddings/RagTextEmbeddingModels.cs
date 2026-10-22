@@ -107,7 +107,7 @@ public static class RagTextEmbeddingModels
     /// the first commit rather than retrofitted when the second model needs it.
     public const string MultilingualE5SmallKey = "multilingual-e5-small";
 
-    /// The profile key an operator sets in `Rag:TextEmbeddingProfileKey`.
+    /// The profile key an operator sets in `Rag:Domains:user-documents:TextEmbeddingProfileKey`.
     public const string MultilingualE5SmallProfileKey = "rag-text-multilingual-e5-small-v1";
 
     public const int MultilingualE5SmallDimension = 384;

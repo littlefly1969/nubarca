@@ -31,22 +31,10 @@ public sealed class DocumentVisualOptions
     /// text-only rather than the whole feature refusing to start.
     public bool RenderOfficeEnabled { get; set; }
 
-    /// Whether the late-interaction reranker runs. Off unless a candidate model
-    /// cleared the promotion gate AND an operator turned it on.
-    public bool LateInteractionEnabled { get; set; }
-
-    /// The late-interaction profile key. Empty means none is promoted, which is
-    /// this release's shipped state.
-    public string? LateProfileKey { get; set; }
-
     /// Unix socket the Office renderer worker listens on. A socket rather than a
     /// TCP port so the worker can run with no network stack at all — see
     /// docker-compose.document-renderer.yml.
     public string? OfficeRendererSocketPath { get; set; }
-
-    /// Unix socket for the optional late-interaction model worker. Absent
-    /// unless a late profile was promoted and deployed.
-    public string? LateInteractionSocketPath { get; set; }
 
     // ---- rendering bounds ---------------------------------------------------
 
@@ -96,20 +84,7 @@ public sealed class DocumentVisualOptions
     public int MaxConcurrentVisualDocuments { get; set; } = 1;
     public int MaxConcurrentVisualPageEmbeddings { get; set; } = 1;
 
-    // ---- multi-vector ceilings ---------------------------------------------
-
-    /// The declared ceiling on a late-interaction model's output. A model that
-    /// produces more FAILS THE PROFILE — vectors are never truncated to fit,
-    /// because a MaxSim over a truncated page is a score for a document that
-    /// does not exist.
-    public int MaxVectorsPerVisualUnit { get; set; } = 1_030;
-
-    public int MaxLateInteractionDimension { get; set; } = 256;
-
-    public int MaxMultiVectorBytesPerUnit { get; set; } = 2 * 1024 * 1024;
-
-    /// How many dense candidates the exact MaxSim reranker will load and score.
-    public int MaxMultiVectorCandidateUnits { get; set; } = 100;
+    // ---- exact-search ceiling ---------------------------------------------
 
     /// The ceiling on an owner's visual corpus when there is no pgvector
     /// accelerator and dense search is exact. Past it, visual retrieval reports
@@ -167,12 +142,6 @@ public sealed class DocumentVisualOptions
     public int EffectiveMaxConcurrentVisualDocuments => Math.Clamp(MaxConcurrentVisualDocuments, 1, 16);
     public int EffectiveMaxConcurrentVisualPageEmbeddings
         => Math.Clamp(MaxConcurrentVisualPageEmbeddings, 1, 16);
-    public int EffectiveMaxVectorsPerVisualUnit => Math.Clamp(MaxVectorsPerVisualUnit, 1, 8_192);
-    public int EffectiveMaxLateInteractionDimension => Math.Clamp(MaxLateInteractionDimension, 1, 4_096);
-    public int EffectiveMaxMultiVectorBytesPerUnit
-        => Math.Clamp(MaxMultiVectorBytesPerUnit, 1_024, 32 * 1024 * 1024);
-    public int EffectiveMaxMultiVectorCandidateUnits
-        => Math.Clamp(MaxMultiVectorCandidateUnits, 1, 1_000);
     public int EffectiveMaxVisualUnitsPerOwnerExactFallback
         => Math.Clamp(MaxVisualUnitsPerOwnerExactFallback, 1, 1_000_000);
     public int EffectiveVisualUnitCandidates => Math.Clamp(VisualUnitCandidates, 1, 500);

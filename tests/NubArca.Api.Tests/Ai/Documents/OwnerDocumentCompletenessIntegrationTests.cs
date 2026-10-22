@@ -513,8 +513,6 @@ public sealed class OwnerDocumentCompletenessIntegrationTests : IDisposable
     {
         var rag = Options.Create(new RagOptions
         {
-            SemanticEnabled = semantic,
-            TextEmbeddingProfileKey = EmbeddingProfileKey,
             Domains = semantic
                 ? new Dictionary<string, RagDomainSemanticOptions>(StringComparer.OrdinalIgnoreCase)
                 {

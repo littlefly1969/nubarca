@@ -921,10 +921,8 @@ public sealed class OwnerDocumentIndexer
 
     /// Local passage embeddings for THIS OWNER's chunks only.
     ///
-    /// The profile is resolved for `user-documents`, which never inherits the
-    /// installation-wide semantic settings — so a person's documents are
-    /// embedded because somebody enabled it for that domain, not because Help
-    /// has been semantic since last year.
+    /// The profile is resolved for `user-documents`, by name — so a person's
+    /// documents are embedded because somebody enabled it for that domain.
     private async Task<(string?, string?)> EmbedAsync(
         Guid ownerUserId, IReadOnlyList<Guid> seenDocumentTextIds, bool partial,
         IndexState state, CancellationToken cancellationToken)
