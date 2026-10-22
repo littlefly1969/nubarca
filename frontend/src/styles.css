@@ -6986,65 +6986,6 @@ video.lightbox-image {
 .plate-detection-text { font-weight: 700; letter-spacing: 0.06em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .plate-detection-confidence { font-size: 0.8rem; }
 
-/* Aesthetics Lab — score comparison matrix. The table deliberately scrolls
-   horizontally so all 12 metrics remain readable even for a large selection. */
-.aesthetics-comparison {
-  width: min(96vw, 1400px);
-  max-width: 1400px;
-  max-height: 92vh;
-  overflow: auto;
-}
-.aesthetics-comparison .modal-header > div { min-width: 0; }
-.aesthetics-comparison .modal-header h2 { margin-bottom: 0.2rem; }
-.aesthetics-comparison .modal-header p { margin: 0; }
-.aesthetics-comparison-scroll {
-  margin-top: 0.75rem;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-}
-.aesthetics-comparison-table {
-  width: max-content;
-  min-width: 100%;
-  border-collapse: collapse;
-  font-variant-numeric: tabular-nums;
-}
-.aesthetics-comparison-table th,
-.aesthetics-comparison-table td {
-  padding: 0.55rem 0.75rem;
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  text-align: center;
-  white-space: nowrap;
-}
-.aesthetics-comparison-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  max-width: 13rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  background: var(--bg);
-}
-.aesthetics-comparison-table thead th:first-child,
-.aesthetics-comparison-table tbody tr:not(.aesthetics-comparison-group) th {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  text-align: left;
-  background: var(--bg);
-}
-.aesthetics-comparison-table thead th:first-child { z-index: 3; }
-.aesthetics-comparison-group th {
-  text-align: left;
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
-}
-.aesthetics-comparison-table td.is-best {
-  color: var(--accent);
-  font-weight: 600;
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
 /* ============================================================================
    Gallery workspace (redesign) — one photo-first workspace: sticky header
    (NL input + Filters + Sort + count + chips), a unified right-side filter

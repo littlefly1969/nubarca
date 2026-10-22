@@ -283,9 +283,9 @@ describe('MediaWorkspace', () => {
   });
 
   it('builds no destination the user is not permitted to use', async () => {
-    // The bug this closes: the Plates and Beauty destinations used to be built
-    // from the page with no permission check at all, so a user with no
-    // Laboratory access was offered two doors that answer 403.
+    // The bug this closes: the Plates destination used to be built from the
+    // page with no permission check at all, so a user with no Laboratory
+    // access was offered a door that answers 403.
     installFetchMock({
       'GET /api/media': () => jsonResponse(page([imageItem])),
       'GET /api/albums': () => jsonResponse([]),
@@ -301,7 +301,6 @@ describe('MediaWorkspace', () => {
             searchPlaceholder="Cerca"
             photoDestinations={[
               { id: 'plates', run: () => 'x' },
-              { id: 'beauty-lab', run: () => 'x' },
             ]}
           />
         </AuthedWrapper>
@@ -316,7 +315,6 @@ describe('MediaWorkspace', () => {
     await userEvent.click(screen.getByTestId('media-sel-add-to'));
     expect(screen.getByTestId('media-sel-album')).toBeInTheDocument();
     expect(screen.queryByTestId('media-sel-plates')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('media-sel-beauty')).not.toBeInTheDocument();
 
     await userEvent.keyboard('{Escape}');
     await userEvent.click(screen.getByTestId('media-sel-move-to'));
@@ -386,7 +384,6 @@ describe('MediaWorkspace', () => {
             searchPlaceholder="Cerca"
             photoDestinations={[
               { id: 'plates', run: () => 'x' },
-              { id: 'beauty-lab', run: () => 'x' },
             ]}
           />
         </AuthedWrapper>
@@ -399,7 +396,6 @@ describe('MediaWorkspace', () => {
     await userEvent.click(controls[0]);
     await userEvent.click(await screen.findByTestId('media-sel-add-to'));
     expect(screen.getByTestId('media-sel-plates')).toBeInTheDocument();
-    expect(screen.getByTestId('media-sel-beauty')).toBeInTheDocument();
     await userEvent.keyboard('{Escape}');
 
     // Adding the video makes the selection mixed: a photo-only action must not
@@ -408,7 +404,6 @@ describe('MediaWorkspace', () => {
     await userEvent.click(screen.getByTestId('media-sel-add-to'));
     expect(screen.getByTestId('media-sel-album')).toBeInTheDocument();
     expect(screen.queryByTestId('media-sel-plates')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('media-sel-beauty')).not.toBeInTheDocument();
   });
 
   it('files the whole selection through the common picker, then clears it', async () => {

@@ -4,7 +4,7 @@
 //   A. STARTUP PREFETCH  (startBackgroundUpdateCheck)
 //      Runs at most once per JS process, never blocks the UI, and NEVER
 //      reloads. A downloaded update stays pending until a later cold launch —
-//      an automatic reload would interrupt a slideshow or a Beauty Lab run.
+//      an automatic reload would interrupt a running slideshow.
 //
 //   B. EXPLICIT USER CHECK  (checkForUpdateNow / applyPendingUpdate)
 //      Driven by the Updates screen. May run again after an earlier no-update

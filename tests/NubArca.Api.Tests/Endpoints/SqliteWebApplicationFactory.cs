@@ -147,7 +147,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             {
                 "Login", "Share", "ExportCreate", "VaultUnlock",
                 "TvPairingStart", "TvPersonalUnlock", "Party", "PartyMedia",
-                "PartyUpload", "PartyMessage", "BeautyLabUpload", "PartyFaceSearch",
+                "PartyUpload", "PartyMessage", "PartyFaceSearch",
                 "PartyGameRead", "PartyGameVote", "PartyRsvp", "PartyInvitationSend", "PartyInvitationShare",
                 "PartyCrewInvite", "PartyCrewCode", "PartyCrewVerify",
                 "AlbumShareUpload", "AlbumShareCode",
@@ -470,22 +470,6 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddNubArcaPlates();
             // MailArchive: mirrors the production/CLI registration.
             services.AddNubArcaMailArchive(context.Configuration);
-            // Aesthetics Lab: mirror production/CLI registration, then override
-            // the sidecar client with a strict FAKE so worker analysis tests
-            // never load the real model. AestheticsOptions binds from config
-            // (tests set HumanAesExpert:* via extraSettings when needed).
-            services.Configure<NubArca.Api.Aesthetics.AestheticsOptions>(
-                context.Configuration.GetSection(NubArca.Api.Aesthetics.AestheticsOptions.SectionName));
-            services.AddScoped<NubArca.Api.Aesthetics.IAestheticLabService,
-                NubArca.Api.Aesthetics.AestheticLabService>();
-            services.AddScoped<NubArca.Api.Aesthetics.IAestheticAnalysisService,
-                NubArca.Api.Aesthetics.AestheticAnalysisService>();
-            // TV "Beauty Lab" QR mobile-upload capability service (mirror prod).
-            services.AddScoped<NubArca.Api.Aesthetics.IAestheticUploadSessionService,
-                NubArca.Api.Aesthetics.AestheticUploadSessionService>();
-            services.AddSingleton<NubArca.Api.Tests.Aesthetics.FakeAestheticModelClient>();
-            services.AddScoped<NubArca.Api.Aesthetics.Sidecar.IAestheticModelClient>(
-                sp => sp.GetRequiredService<NubArca.Api.Tests.Aesthetics.FakeAestheticModelClient>());
             // Post-ingestion media pipeline (direct-upload → background media work).
             services.AddScoped<NubArca.Api.Ingestion.IPostIngestionMediaPipelineService,
                 NubArca.Api.Ingestion.PostIngestionMediaPipelineService>();
@@ -917,9 +901,6 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
         }
 
         pooled.Host.Services.GetRequiredService<StorageStatsCache>().Clear();
-        pooled.Host.Services
-            .GetRequiredService<NubArca.Api.Tests.Aesthetics.FakeAestheticModelClient>()
-            .Reset();
         pooled.Host.Services.GetRequiredService<RecordingEmailSender>().Reset();
     }
 

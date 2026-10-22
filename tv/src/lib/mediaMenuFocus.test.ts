@@ -147,7 +147,6 @@ const MEDIA_WALLS = {
   'AlbumItemsScreen.tsx': readFileSync(new URL('../screens/AlbumItemsScreen.tsx', import.meta.url), 'utf8'),
   'PersonalAlbumsScreen.tsx': readFileSync(new URL('../screens/PersonalAlbumsScreen.tsx', import.meta.url), 'utf8'),
   'PersonalLibraryScreen.tsx': readFileSync(new URL('../screens/PersonalLibraryScreen.tsx', import.meta.url), 'utf8'),
-  'BeautyLabScreen.tsx': readFileSync(new URL('../screens/BeautyLabScreen.tsx', import.meta.url), 'utf8'),
 };
 
 const MENU_SCREENS = {
@@ -202,7 +201,6 @@ test('every focusable command overlay is a trapping focus scope', () => {
   const railed = {
     'screens/AlbumItemsScreen.tsx': /<View style=\{\[styles\.commandBar/,
     'screens/PersonalLibraryScreen.tsx': /<View style=\{\[styles\.commandBar/,
-    'screens/BeautyLabScreen.tsx': /<View style=\{styles\.menu\}/,
   };
   for (const [path, plainView] of Object.entries(railed)) {
     const source = readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');

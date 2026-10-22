@@ -4,6 +4,25 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.5 — 2026-10-22
+
+### Aesthetics Lab removed
+
+- **The experimental Aesthetics Lab is gone**: the web page (`/lab/aesthetics`),
+  the gallery action that added photos to it, the TV Beauty Lab with its QR
+  phone upload, the `laboratory.aesthetics` permission and the HumanAesExpert
+  sidecar with its install script, Compose overlay and `HumanAesExpert__*`
+  settings. The Laboratory keeps Plates.
+- **Migration `RemoveAestheticsLab` deletes what the lab stored.** Before
+  dropping its six tables it gives back the blob references the lab held: a
+  photo that was also in the library keeps its library reference, while an
+  image or rendition only the lab used drops to zero and is reclaimed by the
+  blob janitor after the usual grace period. It also removes queued lab
+  analysis jobs and the retired permission from every role. It is not an
+  automatic migration: it runs through the manual, backed-up path.
+- **Older TV builds**: until the TV receives the OTA that removes the Beauty
+  Lab entry, choosing it there reaches endpoints that now answer 404.
+
 ## 0.4.4 — 2026-10-22
 
 ### Mail and document search are enabled per role

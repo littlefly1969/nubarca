@@ -39,12 +39,12 @@ public static class Permissions
     // import already under way (the run ends cancelled, resumable later).
     public const string MailAccess = "mail.access";
 
-    // The Laboratory shell plus its two independent sections. A section always
-    // requires the shell as well, so `laboratory.plates` alone grants nothing:
-    // see PermissionPolicies.LaboratoryPlates.
+    // The Laboratory shell plus its section. A section always requires the
+    // shell as well, so `laboratory.plates` alone grants nothing: see
+    // PermissionPolicies.LaboratoryPlates.
     public const string LaboratoryAccess = "laboratory.access";
     public const string LaboratoryPlates = "laboratory.plates";
-    public const string LaboratoryAesthetics = "laboratory.aesthetics";
+
 
     // The Cloud Functions hub and the tools reached from it: bulk staging
     // upload, the date-taken organizer and archive export. TV devices is the

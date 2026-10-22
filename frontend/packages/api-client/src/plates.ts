@@ -132,7 +132,7 @@ export interface PlateAddFromGalleryResult {
 
 // Adds EXISTING owner gallery images into the hidden plates container by
 // fileItemId. No bytes are copied (blob reference acquire), idempotent on active
-// membership, and analysis is NOT started. Mirrors addAestheticLabFromGallery.
+// membership, and analysis is NOT started.
 export function addPlateImagesFromGallery(
   fileItemIds: string[],
   signal?: AbortSignal,

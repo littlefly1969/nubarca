@@ -45,7 +45,6 @@ import { PinEntryScreen } from './src/screens/PinEntryScreen';
 import { PersonalHomeScreen } from './src/screens/PersonalHomeScreen';
 import { PersonalLibraryScreen } from './src/screens/PersonalLibraryScreen';
 import { PersonalAlbumsScreen } from './src/screens/PersonalAlbumsScreen';
-import { BeautyLabScreen } from './src/screens/BeautyLabScreen';
 import { UpdateScreen } from './src/screens/UpdateScreen';
 import { PartyDisplayScreen } from './src/screens/PartyDisplayScreen';
 import { PartyGuestbookScreen } from './src/screens/PartyGuestbookScreen';
@@ -314,8 +313,8 @@ function AppInner(): React.JSX.Element {
   // change (or server-side revocation) evicts this TV promptly — not merely on
   // the next user action. 403 pin_changed → mode selector with the notice;
   // any other 403 → plain lock; 401 → pairing.
-  // The ONE 15s grant re-validation loop spans the Personal Area AND the Beauty
-  // Lab (both live behind the same in-memory grant); no extra permanent timer.
+  // The ONE 15s grant re-validation loop spans every Personal Area screen
+  // (they live behind the same in-memory grant); no extra permanent timer.
   // `isPersonalState` is the single predicate — a personal screen added without
   // it would silently escape re-validation.
   const inPersonalArea = isPersonalState(flow);
@@ -487,7 +486,6 @@ function AppInner(): React.JSX.Element {
         <ModeSelectScreen
           onChooseParty={onChooseParty}
           onChoosePersonal={() => rawDispatch({ type: 'CHOOSE_PERSONAL' })}
-          onChooseBeautyLab={() => rawDispatch({ type: 'CHOOSE_BEAUTY_LAB' })}
           onChooseUpdates={() => rawDispatch({ type: 'CHOOSE_UPDATES' })}
           notice={flow.notice === 'pinChanged' ? t('mode.pinChangedNotice') : null}
         />
@@ -584,14 +582,6 @@ function AppInner(): React.JSX.Element {
           onGrantInvalid={onLock}
           onSessionInvalid={onSessionInvalid}
           selection={personalSelection}
-        />
-      )}
-      {flow.name === 'beautyLab' && (
-        <BeautyLabScreen
-          // BACK from the Beauty Lab root LOCKS and returns to mode selection —
-          // exactly the Personal Area security behaviour (onLock revokes the grant).
-          onLock={onLock}
-          onSessionInvalid={onSessionInvalid}
         />
       )}
       {flow.name === 'party' && partyScreen.name === 'albums' && (

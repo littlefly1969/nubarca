@@ -16,7 +16,6 @@ using Microsoft.OpenApi;
 using Microsoft.AspNetCore.Authorization;
 using NubArca.Api.Access;
 using NubArca.Api.Admin;
-using NubArca.Api.Aesthetics;
 using NubArca.Api.Ai;
 using NubArca.Api.Ai.Photos;
 using NubArca.Api.Albums;
@@ -62,7 +61,6 @@ const string PartyFaceSearchRateLimitPolicy = "party-face-search";
 const string PartyMessageRateLimitPolicy = "party-message";
 const string SemanticSearchRateLimitPolicy = "semantic-search";
 const string TvPersonalInterpretRateLimitPolicy = "tv-personal-interpret";
-const string BeautyLabUploadRateLimitPolicy = "beauty-lab-upload";
 // Public password-recovery request/reset. The SECOND axis (per normalized
 // email) lives in PasswordRecoveryThrottle: an IP limit alone lets a
 // distributed caller hammer one mailbox, an email limit alone lets one host
@@ -324,10 +322,6 @@ var partyPublicMediaQueueLimit = builder.Configuration.GetValue<int?>("RateLimit
 // a tighter per-IP window than the view/download policy.
 var partyUploadPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyUpload:PermitLimit") ?? 30;
 var partyUploadWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyUpload:WindowSeconds") ?? 60;
-// Beauty Lab QR mobile-upload: a token-bearing phone posting photos. Same
-// tight per-IP window as the party upload path.
-var beautyLabUploadPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:BeautyLabUpload:PermitLimit") ?? 30;
-var beautyLabUploadWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:BeautyLabUpload:WindowSeconds") ?? 60;
 // Anonymous party MESSAGES cost almost nothing to serve, which is exactly why
 // they need their own limit rather than none: a 120-character insert is the
 // cheapest way to fill a party's TV with noise. Tighter than viewing, looser
@@ -659,16 +653,6 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true,
             }));
 
-    options.AddPolicy(BeautyLabUploadRateLimitPolicy, httpContext =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = beautyLabUploadPermitLimit,
-                Window = TimeSpan.FromSeconds(beautyLabUploadWindowSeconds),
-                QueueLimit = 0,
-                AutoReplenishment = true,
-            }));
 
     options.AddPolicy(PartyMessageRateLimitPolicy, httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
@@ -1245,13 +1229,6 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // MailArchive (owner-private PST import + consultation).
     builder.Services.AddNubArcaMailArchive(builder.Configuration);
 
-    // Aesthetics Lab (Laboratorio estetico): owner-private, opt-in, EXPERIMENTAL
-    // isolated space for local HumanAesExpert analysis. Standalone entity (never
-    // a FileItem); reuses the shared blob store + on-demand derivative rendering,
-    // but never enters Files/Gallery/People/Party/TV/Private Vault/shares. The
-    // analysis runs on the worker (Compute band) via the internal HumanAesExpert
-    // sidecar. Disabled by default (HumanAesExpert:Enabled=false).
-    builder.Services.AddNubArcaAesthetics();
 
     // Post-ingestion media pipeline: after a normal-library upload, enqueue the
     // bounded, idempotent background work (metadata / derivatives / AI embedding)
@@ -1287,11 +1264,6 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddSingleton<IHostedService>(sp =>
         sp.GetRequiredService<NubArca.Api.Uploads.ResumableUploadSweeper>());
 
-    // TV "Beauty Lab" QR upload-session sweeper — reclaims expired/revoked rows
-    // (self-disables unless HumanAesExpert:UploadSessionCleanupEnabled = true).
-    builder.Services.AddSingleton<NubArca.Api.Aesthetics.AestheticUploadSessionCleanupService>();
-    builder.Services.AddSingleton<IHostedService>(sp =>
-        sp.GetRequiredService<NubArca.Api.Aesthetics.AestheticUploadSessionCleanupService>());
 
     builder.Services.AddSingleton<BlobJanitor>();
     builder.Services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<BlobJanitor>());
@@ -1354,11 +1326,6 @@ builder.Services.Configure<NubArca.Api.Plates.PlatesAlprOptions>(
     builder.Configuration.GetSection(NubArca.Api.Plates.PlatesAlprOptions.SectionName));
 builder.Services.Configure<NubArca.Api.Plates.PlatesFaceRedactionOptions>(
     builder.Configuration.GetSection(NubArca.Api.Plates.PlatesFaceRedactionOptions.SectionName));
-// Aesthetics Lab + HumanAesExpert sidecar config. Bound unconditionally so the
-// owner-scoped container key is stable everywhere; DISABLED by default
-// (HumanAesExpert:Enabled=false, empty SidecarBaseUrl).
-builder.Services.Configure<NubArca.Api.Aesthetics.AestheticsOptions>(
-    builder.Configuration.GetSection(NubArca.Api.Aesthetics.AestheticsOptions.SectionName));
 
 // AI substrate (Phase 0A): options only, bound outside the Postgres conditional
 // so they always resolve. AI is disabled by default; Phase 0A wires no AI
@@ -1828,12 +1795,6 @@ app.MapPartyCrewOwnerEndpoints();
 app.MapPartyCrewAuthEndpoints();
 app.MapPartyCrewEndpoints();
 
-// Aesthetics Lab / Beauty Lab endpoints — the public TV "Beauty Lab" QR
-// mobile upload below, plus the owner-facing lab surface further down —
-// live in Endpoints/AestheticsEndpoints.cs — extracted as part of the
-// modular-monolith cleanup. Same routes, same owner-private/token-scoped
-// behavior; see that file for the implementation.
-app.MapAestheticsEndpoints();
 
 // Party face-search endpoints are also mapped by
 // Endpoints/PartyEndpoints.cs (see app.MapPartyEndpoints() above).
@@ -1856,10 +1817,6 @@ app.MapPrivateVaultEndpoints();
 app.MapPlatesEndpoints();
 app.MapMailArchiveEndpoints();
 
-// Aesthetics Lab (Laboratorio estetico) owner-facing endpoints live in
-// Endpoints/AestheticsEndpoints.cs — extracted as part of the
-// modular-monolith cleanup (see app.MapAestheticsEndpoints() above). Same
-// routes, same owner-private behavior; see that file for the implementation.
 
 app.MapPhotoExportEndpoints();
 
@@ -2011,8 +1968,8 @@ static async Task TrySeedDevUserAsync(WebApplication app)
 // (Album request bodies moved to Endpoints/AlbumEndpoints.cs;
 // SetAlbumPartyModeRequest moved to Endpoints/PartyEndpoints.cs;
 // PlateAddFromGalleryRequest moved to Endpoints/PlatesEndpoints.cs;
-// AestheticAddFromGalleryRequest/AestheticAnalyzeRequest moved to
-// Endpoints/AestheticsEndpoints.cs; FaceSettingsUpdateRequest moved to
+// FaceSettingsUpdateRequest moved to
+
 // Endpoints/AdminAiEndpoints.cs.)
 
 public partial class Program;

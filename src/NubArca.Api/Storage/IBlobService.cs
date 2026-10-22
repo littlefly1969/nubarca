@@ -45,7 +45,7 @@ public interface IBlobService
     // Acquires ONE additional reference to an EXISTING blob by id, WITHOUT
     // copying or re-hashing any bytes (atomic ReferenceCount++). Used when a new
     // owner-row references bytes already in the store — e.g. adding a gallery
-    // image to the Aesthetics Lab reuses the FileItem's blob. Returns the blob;
+    // image to Plates reuses the FileItem's blob. Returns the blob;
     // throws InvalidOperationException if the blob id does not exist (the caller
     // must have verified it inside the same transaction). Pairs with
     // ReleaseAsync on every failure/removal path.

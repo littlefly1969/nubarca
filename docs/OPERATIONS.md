@@ -99,8 +99,7 @@ expiry — run the same canonical purge, so they remove the same things:
   blobs, the sha256-keyed HLS ladder, and the face-preview crops cached in the
   derived store
 
-A blob still referenced by another live file, an Aesthetics Lab item, a plate or
-an album transfer is never removed — `ReferenceCount` is the authority.
+A blob still referenced by another live file, a plate or an album transfer is never removed — `ReferenceCount` is the authority.
 
 If an unlink fails, the blob's storage key survives in `pending_blob_purges` and
 the next janitor tick retries it. A non-empty `pending_blob_purges` with a
@@ -281,8 +280,7 @@ back show in `media derivatives failures`. Full reference:
 ## Blob reference integrity (audit / repair)
 
 `BlobObject.ReferenceCount` is derived accounting. The owners include active
-`file_items`, `file_thumbnails`, `face_previews`, Plates/Party derived rows and
-Aesthetics Lab items/derivatives. Some owners, notably `face_previews`, use a
+`file_items`, `file_thumbnails`, `face_previews` and Plates/Party derived rows. Some owners, notably `face_previews`, use a
 plain correlation id rather than a database foreign key and must still be
 counted. A hard interruption (worker kill, crash) between the refcount increment
 and the owner-row commit leaks one reference: the blob has a nonzero refcount,

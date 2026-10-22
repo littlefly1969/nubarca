@@ -37,7 +37,6 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
         { "/api/people/cluster-rebuild/00000000-0000-0000-0000-000000000000",
             Permissions.PeopleClusterRebuild },
         { "/api/plates/images", Permissions.LaboratoryPlates },
-        { "/api/aesthetics-lab/items", Permissions.LaboratoryAesthetics },
         { "/api/private-vault", Permissions.PrivateVaultAccess },
         { "/api/uploads/staging/config", Permissions.CloudFunctionsAccess },
         // Party. The owner surface is nested under the album it is configured
@@ -103,7 +102,7 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
         // to store the child alone.
         string[] permissions = permissionKey switch
         {
-            Permissions.LaboratoryPlates or Permissions.LaboratoryAesthetics =>
+            Permissions.LaboratoryPlates =>
                 [Permissions.LaboratoryAccess, permissionKey],
             Permissions.PeopleClusterRebuild => [Permissions.PeopleAccess, permissionKey],
             Permissions.PartyContributions or Permissions.PartyGames
@@ -145,7 +144,7 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
 
         foreach (var route in new[]
         {
-            "/api/people", "/api/plates/images", "/api/aesthetics-lab/items",
+            "/api/people", "/api/plates/images",
             "/api/private-vault", "/api/uploads/staging/config", "/api/tv-devices",
             "/api/albums/00000000-0000-0000-0000-000000000000/party-settings",
             "/api/albums/00000000-0000-0000-0000-000000000000/party-challenges",
@@ -219,16 +218,17 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
     }
 
     [Fact]
-    public async Task Laboratory_Plates_Does_Not_Open_Aesthetics()
+    public async Task The_Retired_Aesthetics_Lab_Routes_Are_Gone()
     {
-        // The scenario the two sub-permissions exist for: Laboratory visible,
-        // Plates usable, Aesthetics refused.
+        // The Aesthetics Lab was removed with its tables. A Laboratory user
+        // finds Plates and nothing where the lab used to answer.
         var (_, client) = await _factory.CreatePermissionClientAsync(
             "lab-plates-only@example.com",
             Permissions.LaboratoryAccess, Permissions.LaboratoryPlates);
 
         Assert.NotEqual(HttpStatusCode.Forbidden, (await client.GetAsync("/api/plates/images")).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/aesthetics-lab/items")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/aesthetics-lab/items")).StatusCode);
+        Assert.False(PermissionCatalog.IsKnown("laboratory.aesthetics"));
     }
 
     [Fact]

@@ -9,7 +9,6 @@ const screens = [
   ['AlbumItemsScreen.tsx', source('../screens/AlbumItemsScreen.tsx')],
   ['PersonalAlbumsScreen.tsx', source('../screens/PersonalAlbumsScreen.tsx')],
   ['PersonalLibraryScreen.tsx', source('../screens/PersonalLibraryScreen.tsx')],
-  ['BeautyLabScreen.tsx', source('../screens/BeautyLabScreen.tsx')],
 ] as const;
 const screenSources = screens.map(([, screen]) => screen);
 const preview = source('../components/MediaTilePreview.tsx');
@@ -44,7 +43,6 @@ test('every TV wall uses the installed native item-snap scrolling contract', () 
 test('media walls use DTO dimensions and album shelves use one stable card ratio', () => {
   assert.match(screenSources[1], /getAspectRatio: getTvMediaAspectRatio/);
   assert.match(library, /normalizeTvMediaAspectRatio/);
-  assert.match(screenSources[4], /normalizeTvMediaAspectRatio/);
   assert.match(screenSources[0], /getAspectRatio: \(\) => TILE_ASPECT/);
   assert.match(screenSources[2], /getAspectRatio: \(\) => TILE_ASPECT/);
 });
@@ -58,9 +56,6 @@ test('All, Photos and Videos live in MENU, not above the library grid', () => {
 test('paged walls serialize appends and reject duplicate item ids', () => {
   assert.match(library, /requestedCursorRef\.current === current\.nextCursor/);
   assert.match(library, /known\.has\(item\.id\)/);
-  const beauty = screenSources[4];
-  assert.match(beauty, /if \(loadInFlightRef\.current\) return/);
-  assert.match(beauty, /known\.has\(item\.id\)/);
 });
 
 test('video tiles remain still-image previews with one viewer player', () => {

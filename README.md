@@ -13,7 +13,7 @@ NubArca is designed for a **single operator and their users**, running on one sm
 - **A media experience, not just a file list** — responsive grid/list browsing, infinite scroll, bulk actions, image and video galleries, full-screen viewing, albums, metadata editing and privacy-safe downloads.
 - **Adaptive private video** — optional FFmpeg-based fMP4 HLS creates a VOD ladder with an up-to-1080p high rendition and, when useful, a 480p low rendition. Compatible H.264/AAC sources can be remuxed instead of fully re-encoded; the web client uses native HLS or hls.js and falls back to HTTP Range playback when HLS is disabled.
 - **Photo organization without rewriting files** — photos can be organized into date-based folders through previewable, cancellable background jobs. Moves are logical: original bytes, thumbnails, metadata and shares remain intact.
-- **Local AI, under your control** — optional services provide semantic text-to-photo search, image similarity and post-ingestion face detection/embedding. The experimental **Aesthetics Lab** evaluates selected images locally and remains isolated from the main library.
+- **Local AI, under your control** — optional services provide semantic text-to-photo search, image similarity and post-ingestion face detection/embedding.
 - **Built for the living room** — the dedicated Fire TV / Android TV experience supports secure QR pairing, remote-first albums and slideshows, personal videos and live Party Mode refresh as new guest photos arrive.
 - **Cast a video to the television** — Chrome on a desktop or on Android can send a video to a Chromecast, a Google TV or any certified Google Cast receiver, and stays a real remote control while it plays. The receiver never holds a NubArca session: it is handed a short-lived, single-video capability whose permission, account and file are re-checked on every request. See [Google Cast](docs/google-cast.md).
 - **Print without exposing an owner session** — the server renders bounded 10×15 artifacts and a separately packaged headless Windows Print Agent or Linux fake simulator delivers them through a station-scoped credential. Enrollment is one-shot and ambiguous outcomes are never auto-reprinted. See [Print Agent](docs/print-agent.md).
@@ -34,7 +34,7 @@ The core product is implemented and usable for controlled self-hosted deployment
   packaged Windows Service agent (physical DS620 acceptance remains explicit);
 - production Docker Compose deployment, reverse-proxy examples, migrations, backup/restore scripts and operational diagnostics.
 
-Some capabilities are intentionally **opt-in**: background workers, staged uploads, server-side imports, cleanup services, HLS, FFmpeg media derivatives and AI sidecars. HLS requires an FFmpeg/FFprobe-enabled runtime and an active job worker. The Aesthetics Lab is **experimental and disabled by default**.
+Some capabilities are intentionally **opt-in**: background workers, staged uploads, server-side imports, cleanup services, HLS, FFmpeg media derivatives and AI sidecars. HLS requires an FFmpeg/FFprobe-enabled runtime and an active job worker.
 
 NubArca is pre-1.0 software for technical self-hosters. It is not currently a replacement for a full collaboration platform or a transparent sync service.
 

@@ -38,7 +38,6 @@ import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { PeoplePage } from './pages/PeoplePage';
 import { PersonDetailPage } from './pages/PersonDetailPage';
 import { PlatesPage } from './pages/PlatesPage';
-import { AestheticsLabPage } from './pages/AestheticsLabPage';
 import { LaboratoryIndexRedirect, LaboratoryPage } from './pages/LaboratoryPage';
 import { PrivateVaultPage } from './pages/PrivateVaultPage';
 import { SharedAlbumDetailPage } from './pages/SharedAlbumDetailPage';
@@ -63,7 +62,6 @@ import { PartyUploadsPage } from './pages/PartyUploadsPage';
 import { PartyMessagesPage } from './pages/PartyMessagesPage';
 import { PartyGuestbookPage } from './pages/PartyGuestbookPage';
 import { PartyGuestbookPublicPage } from './pages/PartyGuestbookPublicPage';
-import { BeautyLabUploadPage } from './pages/BeautyLabUploadPage';
 import { MailPage } from './mail/MailPage';
 
 export function App() {
@@ -130,8 +128,6 @@ export function App() {
               token, not the view one: a separate capability, resolved on every
               request, that can print but cannot browse the album. */}
           <Route path="/party/:token/print" element={<PartyPrintPage />} />
-          {/* PUBLIC, unauthenticated TV Beauty Lab mobile UPLOAD landing (QR target). */}
-          <Route path="/beauty-lab-upload/:token" element={<BeautyLabUploadPage />} />
           {/* PARTY CREW. Unauthenticated because a collaborator has no account
               and never gets one: what stands in for a session is a device
               cookie that resolves, on the server, to one collaborator on one
@@ -308,8 +304,8 @@ export function App() {
             />
             {/* Laboratory (Laboratorio): ONE primary destination whose sections
                 are routes, so a tab survives refresh, is linkable and moves
-                Back/Forward. Plates and Aesthetics keep their own APIs,
-                storage and data models — only the shell is shared. */}
+                Back/Forward. Each section keeps its own API, storage and
+                data model — only the shell is shared. */}
             <Route
               path="/lab"
               element={
@@ -328,16 +324,6 @@ export function App() {
                     permissions={[PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryPlates]}
                   >
                     <PlatesPage />
-                  </PermissionRoute>
-                }
-              />
-              <Route
-                path="aesthetics"
-                element={
-                  <PermissionRoute
-                    permissions={[PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryAesthetics]}
-                  >
-                    <AestheticsLabPage />
                   </PermissionRoute>
                 }
               />

@@ -397,24 +397,6 @@ public static class AuditActions
     // Owner requested ALPR analysis of a plate image (metadata: job id + status).
     public const string PlateAnalyzeRequest = "plate.analysis_request";
 
-    // Owner-private Aesthetics Lab (Laboratorio estetico). Safe COUNTS/status
-    // only — never image content, metrics, text, blob ids, storage keys, hashes,
-    // paths, or the logical container key.
-    public const string AestheticLabAdd = "aesthetics.item_add";
-    public const string AestheticLabRemove = "aesthetics.item_remove";
-    // Owner requested analysis of a batch (metadata: enqueued/skipped counts).
-    public const string AestheticAnalyzeRequest = "aesthetics.analysis_request";
-    public const string AestheticAnalyzeCancel = "aesthetics.analysis_cancel";
-    public const string AestheticAnalyzeRetry = "aesthetics.analysis_retry";
-
-    // TV "Beauty Lab" QR mobile-upload session. Safe COUNTS/lifecycle only —
-    // never the token, filename, image content, or storage internals.
-    public const string AestheticUploadSessionCreate = "aesthetics.upload_session_create";
-    public const string AestheticUploadSessionRevoke = "aesthetics.upload_session_revoke";
-    public const string AestheticUploadSessionExpire = "aesthetics.upload_session_expire";
-    // A mobile upload attempt against a session (metadata: accepted/rejected).
-    public const string AestheticUploadSessionUpload = "aesthetics.upload_session_upload";
-
     // Admin user management (metadata: target user id via entityId only —
     // never password/hash, and email only where the existing login/admin
     // audit trail already records it).
@@ -512,6 +494,4 @@ public static class AuditEntityTypes
     public const string Plate = "plate";
     public const string MailArchive = "mail_archive";
     public const string MailMessage = "mail_message";
-    public const string AestheticLabItem = "aesthetic_lab_item";
-    public const string AestheticRun = "aesthetic_run";
 }

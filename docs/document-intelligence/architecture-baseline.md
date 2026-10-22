@@ -229,7 +229,7 @@ Memory note: `PdfVisualRenderer.RenderAsync` accumulates **all page PNGs in a Li
 ### 4.2 Files expected
 - `${Ai__Onnx__ModelDir}/multilingual-e5-small/model.onnx` + `tokenizer.json` (`RagTextEmbeddingModels.cs:69-72`, `OnnxTextEmbeddingProvider.cs:316-320`).
 - `${Ai__Onnx__ModelDir}/siglip2-so400m-patch14-384/model.onnx`, `text_model.onnx`, `tokenizer.json` (`OnnxImageModels.cs:41-43,53-63`).
-- Production model mount `/models/ai`, OpenVINO direct, cache `/var/cache/nubarca/openvino` (`docker-compose.facedirect-api.yml:25-29`). No `docs/model-deployment/*` page exists for e5 (only plates, subject-cutout, NLU, human-aesexpert, SigLIP2 benchmark).
+- Production model mount `/models/ai`, OpenVINO direct, cache `/var/cache/nubarca/openvino` (`docker-compose.facedirect-api.yml:25-29`). No `docs/model-deployment/*` page exists for e5 (only plates, subject-cutout, NLU, SigLIP2 benchmark).
 
 ### 4.3 What assumes e5 / 384 / encoder
 | Assumption | Location | Impact for a new model |

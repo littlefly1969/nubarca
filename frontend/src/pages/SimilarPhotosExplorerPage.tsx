@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
-  addAestheticLabFromGallery,
   addPlateImagesFromGallery,
   ApiError,
   getFileMetadata,
@@ -286,7 +285,6 @@ export function SimilarPhotosExplorerPage() {
   const runDestination = useCallback(
     async (
       execute: (ids: string[]) => Promise<{ added: unknown[]; skipped: unknown[] }>,
-      noticeKey: 'aesthetics' | 'plates',
     ) => {
       const ids = [...selection.selected];
       if (ids.length === 0) return;
@@ -294,26 +292,20 @@ export function SimilarPhotosExplorerPage() {
       setNotice(null);
       try {
         const result = await execute(ids);
-        if (noticeKey === 'aesthetics') {
-          setNotice(
-            t('aesthetics.addedFromGallery', { added: result.added.length, skipped: result.skipped.length }),
-          );
-        } else {
-          const base = result.added.length === 1
-            ? t('gallery.ws.plates.added_one', { count: 1 })
-            : t('gallery.ws.plates.added_other', { count: result.added.length });
-          const extra = result.skipped.length > 0
-            ? t('gallery.ws.plates.skipped', { count: result.skipped.length })
-            : '';
-          setNotice(base + extra);
-        }
+        const base = result.added.length === 1
+          ? t('gallery.ws.plates.added_one', { count: 1 })
+          : t('gallery.ws.plates.added_other', { count: result.added.length });
+        const extra = result.skipped.length > 0
+          ? t('gallery.ws.plates.skipped', { count: result.skipped.length })
+          : '';
+        setNotice(base + extra);
         selection.clear();
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
           invalidateAuth();
           return;
         }
-        setNotice(noticeKey === 'aesthetics' ? t('aesthetics.addError') : t('gallery.ws.plates.error'));
+        setNotice(t('gallery.ws.plates.error'));
       } finally {
         setActionBusy(false);
       }
@@ -324,16 +316,10 @@ export function SimilarPhotosExplorerPage() {
   const destinations = useMemo<GalleryDestinationAction[]>(
     () => [
       {
-        id: 'beauty-lab',
-        label: t('gallerySel.addToAestheticsLab'),
-        isAvailable: true,
-        run: () => void runDestination((ids) => addAestheticLabFromGallery(ids), 'aesthetics'),
-      },
-      {
         id: 'plates',
         label: t('gallery.ws.destPlates'),
         isAvailable: true,
-        run: () => void runDestination((ids) => addPlateImagesFromGallery(ids), 'plates'),
+        run: () => void runDestination((ids) => addPlateImagesFromGallery(ids)),
       },
     ],
     [t, runDestination],

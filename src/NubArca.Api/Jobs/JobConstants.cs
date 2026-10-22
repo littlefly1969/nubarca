@@ -103,12 +103,6 @@ public static class JobTypes
     // carries only the PlateAnalysisJob row id.
     public const string PlatesAnalyze = "plates.analyze";
 
-    // Aesthetics Lab: analyze ONE owner-private AestheticLabItem with the local
-    // HumanAesExpert sidecar. One image = one run = one job (a batch of N creates
-    // N independent jobs, never a monolith). Compute band. Opt-in/experimental,
-    // disabled by default. The payload carries only the AestheticAnalysisRun id.
-    public const string AestheticsAnalyze = "ai.aesthetics.human-aesexpert.analyze";
-
     // MailArchive: import (or resume the import of) ONE owner-private PST
     // archive. Sliceable and resumable from the persisted manifest; Normal
     // band so foreground uploads go first. The payload carries only the

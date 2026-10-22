@@ -224,7 +224,7 @@ incomplete scan (`scanErrors > 0`).
 ## 4. Immutability strategy (gate)
 
 The message content is **not** a `FileItem`. It follows the established
-owner-private pattern of Plates and the Aesthetics Lab: an owner table row
+owner-private pattern of Plates: an owner table row
 (`mail_messages.BlobObjectId`) owns one reference to a content-addressed blob,
 is counted by `BlobReferenceAuditService` (so `audit-references` /
 `repair-references` see it), is protected by a `RESTRICT` foreign key, and is

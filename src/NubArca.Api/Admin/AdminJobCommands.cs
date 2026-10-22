@@ -16,7 +16,8 @@ namespace NubArca.Api.Admin;
 // carry no storage keys, paths, payloads, or secrets.
 //
 // Deliberately EXCLUDED (matching the CLI): admin.import, photo.organizer,
-// photo.export, plates.analyze, aesthetics.analyze — those run off dedicated
+// photo.export, plates.analyze — those run off dedicated
+
 // run-rows created by their own owner-scoped flows, not flag-only enqueues.
 public static class AdminJobCommands
 {

@@ -36,14 +36,14 @@ describe('primary navigation model', () => {
     expect(albums.end).toBeUndefined();
   });
 
-  // UX-02: Plates and Aesthetics are sections of one Laboratory workspace,
-  // not two primary destinations. The entry has no `end`, so it stays active
-  // for every /lab/* child route.
-  it('offers ONE Laboratory entry, not separate Plates and Aesthetics', () => {
+  // UX-02: Plates is a section of the Laboratory workspace, not a primary
+  // destination. The entry has no `end`, so it stays active for every /lab/*
+  // child route.
+  it('offers ONE Laboratory entry, not a separate Plates one', () => {
     const routes = allRoutes(MEMBER_PERMISSIONS);
     expect(routes).toContain('/lab');
     expect(routes).not.toContain('/plates');
-    expect(routes).not.toContain('/lab/aesthetics');
+    expect(routes).not.toContain('/lab/plates');
     const lab = buildNavGroups({ permissions: MEMBER_PERMISSIONS })
       .flatMap((g) => g.items).find((i) => i.to === '/lab')!;
     expect(lab.end).toBeUndefined();

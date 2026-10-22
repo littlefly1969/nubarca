@@ -100,7 +100,7 @@ is built is described by `ARCHITECTURE.md`.
   its own image, copied into the API image by digest), replacing Ubuntu's 6.1.
 - HEIC photos: recognised by signature and decoded by FFmpeg through
   `OriginalImageReader` (upload, bulk import, thumbnails, print from the original, SigLIP,
-  faces, guest book, aesthetics); stored upright with orientation 1;
+  faces, guest book); stored upright with orientation 1;
   `media images redetect` recognises the ones uploaded before. The frame is
   streamed from FFmpeg's stdout to a temporary PNG file with
   `HeifDecodeMaxOutputBytes` enforced as it arrives (one byte past it kills
@@ -942,7 +942,7 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   only a `401` unpairs, and a session is admitted into a party only after the
   Personal Area status says its association is complete (a PIN-less one still
   goes to the incomplete-pairing recovery, never straight into a party). The assignment PREEMPTS every local surface (mode
-  selector, manual Party, Updates, PIN, Personal Area, Beauty Lab); preempting a
+  selector, manual Party, Updates, PIN, Personal Area); preempting a
   personal screen is a LOCK in `flowEffects`, an unlock that lands after its PIN
   screen was preempted is revoked, and BACK at the root of an assigned party
   closes the app rather than returning it to general. The slideshow is the
@@ -1679,11 +1679,10 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   surface that renders it. Three gates are easy to lose. **"Move to Personal" is
   the private vault operation**, not a second name for the library, so it needs
   `private-vault.access` exactly as the Private destination in the navigation
-  does. **Plates and Beauty carry the Laboratory's own composite** —
-  `laboratory.access` plus the section permission — so a user with Plates but not
-  Aesthetics is offered exactly one of them here, just as they get one tab there;
-  they were previously built with no permission check at all, which offered two
-  doors that answer 403. And **a photo-only destination is withdrawn entirely
+  does. **Plates carries the Laboratory's own composite** —
+  `laboratory.access` plus the section permission — so it is offered here
+  exactly when the user has its Laboratory tab; it was previously built with no
+  permission check at all, which offered a door that answers 403. And **a photo-only destination is withdrawn entirely
   from a mixed selection** rather than run over the photos in it: partially
   applying a bulk action is worse than not offering it. Restore and
   remove-from-album deliberately sit OUTSIDE the Move menu — restore is the

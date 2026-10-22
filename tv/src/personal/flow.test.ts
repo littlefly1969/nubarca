@@ -137,7 +137,6 @@ test('pairing revocation tears down EVERY state, personal or not', () => {
     { name: 'personalLibrary', home },
     { name: 'personalAlbums', home },
     { name: 'personalAlbumItems', home, album: { id: 'a-1', name: 'Vacanze' } },
-    { name: 'beautyLab', home },
   ];
   for (const state of states) {
     assert.deepEqual(tvFlowReducer(state, { type: 'SESSION_INVALID' }), pairing);
@@ -192,36 +191,6 @@ test('LOCK revokes the grant server-side only when leaving a personal screen', (
   assert.equal(flowEffects({ name: 'party' }, { type: 'LOCK' }).revokeGrant, false);
 });
 
-test('Beauty Lab reuses the SAME PIN gate and grant, then navigates to the lab', () => {
-  const pin = run([{ type: 'SESSION_READY' }, { type: 'CHOOSE_BEAUTY_LAB' }]);
-  assert.deepEqual(pin, { name: 'pin', target: 'beautyLab' });
-  // The same UNLOCKED event (grant in hand) routes to Beauty Lab, not the home.
-  const lab = tvFlowReducer(pin, { type: 'UNLOCKED', home });
-  assert.deepEqual(lab, { name: 'beautyLab', home });
-  // BACK / no digits from the Beauty Lab PIN gate returns to mode selection.
-  assert.deepEqual(tvFlowReducer(pin, { type: 'PIN_CANCELLED' }), mode);
-});
-
-test('BACK from the Beauty Lab root LOCKS to mode selection and revokes the grant', () => {
-  const lab: TvFlowState = { name: 'beautyLab', home };
-  assert.deepEqual(tvFlowReducer(lab, { type: 'LOCK' }), mode);
-  assert.equal(flowEffects(lab, { type: 'LOCK' }).revokeGrant, true);
-  // A PIN change evicts Beauty Lab with the notice, never to pairing.
-  assert.deepEqual(
-    tvFlowReducer(lab, { type: 'LOCK', reason: 'pinChanged' }),
-    { name: 'mode', notice: 'pinChanged' },
-  );
-});
-
-test('session/association invalidation tears down the Beauty Lab too', () => {
-  const lab: TvFlowState = { name: 'beautyLab', home };
-  assert.deepEqual(tvFlowReducer(lab, { type: 'SESSION_INVALID' }), pairing);
-  assert.deepEqual(tvFlowReducer(lab, { type: 'ASSOCIATION_INCOMPLETE' }), { name: 'pairing', incomplete: true });
-  const invalid = flowEffects(lab, { type: 'SESSION_INVALID' });
-  assert.equal(invalid.dropGrant, true);
-  assert.equal(invalid.clearSession, true);
-});
-
 // --- the assigned party: server-authoritative takeover ----------------------
 
 type PartyView = Extract<AssignmentView, { party: unknown }>;
@@ -238,12 +207,10 @@ const everyLocalState: TvFlowState[] = [
   { name: 'party' },
   { name: 'updates' },
   { name: 'pin', target: 'personal' },
-  { name: 'pin', target: 'beautyLab' },
   { name: 'personalHome', home },
   { name: 'personalLibrary', home },
   { name: 'personalAlbums', home },
   { name: 'personalAlbumItems', home, album: { id: 'a-1', name: 'Vacanze' } },
-  { name: 'beautyLab', home },
 ];
 
 test('an assigned television starts in its party, straight from the first read', () => {
@@ -339,7 +306,7 @@ test('an assigned party preempts every local surface, Personal Area included', (
 
 test('preempting a personal screen LOCKS it; preempting anything else holds nothing', () => {
   const personal = everyLocalState.filter((state) => isPersonalState(state));
-  assert.equal(personal.length, 5);
+  assert.equal(personal.length, 4);
   for (const from of personal) {
     const effects = flowEffects(from, assignment(view('game')));
     // Exactly what BACK does: the grant is dropped and revoked server-side.
@@ -366,7 +333,7 @@ test('an unlock that lands after its PIN screen was preempted is revoked on arri
 
 test('no local event can take an assigned television back to general', () => {
   const localEvents: TvFlowEvent[] = [
-    { type: 'CHOOSE_PARTY' }, { type: 'CHOOSE_PERSONAL' }, { type: 'CHOOSE_BEAUTY_LAB' },
+    { type: 'CHOOSE_PARTY' }, { type: 'CHOOSE_PERSONAL' },
     { type: 'CHOOSE_UPDATES' }, { type: 'UPDATES_BACK' }, { type: 'PIN_CANCELLED' },
     { type: 'UNLOCKED', home }, { type: 'OPEN_LIBRARY' }, { type: 'LIBRARY_BACK' },
     { type: 'OPEN_ALBUMS' }, { type: 'ALBUMS_BACK' }, { type: 'ALBUM_BACK' },

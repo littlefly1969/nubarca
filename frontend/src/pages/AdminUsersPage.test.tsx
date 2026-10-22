@@ -53,7 +53,6 @@ const MEMBER_KEYS = [
   PERMISSIONS.semanticSearchAccess,
   PERMISSIONS.laboratoryAccess,
   PERMISSIONS.laboratoryPlates,
-  PERMISSIONS.laboratoryAesthetics,
   PERMISSIONS.cloudFunctionsAccess,
   PERMISSIONS.privateVaultAccess,
   PERMISSIONS.tvManage,
@@ -109,13 +108,6 @@ const PERMISSION_CATALOG = [
   { key: PERMISSIONS.laboratoryAccess, group: 'features', administrative: false, parent: null, assignable: true },
   {
     key: PERMISSIONS.laboratoryPlates,
-    group: 'features',
-    administrative: false,
-    parent: PERMISSIONS.laboratoryAccess,
-    assignable: true,
-  },
-  {
-    key: PERMISSIONS.laboratoryAesthetics,
     group: 'features',
     administrative: false,
     parent: PERMISSIONS.laboratoryAccess,
@@ -275,7 +267,7 @@ describe('AdminUsersPage', () => {
       await waitFor(() =>
         expect(previewRow(PERMISSIONS.privateVaultAccess)).toHaveAttribute('data-included', 'yes'));
       expect(previewRow(PERMISSIONS.adminUsersManage)).toHaveAttribute('data-included', 'no');
-      expect(screen.getByTestId('role-permission-count')).toHaveTextContent('8 permessi');
+      expect(screen.getByTestId('role-permission-count')).toHaveTextContent('7 permessi');
 
       // Restricted: nothing at all — and no request was needed to find out.
       await user.selectOptions(screen.getByTestId('admin-user-role'), ROLES.restricted);
@@ -285,7 +277,7 @@ describe('AdminUsersPage', () => {
       // A custom role describes itself too.
       await user.selectOptions(screen.getByTestId('admin-user-role'), 'custom:lab');
       expect(previewRow(PERMISSIONS.laboratoryPlates)).toHaveAttribute('data-included', 'yes');
-      expect(previewRow(PERMISSIONS.laboratoryAesthetics)).toHaveAttribute('data-included', 'no');
+      expect(previewRow(PERMISSIONS.cloudFunctionsAccess)).toHaveAttribute('data-included', 'no');
       expect(screen.getByTestId('role-summary')).toHaveTextContent('Laboratorio');
     });
 

@@ -16,7 +16,6 @@ public static class PermissionPolicies
     // `laboratory.access` + `laboratory.plates` opens Plates while
     // `laboratory.plates` on its own opens nothing.
     public const string LaboratoryPlates = Prefix + "laboratory:plates+access";
-    public const string LaboratoryAesthetics = Prefix + "laboratory:aesthetics+access";
 
     // Rebuilding one's own face clusters requires People itself as well, on the
     // same principle: a capability over a surface the caller cannot otherwise
@@ -58,12 +57,6 @@ public static class PermissionPolicies
                 Permissions.LaboratoryAccess, Permissions.LaboratoryPlates));
         });
 
-        options.AddPolicy(LaboratoryAesthetics, policy =>
-        {
-            policy.RequireAuthenticatedUser();
-            policy.AddRequirements(new PermissionRequirement(
-                Permissions.LaboratoryAccess, Permissions.LaboratoryAesthetics));
-        });
 
         options.AddPolicy(PeopleClusterRebuild, policy =>
         {
@@ -109,10 +102,6 @@ public static class PermissionEndpointExtensions
     public static TBuilder RequireLaboratoryPlates<TBuilder>(this TBuilder builder)
         where TBuilder : IEndpointConventionBuilder
         => builder.RequireAuthorization(PermissionPolicies.LaboratoryPlates);
-
-    public static TBuilder RequireLaboratoryAesthetics<TBuilder>(this TBuilder builder)
-        where TBuilder : IEndpointConventionBuilder
-        => builder.RequireAuthorization(PermissionPolicies.LaboratoryAesthetics);
 
     public static TBuilder RequirePeopleClusterRebuild<TBuilder>(this TBuilder builder)
         where TBuilder : IEndpointConventionBuilder

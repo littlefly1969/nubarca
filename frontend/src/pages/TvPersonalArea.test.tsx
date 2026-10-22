@@ -70,53 +70,15 @@ describe('/tv Personal Area', () => {
     expect(screen.queryByRole('heading', { name: 'I tuoi album TV' })).not.toBeInTheDocument();
   });
 
-  it('renders a focusable third "Laboratorio bellezza" mode card', async () => {
+  it('offers exactly the Party and Personal modes', async () => {
     installTvMock({ 'GET /api/tv/session': activeSession });
     renderTv();
 
-    const card = await screen.findByTestId('tv-mode-beauty-lab');
-    expect(card).toHaveTextContent('Laboratorio bellezza');
-    expect(card.tagName).toBe('BUTTON'); // focusable via D-pad like the others
-  });
-
-  it('Beauty Lab uses the existing PIN flow and a successful unlock opens the lab grid', async () => {
-    installTvMock({
-      'GET /api/tv/session': activeSession,
-      'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false, scheme: 'dpad-v1' }),
-      'POST /api/tv/personal/unlock': () => jsonResponse({ unlockToken: 'grant-1', expiresAt: '2026-08-05T12:00:00Z' }),
-      'GET /api/tv/personal/home': () => jsonResponse({ displayName: 'Owner', galleryAvailable: true }),
-      'GET /api/tv/personal/aesthetics/items': () => jsonResponse({ items: [], nextCursor: null }),
-    });
-    renderTv();
-
-    await userEvent.setup().click(await screen.findByTestId('tv-mode-beauty-lab'));
-    // Same unlock screen as the Personal Area — no second credential system.
-    expect(await screen.findByTestId('tv-code-entry')).toBeInTheDocument();
-    await enterCode(VALID_CODE);
-
-    // Unlock lands on the Beauty Lab, not the Personal Area home.
-    expect(await screen.findByTestId('tv-beauty-lab')).toBeInTheDocument();
-    expect(screen.queryByTestId('tv-personal-home')).not.toBeInTheDocument();
-  });
-
-  it('BACK from the Beauty Lab root locks and returns to mode selection', async () => {
-    installTvMock({
-      'GET /api/tv/session': activeSession,
-      'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false, scheme: 'dpad-v1' }),
-      'POST /api/tv/personal/unlock': () => jsonResponse({ unlockToken: 'grant-1', expiresAt: '2026-08-05T12:00:00Z' }),
-      'GET /api/tv/personal/home': () => jsonResponse({ displayName: 'Owner', galleryAvailable: true }),
-      'GET /api/tv/personal/aesthetics/items': () => jsonResponse({ items: [], nextCursor: null }),
-      'POST /api/tv/personal/lock': () => emptyResponse(204),
-    });
-    renderTv();
-    await userEvent.setup().click(await screen.findByTestId('tv-mode-beauty-lab'));
-    await screen.findByTestId('tv-code-entry');
-    await enterCode(VALID_CODE);
-    const lab = await screen.findByTestId('tv-beauty-lab');
-
-    fireEvent.keyDown(lab, { key: 'Escape' });
-    // Locked → back on the mode selector.
-    expect(await screen.findByText('Come vuoi usare NubArca?')).toBeInTheDocument();
+    await screen.findByTestId('tv-mode-party');
+    expect(screen.getByTestId('tv-mode-personal')).toBeInTheDocument();
+    // The Beauty Lab was retired with the Aesthetics Lab.
+    expect(screen.queryByTestId('tv-mode-beauty-lab')).not.toBeInTheDocument();
+    expect(document.querySelectorAll('.tv-mode-option')).toHaveLength(2);
   });
 
   it('Personal area opens PIN entry; a wrong PIN shows a generic error, clears input, and stays locked', async () => {

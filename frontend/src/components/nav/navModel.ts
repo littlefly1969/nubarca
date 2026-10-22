@@ -70,15 +70,14 @@ const MAIN: NavItem[] = [
 ];
 
 const MORE: NavItem[] = [
-  // ONE Laboratory entry. Plates and Aesthetics are sections inside it now,
-  // reached by /lab/plates and /lab/aesthetics; without `end` this link stays
-  // active for every /lab/* child. The entry needs only the SHELL permission:
-  // which sections appear inside is the Laboratory page's own decision, so a
-  // user with Plates but not Aesthetics still sees the Laboratory.
+  // ONE Laboratory entry. Its sections (Plates, at /lab/plates) live inside
+  // it; without `end` this link stays active for every /lab/* child. The entry
+  // needs only the SHELL permission: which sections appear inside is the
+  // Laboratory page's own decision.
   {
     to: '/lab',
     labelKey: 'nav.laboratory',
-    icon: 'aesthetics',
+    icon: 'laboratory',
     permission: PERMISSIONS.laboratoryAccess,
   },
   { to: '/shares', labelKey: 'nav.shares', icon: 'shares' },

@@ -46,10 +46,6 @@ const PERMISSION_META: Record<string, PermissionPresentation> = {
     labelKey: 'perm.laboratoryPlates',
     descriptionKey: 'permDesc.laboratoryPlates',
   },
-  [PERMISSIONS.laboratoryAesthetics]: {
-    labelKey: 'perm.laboratoryAesthetics',
-    descriptionKey: 'permDesc.laboratoryAesthetics',
-  },
   [PERMISSIONS.cloudFunctionsAccess]: {
     labelKey: 'perm.cloudFunctionsAccess',
     descriptionKey: 'permDesc.cloudFunctionsAccess',

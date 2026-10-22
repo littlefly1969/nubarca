@@ -439,7 +439,7 @@ describe('/tv Personal Gallery', () => {
       'GET /api/tv/personal/gallery': () => page([
         galleryItem('a'), galleryItem('b'), galleryItem('c'),
       ], null, 3),
-      'POST /api/tv/personal/gallery/add-to-beauty-lab': () => jsonResponse({
+      'POST /api/tv/personal/gallery/add-to-plates': () => jsonResponse({
         requested: 2,
         succeeded: 1,
         skipped: 1,
@@ -465,7 +465,7 @@ describe('/tv Personal Gallery', () => {
 
     openCommandMenu();
     await user.click(screen.getByRole('button', { name: 'Aggiungi a' }));
-    await user.click(screen.getByRole('button', { name: 'Laboratorio bellezza' }));
+    await user.click(screen.getByRole('button', { name: 'Targhe' }));
     expect(await screen.findByTestId('tv-personal-toast')).toHaveTextContent('1 aggiunte, 1 non aggiunte');
     expect(screen.getByTestId('tv-personal-selection-bar')).toHaveTextContent('1 foto selezionata');
     expect(screen.getByText('b.jpg').closest('button')).toHaveAttribute('aria-pressed', 'true');

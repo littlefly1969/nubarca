@@ -144,11 +144,9 @@ describe('the same navigation', () => {
     { name: 'partyGuestbook', party: partyA },
     { name: 'partyUnavailable', party: partyA },
     { name: 'pin', target: 'personal' },
-    { name: 'pin', target: 'beautyLab' },
     { name: 'personalHome', home },
     { name: 'personalHome', home: { ...home, galleryAvailable: false } },
     { name: 'personalLibrary', home },
-    { name: 'beautyLab', home },
   ];
   const view = (presentation: string, party = partyA) =>
     (presentation === 'general' ? { presentation } : { presentation, party });
@@ -162,7 +160,6 @@ describe('the same navigation', () => {
     { type: 'ASSOCIATION_INCOMPLETE' },
     { type: 'CHOOSE_PARTY' },
     { type: 'CHOOSE_PERSONAL' },
-    { type: 'CHOOSE_BEAUTY_LAB' },
     { type: 'PIN_CANCELLED' },
     { type: 'UNLOCKED', home },
     { type: 'OPEN_LIBRARY' },

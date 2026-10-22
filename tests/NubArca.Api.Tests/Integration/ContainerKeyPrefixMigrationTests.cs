@@ -198,21 +198,20 @@ public sealed class ContainerKeyPrefixMigrationTests : IAsyncLifetime
         await ctx.SaveChangesAsync();
     }
 
+    // The Aesthetics Lab has since been removed from the model, but its table
+    // exists at the schema this migration runs against, so the row is written
+    // with SQL rather than through an entity that no longer exists.
     private static async Task SeedLabItemAsync(AppDbContext ctx, Guid ownerUserId, string containerKey)
     {
-        ctx.AestheticLabItems.Add(new AestheticLabItem
-        {
-            Id = Guid.NewGuid(),
-            OwnerUserId = ownerUserId,
-            BlobObjectId = await SeedBlobAsync(ctx),
-            OriginalFileName = "portrait.jpg",
-            ContentType = "image/jpeg",
-            SizeBytes = 1,
-            LogicalContainerKey = containerKey,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-        });
-        await ctx.SaveChangesAsync();
+        var blobObjectId = await SeedBlobAsync(ctx);
+        var now = DateTime.UtcNow;
+        await ctx.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO aesthetic_lab_items
+                ("Id", "OwnerUserId", "BlobObjectId", "OriginalFileName", "ContentType",
+                 "SizeBytes", "LogicalContainerKey", "CreatedAt", "UpdatedAt")
+            VALUES ({Guid.NewGuid()}, {ownerUserId}, {blobObjectId}, {"portrait.jpg"}, {"image/jpeg"},
+                    {1L}, {containerKey}, {now}, {now})
+            """);
     }
 
     // Read straight from the table, ordered, so the assertion observes stored
