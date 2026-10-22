@@ -171,7 +171,11 @@ public sealed class RagRetriever : IRagRetriever
             "rag: domain={Domain} mode={Mode} lexical={Lexical} vector={Vector} fused={Fused}",
             domain.Key, mode, lexical.Count, semantic.Hits.Count, fused.Count);
 
-        if (!HasStrongEvidence(fused, options))
+        // The semantic-only floor belongs to the PROFILE that produced the scores.
+        if (!HasStrongEvidence(
+                fused,
+                RagTextEmbeddingModels.MinimumVectorScoreFor(
+                    semantic.ProfileKey, options.EffectiveMinimumVectorScore)))
         {
             return RagRetrievalResult.None(query.Domain, mode, index.Corpus.Revision);
         }
@@ -379,10 +383,10 @@ public sealed class RagRetriever : IRagRetriever
     /// whether the context was any good — was rejected: it pays a boundary
     /// crossing to ask, and a model given three irrelevant paragraphs and a
     /// question tends to answer the question anyway.
-    private static bool HasStrongEvidence(IReadOnlyList<RagFusedCandidate> fused, RagOptions options)
+    private static bool HasStrongEvidence(IReadOnlyList<RagFusedCandidate> fused, double minimumVectorScore)
         => fused.Any(c => c.LexicalRank is not null)
            || fused.Any(c => c.VectorRank is not null
-                             && c.VectorScore >= options.EffectiveMinimumVectorScore);
+                             && c.VectorScore >= minimumVectorScore);
 
     private static List<RagEvidence> BuildEvidence(
         RagQuery query, RagQueryShape shape, IReadOnlyList<RagFusedCandidate> fused, string revision)
