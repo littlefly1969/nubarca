@@ -325,8 +325,7 @@ public sealed class DocumentIndexJobTests
     public async Task Cancellation_Mid_Source_Records_Nothing_Permanent()
     {
         var gate = new CancellingSource();
-        using var f = Factory(Enabled);
-        f.ConfigureExtraServices = services => services.AddScoped<IOwnerDocumentSource>(_ => gate);
+        using var f = Factory(services => services.AddScoped<IOwnerDocumentSource>(_ => gate), Enabled);
         var owner = await AddUserAsync(f);
 
         using var cts = new CancellationTokenSource();
@@ -435,8 +434,7 @@ public sealed class DocumentIndexJobTests
     public async Task A_Sections_Kind_Is_Chunked_On_Its_Locators_And_Is_In_No_Corpus()
     {
         var sections = new SectionsSource();
-        using var f = Factory(Enabled);
-        f.ConfigureExtraServices = services => services.AddScoped<IOwnerDocumentSource>(_ => sections);
+        using var f = Factory(services => services.AddScoped<IOwnerDocumentSource>(_ => sections), Enabled);
         var owner = await AddUserAsync(f);
 
         await RunAsync(f, new DocumentIndexJobPayload(OwnerUserId: owner));
@@ -452,7 +450,7 @@ public sealed class DocumentIndexJobTests
 
         var chunks = await db.DocumentChunks.OrderBy(c => c.Ordinal).ToListAsync();
         Assert.Equal(2, chunks.Count);
-        Assert.Equal(new[] { 1, 2 }, chunks.Select(c => c.LocatorIndex));
+        Assert.Equal(new int?[] { 1, 2 }, chunks.Select(c => c.LocatorIndex).ToArray());
         Assert.Equal(DocumentLocatorKinds.Section, chunks[0].LocatorKind);
 
         // ELIGIBILITY IS PER REGISTERED KIND. This test kind registered a source
@@ -504,9 +502,16 @@ public sealed class DocumentIndexJobTests
     // ---- fixture ------------------------------------------------------------
 
     private static SqliteWebApplicationFactory Factory(params (string Key, string Value)[] settings)
+        => Factory(null, settings);
+
+    // Extra services must be wired before the host is first built.
+    private static SqliteWebApplicationFactory Factory(
+        Action<IServiceCollection>? extraServices, params (string Key, string Value)[] settings)
     {
         var factory = new SqliteWebApplicationFactory(
             settings.ToDictionary(s => s.Key, s => (string?)s.Value));
+        if (extraServices is not null)
+            factory.ConfigureExtraServices = extraServices;
         factory.EnsureDatabaseCreated();
         using var scope = factory.Services.CreateScope();
         SeedEmbeddingProfile(scope.ServiceProvider.GetRequiredService<AppDbContext>());
