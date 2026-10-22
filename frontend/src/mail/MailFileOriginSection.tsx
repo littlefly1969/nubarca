@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useInRouterContext } from 'react-router';
 import { ApiError } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
+import { usePermissions } from '../auth/usePermissions';
+import { PERMISSIONS } from '../auth/permissions';
 import { useI18n } from '../i18n';
 import { listMailFileOrigins } from './mailApi';
 import { formatAddress } from './mailFormat';
@@ -14,15 +16,18 @@ import './mail.css';
 // Purely additive. It renders NOTHING while loading, when the file has no live
 // origin, or when the request fails (MailArchive disabled, older server, a
 // network blip): the details panel must look exactly as it always has for
-// every file that did not come from a mailbox.
+// every file that did not come from a mailbox. Without mail.access it asks
+// nothing at all.
 export function MailFileOriginSection({ fileItemId }: { fileItemId: string }) {
   const { t, formatDate } = useI18n();
   const { invalidateAuth } = useAuth();
+  const canReadMail = usePermissions().has(PERMISSIONS.mailAccess);
   const [origins, setOrigins] = useState<MailFileOrigin[]>([]);
 
   useEffect(() => {
     const controller = new AbortController();
     setOrigins([]);
+    if (!canReadMail) return () => controller.abort();
     listMailFileOrigins(fileItemId, controller.signal)
       .then((items) => { if (!controller.signal.aborted) setOrigins(items); })
       .catch((err: unknown) => {
@@ -30,7 +35,7 @@ export function MailFileOriginSection({ fileItemId }: { fileItemId: string }) {
         if (err instanceof ApiError && err.status === 401) invalidateAuth();
       });
     return () => controller.abort();
-  }, [fileItemId, invalidateAuth]);
+  }, [fileItemId, invalidateAuth, canReadMail]);
 
   if (origins.length === 0) return null;
 

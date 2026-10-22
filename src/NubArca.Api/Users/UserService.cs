@@ -12,11 +12,13 @@ public sealed class UserService : IUserService
 
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly DocumentSearchGrants? _documentSearch;
 
-    public UserService(AppDbContext db, TimeProvider clock)
+    public UserService(AppDbContext db, TimeProvider clock, DocumentSearchGrants? documentSearch = null)
     {
         _db = db;
         _clock = clock;
+        _documentSearch = documentSearch;
     }
 
     public async Task<User> CreateAsync(string email, string displayName, CancellationToken cancellationToken = default)
@@ -88,11 +90,19 @@ public sealed class UserService : IUserService
             throw new ArgumentException($"Unknown role '{roleKey}'.", nameof(roleKey));
         }
 
+        // The CLI assigns roles here: a role that brings document-search.access
+        // queues the user's existing documents for indexing.
+        var hadDocumentSearch = _documentSearch is not null
+            && await _documentSearch.HeldAsync(userId, cancellationToken);
         var affected = await _db.Users
             .Where(u => u.Id == userId)
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(u => u.RoleKey, _ => roleKey),
                 cancellationToken);
+        if (affected > 0 && _documentSearch is not null)
+        {
+            await _documentSearch.CatchUpAsync(userId, hadDocumentSearch, cancellationToken);
+        }
         return affected > 0;
     }
 

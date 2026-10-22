@@ -38,6 +38,8 @@ public static class PermissionCatalog
         new(Permissions.PeopleClusterRebuild, PermissionGroups.Features, false,
             Parent: Permissions.PeopleAccess),
         new(Permissions.SemanticSearchAccess, PermissionGroups.Features, false),
+        new(Permissions.DocumentSearchAccess, PermissionGroups.Features, false),
+        new(Permissions.MailAccess, PermissionGroups.Features, false),
         new(Permissions.LaboratoryAccess, PermissionGroups.Features, false),
         new(Permissions.LaboratoryPlates, PermissionGroups.Features, false,
             Parent: Permissions.LaboratoryAccess),

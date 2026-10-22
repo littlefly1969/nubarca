@@ -22,7 +22,22 @@ public static class Permissions
     // people.access, which is why the catalogue makes that its Parent.
     public const string PeopleClusterRebuild = "people.cluster.rebuild";
 
+    // Semantic search over the holder's PHOTOS AND VIDEOS (gallery and TV).
+    // Documents are a separate product decision with their own key below.
     public const string SemanticSearchAccess = "semantic-search.access";
+
+    // Search and questions over the holder's own DOCUMENTS: the private
+    // document assistant today, document search and indexing next. Separate
+    // from SemanticSearchAccess on purpose: enabling semantic search on media
+    // must not quietly open an assistant over someone's contracts, and the
+    // reverse.
+    public const string DocumentSearchAccess = "document-search.access";
+
+    // MailArchive: importing Outlook PST archives and reading, searching and
+    // deleting the imported mail. Every /api/mail route requires it, and the
+    // import and search-text jobs re-read it, so revoking it also stops an
+    // import already under way (the run ends cancelled, resumable later).
+    public const string MailAccess = "mail.access";
 
     // The Laboratory shell plus its two independent sections. A section always
     // requires the shell as well, so `laboratory.plates` alone grants nothing:

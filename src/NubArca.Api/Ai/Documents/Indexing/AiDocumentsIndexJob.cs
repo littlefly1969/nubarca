@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using NubArca.Api.Access;
 using NubArca.Api.Ai.Diagnostics;
 using NubArca.Api.Ai.Resolution;
 using NubArca.Api.Ai.DocumentVisual;
@@ -83,6 +84,7 @@ public sealed class AiDocumentsIndexJobHandler : IJobHandler
     private readonly DocumentVisualProfileResolver _visual;
     private readonly IAiDiagnosticsWriter _diagnostics;
     private readonly DocumentIndexingGate _gate;
+    private readonly IUserPermissionService _permissions;
 
     public AiDocumentsIndexJobHandler(
         IOptions<AiOptions> options,
@@ -92,7 +94,8 @@ public sealed class AiDocumentsIndexJobHandler : IJobHandler
         TextEmbeddingResolver embeddings,
         DocumentVisualProfileResolver visual,
         IAiDiagnosticsWriter diagnostics,
-        DocumentIndexingGate gate)
+        DocumentIndexingGate gate,
+        IUserPermissionService permissions)
     {
         _options = options;
         _db = db;
@@ -102,6 +105,7 @@ public sealed class AiDocumentsIndexJobHandler : IJobHandler
         _visual = visual;
         _diagnostics = diagnostics;
         _gate = gate;
+        _permissions = permissions;
     }
 
     public string JobType => JobTypes.AiDocumentsIndex;
@@ -172,6 +176,12 @@ public sealed class AiDocumentsIndexJobHandler : IJobHandler
         // ---- one source -----------------------------------------------------
         if (payload.SourceId is { } sourceId && payload.OwnerUserId is { } sourceOwner)
         {
+            if (!await PermittedAsync(sourceOwner, cancellationToken))
+            {
+                await NoOpAsync(context, "not-permitted");
+                return;
+            }
+
             var source = _sources.For(payload.SourceKind ?? DocumentSourceKinds.File);
             var candidate = source is null
                 ? null
@@ -206,7 +216,13 @@ public sealed class AiDocumentsIndexJobHandler : IJobHandler
             }
 
             var owner = checkpoint.Owner.Value;
-            while (checkpoint.KindIndex < kinds.Count)
+
+            // Only owners who hold document-search.access are indexed. It is
+            // re-read per owner, so a revoked owner is skipped from the next
+            // slice on; what was already indexed stays until they are allowed
+            // again or their documents change.
+            var permitted = await PermittedAsync(owner, cancellationToken);
+            while (permitted && checkpoint.KindIndex < kinds.Count)
             {
                 var source = kinds[checkpoint.KindIndex];
                 var page = await source.ListCandidatesAsync(owner, checkpoint.SourceCursor, PageSize, cancellationToken);
@@ -260,6 +276,9 @@ public sealed class AiDocumentsIndexJobHandler : IJobHandler
 
         await FinishAsync(context, checkpoint);
     }
+
+    private async Task<bool> PermittedAsync(Guid owner, CancellationToken cancellationToken) =>
+        (await _permissions.GetCurrentAsync(owner, cancellationToken)).Has(Permissions.DocumentSearchAccess);
 
     private async Task<Guid?> NextOwnerAsync(Guid? after, CancellationToken cancellationToken)
     {

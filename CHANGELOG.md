@@ -4,6 +4,27 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.4 — 2026-10-22
+
+### Mail and document search are enabled per role
+
+- **Two new permissions** in the role editor: **Posta** (`mail.access`) and
+  **Ricerca documenti** (`document-search.access`). Until now MailArchive and
+  the document search and assistant were open to every signed-in user.
+- **Document search is its own decision.** `document-search.access` is
+  separate from **Ricerca semantica** (`semantic-search.access`), which keeps
+  covering photos and videos only: enabling one never opens the other.
+- **Without Posta**: the Posta entry and the "Origine email" panel disappear,
+  every `/api/mail` route answers 403, and an import already running stops at
+  its next slice as *cancelled*, resumable once the permission is back.
+- **Without Ricerca documenti**: the Documenti page, document search, the
+  indexing status and the document assistant are refused, and automatic
+  indexing skips that owner. Granting it later indexes the documents the
+  owner already holds, without a manual backfill.
+- **Nobody loses anything on upgrade.** Member receives both permissions,
+  Administrator always holds every permission, and Restricted and custom roles
+  get them only when an operator adds them.
+
 ## 0.4.3 — 2026-10-22
 
 ### Search inside your documents

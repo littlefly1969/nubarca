@@ -2262,6 +2262,10 @@ public static class CliEntryPoint
             // `db migrate`. Registered beside IUserService because both are
             // needed by the same commands.
             services.AddScoped<NubArca.Api.Access.IRoleService, NubArca.Api.Access.RoleService>();
+            // The worker re-reads an owner's permissions inside jobs: mail
+            // import and search-text backfill need mail.access, document
+            // indexing needs document-search.access.
+            services.AddScoped<NubArca.Api.Access.IUserPermissionService, NubArca.Api.Access.UserPermissionService>();
 
             // Graph needed by `metadata backfill` (slice 55): the backfill
             // service drives FileItemService.ReExtractEmbeddedMetadataAsync,

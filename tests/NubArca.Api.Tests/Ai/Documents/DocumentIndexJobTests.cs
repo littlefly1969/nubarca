@@ -1,8 +1,10 @@
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NubArca.Api.Access;
 using NubArca.Api.Ai.Documents;
 using NubArca.Api.Ai.Documents.Indexing;
 using NubArca.Api.Ai.Documents.Sources;
@@ -410,6 +412,81 @@ public sealed class DocumentIndexJobTests
     }
 
     [Fact]
+    public async Task Owners_Without_Document_Search_Access_Are_Not_Indexed()
+    {
+        using var f = Factory(Enabled);
+        var alice = await AddUserAsync(f);
+        var bob = await AddUserAsync(f, RoleKeys.Restricted);
+        var alices = await AddFileAsync(f, alice, "manuale.md", Manual);
+        var bobs = await AddFileAsync(f, bob, "ricetta.md", Recipe);
+
+        // Every owner: Bob, without document-search.access, is skipped.
+        await RunAsync(f, new DocumentIndexJobPayload(AllOwners: true));
+        // His own change signal and his own backfill index nothing either.
+        await RunAsync(f, new DocumentIndexJobPayload(
+            OwnerUserId: bob, SourceKind: DocumentSourceKinds.File, SourceId: bobs.Id));
+        await RunAsync(f, new DocumentIndexJobPayload(OwnerUserId: bob));
+
+        Assert.Equal(DocumentSourceStatuses.Completed,
+            (await StateAsync(f, alices.Id, DocumentSourcePhases.Embed))!.Status);
+        using var scope = f.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.False(await db.DocumentSourceStates.AnyAsync(s => s.OwnerUserId == bob));
+        Assert.False(await db.DocumentTexts.AnyAsync(d => d.OwnerUserId == bob));
+    }
+
+    // A document uploaded while its owner could not search documents is not
+    // lost: whichever way an administrator gives them the key, the documents
+    // they already hold are indexed and found.
+    [Theory]
+    [InlineData("role-edit")]
+    [InlineData("role-change")]
+    [InlineData("re-enable")]
+    [InlineData("cli-role")]
+    public async Task Granting_Document_Search_Indexes_The_Documents_Already_Held(string grant)
+    {
+        using var f = Factory(Enabled);
+        var (admin, adminClient) = await f.CreateAuthenticatedClientAsync("admin@example.invalid");
+        await f.PromoteToAdminAsync(admin);
+        var bob = await f.SeedUserAsync("bob@example.invalid");
+        await f.SetRoleAsync(bob, grant == "re-enable" ? RoleKeys.Member : RoleKeys.Restricted);
+        if (grant == "re-enable")
+        {
+            Assert.True((await adminClient.PutAsJsonAsync(
+                $"/api/admin/users/{bob}/disabled", new { disabled = true })).IsSuccessStatusCode);
+        }
+        var recipe = await AddFileAsync(f, bob, "ricetta.md", Recipe);
+
+        await RunAsync(f, new DocumentIndexJobPayload(AllOwners: true));
+        Assert.Null(await StateAsync(f, recipe.Id, DocumentSourcePhases.Embed));
+
+        var response = grant switch
+        {
+            "role-edit" => await adminClient.PutAsJsonAsync($"/api/admin/roles/{RoleKeys.Restricted}", new
+            {
+                name = "Restricted",
+                permissions = await RolePermissionsAsync(f, RoleKeys.Restricted, Permissions.DocumentSearchAccess),
+            }),
+            "role-change" => await adminClient.PutAsJsonAsync(
+                $"/api/admin/users/{bob}/role", new { role = RoleKeys.Member }),
+            "cli-role" => await CliSetRoleAsync(f, bob, RoleKeys.Member),
+            _ => await adminClient.PutAsJsonAsync($"/api/admin/users/{bob}/disabled", new { disabled = false }),
+        };
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+
+        await RunQueuedJobsAsync(f);
+
+        Assert.Equal(DocumentSourceStatuses.Completed,
+            (await StateAsync(f, recipe.Id, DocumentSourcePhases.Embed))!.Status);
+        var bobClient = await f.LoginAsync("bob@example.invalid");
+        var search = await bobClient.PostAsJsonAsync("/api/documents/search", new { query = "ragù passata di pomodoro" });
+        search.EnsureSuccessStatusCode();
+        var json = JsonDocument.Parse(await search.Content.ReadAsStringAsync()).RootElement;
+        Assert.Contains(json.GetProperty("documents").EnumerateArray(),
+            d => d.GetProperty("sourceId").GetGuid() == recipe.Id);
+    }
+
+    [Fact]
     public async Task A_Deleted_Source_Stops_Counting_At_Once()
     {
         using var f = Factory(Enabled);
@@ -536,7 +613,36 @@ public sealed class DocumentIndexJobTests
         return context;
     }
 
-    private static async Task<Guid> AddUserAsync(SqliteWebApplicationFactory f)
+    // `users set-role` goes through IUserService, not the admin endpoints.
+    private static async Task<HttpResponseMessage> CliSetRoleAsync(
+        SqliteWebApplicationFactory f, Guid userId, string roleKey)
+    {
+        using var scope = f.Services.CreateScope();
+        Assert.True(await scope.ServiceProvider.GetRequiredService<NubArca.Api.Users.IUserService>()
+            .SetRoleAsync(userId, roleKey));
+        return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+    }
+
+    private static async Task RunQueuedJobsAsync(SqliteWebApplicationFactory f)
+    {
+        for (var i = 0; i < 50; i++)
+        {
+            using var scope = f.Services.CreateScope();
+            if (await scope.ServiceProvider.GetRequiredService<JobProcessor>().ProcessAvailableAsync(10) == 0)
+                return;
+        }
+    }
+
+    private static async Task<string[]> RolePermissionsAsync(
+        SqliteWebApplicationFactory f, string roleKey, string added)
+    {
+        using var scope = f.Services.CreateScope();
+        var keys = await scope.ServiceProvider.GetRequiredService<IRoleService>()
+            .GetEffectivePermissionsAsync(roleKey);
+        return keys.Append(added).ToArray();
+    }
+
+    private static async Task<Guid> AddUserAsync(SqliteWebApplicationFactory f, string roleKey = RoleKeys.Member)
     {
         using var scope = f.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -546,6 +652,7 @@ public sealed class DocumentIndexJobTests
             Id = id,
             Email = $"owner-{id:N}@example.invalid",
             DisplayName = "Owner",
+            RoleKey = roleKey,
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();

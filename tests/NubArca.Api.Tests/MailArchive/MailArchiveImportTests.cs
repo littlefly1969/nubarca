@@ -1,3 +1,4 @@
+using NubArca.Api.Access;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -803,6 +804,60 @@ public sealed class MailArchiveImportTests : IDisposable
         var attachments = await InDbAsync(factory, db => db.FileItems.CountAsync(f => f.OwnerUserId == owner && !f.Name.EndsWith(".pst")));
         Assert.Equal(5, attachments);
         Assert.Equal(1, engine.Lists);
+    }
+
+    [Fact]
+    public async Task Revoking_mail_access_stops_a_running_import_as_cancelled_and_it_resumes_once_allowed_again()
+    {
+        var engine = FakePstEngine.Sample();
+        var factory = NewFactory(engine, settings: new() { ["Jobs:MaintenanceSliceItemBudget"] = "1" });
+        var (owner, client) = await factory.CreateAuthenticatedClientAsync();
+        var started = await StartAsync(client, await UploadPstAsync(client));
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<JobProcessor>().ProcessAvailableAsync(1); // one slice: one message
+        }
+
+        // The owner loses mail.access mid-import: the next slice ends the run
+        // cancelled (never failed), and the routes refuse them.
+        await factory.SetRoleAsync(owner, RoleKeys.Restricted);
+        await RunJobsAsync(factory);
+        var run = await InDbAsync(factory, db => db.MailImportRuns.AsNoTracking().SingleAsync(r => r.Id == started.Run.Id));
+        Assert.Equal("cancelled", run.Status);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/mail/runs/{started.Run.Id}")).StatusCode);
+
+        await factory.SetRoleAsync(owner, RoleKeys.Member);
+        var resume = await client.PostAsync($"/api/mail/archives/{started.Archive.Id}/import", null);
+        Assert.Equal(HttpStatusCode.Accepted, resume.StatusCode);
+        await RunJobsAsync(factory);
+        var archive = await GetAsync<MailArchiveDto>(client, $"/api/mail/archives/{started.Archive.Id}");
+        Assert.Equal("succeeded", archive.LatestRun!.Status);
+        Assert.Equal(4, archive.MessageCount);
+    }
+
+    [Fact]
+    public async Task Revoking_mail_access_between_two_slices_of_the_same_worker_scope_imports_nothing_more()
+    {
+        var engine = FakePstEngine.Sample();
+        var factory = NewFactory(engine, settings: new() { ["Jobs:MaintenanceSliceItemBudget"] = "1" });
+        var (owner, client) = await factory.CreateAuthenticatedClientAsync();
+        var started = await StartAsync(client, await UploadPstAsync(client));
+
+        // The worker keeps one scope across slices, so the permission service
+        // the runner holds has already resolved the owner once when the second
+        // slice asks again.
+        using var scope = factory.Services.CreateScope();
+        var processor = scope.ServiceProvider.GetRequiredService<JobProcessor>();
+        await processor.ProcessAvailableAsync(1);
+        var midway = await InDbAsync(factory, db => db.MailMessages.CountAsync(m => m.ArchiveId == started.Archive.Id));
+
+        await factory.SetRoleAsync(owner, RoleKeys.Restricted);
+        await processor.ProcessAvailableAsync(1);
+
+        var run = await InDbAsync(factory, db => db.MailImportRuns.AsNoTracking().SingleAsync(r => r.Id == started.Run.Id));
+        Assert.Equal("cancelled", run.Status);
+        Assert.Equal(midway, await InDbAsync(factory, db => db.MailMessages.CountAsync(m => m.ArchiveId == started.Archive.Id)));
     }
 
     [Fact]

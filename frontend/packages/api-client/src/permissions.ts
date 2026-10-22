@@ -12,7 +12,13 @@ export const PERMISSIONS = {
   // over the holder's own People data, never an administration surface: the job
   // it starts clusters exactly one owner. Requires people.access as well.
   peopleClusterRebuild: 'people.cluster.rebuild',
+  // Semantic search over PHOTOS AND VIDEOS. Documents have their own key.
   semanticSearchAccess: 'semantic-search.access',
+  // Search and questions over the holder's own DOCUMENTS (the Documenti page
+  // and the document assistant), separate from media semantic search.
+  documentSearchAccess: 'document-search.access',
+  // MailArchive: importing PST archives and reading the imported mail.
+  mailAccess: 'mail.access',
   laboratoryAccess: 'laboratory.access',
   laboratoryPlates: 'laboratory.plates',
   laboratoryAesthetics: 'laboratory.aesthetics',
