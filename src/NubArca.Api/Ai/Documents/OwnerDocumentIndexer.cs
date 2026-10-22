@@ -107,6 +107,7 @@ public sealed class OwnerDocumentIndexer
     private readonly TimeProvider _clock;
     private readonly ILogger<OwnerDocumentIndexer> _log;
     private readonly FileItemDocumentSource _files;
+    private readonly IReadOnlyList<IOwnerDocumentSourceEligibility> _kinds;
 
     public OwnerDocumentIndexer(
         AppDbContext db,
@@ -116,7 +117,8 @@ public sealed class OwnerDocumentIndexer
         DocumentExtractionProviders providers,
         IOptions<DocumentExtractionOptions> options,
         TimeProvider clock,
-        ILogger<OwnerDocumentIndexer> log)
+        ILogger<OwnerDocumentIndexer> log,
+        OwnerDocumentSources? sources = null)
     {
         _db = db;
         _storage = storage;
@@ -130,6 +132,10 @@ public sealed class OwnerDocumentIndexer
         // injected, so the operator command and every existing caller keep
         // their constructor while reading through the source seam.
         _files = new FileItemDocumentSource(db, storage, options);
+        // The registered kinds' eligibility, which EMBEDDING unions over exactly
+        // as retrieval does. DI always supplies it; a hand-built indexer gets
+        // the `file` branch only.
+        _kinds = sources?.Eligibility ?? OwnerDocumentEligibility.FileKindOnly;
     }
 
     public async Task<OwnerDocumentIndexOutcome> IndexOwnerAsync(
@@ -959,15 +965,11 @@ public sealed class OwnerDocumentIndexer
             // document the owner deleted would keep acquiring new derived data
             // for as long as the sweeper was behind.
             //
-            // So embedding joins the live `FileItem` through the same predicate
-            // retrieval joins, and a chunk that is not readable does not become
-            // embeddable either.
+            // So embedding joins the live source — of EVERY registered kind —
+            // through the same predicate retrieval joins, and a chunk that is
+            // not readable does not become embeddable either.
             var candidates = OwnerDocumentEligibility
-                .EligibleChunks(
-                    _db.DocumentChunks.AsNoTracking(),
-                    _db.DocumentTexts.AsNoTracking(),
-                    _db.FileItems.AsNoTracking(),
-                    ownerUserId)
+                .EligibleChunks(_db, _kinds, ownerUserId)
                 .Where(r => r.Chunk.Id > cursor
                             && !_db.DocumentChunkEmbeddings.Any(
                                 e => e.DocumentChunkId == r.Chunk.Id && e.ProfileId == profile.Id))

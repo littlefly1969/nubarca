@@ -45,7 +45,7 @@ public sealed class DocumentIndexProgressService
         {
             if (ownerUserId is { } owner)
             {
-                var ids = source.EligibleSourceIds(_db, owner);
+                var ids = source.Eligible(_db, owner).Select(r => r.SourceId);
                 eligible += await CountCandidatesAsync(source, owner, cancellationToken);
 
                 var grouped = await _db.DocumentSourceStates.AsNoTracking()

@@ -71,15 +71,20 @@ public static class AiDistanceMetrics
 //               text, capability not applicable). Never used for an unavailable
 //               provider/environment condition.
 //  - Failed:    a real processing error on a processable target (retryable).
-/// The kinds of owner-private document SOURCE (see the source contract). Only
-/// `file` is implemented; `email` plugs in later through the same seam.
+/// The kinds of owner-private document SOURCE (see
+/// docs/document-intelligence/source-contract.md) — the ONE spelling of the
+/// discriminator stored in `SourceKind`, returned by search and accepted by its
+/// `SourceKinds` filter. Only `file` ships in the engine; another kind (archived
+/// email) is defined by its own code and becomes part of every corpus by
+/// registering an IOwnerDocumentSource — WHICH kinds exist is the DI
+/// registration, never a list here.
+///
+/// Not to be confused with `RagSourceKinds` (documentation/code), which is a
+/// ranking hint about CONTENT, not about where a person's document lives.
 public static class DocumentSourceKinds
 {
+    /// A `FileItem`; its SourceId is the FileItem's id.
     public const string File = "file";
-
-    /// Every kind this build registers. Eligibility is the union of these
-    /// kinds' predicates, and nothing else.
-    public static readonly IReadOnlyList<string> Registered = new[] { File };
 }
 
 public static class AiArtifactStatuses

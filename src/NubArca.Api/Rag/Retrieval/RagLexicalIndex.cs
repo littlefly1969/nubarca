@@ -79,8 +79,8 @@ public sealed class RagLexicalIndex
     /// it returns, so a chunk that lexical ranked eighth can still become the
     /// answer when the vector path agrees with it.
     ///
-    /// `allowedFileItemIds` is the SERVER-ONLY narrowing described on
-    /// `RagQuery.AllowedFileItemIds`, and it is applied HERE rather than when
+    /// `allowedSourceIds` / `allowedSourceKinds` are the SERVER-ONLY narrowing
+    /// described on `RagQuery.AllowedSourceIds`, and it is applied HERE rather than when
     /// the corpus was loaded. The distinction matters: BM25 weights a term by
     /// how rare it is across the corpus, so building an index from three
     /// documents would make every term unremarkable and collapse the scores
@@ -95,7 +95,8 @@ public sealed class RagLexicalIndex
     /// applied before ranking is cut to `take`, so a narrowed question sees its
     /// own best results and not the leftovers of somebody else's.
     public IReadOnlyList<RagLexicalHit> Search(
-        RagQueryShape shape, int take, IReadOnlyCollection<Guid>? allowedFileItemIds = null)
+        RagQueryShape shape, int take, IReadOnlyCollection<Guid>? allowedSourceIds = null,
+        IReadOnlyCollection<string>? allowedSourceKinds = null)
     {
         if (_documents.Count == 0 || take <= 0 || shape.Literal.Count == 0)
         {
@@ -105,13 +106,22 @@ public sealed class RagLexicalIndex
         // An EMPTY allowlist means "no documents qualify" and is honoured
         // literally. Treating it as null would silently widen a visual pass that
         // found nothing back to the whole library.
-        if (allowedFileItemIds is { Count: 0 }) return Array.Empty<RagLexicalHit>();
+        if (allowedSourceIds is { Count: 0 } || allowedSourceKinds is { Count: 0 })
+        {
+            return Array.Empty<RagLexicalHit>();
+        }
 
         var scored = new List<(Indexed Doc, double Score, int Any, int Literal, bool High)>();
         foreach (var doc in _documents)
         {
-            if (allowedFileItemIds is not null
-                && (doc.Chunk.FileItemId is not { } fileId || !allowedFileItemIds.Contains(fileId)))
+            if (allowedSourceIds is not null
+                && (doc.Chunk.DocumentSourceId is not { } sourceId || !allowedSourceIds.Contains(sourceId)))
+            {
+                continue;
+            }
+            if (allowedSourceKinds is not null
+                && (doc.Chunk.DocumentSourceKind is not { } kind
+                    || !allowedSourceKinds.Contains(kind, StringComparer.Ordinal)))
             {
                 continue;
             }

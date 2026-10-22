@@ -19,13 +19,18 @@ public sealed record PrivateDocumentTurn(bool FromUser, string Text);
 /// The locator is a position, not a handle: "page 4" or "slide 7 — Launch
 /// plan" lets a person open their document at the right place, and addresses
 /// nothing for anybody who does not already have the document.
+///
+/// `SourceKind` (DocumentSourceKinds) says WHAT the document is — a file, or a
+/// kind registered later — so a client can label it. A kind is a category,
+/// not an identifier.
 public sealed record PrivateDocumentCitation(
     string Document,
     string? Section,
     int? Page = null,
     string? LocatorKind = null,
     int? LocatorIndex = null,
-    string? LocatorLabel = null);
+    string? LocatorLabel = null,
+    string SourceKind = NubArca.Api.Domain.Ai.DocumentSourceKinds.File);
 
 public sealed record PrivateDocumentAnswer(
     bool Ok,
@@ -303,8 +308,9 @@ public sealed class PrivateDocumentAssistantService
                 result.Reason ?? AssistantFailureReasons.ProviderUnavailable);
         }
 
-        // Citations are a NAME and a SECTION. Both are things the person wrote
-        // or chose and would recognise; neither is an identifier. No FileItemId,
+        // Citations are a NAME and a SECTION (plus the source's KIND, a
+        // category). Both are things the person wrote or chose and would
+        // recognise; neither is an identifier. No source id, no FileItemId,
         // no DocumentTextId, no chunk id, no blob hash, no storage key, no
         // score — a citation exists so somebody can open the document, not so a
         // client can address it.
@@ -318,7 +324,8 @@ public sealed class PrivateDocumentAssistantService
                 e.Page,
                 e.LocatorKind,
                 e.LocatorIndex,
-                string.IsNullOrWhiteSpace(e.LocatorLabel) ? null : e.LocatorLabel))
+                string.IsNullOrWhiteSpace(e.LocatorLabel) ? null : e.LocatorLabel,
+                e.DocumentSourceKind ?? NubArca.Api.Domain.Ai.DocumentSourceKinds.File))
             .Distinct()
             .ToList();
 

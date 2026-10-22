@@ -56,7 +56,10 @@ public static class PrivateDocumentAssistantEndpoints
             var embeddingReason = embeddings is null
                 ? RagFailureReasons.EmbeddingDisabled
                 : (await embeddings.ResolveAsync(RagDomainKey.UserDocuments, cancellationToken)).Reason;
-            var kinds = OwnerDocumentAvailability.Build(status, embeddingReason);
+            var registered = httpContext.RequestServices
+                .GetService<NubArca.Api.Ai.Documents.Sources.OwnerDocumentSources>();
+            var kinds = OwnerDocumentAvailability.Build(
+                status, embeddingReason, registered?.Eligibility.Select(k => k.Kind).ToList());
 
             return Results.Ok(new
             {
@@ -145,6 +148,9 @@ public static class PrivateDocumentAssistantEndpoints
                 sources = answer.Sources.Select(s => new
                 {
                     document = s.Document,
+                    // `file`, or a kind registered later: a category for the
+                    // label, never an id.
+                    sourceKind = s.SourceKind,
                     section = s.Section,
                     page = s.Page,
                     locator = LocatorDto(s.LocatorKind, s.LocatorIndex, s.LocatorLabel),

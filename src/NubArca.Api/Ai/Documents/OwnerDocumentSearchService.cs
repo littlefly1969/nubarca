@@ -4,21 +4,6 @@ using NubArca.Api.Rag.Retrieval;
 
 namespace NubArca.Api.Ai.Documents;
 
-/// Which KIND of owner-private source a document came from.
-///
-/// Only `file` exists in this release; it is a discriminator now so a result,
-/// a request and a UI never have to learn a second, FileItem-only spelling
-/// when another kind arrives (docs/document-intelligence/source-contract.md).
-/// Not to be confused with `RagSourceKinds` (documentation/code), which is a
-/// ranking hint about CONTENT, not about where a person's document lives.
-public static class OwnerDocumentSourceKinds
-{
-    /// A `FileItem`; its SourceId is the FileItem's id.
-    public const string File = "file";
-
-    public static readonly IReadOnlyList<string> All = new[] { File };
-}
-
 /// What a search found, and why it found nothing when it did.
 public static class OwnerDocumentSearchStatuses
 {
@@ -59,8 +44,9 @@ public sealed record OwnerDocumentSearchPassage(
     int? LexicalRank,
     int? VectorRank);
 
-/// One document, as good as its best passage. `SourceId` is the CALLER'S OWN
-/// id for the source — for `file`, their FileItemId.
+/// One document, as good as its best passage. `SourceKind` is one of
+/// DocumentSourceKinds; `SourceId` is the CALLER'S OWN id for the source — for
+/// `file`, their FileItemId.
 public sealed record OwnerDocumentSearchHit(
     string SourceKind,
     Guid SourceId,
@@ -127,11 +113,10 @@ public sealed class OwnerDocumentSearchService
                 RagRetrievalModes.Lexical, DocumentVisualModes.Unavailable);
         }
 
-        // Only `file` exists. A request scoped to kinds that exclude it has
-        // nothing to search — answered as "no evidence", never widened.
-        var kinds = request.SourceKinds;
+        // Narrowings that leave nothing are answered as "no evidence", never
+        // widened. A kind that is not registered simply matches no branch.
         if (text.Length == 0
-            || (kinds is not null && !kinds.Contains(OwnerDocumentSourceKinds.File, StringComparer.Ordinal))
+            || request.SourceKinds is { Count: 0 }
             || request.AllowedSourceIds is { Count: 0 })
         {
             return OwnerDocumentSearchResult.Empty(
@@ -144,7 +129,8 @@ public sealed class OwnerDocumentSearchService
         var retrieval = await _pipeline.RetrieveAsync(
             ownerUserId, text, MaxEvidence, MaxEvidenceCharacters,
             cancellationToken: cancellationToken,
-            allowedSourceIds: request.AllowedSourceIds);
+            allowedSourceIds: request.AllowedSourceIds,
+            allowedSourceKinds: request.SourceKinds);
 
         // Outcome, modes and counts. Never the query, never a name, never an id.
         _log.LogInformation(
@@ -187,22 +173,24 @@ public sealed class OwnerDocumentSearchService
         IReadOnlyList<string> terms,
         int maxDocuments)
     {
-        var order = new List<Guid>();
-        var byFile = new Dictionary<Guid, (string Name, List<OwnerDocumentSearchPassage> Passages)>();
+        var order = new List<(string Kind, Guid Id)>();
+        var bySource = new Dictionary<(string Kind, Guid Id), (string Name, List<OwnerDocumentSearchPassage> Passages)>();
 
         var rank = 0;
         foreach (var item in evidence)
         {
             rank++;
             if (item.OwnerUserId != ownerUserId) continue;
-            if (item.FileItemId is not { } fileId || fileId == Guid.Empty) continue;
+            if (item.DocumentSourceId is not { } sourceId || sourceId == Guid.Empty) continue;
+            if (string.IsNullOrEmpty(item.DocumentSourceKind)) continue;
 
-            if (!byFile.TryGetValue(fileId, out var entry))
+            var key = (item.DocumentSourceKind, sourceId);
+            if (!bySource.TryGetValue(key, out var entry))
             {
                 if (order.Count >= maxDocuments) continue;
                 entry = (item.Title, new List<OwnerDocumentSearchPassage>());
-                byFile[fileId] = entry;
-                order.Add(fileId);
+                bySource[key] = entry;
+                order.Add(key);
             }
             if (entry.Passages.Count >= MaxPassagesPerDocument) continue;
 
@@ -219,9 +207,10 @@ public sealed class OwnerDocumentSearchService
                 VectorRank: item.VectorRank));
         }
 
+        // The REAL kind of each source, as the eligibility join stamped it.
         return order
-            .Select((id, i) => new OwnerDocumentSearchHit(
-                OwnerDocumentSourceKinds.File, id, byFile[id].Name, i + 1, byFile[id].Passages))
+            .Select((key, i) => new OwnerDocumentSearchHit(
+                key.Kind, key.Id, bySource[key].Name, i + 1, bySource[key].Passages))
             .ToList();
     }
 }

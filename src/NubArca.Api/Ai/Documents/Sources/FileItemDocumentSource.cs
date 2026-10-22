@@ -39,8 +39,8 @@ public sealed class FileItemDocumentSource : IOwnerDocumentSource
     public static Guid? BlobOf(string revisionHash)
         => Guid.TryParseExact(revisionHash, "N", out var id) ? id : null;
 
-    public IQueryable<Guid> EligibleSourceIds(AppDbContext db, Guid ownerUserId)
-        => OwnerDocumentEligibility.Eligible(db.FileItems.AsNoTracking(), ownerUserId).Select(f => f.Id);
+    public IQueryable<EligibleSourceRow> Eligible(AppDbContext db, Guid ownerUserId)
+        => FileItemDocumentEligibility.Instance.Eligible(db, ownerUserId);
 
     public async Task<IReadOnlyList<DocumentSourceCandidate>> ListCandidatesAsync(
         Guid ownerUserId, Guid? afterSourceId, int take, CancellationToken cancellationToken = default)
@@ -165,6 +165,31 @@ public sealed class FileItemDocumentSource : IOwnerDocumentSource
             total += read;
         }
     }
+}
+
+/// The `file` kind's eligibility branch on its own, with no collaborators, so
+/// a caller constructed outside DI (an operator tool, a test) still has the
+/// file branch. EXACTLY OwnerDocumentEligibility.Eligible — owner, not
+/// deleted, not vaulted, active in the library — projected to the row shape.
+public sealed class FileItemDocumentEligibility : IOwnerDocumentSourceEligibility
+{
+    public static readonly FileItemDocumentEligibility Instance = new();
+
+    private FileItemDocumentEligibility() { }
+
+    public string Kind => DocumentSourceKinds.File;
+
+    public IQueryable<EligibleSourceRow> Eligible(AppDbContext db, Guid ownerUserId)
+        => OwnerDocumentEligibility.Eligible(db.FileItems.AsNoTracking(), ownerUserId)
+            .Select(f => new EligibleSourceRow
+            {
+                SourceId = f.Id,
+                // The LIVE owner, off the FileItem the predicate matched.
+                OwnerUserId = f.OwnerUserId,
+                // The file NAME: what a person recognises. Never the logical
+                // folder path, the storage key or a physical path.
+                DisplayName = f.Name,
+            });
 }
 
 /// Source-level reason tokens. Environment states, never content verdicts.

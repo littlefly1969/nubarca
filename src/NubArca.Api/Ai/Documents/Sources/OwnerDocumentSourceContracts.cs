@@ -77,6 +77,41 @@ public enum DocumentSourceLoadKind
     Refused,
 }
 
+/// One live, eligible source of one kind, as the engine joins it: the id the
+/// derived rows are keyed by, the LIVE owner (read off the kind's own row, not
+/// a derived copy) and the name a citation shows. Nothing else — a citation
+/// needs a name, and a kind's other columns stay inside the kind.
+public sealed class EligibleSourceRow
+{
+    public string SourceKind { get; init; } = string.Empty;
+    public Guid SourceId { get; init; }
+    public Guid OwnerUserId { get; init; }
+    public string DisplayName { get; init; } = string.Empty;
+}
+
+/// THE BOUNDARY for one kind (see docs/document-intelligence/source-contract.md).
+///
+/// Split from IOwnerDocumentSource only so retrieval can ask the question
+/// without the kind's loading collaborators (storage, options): every
+/// registered source IS one of these, and the engine's eligible set is the
+/// union of exactly the registered ones.
+public interface IOwnerDocumentSourceEligibility
+{
+    /// The discriminator stored in `SourceKind` (see DocumentSourceKinds).
+    string Kind { get; }
+
+    /// This owner's sources of this kind that may be knowledge RIGHT NOW,
+    /// recomputed from the kind's live rows on every call. Composable: the
+    /// engine joins it inside its own query (never materialized), so it must
+    /// be translatable by EF for every supported provider. `SourceKind` may be
+    /// left empty — the engine stamps the discriminator itself.
+    ///
+    /// Owner-prefiltered by contract, and the engine re-checks the returned
+    /// `OwnerUserId` against the asking owner anyway, so a kind that forgot
+    /// the owner clause still cannot widen anybody's corpus.
+    IQueryable<EligibleSourceRow> Eligible(AppDbContext db, Guid ownerUserId);
+}
+
 /// ONE KIND OF OWNER-PRIVATE DOCUMENT SOURCE (see
 /// docs/document-intelligence/source-contract.md).
 ///
@@ -84,16 +119,8 @@ public enum DocumentSourceLoadKind
 /// identity, liveness and how its text is obtained. Every method is
 /// owner-prefiltered: a kind cannot be asked about a source without saying
 /// whose, and a source of another owner is simply not there.
-public interface IOwnerDocumentSource
+public interface IOwnerDocumentSource : IOwnerDocumentSourceEligibility
 {
-    /// The discriminator stored in `SourceKind` (see DocumentSourceKinds).
-    string Kind { get; }
-
-    /// THE BOUNDARY for this kind: the ids of this owner's sources that may be
-    /// knowledge right now. Composable, so callers join or `Contains` it inside
-    /// their own query rather than materializing it.
-    IQueryable<Guid> EligibleSourceIds(AppDbContext db, Guid ownerUserId);
-
     /// A keyset page of this owner's candidates after `afterSourceId`, ordered
     /// by SourceId. Never the whole set.
     Task<IReadOnlyList<DocumentSourceCandidate>> ListCandidatesAsync(
@@ -124,6 +151,11 @@ public sealed class OwnerDocumentSources
         => kind is not null && _byKind.TryGetValue(kind, out var source) ? source : null;
 
     public IReadOnlyCollection<IOwnerDocumentSource> All => _byKind.Values.ToArray();
+
+    /// The registered kinds' eligibility branches — what retrieval, vector
+    /// retrieval and embedding union over.
+    public IReadOnlyList<IOwnerDocumentSourceEligibility> Eligibility
+        => _byKind.Values.OrderBy(s => s.Kind, StringComparer.Ordinal).ToArray();
 }
 
 /// "This source is new, changed or removed." Returns once the change is
