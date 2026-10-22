@@ -91,7 +91,10 @@ class PdfTextLayer(Engine):
 class Tesseract(Engine):
     name = "tesseract"
 
-    def __init__(self, threads: int, langs: str = "ita+eng", psm: int = 3):
+    # eng+ita, in THAT order, is what NubArca configures (Ai__DocumentExtraction__OcrLanguages).
+    # The order is not cosmetic: with Ubuntu's tessdata 4.1, `ita+eng` was observed to spin
+    # for minutes on a page that `eng+ita` reads in under three seconds.
+    def __init__(self, threads: int, timeout: float, langs: str = "eng+ita", psm: int = 3):
         if not shutil.which("tesseract"):
             raise Unavailable("tesseract binary not on PATH")
         available = subprocess.run(["tesseract", "--list-langs"], capture_output=True,
@@ -99,20 +102,21 @@ class Tesseract(Engine):
         missing = [lang for lang in langs.split("+") if lang not in available]
         if missing:
             raise Unavailable(f"tesseract language data missing: {missing}")
-        self.langs, self.psm = langs, psm
+        self.langs, self.psm, self.timeout = langs, psm, timeout
         self.env = {**os.environ, "OMP_THREAD_LIMIT": str(threads)}
         self.version = subprocess.run(["tesseract", "--version"], capture_output=True,
                                       text=True).stdout.splitlines()[0]
 
     def describe(self):
         return {"engine": self.name, "runtime": self.version, "langs": self.langs,
-                "psm": self.psm, "oem": 1, "precision": "LSTM (tessdata from distro package)",
+                "psm": self.psm, "oem": 1, "timeout_s": self.timeout,
+                "precision": "LSTM (tessdata from distro package)",
                 "invocation": "tesseract - - -l <langs> --psm <psm> (PNG on stdin, as NubArca does)"}
 
     def page(self, image):
         proc = subprocess.run(["tesseract", "-", "-", "-l", self.langs, "--psm", str(self.psm),
                                "--oem", "1"], input=png_bytes(image), capture_output=True,
-                              env=self.env, timeout=300)
+                              env=self.env, timeout=self.timeout)
         if proc.returncode != 0:
             raise RuntimeError(f"tesseract exit {proc.returncode}")
         return proc.stdout.decode("utf-8", errors="replace")
@@ -334,7 +338,7 @@ def load_engine(name: str, args) -> Engine:
     if name == "pdf-textlayer":
         return PdfTextLayer(args.golden)
     if name == "tesseract":
-        return Tesseract(args.threads)
+        return Tesseract(args.threads, args.timeout)
     if name == "rapidocr-ppocrv5":
         return RapidOcr(args.models_dir, args.threads)
     if name == "paddleocr-vl-1.5-gguf":

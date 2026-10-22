@@ -209,8 +209,8 @@ QUERIES: tuple[Q, ...] = (
       (R(BM, 2, 2, "Premere il tasto MENU per 3 secondi fino a visualizzare P01."),), "MENU 3 s, P01"),
     Q("q049", "Where is the expansion vessel located in the hydraulic diagram of the boiler?", "en",
       ("en-it", "visual-only", "technical"),
-      (R(BM, 2, 2, "Figura 3 — Schema idraulico semplificato del circuito primario"),), "",
-      visual_only=True),
+      (R(BM, 2, 2, "Figura 3 — Schema idraulico semplificato del circuito primario"),),
+      "Vaso espansione: between the three-way valve and the flow (Mandata)", visual_only=True),
     Q("q050", "Does the boiler warranty on the heat exchanger require yearly servicing?", "en",
       ("en-it", "specialist", "indirect"),
       (R(BM, 4, 2, "La garanzia convenzionale di 5 anni sullo scambiatore è valida solo se la "
@@ -369,7 +369,7 @@ QUERIES: tuple[Q, ...] = (
       (R(FR, 2, 2, "Il margine EBITDA è passato dal 14,2% al 15,1% dei ricavi."),), "15,1%"),
     Q("q098", "ricavi servizi doganali 2024 rispetto al 2023", "it",
       ("it-it", "visual-only"),
-      (R(FR, 3, 2, "Grafico 2 — Ricavi per area di attività, confronto 2023–2024"),), "1,3 vs 1,35",
+      (R(FR, 3, 2, "Grafico 2 — Ricavi per area di attività, confronto 2023–2024"),), "1,30 nel 2024 contro 1,35 nel 2023",
       visual_only=True),
 
     # ---- newsletter ---------------------------------------------------------

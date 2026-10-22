@@ -56,7 +56,8 @@ def main(argv=None) -> int:
     p.add_argument("--subset", default="all", help="all | core | doc ids comma-separated")
     p.add_argument("--mode", default="page", help="page | region (if the engine supports it)")
     p.add_argument("--llama-server", default=os.environ.get("BENCH_LLAMA_SERVER", "llama-server"))
-    p.add_argument("--timeout", type=float, default=600.0, help="seconds per page")
+    p.add_argument("--timeout", type=float, default=180.0,
+                   help="seconds per page; a timeout is recorded as a failed page")
     p.add_argument("--max-tokens", type=int, default=4096)
 
     p = sub.add_parser("visual", help="visual page retrieval lane")
