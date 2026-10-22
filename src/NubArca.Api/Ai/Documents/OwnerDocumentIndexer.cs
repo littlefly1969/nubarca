@@ -480,16 +480,38 @@ public sealed class OwnerDocumentIndexer
         // be visible to the database before the promotion, or the filtered
         // unique index sees two current rows for one source and refuses the
         // write. That refusal is the point.
+        //
+        // AND THE CHUNKS ARE PUBLISHED WITH IT. A reading marked Completed and
+        // current whose chunks are still the previous reading's — because the
+        // process died between two saves — answers questions from text that no
+        // longer exists, and the unchanged-source short-circuit would then keep
+        // it that way. So the promotion and the chunk replacement commit
+        // together or not at all; a caller that already holds a transaction
+        // owns the commit.
+        await using var transaction = _db.Database.CurrentTransaction is null
+            ? await _db.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+
         await DemoteOtherDerivationsAsync(reference, existing.Id, cancellationToken);
         existing.IsCurrent = true;
 
         await _db.SaveChangesAsync(cancellationToken);
 
+        // ALWAYS reconciled, even when the text hash is unchanged. The hash
+        // covers the canonical TEXT, not the layout: the same words can move to
+        // another page, slide or section, and a citation must follow them.
+        // Reconciling is cheap — unchanged chunks keep their embeddings and only
+        // their placement is rewritten.
+        await ReplaceChunksAsync(
+            existing, planned.Chunks!, profile, state, now, cancellationToken);
         if (!chunksAreCurrent)
         {
-            await ReplaceChunksAsync(
-                existing, planned.Chunks!, profile, state, now, cancellationToken);
             state.Chunked++;
+        }
+
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
         }
 
         return OwnerDocumentSourceOutcome.Indexed(existing.Id, profile.Id);
@@ -820,7 +842,15 @@ public sealed class OwnerDocumentIndexer
             {
                 if (chunk.TextHash == hash)
                 {
+                    // Same words, so the vector stays — but the PLACEMENT is
+                    // the new reading's: heading, offsets and page/slide/sheet
+                    // locator are what a citation says, and they move with the
+                    // layout even when the text does not change.
                     chunk.OwnerUserId = document.OwnerUserId;
+                    chunk.Heading = draft.Heading;
+                    chunk.StartOffset = draft.StartOffset >= 0 ? draft.StartOffset : null;
+                    chunk.EndOffset = draft.EndOffset >= 0 ? draft.EndOffset : null;
+                    ApplyLocator(chunk, draft.Locator);
                     continue;
                 }
                 chunk.Heading = draft.Heading;
