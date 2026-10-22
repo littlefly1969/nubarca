@@ -58,6 +58,7 @@ fi
 if want ocr; then
   bench ocr --engine pdf-textlayer
   bench ocr --engine tesseract --subset all
+  bench ocr --engine tesseract --subset core --tesseract-omp 4
   bench ocr --engine rapidocr-ppocrv5 --subset all
 fi
 

@@ -59,6 +59,8 @@ def main(argv=None) -> int:
     p.add_argument("--timeout", type=float, default=180.0,
                    help="seconds per page; a timeout is recorded as a failed page")
     p.add_argument("--max-tokens", type=int, default=4096)
+    p.add_argument("--tesseract-omp", type=int, default=1,
+                   help="OMP_THREAD_LIMIT for each tesseract process (default 1)")
 
     p = sub.add_parser("visual", help="visual page retrieval lane")
     _common(p)

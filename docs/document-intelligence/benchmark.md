@@ -281,9 +281,13 @@ weights cannot be fetched. On the target they are recorded skips until
     documents. None of these are modelled.
 - **Region mode** uses the renderer's oracle layout, not a layout model. It is
   an upper bound.
-- **Tesseract language order:** Tesseract with `ita+eng` hangs for minutes on
-  some pages, while `eng+ita` (NubArca's configured order) does not. The lane
-  uses `eng+ita` with a per-page timeout.
+- **Tesseract threading:** Tesseract runs with `OMP_THREAD_LIMIT=1` by
+  default. With the limit at the container's full core count (4), the cloud
+  container's Tesseract spun past a 120 s timeout on pages that one thread
+  reads in under a second. The suite also runs the core subset with
+  `--tesseract-omp 4`, so the target shows whether OpenMP helps there. NubArca
+  itself does not set the variable today. A per-page timeout turns any hang
+  into a recorded failure.
 - **Visual-only queries:** answers drawn only into chart images are
   unreachable for any text lane. They are kept to measure the visual lane and
   fusion, and they cap text recall below 1.0.

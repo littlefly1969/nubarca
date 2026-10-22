@@ -91,10 +91,12 @@ class PdfTextLayer(Engine):
 class Tesseract(Engine):
     name = "tesseract"
 
-    # eng+ita, in THAT order, is what NubArca configures (Ai__DocumentExtraction__OcrLanguages).
-    # The order is not cosmetic: with Ubuntu's tessdata 4.1, `ita+eng` was observed to spin
-    # for minutes on a page that `eng+ita` reads in under three seconds.
-    def __init__(self, threads: int, timeout: float, langs: str = "eng+ita", psm: int = 3):
+    # eng+ita is what NubArca configures (Ai__DocumentExtraction__OcrLanguages).
+    # OMP_THREAD_LIMIT defaults to 1: with the limit at the container's full core count,
+    # Tesseract's OpenMP workers were observed to spin past a 120 s timeout on pages that
+    # one thread reads in under a second (cloud container, other load present). Raise it
+    # with --tesseract-omp to measure multi-threaded Tesseract; the value is in the manifest.
+    def __init__(self, omp_threads: int, timeout: float, langs: str = "eng+ita", psm: int = 3):
         if not shutil.which("tesseract"):
             raise Unavailable("tesseract binary not on PATH")
         available = subprocess.run(["tesseract", "--list-langs"], capture_output=True,
@@ -103,13 +105,15 @@ class Tesseract(Engine):
         if missing:
             raise Unavailable(f"tesseract language data missing: {missing}")
         self.langs, self.psm, self.timeout = langs, psm, timeout
-        self.env = {**os.environ, "OMP_THREAD_LIMIT": str(threads)}
+        self.omp_threads = omp_threads
+        self.env = {**os.environ, "OMP_THREAD_LIMIT": str(omp_threads)}
         self.version = subprocess.run(["tesseract", "--version"], capture_output=True,
                                       text=True).stdout.splitlines()[0]
 
     def describe(self):
         return {"engine": self.name, "runtime": self.version, "langs": self.langs,
                 "psm": self.psm, "oem": 1, "timeout_s": self.timeout,
+                "omp_thread_limit": self.omp_threads,
                 "precision": "LSTM (tessdata from distro package)",
                 "invocation": "tesseract - - -l <langs> --psm <psm> (PNG on stdin, as NubArca does)"}
 
@@ -338,7 +342,7 @@ def load_engine(name: str, args) -> Engine:
     if name == "pdf-textlayer":
         return PdfTextLayer(args.golden)
     if name == "tesseract":
-        return Tesseract(args.threads, args.timeout)
+        return Tesseract(getattr(args, "tesseract_omp", 1), args.timeout)
     if name == "rapidocr-ppocrv5":
         return RapidOcr(args.models_dir, args.threads)
     if name == "paddleocr-vl-1.5-gguf":
