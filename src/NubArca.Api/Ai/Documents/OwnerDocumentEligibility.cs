@@ -29,6 +29,11 @@ namespace NubArca.Api.Ai.Documents;
 /// this bounded context says `IgnoreQueryFilters()`. The explicit predicate
 /// below is stated anyway — in the one place a future refactor would remove the
 /// filter, a test that reads this file should fail.
+///
+/// `Eligible`/`Extractable` are the `file` kind's rule. `EligibleChunks` is
+/// the chunk-level boundary for EVERY registered source kind: the `file`
+/// branch is `Eligible`, and each other kind brings its own live predicate
+/// (docs/document-intelligence/source-contract.md).
 public static class OwnerDocumentEligibility
 {
     /// Every condition, as one composable predicate.
