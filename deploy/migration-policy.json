@@ -242,6 +242,11 @@
       "previousApplicationCompatible": true,
       "reason": "Purely additive. It adds one non-nullable boolean column, albums.SortOldestFirst, with a database default of false, so every existing album keeps the default newest-first direction without a backfill or a table rewrite (a constant default is a metadata-only change on PostgreSQL 11+). No index, constraint or foreign key is added or altered. The previous application neither reads nor writes the column, and its inserts take the default, so rolling the image back leaves every existing flow working against the upgraded schema; albums are then shown in that application's own order until the new application runs again. album_items.SortOrder is kept and still written on append, so the previous application's curated-order reads and writes remain valid. Down() drops the column, losing only the owners' chosen direction (albums return to newest first); no file, blob or album item is touched."
     },
+    "20261021224250_AddDocumentSourceIdentityAndIndexState": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Additive for the previous application. It adds document_texts.SourceKind (default 'file'), SourceId (backfilled from FileItemId for every existing row) and nullable SourceRevision, makes FileItemId nullable, and moves the two unique indexes from (FileItemId, ProfileId) and current-per-FileItemId to the identical (SourceKind, SourceId, ProfileId) and current-per-(SourceKind, SourceId) keys, which for file rows enforce exactly the same uniqueness. A BEFORE INSERT/UPDATE trigger sets SourceId from FileItemId for file rows, so the previous application, which writes only FileItemId, keeps producing valid rows; a check constraint states the same rule. It also creates the new document_source_states table, which the previous application neither reads nor writes. Down() drops the trigger, deletes non-file rows (none exist before this release), drops the new columns and table and restores the original indexes; no file, blob or extracted text of a file is touched."
+    },
     "20261021181506_AddMailArchive": {
       "automated": true,
       "previousApplicationCompatible": true,

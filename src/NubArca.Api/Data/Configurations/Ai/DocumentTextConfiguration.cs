@@ -14,6 +14,14 @@ public class DocumentTextConfiguration : IEntityTypeConfiguration<DocumentText>
             t.HasCheckConstraint(
                 "ck_document_texts_char_count_non_negative",
                 "\"CharCount\" IS NULL OR \"CharCount\" >= 0");
+
+            // A FILE READING'S SOURCE IS ITS FILE. (The migration also installs
+            // a PostgreSQL trigger that fills SourceId from FileItemId, so rows
+            // written by an application that predates the source identity stay
+            // correct.)
+            t.HasCheckConstraint(
+                "ck_document_texts_file_source",
+                "\"SourceKind\" <> 'file' OR (\"FileItemId\" IS NOT NULL AND \"FileItemId\" = \"SourceId\")");
         });
 
         builder.HasKey(d => d.Id);
@@ -48,14 +56,30 @@ public class DocumentTextConfiguration : IEntityTypeConfiguration<DocumentText>
         builder.Property(d => d.UpdatedAt)
             .HasColumnType("timestamp with time zone");
 
-        builder.HasIndex(d => new { d.FileItemId, d.ProfileId })
+        builder.Property(d => d.SourceKind)
+            .IsRequired()
+            .HasMaxLength(16)
+            .HasDefaultValue(DocumentSourceKinds.File);
+
+        builder.Property(d => d.SourceRevision)
+            .HasMaxLength(128);
+
+        // The FileItem column is read through its backing field, so the setter
+        // that keeps the source identity in step never runs on materialization.
+        builder.Property(d => d.FileItemId)
+            .HasField("_fileItemId")
+            .UsePropertyAccessMode(PropertyAccessMode.Field);
+
+        // ONE READING PER (source, extraction profile). For the `file` kind this
+        // is exactly the previous (FileItemId, ProfileId) uniqueness.
+        builder.HasIndex(d => new { d.SourceKind, d.SourceId, d.ProfileId })
             .IsUnique()
-            .HasDatabaseName("ux_document_texts_file_profile");
+            .HasDatabaseName("ux_document_texts_source_profile");
 
         builder.HasIndex(d => d.OwnerUserId)
             .HasDatabaseName("ix_document_texts_owner");
 
-        // AT MOST ONE CURRENT EXTRACTION PER FILE, enforced by the database.
+        // AT MOST ONE CURRENT EXTRACTION PER SOURCE, enforced by the database.
         //
         // A filtered unique index rather than application discipline, because
         // the failure it prevents is silent. Two current rows do not throw
@@ -65,12 +89,16 @@ public class DocumentTextConfiguration : IEntityTypeConfiguration<DocumentText>
         // write that cannot commit, at the moment it is attempted.
         //
         // Filtered on IsCurrent so historical rows are unconstrained — there may
-        // be any number of superseded readings of one file, and they are the
+        // be any number of superseded readings of one source, and they are the
         // provenance a future extractor upgrade reads.
-        builder.HasIndex(d => d.FileItemId)
+        builder.HasIndex(d => new { d.SourceKind, d.SourceId })
             .IsUnique()
             .HasFilter("\"IsCurrent\"")
-            .HasDatabaseName("ux_document_texts_current_per_file");
+            .HasDatabaseName("ux_document_texts_current_per_source");
+
+        // The FileItem foreign key still needs an index for its cascade.
+        builder.HasIndex(d => d.FileItemId)
+            .HasDatabaseName("ix_document_texts_file");
 
         // Not a foreign key to BlobObject on purpose. This column records WHICH
         // BYTES were read, for idempotence; it is not a reference that should

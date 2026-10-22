@@ -3,8 +3,10 @@ using Microsoft.Extensions.Options;
 using NubArca.Api.Ai;
 using NubArca.Api.Ai.DocumentVisual;
 using NubArca.Api.Ai.Documents;
+using NubArca.Api.Ai.Documents.Indexing;
 using NubArca.Api.Data;
 using NubArca.Api.Domain.Ai;
+using NubArca.Api.Jobs;
 using NubArca.Api.Rag;
 using NubArca.Api.Rag.Domains;
 using NubArca.Api.Rag.Retrieval;
@@ -19,11 +21,11 @@ namespace NubArca.Api.Cli;
 /// would make "which corpus does this command touch" a question about arguments
 /// rather than about which command was typed.
 ///
-/// Every verb here REQUIRES `--owner`. There is no "all owners" mode, not
-/// because it would be hard, but because an operator command that walks every
-/// person's documents is a capability worth not having: the one legitimate use
-/// (backfill after enabling the feature) is served by running it per owner,
-/// which is also the form that can be stopped halfway without ambiguity.
+/// Every verb that reads or indexes in this process REQUIRES `--owner`. The one
+/// exception is `backfill --all-owners`, which does not walk anybody's documents
+/// here: it ENQUEUES the background job, which processes one owner at a time,
+/// sliced, checkpointed and cancellable from the jobs dashboard — the form of
+/// "every owner" that can be stopped halfway without ambiguity.
 ///
 /// Nothing here prints a document name, a heading, an excerpt or a storage key.
 /// An operator diagnosing an indexing problem needs counts and reason tokens,
@@ -37,10 +39,13 @@ internal static class DocumentsCliCommands
         {
             "index" => IndexAsync(args, sp, stdout, stderr),
             "status" => StatusAsync(args, sp, stdout, stderr),
+            "backfill" => BackfillAsync(args, sp, stdout, stderr),
+            "progress" => ProgressAsync(args, sp, stdout, stderr),
             "visual-seed-profiles" => VisualSeedAsync(sp, stdout),
             "visual-index" => VisualIndexAsync(args, sp, stdout, stderr),
             "visual-status" => VisualStatusAsync(args, sp, stdout, stderr),
             "visual-evaluate" => VisualEvaluateAsync(args, sp, stdout, stderr),
+            "query" => DocumentsQueryCliCommand.RunAsync(args, sp, stdout, stderr),
             _ => Usage(stderr),
         };
 
@@ -49,7 +54,12 @@ internal static class DocumentsCliCommands
         stderr.WriteLine(
             "usage: documents <index|status|visual-index|visual-status> --owner <user-id> "
             + "[--limit N] [--embed]");
+        stderr.WriteLine(
+            "       documents backfill (--owner <user-id> | --all-owners) [--retry-failed] [--limit N]");
+        stderr.WriteLine("       documents progress [--owner <user-id>]");
         stderr.WriteLine("       documents visual-seed-profiles");
+        stderr.WriteLine(
+            "       documents query --owner <user-id> [--limit N] [--expect name[,name]] \"<question>\"");
         stderr.WriteLine(
             "       documents visual-evaluate --owner <user-id> --queries <file> [--expect <file>]");
         return Task.FromResult(2);
@@ -65,8 +75,11 @@ internal static class DocumentsCliCommands
         var limit = TryInt(Arg(args, "--limit"));
         var embed = args.Contains("--embed", StringComparer.Ordinal);
 
+        // Ctrl-C reaches the indexer COOPERATIVELY: it stops at the next safe
+        // point, and a cancelled run records no verdict about any document.
+        using var cancel = CancelOnCtrlC();
         var outcome = await sp.GetRequiredService<OwnerDocumentIndexer>()
-            .IndexOwnerAsync(owner, limit, embed);
+            .IndexOwnerAsync(owner, limit, embed, cancel.Token);
 
         stdout.WriteLine($"files_seen={outcome.FilesSeen}");
         stdout.WriteLine($"extracted={outcome.Extracted}");
@@ -93,6 +106,89 @@ internal static class DocumentsCliCommands
         // the old signature. Private indexes are not cached, but the system ones
         // share the process — clearing is cheap and keeps one rule.
         sp.GetRequiredService<RagLexicalIndexCache>().Clear();
+        return 0;
+    }
+
+    // ---- documents backfill -------------------------------------------------
+
+    /// Enqueue the automatic indexing job instead of running it in this
+    /// process. Per owner, or — only with the explicit `--all-owners` flag —
+    /// every owner, which the job still processes ONE OWNER AT A TIME, sliced
+    /// and resumable. Refused while the capability is off, so an operator is
+    /// not left waiting on a job that will no-op.
+    private static async Task<int> BackfillAsync(
+        string[] args, IServiceProvider sp, TextWriter stdout, TextWriter stderr)
+    {
+        var allOwners = args.Contains("--all-owners", StringComparer.Ordinal);
+        Guid owner = Guid.Empty;
+        if (!allOwners && !TryOwner(args, stderr, out owner)) return 2;
+        if (allOwners && Arg(args, "--owner") is not null)
+        {
+            stderr.WriteLine("documents backfill: use either --owner or --all-owners, not both.");
+            return 2;
+        }
+
+        var ai = sp.GetRequiredService<IOptions<AiOptions>>().Value;
+        if (!ai.Enabled || !ai.DocumentExtractionEnabled)
+        {
+            stderr.WriteLine(
+                "documents backfill: automatic document indexing is disabled "
+                + "(set Ai__Enabled=true and Ai__DocumentExtractionEnabled=true).");
+            return 1;
+        }
+
+        var payload = new DocumentIndexJobPayload(
+            OwnerUserId: allOwners ? null : owner,
+            AllOwners: allOwners,
+            RetryFailed: args.Contains("--retry-failed", StringComparer.Ordinal),
+            Limit: TryInt(Arg(args, "--limit")));
+
+        var job = await sp.GetRequiredService<IJobQueue>().EnqueueAsync(
+            JobTypes.AiDocumentsIndex,
+            payload,
+            idempotencyKey: allOwners
+                ? "documents:index:all-owners"
+                : $"documents:index:backfill:{owner:N}");
+
+        stdout.WriteLine($"job={job.Id}");
+        stdout.WriteLine($"type={JobTypes.AiDocumentsIndex}");
+        stdout.WriteLine($"scope={(allOwners ? "all-owners" : "owner")}");
+        stdout.WriteLine($"status={job.Status}");
+        return 0;
+    }
+
+    // ---- documents progress -------------------------------------------------
+
+    /// Counts per phase and state, and reason tokens with counts. No names, no
+    /// ids. Without `--owner` the installation-wide aggregate (which cannot
+    /// compute implicit pending: there is no per-owner eligibility to subtract
+    /// from).
+    private static async Task<int> ProgressAsync(
+        string[] args, IServiceProvider sp, TextWriter stdout, TextWriter stderr)
+    {
+        Guid? owner = null;
+        if (Arg(args, "--owner") is not null)
+        {
+            if (!TryOwner(args, stderr, out var parsed)) return 2;
+            owner = parsed;
+        }
+
+        var progress = await sp.GetRequiredService<DocumentIndexProgressService>().GetAsync(owner);
+        var ai = sp.GetRequiredService<IOptions<AiOptions>>().Value;
+
+        stdout.WriteLine($"automatic_indexing={(ai.Enabled && ai.DocumentExtractionEnabled ? "enabled" : "disabled")}");
+        stdout.WriteLine($"embeddings_in_job={(ai.Enabled && ai.DocumentEmbeddingsEnabled ? "enabled" : "disabled")}");
+        stdout.WriteLine($"scope={(owner is null ? "installation" : "owner")}");
+        if (owner is not null) stdout.WriteLine($"eligible_sources={progress.EligibleSources}");
+        foreach (var (phase, counts) in progress.Phases)
+        {
+            stdout.WriteLine(
+                $"{phase}: " + string.Join(' ', counts.Select(c => $"{c.Key}={c.Value}")));
+        }
+        foreach (var (reason, count) in progress.ReasonCounts.OrderBy(r => r.Key, StringComparer.Ordinal))
+        {
+            stdout.WriteLine($"  reason_{reason}={count}");
+        }
         return 0;
     }
 
@@ -197,8 +293,9 @@ internal static class DocumentsCliCommands
         if (!TryOwner(args, stderr, out var owner)) return 2;
 
         var limit = TryInt(Arg(args, "--limit"));
+        using var cancel = CancelOnCtrlC();
         var outcome = await sp.GetRequiredService<OwnerDocumentVisualIndexer>()
-            .IndexOwnerAsync(owner, limit);
+            .IndexOwnerAsync(owner, limit, cancel.Token);
 
         stdout.WriteLine($"files_seen={outcome.FilesSeen}");
         stdout.WriteLine($"indexed={outcome.Indexed}");
@@ -431,6 +528,23 @@ internal static class DocumentsCliCommands
             if (string.Equals(args[i], name, StringComparison.Ordinal)) return args[i + 1];
         }
         return null;
+    }
+
+    /// A token cancelled by Ctrl-C, so a long operator run stops cooperatively
+    /// instead of being killed mid-write.
+    private static CancellationTokenSource CancelOnCtrlC()
+    {
+        var cts = new CancellationTokenSource();
+        ConsoleCancelEventHandler? handler = null;
+        handler = (_, e) =>
+        {
+            e.Cancel = true;
+            Console.CancelKeyPress -= handler;
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        };
+        Console.CancelKeyPress += handler;
+        cts.Token.Register(() => Console.CancelKeyPress -= handler);
+        return cts;
     }
 
     private static int? TryInt(string? value)

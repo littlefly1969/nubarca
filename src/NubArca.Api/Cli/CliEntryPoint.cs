@@ -72,6 +72,10 @@ public static class CliEntryPoint
             "plates",
             "help-knowledge",
             "rag",
+            // The owner-private document verbs. Without this entry `documents`
+            // was dispatched by RunAsync but never recognised as a CLI
+            // invocation, so the container started the web host instead.
+            "documents",
             "--help", "-h", "help",
         };
 

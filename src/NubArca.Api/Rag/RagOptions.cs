@@ -64,6 +64,10 @@ public sealed class RagOptions
     /// one checkpoint and "both are text" for another — so the evidence decision
     /// stays anchored on the lexical gate, which IS calibrated against a golden
     /// set, and this only lets an unmistakable semantic match through.
+    ///
+    /// This is the FALLBACK: a text-embedding catalog entry that carries its
+    /// own `MinimumVectorScore` (RagTextEmbeddingModels) wins for retrievals
+    /// scored by its profile. The 0.80 default was set for multilingual-e5-small.
     public double MinimumVectorScore { get; set; } = 0.80;
 
     public int EffectiveQueryCharacters => Math.Clamp(MaxQueryCharacters, 1, 2000);

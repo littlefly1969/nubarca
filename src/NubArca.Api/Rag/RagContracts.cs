@@ -42,7 +42,7 @@ public sealed record RagQuery(
     {
     }
 
-    /// A SERVER-ONLY NARROWING of an owner-scoped question to specific files.
+    /// A SERVER-ONLY NARROWING of an owner-scoped question to specific sources.
     ///
     /// It exists for one caller: the visual candidate expansion, which finds
     /// documents that LOOK like the question and then asks the ordinary private
@@ -52,8 +52,8 @@ public sealed record RagQuery(
     ///
     /// THIS IS A NARROWING AND NEVER A WIDENING. It is applied to a corpus that
     /// has ALREADY passed `OwnerDocumentEligibility.EligibleChunks`; it does not
-    /// replace any part of it. A file id belonging to another owner, to a
-    /// deleted file or to a vaulted one is not in that corpus at all, so it
+    /// replace any part of it. A source id belonging to another owner, to a
+    /// deleted source or to a vaulted file is not in that corpus at all, so it
     /// matches nothing — the allowlist can only remove candidates, never reach
     /// one.
     ///
@@ -73,7 +73,14 @@ public sealed record RagQuery(
     /// list means "no files qualify" and is honoured as such — it must not be
     /// treated as null, or a visual pass that found nothing would silently widen
     /// back to the whole library.
-    public IReadOnlyCollection<Guid>? AllowedFileItemIds { get; init; }
+    public IReadOnlyCollection<Guid>? AllowedSourceIds { get; init; }
+
+    /// The same narrowing by source KIND (DocumentSourceKinds): only sources of
+    /// these kinds may be returned. Server-side only, like the ids; null means
+    /// every registered kind, an empty list means none. Combined with
+    /// `AllowedSourceIds` as AND, which is how the visual pass says "these
+    /// FILES" without a file id ever matching another kind's source.
+    public IReadOnlyCollection<string>? AllowedSourceKinds { get; init; }
 }
 
 /// Which retrieval paths actually produced a result.
@@ -131,7 +138,23 @@ public sealed record RagEvidence(
     /// part of an HTTP response, a citation, a log line or a prompt. An owner id
     /// reaching a model would be a stable identifier for a person attached to
     /// text about them.
-    Guid? OwnerUserId = null);
+    Guid? OwnerUserId = null,
+
+    /// WHICH SOURCE (kind + that kind's id), for an owner-scoped domain.
+    /// Internal provenance, never a citation id or a prompt field; the owner's
+    /// own document search is the one reviewed place the id reaches a response,
+    /// and only to its own owner. The kind alone (not an id) may label a
+    /// citation.
+    string? DocumentSourceKind = null,
+    Guid? DocumentSourceId = null,
+
+    /// WHERE in that source, copied from the chunk. `Page` is a real PDF page
+    /// only; the locator triple is the typed page/section/sheet/slide.
+    int? Page = null,
+    string? LocatorKind = null,
+    int? LocatorIndex = null,
+    string? LocatorLabel = null,
+    int? Ordinal = null);
 
 /// Why a retrieval returned what it did.
 ///

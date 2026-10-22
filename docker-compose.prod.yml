@@ -282,6 +282,41 @@ services:
       # measured quality/resource/licence gate. No model ships promoted.
       Ai__DocumentVisual__LateInteractionEnabled: ${Ai__DocumentVisual__LateInteractionEnabled:-false}
       Ai__DocumentVisual__LateProfileKey: ${Ai__DocumentVisual__LateProfileKey:-}
+      # API: query embedding, the documents CLI (`$DC exec api …`) and, if
+      # Jobs__WorkerEnabled, the in-process job runner all read these.
+      # ---- owner-document pipeline (Document Intelligence v1) ----------------
+      #
+      # Every key below is OFF/empty or the code default, so forwarding it
+      # changes nothing until .env sets it. Remember the Cast note above: a key
+      # that is not listed here never reaches the container, whatever .env says.
+      #
+      # Extraction. `Ai__DocumentExtractionEnabled` (above) turns automatic
+      # indexing on; these tune it. OCR is a Tesseract child process that ships
+      # in the image (eng + ita); a language that is not installed reports OCR
+      # not-ready and is never downloaded.
+      Ai__DocumentExtraction__OcrEnabled: ${Ai__DocumentExtraction__OcrEnabled:-false}
+      Ai__DocumentExtraction__OcrLanguages: ${Ai__DocumentExtraction__OcrLanguages:-eng}
+      Ai__DocumentExtraction__OcrPageTimeoutSeconds: ${Ai__DocumentExtraction__OcrPageTimeoutSeconds:-30}
+      Ai__DocumentExtraction__MaxConcurrentOcrPages: ${Ai__DocumentExtraction__MaxConcurrentOcrPages:-1}
+      Ai__DocumentExtraction__ParseTimeoutSeconds: ${Ai__DocumentExtraction__ParseTimeoutSeconds:-120}
+      # Resource and retry bounds of the `ai.documents.index` job. All clamped.
+      Ai__DocumentIndexing__MaxConcurrentJobs: ${Ai__DocumentIndexing__MaxConcurrentJobs:-1}
+      Ai__DocumentIndexing__GateWaitSeconds: ${Ai__DocumentIndexing__GateWaitSeconds:-10}
+      Ai__DocumentIndexing__MaxAttemptsPerSource: ${Ai__DocumentIndexing__MaxAttemptsPerSource:-3}
+      Ai__DocumentIndexing__ParallelTextAndVisualModels: ${Ai__DocumentIndexing__ParallelTextAndVisualModels:-false}
+      # Semantic retrieval for the owner-private `user-documents` domain. It
+      # never inherits an installation-wide Rag__* value, so it must name its
+      # own profile. The Compose VARIABLE uses `user_documents` because a
+      # hyphen cannot appear in an interpolation name; the container KEY keeps
+      # the domain's real name (same convention as help-default below).
+      Rag__Domains__user-documents__SemanticEnabled: ${Rag__Domains__user_documents__SemanticEnabled:-false}
+      Rag__Domains__user-documents__TextEmbeddingProfileKey: ${Rag__Domains__user_documents__TextEmbeddingProfileKey:-}
+      # OpenVINO device for the text-embedding tower; read only under the
+      # openvino-direct provider (docker-compose.facedirect-api.yml). Set HERE,
+      # not in that override, because the override is stacked AFTER the
+      # installation's docker-compose.prod.local.yml and would silently win
+      # over a value set there.
+      Ai__Onnx__OpenVino__RagTextDevice: ${Ai__Onnx__OpenVino__RagTextDevice:-CPU}
       Ai__FaceDetectionEnabled: ${Ai__FaceDetectionEnabled:-false}
       Ai__FaceEmbeddingsEnabled: ${Ai__FaceEmbeddingsEnabled:-false}
       Ai__FaceClusteringEnabled: ${Ai__FaceClusteringEnabled:-false}
@@ -422,6 +457,20 @@ services:
       Assistant__Models__help-default__Label: ${Assistant__Models__help_default__Label:-}
       Assistant__Models__help-default__TimeoutSeconds: ${Assistant__Models__help_default__TimeoutSeconds:-30}
       Assistant__Models__help-default__MaxOutputTokens: ${Assistant__Models__help_default__MaxOutputTokens:-800}
+      # The model that may read an owner's OWN documents
+      # (POST /api/assistant/documents/chat). Unset → no private answers.
+      # It must resolve to a LocalTrusted profile; an External one is refused
+      # at configuration time, never at request time. It may name help-default
+      # when that profile is LocalTrusted, or the dedicated profile below.
+      Assistant__PrivateKnowledgeModel: ${Assistant__PrivateKnowledgeModel:-}
+      Assistant__Models__documents-local__Protocol: ${Assistant__Models__documents_local__Protocol:-OpenAiCompatible}
+      Assistant__Models__documents-local__Trust: ${Assistant__Models__documents_local__Trust:-}
+      Assistant__Models__documents-local__BaseUrl: ${Assistant__Models__documents_local__BaseUrl:-}
+      Assistant__Models__documents-local__ApiKey: ${Assistant__Models__documents_local__ApiKey:-}
+      Assistant__Models__documents-local__Model: ${Assistant__Models__documents_local__Model:-}
+      Assistant__Models__documents-local__Label: ${Assistant__Models__documents_local__Label:-}
+      Assistant__Models__documents-local__TimeoutSeconds: ${Assistant__Models__documents_local__TimeoutSeconds:-30}
+      Assistant__Models__documents-local__MaxOutputTokens: ${Assistant__Models__documents_local__MaxOutputTokens:-800}
       # Legacy, kept so an installation configured before named profiles keeps
       # working. Adapted into ONE External profile, and only when Assistant__* is
       # absent. Deprecated: migrate to the block above.
@@ -578,6 +627,41 @@ services:
       # measured quality/resource/licence gate. No model ships promoted.
       Ai__DocumentVisual__LateInteractionEnabled: ${Ai__DocumentVisual__LateInteractionEnabled:-false}
       Ai__DocumentVisual__LateProfileKey: ${Ai__DocumentVisual__LateProfileKey:-}
+      # Worker: it RUNS `ai.documents.index` (extract → OCR → chunk → embed →
+      # visual), so it must see the same values as the api.
+      # ---- owner-document pipeline (Document Intelligence v1) ----------------
+      #
+      # Every key below is OFF/empty or the code default, so forwarding it
+      # changes nothing until .env sets it. Remember the Cast note above: a key
+      # that is not listed here never reaches the container, whatever .env says.
+      #
+      # Extraction. `Ai__DocumentExtractionEnabled` (above) turns automatic
+      # indexing on; these tune it. OCR is a Tesseract child process that ships
+      # in the image (eng + ita); a language that is not installed reports OCR
+      # not-ready and is never downloaded.
+      Ai__DocumentExtraction__OcrEnabled: ${Ai__DocumentExtraction__OcrEnabled:-false}
+      Ai__DocumentExtraction__OcrLanguages: ${Ai__DocumentExtraction__OcrLanguages:-eng}
+      Ai__DocumentExtraction__OcrPageTimeoutSeconds: ${Ai__DocumentExtraction__OcrPageTimeoutSeconds:-30}
+      Ai__DocumentExtraction__MaxConcurrentOcrPages: ${Ai__DocumentExtraction__MaxConcurrentOcrPages:-1}
+      Ai__DocumentExtraction__ParseTimeoutSeconds: ${Ai__DocumentExtraction__ParseTimeoutSeconds:-120}
+      # Resource and retry bounds of the `ai.documents.index` job. All clamped.
+      Ai__DocumentIndexing__MaxConcurrentJobs: ${Ai__DocumentIndexing__MaxConcurrentJobs:-1}
+      Ai__DocumentIndexing__GateWaitSeconds: ${Ai__DocumentIndexing__GateWaitSeconds:-10}
+      Ai__DocumentIndexing__MaxAttemptsPerSource: ${Ai__DocumentIndexing__MaxAttemptsPerSource:-3}
+      Ai__DocumentIndexing__ParallelTextAndVisualModels: ${Ai__DocumentIndexing__ParallelTextAndVisualModels:-false}
+      # Semantic retrieval for the owner-private `user-documents` domain. It
+      # never inherits an installation-wide Rag__* value, so it must name its
+      # own profile. The Compose VARIABLE uses `user_documents` because a
+      # hyphen cannot appear in an interpolation name; the container KEY keeps
+      # the domain's real name (same convention as help-default below).
+      Rag__Domains__user-documents__SemanticEnabled: ${Rag__Domains__user_documents__SemanticEnabled:-false}
+      Rag__Domains__user-documents__TextEmbeddingProfileKey: ${Rag__Domains__user_documents__TextEmbeddingProfileKey:-}
+      # OpenVINO device for the text-embedding tower; read only under the
+      # openvino-direct provider (docker-compose.facedirect-api.yml). Set HERE,
+      # not in that override, because the override is stacked AFTER the
+      # installation's docker-compose.prod.local.yml and would silently win
+      # over a value set there.
+      Ai__Onnx__OpenVino__RagTextDevice: ${Ai__Onnx__OpenVino__RagTextDevice:-CPU}
       Ai__FaceDetectionEnabled: ${Ai__FaceDetectionEnabled:-false}
       Ai__FaceEmbeddingsEnabled: ${Ai__FaceEmbeddingsEnabled:-false}
       Ai__FaceClusteringEnabled: ${Ai__FaceClusteringEnabled:-false}

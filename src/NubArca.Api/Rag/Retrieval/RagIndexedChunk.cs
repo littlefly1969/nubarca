@@ -45,19 +45,42 @@ public sealed record RagIndexedChunk(
     /// a log line or anything a prompt sees.
     Guid? OwnerUserId = null,
 
-    /// WHICH FILE this chunk came from, for an owner-scoped domain. Null for
-    /// every system domain, whose chunks come from a repository or a corpus
-    /// file rather than from somebody's library.
+    /// WHICH OWNER-PRIVATE SOURCE this chunk came from: the kind
+    /// (DocumentSourceKinds — `file`, or a kind registered later) and that
+    /// kind's id (for `file`, the FileItemId). Null for every system domain,
+    /// whose chunks come from a repository or a corpus file rather than from
+    /// somebody's library. Not to be confused with `SourceKind` above, which is
+    /// a ranking hint about CONTENT (documentation/code).
     ///
-    /// It exists for exactly one caller: the visual candidate expansion, which
-    /// needs to ask the SAME index for "the best chunks, but only from these
-    /// documents". Carrying it here rather than re-querying the database is what
-    /// lets that be a filter on an already-built, already-owner-eligible corpus
-    /// instead of a second read with a second copy of the boundary.
+    /// It exists so the server-only narrowing (`RagQuery.AllowedSourceIds` /
+    /// `AllowedSourceKinds`) can ask the SAME index for "the best chunks, but
+    /// only from these sources". Carrying it here rather than re-querying the
+    /// database is what lets that be a filter on an already-built,
+    /// already-owner-eligible corpus instead of a second read with a second
+    /// copy of the boundary.
     ///
-    /// Internal, like `OwnerUserId`: never a response field, never a citation,
-    /// never in a prompt.
-    Guid? FileItemId = null);
+    /// Internal, like `OwnerUserId`: never a citation and never in a prompt.
+    /// The ONE place it leaves retrieval is the owner's own document search,
+    /// which returns the caller's own source kind and id so the UI can open it
+    /// — a reviewed exception, see docs/rag-platform.md "Search returns the
+    /// owner's own file id".
+    string? DocumentSourceKind = null,
+    Guid? DocumentSourceId = null,
+
+    /// WHERE in its document this chunk sits, copied from `DocumentChunk`.
+    /// `Page` is a real PDF page and nothing else; the locator triple is the
+    /// typed position in the document's own units (page / section / sheet /
+    /// slide). Null for every system domain and for native text. See
+    /// docs/rag-platform.md "Location is typed".
+    int? Page = null,
+    string? LocatorKind = null,
+    int? LocatorIndex = null,
+    string? LocatorLabel = null,
+
+    /// The chunk's position in its document (`DocumentChunk.Ordinal`). A
+    /// position, not an id: it lets a result say "the third passage" and a
+    /// benchmark compare runs, and addresses nothing on its own.
+    int? Ordinal = null);
 
 /// A domain's complete lexical corpus at one revision.
 ///

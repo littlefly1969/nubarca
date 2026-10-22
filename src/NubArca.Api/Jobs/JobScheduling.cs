@@ -67,6 +67,9 @@ public static class JobScheduling
         JobTypes.AiPhotosEmbeddingsBackfill => Compute,
         JobTypes.AiDocumentsExtractBackfill => Compute,
         JobTypes.AiDocumentsEmbeddingsBackfill => Compute,
+        // Document extraction, OCR and embeddings: CPU-heavy inference work in
+        // the lowest band, sliced so a foreground import waits one slice.
+        JobTypes.AiDocumentsIndex => Compute,
         JobTypes.AiFacesDetectBackfill => Compute,
         JobTypes.AiFacesEmbeddingsBackfill => Compute,
         JobTypes.AiFacesClusterBackfill => Compute,

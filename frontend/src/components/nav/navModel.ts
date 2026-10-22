@@ -56,6 +56,9 @@ const MAIN: NavItem[] = [
   // The owner's own lists ("Da stampare", "Per la nonna"): references to media,
   // never copies. Core personal cloud, so not gated.
   { to: '/lists', labelKey: 'nav.lists', icon: 'list' },
+  // Search inside the owner's own documents. Core personal cloud: it reads
+  // only the caller's library, so it is not gated.
+  { to: '/documents', labelKey: 'nav.documents', icon: 'document' },
   // MailArchive: the owner's imported Outlook archives. Owner-private and part
   // of the personal archive, so not gated; the server authorizes every call.
   { to: '/mail', labelKey: 'nav.mail', icon: 'mail' },

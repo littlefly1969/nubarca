@@ -316,6 +316,14 @@ call at all, at either trust level — sending a third party a question plus thr
 irrelevant paragraphs buys a boundary crossing and the answer most likely to be
 wrong.
 
+That cosine floor belongs to the **profile** that scored the candidates, because
+cosine is not calibrated across checkpoints. A text-embedding catalog entry may
+carry its own `MinimumVectorScore`; without one the configured
+`Rag:MinimumVectorScore` (0.80, set for `multilingual-e5-small`) applies. The
+benchmark candidates carry `1.0`, a placeholder that keeps semantic-only
+evidence off until their floor is measured on the golden set
+([text-embeddings.md](model-deployment/text-embeddings.md)).
+
 Retrieval modes are observable: `lexical`, `hybrid`, or
 `lexical-fallback-<reason>`. A degraded run says it is degraded.
 
@@ -377,6 +385,13 @@ be real from the first commit. Those prefixes are MODEL syntax and are applied b
 the provider — RAG states semantic intent (`Query` or `Passage`), never a
 literal string.
 
+It is still the default. Qwen3-Embedding-0.6B (1024 and Matryoshka 768) and
+Granite Embedding R2 (311M, 97M) are catalogued as opt-in benchmark candidates,
+with the provider support they need (last-token pooling, Matryoshka truncation,
+position ids, a guaranteed trailing EOS, refusal of KV-cache graphs). Choosing
+one awaits a measurement on the target server; see
+[model-deployment/text-embeddings.md](model-deployment/text-embeddings.md).
+
 A missing model file is an availability condition with a reason code, and
 retrieval degrades to lexical.
 
@@ -422,9 +437,16 @@ not the storage.
 
 A `DocumentText`, its chunks and its vectors record an extraction that happened
 at some point in the past. Between then and now the file may have been deleted
-or moved into the Private Vault. So **every read joins the live `FileItem`**
-through `OwnerDocumentEligibility`, and a chunk whose file no longer qualifies is
-not in the corpus at all — not filtered out afterwards.
+or moved into the Private Vault. So **every read joins the live source** — the
+`FileItem` for the `file` kind, the kind's own row for any other registered kind
+— through `OwnerDocumentEligibility.EligibleChunks`, and a chunk whose source no
+longer qualifies is not in the corpus at all — not filtered out afterwards.
+`EligibleChunks` is the union of the registered kinds' live predicates
+(`IOwnerDocumentSourceEligibility.Eligible`, see
+[the source contract](document-intelligence/source-contract.md)); lexical
+retrieval, vector retrieval and embedding all read through it, so a kind joins
+every one of them by registering its `IOwnerDocumentSource`, and the engine
+re-checks each kind's live owner against the asker.
 
 That is deliberately not left to cleanup. A sweeper that deletes orphaned rows
 runs on a schedule; a boundary that only holds once it has run fails for as long
@@ -486,11 +508,130 @@ one question.
 
 ### What a citation may say
 
-The document's NAME and the SECTION heading — both things the owner wrote or
-chose. Never a `FileItemId`, `DocumentTextId`, chunk id, `BlobObjectId`, blob
-hash, `StorageKey`, filesystem path or owner id. A citation exists so a person
-can open their document, not so anything can address it, and an identifier on
-the wire is a durable handle to private content sitting in somebody else's logs.
+The document's NAME, the SECTION heading, and WHERE in the document — the real
+PDF page, or the typed locator (`page` / `section` / `sheet` / `slide`, its
+index and label; see "Location is typed"). All of it is something the owner
+wrote, chose, or can see by opening the file — plus the source KIND (`file`, or
+a kind registered later), a category for the label. Never a `FileItemId` or other source id,
+`DocumentTextId`, chunk id, `BlobObjectId`, blob hash, `StorageKey`, filesystem
+path or owner id. A citation exists so a person can open their document, not so
+anything can address it, and an identifier on the wire is a durable handle to
+private content sitting in somebody else's logs.
+
+The locator travels typed from `DocumentChunk` through `RagIndexedChunk` and
+`RagEvidence` into the citation (`page`, `locator: {kind, index, label}`), and
+the prompt names it too ("contratto.pdf — Recesso — page 3"), so a model that
+cites a page cites the page the passage came from rather than inventing one.
+
+### Search returns the owner's own file id
+
+`POST /api/documents/search` (`{ query, limit }`, authenticated, per-user rate
+limit `private-document-search`) is "find it in my documents": the same
+`OwnerDocumentRetrievalPipeline` the Assistant answers from — lexical, dense
+when semantic is on for `user-documents`, the visual pass when it is available,
+fused by rank — behind the same evidence gate, with **no model call**. Results
+are grouped by document, at most three passages each, each passage a bounded
+(320-character) excerpt centred on the match with its section and locator. The
+response says which retrieval ran (`mode`: `lexical`, `hybrid` or
+`lexical-fallback-<reason>`; `visualMode`, `visualUsed`) so "semantic is off"
+never reads as "search is broken".
+
+**Reviewed exception to the rule above.** Each document carries its real
+`sourceKind` and `sourceId` — the CALLER'S OWN id for that source (for `file`,
+their `FileItemId`) — so the page can open it. Why this one id is acceptable:
+
+- it is the id every other owner endpoint (listing, details, thumbnails,
+  `/api/files/{id}/content`) already returns to the same owner, so it discloses
+  nothing the owner could not already list;
+- every use of it is re-authorized server-side against the caller — a leaked id
+  opens nothing for anybody else;
+- it never appears in a chat citation, a prompt, a log line or a CLI line;
+- nothing else rides with it: no chunk id, `DocumentText` id, blob id, hash,
+  storage key, owner id or score (fusion scores of two passes are not
+  comparable, so the response carries ranks only).
+
+The request has no owner, domain, file or source field. The search service
+accepts optional `SourceKinds` and `AllowedSourceIds` SERVER-SIDE only, as a
+narrowing applied to the already-eligible corpus (`RagQuery.AllowedSourceKinds`
+/ `AllowedSourceIds`, ANDed), so it can only remove candidates (see "Narrowing a
+text pass, correctly"); an unregistered kind matches no branch, and the HTTP
+body cannot reach either. The visual pass is file-only (the renderer needs a
+file's bytes): its scoped text pass is pinned to kind `file`, and a question
+narrowed to kinds without `file` runs no visual pass. Isolation is proved by `OwnerDocumentSearchTests`: another owner's, a
+vaulted, a deleted and a library-excluded document with derived rows left in
+place, forged body fields, and a second owner holding identical bytes, each
+asserted absent from the complete response body.
+
+**Visual-only matches are exploration, not evidence.** A page made of a chart,
+a table or a diagram can look like the question while its text says little, so
+the evidence gate refuses it, correctly. Search lists such pages apart, in
+`visualMatches` (at most five, one per file, in visual rank order): `sourceKind`
+(always `file`), the caller's own `sourceId`, `name`, `rank`, `page` and the
+typed `locator` — no snippet, no score, no unit or index id. A file that already
+has a text hit is not repeated there. Each match is re-joined against the live
+library (owner, not deleted, not vaulted, not excluded) and against the file's
+CURRENT bytes, and the server-side narrowings apply to it as to text. The
+Assistant does not read `visualMatches`: the same question that lists a page
+here gets no answer, no citation and no model call in the chat. The page
+labels the section "pages that look like your search, whose text does not
+confirm it". Proved in `OwnerDocumentSearchTests` (visual-only section).
+
+`GET /api/assistant/documents/status` reports, besides the model boundary,
+`visualEnabled`/`visualReason`, an `indexing` block of counts
+(`candidateFiles`, `indexedFiles`, `notIndexedFiles`, `chunks`,
+`embeddedChunks` — null when semantic is off) and `availability` per domain and
+source kind: whether `lexical`, `semantic` and `visual` can run and, when not, a
+reason token (`disabled`, `no_profile`, `model_missing`, `not_indexed`, or the
+visual reason; `not_applicable` for visual on a kind that is not `file`). Counts and tokens only — never a name.
+
+### Automatic indexing, and its state
+
+With `Ai:Enabled` and `Ai:DocumentExtractionEnabled` both on, indexing is no
+longer something an operator runs. An upload, a file restore, a folder restore
+and an admin import each signal `IDocumentSourceChangeSink`, which enqueues one
+`ai.documents.index` job (compute priority) and never blocks the request. With
+either flag off — the default — the sink is inert and nothing is queued.
+
+The job reads candidates through `IOwnerDocumentSource` (one implementation per
+source kind; only `file` ships in the engine, another kind registers its own),
+keyset-paged per owner, and runs
+extract → chunk → embed (when `Ai:DocumentEmbeddingsEnabled` and the domain's
+semantic profile resolve) → visual (when the visual profile is enabled). It
+yields between sources and between phases, so a foreground import waits at most
+one bounded slice; its checkpoint is the owner, the kind and the last finished
+source, never a candidate list.
+
+Progress is recorded per source and phase in `document_source_states`:
+`pending`, `running`, `completed`, `skipped` (permanent, content-related),
+`failed` (retryable, with an attempt count, capped by
+`Ai:DocumentIndexing:MaxAttemptsPerSource`), plus a reason token, the source
+revision, and the profile and format versions. A missing row is implicit
+pending; rows are written only for sources the job has touched. A missing model
+or an unresolvable profile leaves the phase `pending` with a reason, never
+`failed` or `skipped`. Cancellation and a killed worker leave `pending`
+(`cancelled`), and a row left `running` by a dead worker is simply retried. A
+new revision of the same source resets its attempts. A permanent skip at one
+revision is not re-read until the bytes change.
+
+Resource control: one document job at a time
+(`Ai:DocumentIndexing:MaxConcurrentJobs`, default 1; a job that cannot enter
+within `GateWaitSeconds` re-queues itself); the text embedder and the visual
+model never run concurrently unless `ParallelTextAndVisualModels` is set;
+`Ai:MaxConcurrency` still bounds each model. Both PDFium renderers share one
+process-wide gate.
+
+Parsing is bounded too. PdfPig and the OpenXml SDK run under a
+wall-clock budget, `Ai:DocumentExtraction:ParseTimeoutSeconds` (default 120 s,
+clamped to 5–1800); a
+timeout is `parse-timeout`, retryable. Managed parsers cannot be interrupted, so
+a parser stuck inside one library call is ABANDONED rather than stopped: it keeps
+its pool thread and its bytes until the call returns, and its result is
+discarded. A PDF the parser rejects as malformed is now `pdf-invalid`
+(permanent); rows written earlier with `office-package-invalid` stay readable.
+
+The exact-cosine vector pass reads at most 20,000 candidate vectors per owner.
+Above that it reports `rag_corpus_too_large` (semantic unavailable, lexical
+still answers) instead of silently ranking a sample.
 
 ## Rich document ingestion
 
@@ -706,7 +847,8 @@ those are deliberately null, and a text canvas sheet has no counterpart in a
 Markdown file at all.
 
 Final citations therefore remain Slice-4 typed text provenance: heading/section
-for DOCX, sheet/range for XLSX, slide for PPTX, page for PDF.
+for DOCX, sheet for XLSX, slide for PPTX, page for PDF — carried from the chunk
+into every citation and search result (see "What a citation may say").
 
 ### Publication is all or nothing
 
@@ -932,18 +1074,34 @@ dotnet NubArca.Api.dll documents status --owner <user-id>
 dotnet NubArca.Api.dll documents index  --owner <user-id> --embed
 dotnet NubArca.Api.dll documents index  --owner <user-id> --limit 20
 
+dotnet NubArca.Api.dll documents backfill --owner <user-id> [--retry-failed] [--limit N]
+dotnet NubArca.Api.dll documents backfill --all-owners [--retry-failed]
+dotnet NubArca.Api.dll documents progress [--owner <user-id>]
+
 dotnet NubArca.Api.dll documents visual-seed-profiles
 dotnet NubArca.Api.dll documents visual-index    --owner <user-id> [--limit N]
 dotnet NubArca.Api.dll documents visual-status   --owner <user-id>
 dotnet NubArca.Api.dll documents visual-evaluate --owner <user-id> --queries cases.tsv
+dotnet NubArca.Api.dll documents query --owner <user-id> [--limit N] [--expect name[,name]] "<question>"
 ```
+
+`documents query` runs the owner's document search exactly as the Documenti
+page does and prints the status, the modes, and per document and passage the
+fused/lexical/vector ranks, page, locator kind:index and chunk ordinal. A
+document is printed as its rank, never its name or id; `--expect` takes the
+names the operator expects, compares them in process and prints only
+`expected=true|false` and `expected_first_rank` — enough to score a benchmark
+without a filename reaching the terminal. Like `rag query`, it never generates.
 
 A separate verb rather than `rag index --domain user-documents --owner …`,
 because which corpus a command touches should be visible in the command that was
-typed rather than in its arguments. There is deliberately no "all owners" mode:
-the one legitimate use — backfilling after enabling the feature — is served by
-running it per owner, which is also the form that can be stopped halfway without
-ambiguity. Nothing these commands print is a document name, a heading, an
+typed rather than in its arguments. `index` has deliberately no "all owners"
+mode. `backfill` enqueues the automatic `ai.documents.index` job instead of
+working in the terminal; `--all-owners` must be spelled out, and even then the
+job walks one owner at a time, so it can be stopped halfway without ambiguity.
+`backfill` is refused while automatic indexing is disabled. `progress` (and
+`GET /api/documents/indexing/status` for the signed-in owner) prints counts per
+phase and status and per reason token. Nothing these commands print is a document name, a heading, an
 excerpt or a storage key; an operator diagnosing an indexing problem needs counts
 and reason tokens, and a terminal that echoed somebody's filenames would put them
 in a scrollback buffer, a screenshot and a support ticket.

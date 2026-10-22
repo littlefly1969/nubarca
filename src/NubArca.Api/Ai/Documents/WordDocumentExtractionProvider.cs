@@ -25,7 +25,7 @@ public sealed class WordDocumentExtractionProvider : IDocumentExtractionProvider
 
     public string ProfileKey => DocumentTextSources.WordProfileKey;
 
-    public Task<DocumentExtractionOutcome> ExtractAsync(
+    public async Task<DocumentExtractionOutcome> ExtractAsync(
         DocumentExtractionRequest request, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -34,30 +34,35 @@ public sealed class WordDocumentExtractionProvider : IDocumentExtractionProvider
         archive?.Dispose();
         if (refusal is not null)
         {
-            return Task.FromResult(DocumentExtractionOutcome.Rejected(refusal));
+            return DocumentExtractionOutcome.Rejected(refusal);
         }
 
         try
         {
-            return Task.FromResult(Extract(request, cancellationToken));
+            // BOUNDED: the package walk runs inside the parse budget and is
+            // abandoned, not awaited, past it (see DocumentParseBudget).
+            var (outcome, timedOut) = await DocumentParseBudget.RunAsync(
+                token => Extract(request, token),
+                request.Options.EffectiveParseTimeoutSeconds,
+                cancellationToken);
+            return timedOut
+                ? DocumentExtractionOutcome.Unavailable(DocumentExtractionReasons.ParseTimeout)
+                : outcome!;
         }
         catch (OpenXmlPackageException)
         {
             // Malformed markup that survived the structural probe. A verdict
             // about the content: the same bytes will be just as malformed next
             // week.
-            return Task.FromResult(
-                DocumentExtractionOutcome.Rejected(DocumentExtractionReasons.OfficePackageInvalid));
+            return DocumentExtractionOutcome.Rejected(DocumentExtractionReasons.OfficePackageInvalid);
         }
         catch (InvalidDataException)
         {
-            return Task.FromResult(
-                DocumentExtractionOutcome.Rejected(DocumentExtractionReasons.OfficePackageInvalid));
+            return DocumentExtractionOutcome.Rejected(DocumentExtractionReasons.OfficePackageInvalid);
         }
         catch (FileFormatException)
         {
-            return Task.FromResult(
-                DocumentExtractionOutcome.Rejected(DocumentExtractionReasons.OfficePackageInvalid));
+            return DocumentExtractionOutcome.Rejected(DocumentExtractionReasons.OfficePackageInvalid);
         }
     }
 

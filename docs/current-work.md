@@ -1953,6 +1953,48 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   and deliberately NOT cached, and private semantic retrieval is exact cosine
   over the owner's eligible vectors — a global ANN index with an owner predicate
   is not an owner-prefiltered search and fails silently.
+- **Document search returns the owner's OWN file id, and nothing else that
+  addresses anything.** `POST /api/documents/search` (`{query, limit}`, no
+  model call) and the Documenti page run the same retrieval pipeline and gate
+  as the private chat, grouped by document with bounded match-centred
+  passages, the PDF page / typed slide-sheet-section locator, and the
+  retrieval mode. Each hit carries `sourceKind: "file"` + `sourceId` (the
+  caller's FileItemId) so the file can be opened — a reviewed exception
+  written down in docs/rag-platform.md; never chunk/text/blob ids, hashes,
+  storage keys, owner ids or scores. Chat citations now carry page/locator
+  too, still with no id. `documents query --owner` is the no-names diagnostic.
+  Pages that only LOOK like the question (charts, tables) are listed apart in
+  `visualMatches` (file, page, locator; no text) and are never evidence: the
+  chat gate does not read them.
+- **Document indexing is a job keyed by SOURCE, not by FileItem.**
+  `document_texts` carries `(SourceKind, SourceId)` (`file` = FileItem id
+  today; another owner-private kind such as email plugs in through
+  `IOwnerDocumentSource` and its own eligibility branch, see
+  docs/document-intelligence/source-contract.md). `ai.documents.index` runs
+  extract → chunk → embed → visual per source, sliced and checkpointed, with
+  per-phase rows in `document_source_states` (missing row = implicit pending).
+  Upload, restore and admin import signal it without waiting; nothing runs
+  unless `Ai:Enabled` and `Ai:DocumentExtractionEnabled`. A missing model is
+  `pending` with a reason, never `failed`/`skipped`; cancellation is never
+  permanent. `documents backfill` / `documents progress` are the operator verbs.
+- **The document pipeline's keys now reach production, all off.**
+  `docker-compose.prod.yml` forwards `Ai__DocumentExtraction__{Ocr*,ParseTimeoutSeconds}`,
+  `Ai__DocumentIndexing__*`, `Rag__Domains__user-documents__*` (`.env` spells it
+  `user_documents`) and `Ai__Onnx__OpenVino__RagTextDevice` to api and worker,
+  and `Assistant__PrivateKnowledgeModel` + a `documents-local` profile to the api
+  only. The Office renderer stays out of the four-file release stack until it is
+  CI-built and digest-pinned. Phases, rollback and memory budget:
+  docs/document-intelligence/deployment-runbook.md; tonight's bench:
+  docs/document-intelligence/tonight-server-bench.md.
+- **A source kind joins the whole engine by registration.**
+  `OwnerDocumentEligibility.EligibleChunks` is the union of the registered
+  kinds' `IOwnerDocumentSourceEligibility.Eligible` queries (live owner and
+  display name per source, owner re-checked by the engine), and embedding,
+  the lexical corpus, vector retrieval, search (real `sourceKind`, working
+  `SourceKinds` filter) and Assistant citations (name + kind, no id) all read
+  through it. Visual stays `file`-only. `DocumentSourceKinds` is the one
+  discriminator spelling. Proved with a fake sections kind
+  (`DocumentSourceKindEngineTests`); email itself is not implemented.
 - **A visual hit finds where to look; an eligible current text chunk is still
   what NubArca may say.** Visual document retrieval renders an owner's pages,
   embeds them locally under a DOCUMENT-specific SigLIP2 profile (shared weights

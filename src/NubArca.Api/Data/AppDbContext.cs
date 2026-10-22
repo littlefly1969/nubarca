@@ -192,6 +192,8 @@ public class AppDbContext : DbContext
     public DbSet<BlobAiArtifactStatus> BlobAiArtifactStatuses => Set<BlobAiArtifactStatus>();
     public DbSet<BlobEmbedding> BlobEmbeddings => Set<BlobEmbedding>();
     public DbSet<DocumentText> DocumentTexts => Set<DocumentText>();
+    // Per-source, per-phase indexing state written by the document job.
+    public DbSet<DocumentSourceState> DocumentSourceStates => Set<DocumentSourceState>();
     public DbSet<DocumentChunk> DocumentChunks => Set<DocumentChunk>();
     public DbSet<DocumentChunkEmbedding> DocumentChunkEmbeddings => Set<DocumentChunkEmbedding>();
     public DbSet<DocumentVisualIndex> DocumentVisualIndexes => Set<DocumentVisualIndex>();

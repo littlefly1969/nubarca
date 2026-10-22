@@ -86,6 +86,12 @@ public static class DocumentExtractionReasons
     /// More pages than the PDF bound allows.
     public const string PdfTooManyPages = "pdf-too-many-pages";
 
+    /// The bytes start like a PDF and the parser cannot read them: a corrupt or
+    /// truncated file. Earlier releases recorded this as OfficePackageInvalid,
+    /// which is why that token can still appear on rows written before this
+    /// one existed; both stay readable.
+    public const string PdfInvalid = "pdf-invalid";
+
     // ---- environment, never a verdict ---------------------------------------
     //
     // Each of these describes THIS INSTALLATION at THIS MOMENT. None is ever
@@ -111,6 +117,19 @@ public static class DocumentExtractionReasons
 
     /// Rendering one page failed.
     public const string PdfRenderFailed = "pdf-render-failed";
+
+    /// Parsing did not finish inside the parse budget
+    /// (`Ai:DocumentExtraction:ParseTimeoutSeconds`). Not a verdict — a busy
+    /// host can be slow — but a RETRYABLE FAILURE with an attempt budget, so a
+    /// document that is genuinely pathological stops being retried.
+    public const string ParseTimeout = "parse-timeout";
+
+    /// Non-permanent reasons that are FAILURES of this attempt (retried, up to
+    /// the attempt budget) rather than environment states (an engine, a
+    /// renderer or a parser that is not installed — pending until it is, never
+    /// counted against the document).
+    public static bool IsRetryableFailure(string reason) => reason is
+        ParseTimeout or OcrTimeout or OcrProcessFailed or OcrOutputTooLarge or PdfRenderFailed;
 }
 
 /// Bounds on native text extraction.
@@ -241,6 +260,14 @@ public sealed class DocumentExtractionOptions
     public int EffectiveOcrPageTimeoutSeconds => Math.Clamp(OcrPageTimeoutSeconds, 1, 300);
     public int EffectiveMaxOcrCharactersPerPage => Math.Clamp(MaxOcrCharactersPerPage, 100, 500_000);
     public int EffectiveMaxConcurrentOcrPages => Math.Clamp(MaxConcurrentOcrPages, 1, 4);
+
+    /// Wall-clock budget for PARSING one document (PdfPig reading every page's
+    /// text; OpenXml walking a package). OCR is not included — each recognized
+    /// page has its own timeout. See DocumentParseBudget for what "abandoned"
+    /// means for managed code that cannot be interrupted.
+    public int ParseTimeoutSeconds { get; set; } = 120;
+
+    public int EffectiveParseTimeoutSeconds => Math.Clamp(ParseTimeoutSeconds, 5, 1800);
 
     public int EffectiveMaxFormulaCharacters => Math.Clamp(MaxFormulaCharacters, 10, 4_000);
     public int EffectiveMaxPresentationSlides => Math.Clamp(MaxPresentationSlides, 1, 20_000);

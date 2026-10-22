@@ -166,12 +166,53 @@ public sealed class OwnerDocumentVisualIndexer
             state.UnitsEmbedded, state.Skipped, state.SkipReasons, profile.Key, null, partial);
     }
 
+    /// The visual index of ONE file — the background job's visual phase.
+    ///
+    /// Same eligibility as the owner pass: the file must be live, this owner's,
+    /// and carry a current, completed text reading of its current bytes. The
+    /// outcome is classified with DocumentSourceStatuses so the caller records
+    /// per-phase state: `skipped` is a permanent verdict, `failed` retryable,
+    /// `pending` an environment state that is never counted against the file.
+    public async Task<(string Status, string? Reason)> IndexFileAsync(
+        Guid ownerUserId, Guid fileItemId, DocumentVisualProfileResolution resolution,
+        CancellationToken cancellationToken = default)
+    {
+        if (!resolution.IsAvailable || resolution.Profile is null)
+        {
+            return (DocumentSourceStatuses.Pending, resolution.Reason ?? DocumentVisualReasons.Disabled);
+        }
+
+        var file = await (
+            from candidate in OwnerDocumentEligibility.Eligible(_db.FileItems.AsNoTracking(), ownerUserId)
+            join document in _db.DocumentTexts.AsNoTracking()
+                on candidate.Id equals document.FileItemId
+            where candidate.Id == fileItemId
+                  && document.IsCurrent
+                  && document.Status == AiArtifactStatuses.Completed
+                  && document.OwnerUserId == ownerUserId
+                  && document.SourceBlobObjectId == candidate.BlobObjectId
+            select new VisualCandidate(
+                candidate.Id, candidate.BlobObjectId, candidate.SizeBytes, document.Source))
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (file is null)
+        {
+            // Not a visual candidate (no current text reading of these bytes).
+            // Nothing to record; the text phase decides first.
+            return (DocumentSourceStatuses.Pending, null);
+        }
+
+        return await IndexFileAsync(
+            ownerUserId, file, resolution.Profile, resolution, _visual.Value, new VisualIndexState(),
+            cancellationToken);
+    }
+
     private sealed record VisualCandidate(
         Guid FileItemId, Guid BlobObjectId, long SizeBytes, string Source);
 
     // ---- one document -------------------------------------------------------
 
-    private async Task IndexFileAsync(
+    private async Task<(string Status, string? Reason)> IndexFileAsync(
         Guid ownerUserId,
         VisualCandidate file,
         AiProfile profile,
@@ -189,7 +230,7 @@ public sealed class OwnerDocumentVisualIndexer
         if (format is not { } kind)
         {
             state.Skip(DocumentVisualReasons.FormatUnsupported);
-            return;
+            return (DocumentSourceStatuses.Skipped, DocumentVisualReasons.FormatUnsupported);
         }
 
         var renderer = _renderers.For(kind);
@@ -199,7 +240,7 @@ public sealed class OwnerDocumentVisualIndexer
             // worker is not deployed, most likely. A skip with a reason, not a
             // failure, and the document keeps its text answers.
             state.Skip(DocumentVisualReasons.FormatUnsupported);
-            return;
+            return (DocumentSourceStatuses.Pending, DocumentVisualReasons.FormatUnsupported);
         }
 
         // IDEMPOTENCE, on all four parts of the index's identity.
@@ -220,7 +261,7 @@ public sealed class OwnerDocumentVisualIndexer
         if (existing is { Status: AiArtifactStatuses.Completed })
         {
             state.Unchanged++;
-            return;
+            return (DocumentSourceStatuses.Completed, null);
         }
 
         // A PERMANENT VERDICT IS NOT RETRIED. The same bytes earn the same
@@ -230,14 +271,14 @@ public sealed class OwnerDocumentVisualIndexer
             && DocumentVisualReasons.IsPermanent(recorded))
         {
             state.Unchanged++;
-            return;
+            return (DocumentSourceStatuses.Skipped, recorded);
         }
 
         var readiness = renderer.CheckReadiness();
         if (!readiness.Ready)
         {
             state.Skip(readiness.Reason ?? DocumentVisualReasons.RendererUnavailable);
-            return;
+            return (DocumentSourceStatuses.Pending, readiness.Reason ?? DocumentVisualReasons.RendererUnavailable);
         }
 
         // SIZE BEFORE BYTES, from the recorded size, so an oversized document is
@@ -247,7 +288,7 @@ public sealed class OwnerDocumentVisualIndexer
         if (file.SizeBytes > budget)
         {
             state.Skip(DocumentVisualReasons.DocumentTooComplex);
-            return;
+            return (DocumentSourceStatuses.Skipped, DocumentVisualReasons.DocumentTooComplex);
         }
 
         var storageKey = await _db.BlobObjects.AsNoTracking()
@@ -257,7 +298,7 @@ public sealed class OwnerDocumentVisualIndexer
         if (storageKey is null)
         {
             state.Skip("blob-missing");
-            return;
+            return (DocumentSourceStatuses.Failed, "blob-missing");
         }
 
         byte[] bytes;
@@ -272,13 +313,13 @@ public sealed class OwnerDocumentVisualIndexer
         {
             // A storage error is not a content verdict; the next pass retries.
             state.Skip("unreadable");
-            return;
+            return (DocumentSourceStatuses.Failed, "unreadable");
         }
 
         if (bytes.Length > budget)
         {
             state.Skip(DocumentVisualReasons.DocumentTooComplex);
-            return;
+            return (DocumentSourceStatuses.Skipped, DocumentVisualReasons.DocumentTooComplex);
         }
 
         var render = await renderer.RenderAsync(
@@ -293,7 +334,14 @@ public sealed class OwnerDocumentVisualIndexer
                     ownerUserId, file, profile, renderer.RenderProfileKey, render.Reason!,
                     existing, cancellationToken);
             }
-            return;
+            // A verdict, a retryable failure of this attempt, or an environment
+            // state (no renderer, no worker) — three different records.
+            var status = render.IsPermanent
+                ? DocumentSourceStatuses.Skipped
+                : render.Reason is DocumentVisualReasons.RenderTimeout or DocumentVisualReasons.RenderProcessFailed
+                    ? DocumentSourceStatuses.Failed
+                    : DocumentSourceStatuses.Pending;
+            return (status, render.Reason);
         }
 
         var units = render.Artifact!.Units;
@@ -306,7 +354,7 @@ public sealed class OwnerDocumentVisualIndexer
             await RecordSkipAsync(
                 ownerUserId, file, profile, renderer.RenderProfileKey,
                 DocumentVisualReasons.InvalidSource, existing, cancellationToken);
-            return;
+            return (DocumentSourceStatuses.Skipped, DocumentVisualReasons.InvalidSource);
         }
 
         state.UnitsRendered += units.Count;
@@ -338,13 +386,13 @@ public sealed class OwnerDocumentVisualIndexer
                 // abandoned — not published without this page — and no permanent
                 // verdict is recorded.
                 state.Skip(DocumentVisualReasons.ModelUnavailable);
-                return;
+                return (DocumentSourceStatuses.Pending, DocumentVisualReasons.ModelUnavailable);
             }
 
             if (vector.Length != profile.Dimension || !vector.All(float.IsFinite))
             {
                 state.Skip(DocumentVisualReasons.ModelOutputUnsupported);
-                return;
+                return (DocumentSourceStatuses.Pending, DocumentVisualReasons.ModelOutputUnsupported);
             }
 
             var row = new DocumentVisualUnit
@@ -428,6 +476,7 @@ public sealed class OwnerDocumentVisualIndexer
 
         state.Indexed++;
         state.UnitsEmbedded += staged.Count;
+        return (DocumentSourceStatuses.Completed, null);
     }
 
     /// A PERMANENT verdict about these bytes, recorded so the next pass does not

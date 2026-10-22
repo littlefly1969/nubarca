@@ -78,6 +78,7 @@ public sealed class AdminImportService : IAdminImportService
     private readonly IOptions<StagingOptions> _staging;
     private readonly IOptions<AiOptions> _ai;
     private readonly IOptions<MediaOptions> _media;
+    private readonly NubArca.Api.Ai.Documents.Sources.IDocumentSourceChangeSink? _documentSources;
     private readonly ILogger<AdminImportService>? _logger;
     // Slice 98: DB batch pipeline dependencies (null = per-file path only).
     private readonly IBlobStorage? _blobStorage;
@@ -113,9 +114,13 @@ public sealed class AdminImportService : IAdminImportService
         IOptions<MediaOptions>? media = null,
         // HEIC, recognised by the batch pipeline exactly as an upload
         // recognises it. Optional for direct-construction test sites.
-        IOriginalImageReader? originals = null)
+        IOriginalImageReader? originals = null,
+        // Owner-private document indexing. Optional for direct-construction
+        // test sites; inert unless the document capability is enabled.
+        NubArca.Api.Ai.Documents.Sources.IDocumentSourceChangeSink? documentSources = null)
     {
         _originals = originals;
+        _documentSources = documentSources;
         _db = db;
         _files = files;
         _folders = folders;
@@ -876,6 +881,16 @@ public sealed class AdminImportService : IAdminImportService
                 idempotencyKey: $"ai-photo-embeddings:import:{state.RunId:N}",
                 cancellationToken: CancellationToken.None);
             log($"admin-import: enqueued photo embeddings job {embeddingsJob.Id}");
+        }
+
+        // Documents: one owner-scoped pass for the target user, after the run,
+        // never a job per imported file. The sink enqueues nothing unless the
+        // document capability is enabled, and unchanged sources cost nothing.
+        if (_documentSources is not null
+            && counters.Imported > 0
+            && status is AdminImportStatuses.Succeeded or AdminImportStatuses.Partial)
+        {
+            await _documentSources.OwnerSourcesChangedAsync(state.TargetUserId, CancellationToken.None);
         }
 
         // Faces, as an upload gets them — for exactly the photos THIS run

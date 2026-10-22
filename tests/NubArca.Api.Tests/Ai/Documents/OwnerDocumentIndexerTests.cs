@@ -638,11 +638,7 @@ public sealed class OwnerDocumentIndexerTests : IDisposable
         Assert.Empty(corpus.Chunks);
 
         var embeddable = await OwnerDocumentEligibility
-            .EligibleChunks(
-                _db.DocumentChunks.AsNoTracking(),
-                _db.DocumentTexts.AsNoTracking(),
-                _db.FileItems.AsNoTracking(),
-                _owner)
+            .EligibleChunks(_db, OwnerDocumentEligibility.FileKindOnly, _owner)
             .CountAsync();
         Assert.Equal(0, embeddable);
     }

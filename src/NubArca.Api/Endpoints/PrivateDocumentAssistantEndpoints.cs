@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using NubArca.Api.Ai.Documents;
 using NubArca.Api.Http;
+using NubArca.Api.Rag;
 
 namespace NubArca.Api.Endpoints;
 
@@ -47,6 +48,19 @@ public static class PrivateDocumentAssistantEndpoints
         {
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var status = await assistant.GetStatusAsync(ownerUserId, cancellationToken);
+
+            // The embedding profile's own readiness (configured, present, model
+            // files on disk). Absent on a host with no database.
+            var embeddings = httpContext.RequestServices
+                .GetService<NubArca.Api.Ai.TextEmbeddings.TextEmbeddingResolver>();
+            var embeddingReason = embeddings is null
+                ? RagFailureReasons.EmbeddingDisabled
+                : (await embeddings.ResolveAsync(RagDomainKey.UserDocuments, cancellationToken)).Reason;
+            var registered = httpContext.RequestServices
+                .GetService<NubArca.Api.Ai.Documents.Sources.OwnerDocumentSources>();
+            var kinds = OwnerDocumentAvailability.Build(
+                status, embeddingReason, registered?.Eligibility.Select(k => k.Kind).ToList());
+
             return Results.Ok(new
             {
                 enabled = status.Enabled,
@@ -61,6 +75,36 @@ public static class PrivateDocumentAssistantEndpoints
                 documents = status.Documents,
                 chunks = status.Chunks,
                 reason = status.Reason,
+                // Whether the visual pass can run, and if not the sanitized
+                // reason token. Separate from `semanticEnabled` because the two
+                // degrade independently.
+                visualEnabled = status.VisualEnabled,
+                visualReason = status.VisualReason,
+                // How much of the library is searchable yet. COUNTS ONLY —
+                // never a name, never which files are missing.
+                indexing = status.Indexing is { } indexing
+                    ? new
+                    {
+                        candidateFiles = indexing.CandidateFiles,
+                        indexedFiles = indexing.IndexedFiles,
+                        notIndexedFiles = indexing.NotIndexedFiles,
+                        chunks = indexing.Chunks,
+                        embeddedChunks = indexing.EmbeddedChunks,
+                    }
+                    : null,
+                // Per domain and per source kind: which signals can run, and
+                // the reason token when one cannot.
+                availability = new
+                {
+                    domain = RagDomainKey.UserDocuments.Value,
+                    kinds = kinds.Select(k => new
+                    {
+                        kind = k.Kind,
+                        lexical = new { available = k.Lexical.Available, reason = k.Lexical.Reason },
+                        semantic = new { available = k.Semantic.Available, reason = k.Semantic.Reason },
+                        visual = new { available = k.Visual.Available, reason = k.Visual.Reason },
+                    }),
+                },
             });
         }).WithName("PrivateDocumentAssistantStatus").RequireAuthorization();
 
@@ -99,7 +143,18 @@ public static class PrivateDocumentAssistantEndpoints
             {
                 ok = true,
                 text = answer.Text,
-                sources = answer.Sources.Select(s => new { document = s.Document, section = s.Section }),
+                // Name, section and WHERE — never an id. See
+                // docs/rag-platform.md "What a citation may say".
+                sources = answer.Sources.Select(s => new
+                {
+                    document = s.Document,
+                    // `file`, or a kind registered later: a category for the
+                    // label, never an id.
+                    sourceKind = s.SourceKind,
+                    section = s.Section,
+                    page = s.Page,
+                    locator = LocatorDto(s.LocatorKind, s.LocatorIndex, s.LocatorLabel),
+                }),
             });
         }).WithName("PrivateDocumentAssistantChat")
           .RequireAuthorization()
@@ -107,4 +162,14 @@ public static class PrivateDocumentAssistantEndpoints
 
         return app;
     }
+
+    /// The typed locator as it goes on the wire, or null for a chunk with no
+    /// position. Shared by the chat citations and the document search.
+    public sealed record LocatorWireDto(string Kind, int Index, string? Label);
+
+    public static LocatorWireDto? LocatorDto(string? kind, int? index, string? label)
+        => string.IsNullOrWhiteSpace(kind) || index is null
+           || kind == Ai.Documents.DocumentLocatorKinds.Text
+            ? null
+            : new LocatorWireDto(kind, index.Value, string.IsNullOrWhiteSpace(label) ? null : label);
 }

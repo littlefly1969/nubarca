@@ -132,7 +132,7 @@ public sealed class RagRetriever : IRagRetriever
         var ranking = RagRankingProfiles.For(query.Domain);
         var shape = RagQueryShape.For(text, ranking.ExpandAliases);
         var lexical = index.Search(
-            shape, options.EffectiveLexicalCandidates, query.AllowedFileItemIds);
+            shape, options.EffectiveLexicalCandidates, query.AllowedSourceIds, query.AllowedSourceKinds);
 
         // PER DOMAIN. The repository stays lexical while Help is hybrid, because
         // that is what the two of them measured — and skipping the vector path
@@ -148,7 +148,8 @@ public sealed class RagRetriever : IRagRetriever
             (true, { OwnerVectors: { } ownerVectors }, true) =>
                 await ownerVectors.SearchAsync(
                     index, query.OwnerUserId ?? Guid.Empty, text,
-                    options.EffectiveVectorCandidates, query.AllowedFileItemIds, cancellationToken),
+                    options.EffectiveVectorCandidates, query.AllowedSourceIds, query.AllowedSourceKinds,
+                    cancellationToken),
 
             (true, { } services, false) =>
                 await services.Vectors.SearchAsync(
@@ -171,7 +172,11 @@ public sealed class RagRetriever : IRagRetriever
             "rag: domain={Domain} mode={Mode} lexical={Lexical} vector={Vector} fused={Fused}",
             domain.Key, mode, lexical.Count, semantic.Hits.Count, fused.Count);
 
-        if (!HasStrongEvidence(fused, options))
+        // The semantic-only floor belongs to the PROFILE that produced the scores.
+        if (!HasStrongEvidence(
+                fused,
+                RagTextEmbeddingModels.MinimumVectorScoreFor(
+                    semantic.ProfileKey, options.EffectiveMinimumVectorScore)))
         {
             return RagRetrievalResult.None(query.Domain, mode, index.Corpus.Revision);
         }
@@ -379,10 +384,10 @@ public sealed class RagRetriever : IRagRetriever
     /// whether the context was any good — was rejected: it pays a boundary
     /// crossing to ask, and a model given three irrelevant paragraphs and a
     /// question tends to answer the question anyway.
-    private static bool HasStrongEvidence(IReadOnlyList<RagFusedCandidate> fused, RagOptions options)
+    private static bool HasStrongEvidence(IReadOnlyList<RagFusedCandidate> fused, double minimumVectorScore)
         => fused.Any(c => c.LexicalRank is not null)
            || fused.Any(c => c.VectorRank is not null
-                             && c.VectorScore >= options.EffectiveMinimumVectorScore);
+                             && c.VectorScore >= minimumVectorScore);
 
     private static List<RagEvidence> BuildEvidence(
         RagQuery query, RagQueryShape shape, IReadOnlyList<RagFusedCandidate> fused, string revision)
@@ -439,7 +444,16 @@ public sealed class RagRetriever : IRagRetriever
                 // unstamped evidence for an owner-scoped domain, so a system
                 // chunk that reached a private result fails there rather than
                 // being relabelled with the caller's id on the way past.
-                OwnerUserId: chunk.OwnerUserId));
+                OwnerUserId: chunk.OwnerUserId,
+                // Provenance, copied from the chunk like the owner: which
+                // source and where in it. Null for every system domain.
+                DocumentSourceKind: chunk.DocumentSourceKind,
+                DocumentSourceId: chunk.DocumentSourceId,
+                Page: chunk.Page,
+                LocatorKind: chunk.LocatorKind,
+                LocatorIndex: chunk.LocatorIndex,
+                LocatorLabel: chunk.LocatorLabel,
+                Ordinal: chunk.Ordinal));
         }
 
         return evidence;

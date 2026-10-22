@@ -22,13 +22,6 @@ namespace NubArca.Api.Ai.DocumentVisual;
 /// than inventing a coordinate — see DocumentVisualUnit.
 public sealed class PdfVisualRenderer : IDocumentVisualRenderer
 {
-    /// PDFium is a single native library with process-wide state and is not
-    /// documented as thread-safe. One at a time — and deliberately a DIFFERENT
-    /// semaphore instance from the OCR renderer's would be wrong, so this shares
-    /// the same discipline by serialising here too. Two gates over one native
-    /// library are one gate too few.
-    private static readonly SemaphoreSlim Native = new(1, 1);
-
     private readonly IOptions<DocumentVisualOptions> _options;
     private readonly ILogger<PdfVisualRenderer> _log;
 
@@ -154,7 +147,8 @@ public sealed class PdfVisualRenderer : IDocumentVisualRenderer
             return (null, 0, 0, DocumentVisualReasons.RendererUnavailable);
         }
 
-        await Native.WaitAsync(cancellationToken);
+        // The ONE process-wide PDFium gate, shared with the OCR renderer.
+        await PdfiumGate.Native.WaitAsync(cancellationToken);
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -211,7 +205,7 @@ public sealed class PdfVisualRenderer : IDocumentVisualRenderer
         }
         finally
         {
-            Native.Release();
+            PdfiumGate.Native.Release();
         }
     }
 }

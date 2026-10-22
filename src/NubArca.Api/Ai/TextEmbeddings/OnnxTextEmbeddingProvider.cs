@@ -23,16 +23,24 @@ namespace NubArca.Api.Ai.TextEmbeddings;
 /// operator configuration, exactly like the photo and face towers.
 ///
 /// It owns the model-specific preprocessing so RAG does not have to know any of
-/// it — the `query: ` / `passage: ` prefixes, truncation that preserves the
-/// closing separator token, masked mean pooling, and L2 normalization are all
-/// facts about this checkpoint, stated in RagTextEmbeddingModels and applied
-/// here.
+/// it — the query/passage prefixes, truncation that preserves the closing
+/// separator (or EOS) token, mean/CLS/last-token pooling, Matryoshka truncation
+/// and L2 normalization are all facts about a checkpoint, stated in
+/// RagTextEmbeddingModels and applied here.
+///
+/// Decoder exports (Qwen3-Embedding) are served only WITHOUT a KV cache: a graph
+/// that declares `past_key_values.*` inputs is refused as unavailable rather
+/// than fed an empty past. Feeding one needs the layer count, head count, head
+/// size and dtype of the cache, i.e. a second description of the model that
+/// can drift from the graph; an embedding is a single forward pass and never
+/// needs a cache, so an export without one is the simpler safe contract.
 public sealed class OnnxTextEmbeddingProvider : ITextEmbeddingProvider, IDisposable
 {
     private readonly IOptions<AiOptions> _options;
     private readonly IOnnxInferenceSessionFactory _factory;
     private readonly ConcurrentDictionary<string, Lazy<HuggingFaceTokenizer>> _tokenizers =
         new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, long?> _eosIds = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _gate;
 
     public OnnxTextEmbeddingProvider(IOptions<AiOptions> options, IOnnxInferenceSessionFactory factory)
@@ -57,7 +65,8 @@ public sealed class OnnxTextEmbeddingProvider : ITextEmbeddingProvider, IDisposa
         {
             return TextEmbeddingReadiness.NotReady(RagFailureReasons.EmbeddingProfileUnavailable);
         }
-        if (profile.Dimension is not int dimension || dimension != config.Dimension)
+        if (profile.Dimension is not int dimension || dimension != config.Dimension
+            || config.Dimension > config.GraphDimension)
         {
             return TextEmbeddingReadiness.NotReady(RagFailureReasons.EmbeddingDimensionUnsupported);
         }
@@ -81,7 +90,13 @@ public sealed class OnnxTextEmbeddingProvider : ITextEmbeddingProvider, IDisposa
             {
                 using var lease = _factory.Acquire(
                     new OnnxModelSpec(OnnxModel.RagText, ModelPath(modelDir, config)));
-                _ = lease.Session; // compiled + cached (warm)
+                // Compiled + cached (warm), so asking the graph is free here.
+                // On the CPU provider the session is not built at readiness
+                // time, and the same check runs before the first inference.
+                if (HasKvCacheInputs(lease.Session.InputNames))
+                {
+                    return TextEmbeddingReadiness.NotReady(RagFailureReasons.EmbeddingModelUnavailable);
+                }
             }
             catch (OnnxSessionUnavailableException)
             {
@@ -190,35 +205,43 @@ public sealed class OnnxTextEmbeddingProvider : ITextEmbeddingProvider, IDisposa
                 LazyThreadSafetyMode.ExecutionAndPublication)).Value;
 
         var encoding = tokenizer.Encode(text, addSpecialTokens: true, includeAttentionMask: true).First();
-        var (ids, mask) = Truncate(
-            encoding.Ids.Select(id => (long)id).ToArray(),
-            encoding.AttentionMask.Select(m => (long)m).ToArray(),
-            config.MaxTokens);
+        var ids = encoding.Ids.Select(id => (long)id).ToArray();
+        var mask = encoding.AttentionMask.Select(m => (long)m).ToArray();
 
-        var length = ids.Length;
-        var inputs = new List<NamedOnnxValue>
+        if (config.EosToken is { } eosToken)
         {
-            NamedOnnxValue.CreateFromTensor(
-                config.InputIdsTensor, new DenseTensor<long>(ids, new[] { 1, length })),
-            NamedOnnxValue.CreateFromTensor(
-                config.AttentionMaskTensor, new DenseTensor<long>(mask, new[] { 1, length })),
-        };
+            var eosId = _eosIds.GetOrAdd(tokenizerPath, _ => ResolveSingleTokenId(tokenizer, eosToken));
+            if (eosId is not { } eos)
+            {
+                // The tokenizer does not know the token the model pools over:
+                // this is the wrong tokenizer for this entry, an install
+                // problem rather than a property of the text.
+                throw new TextEmbeddingUnavailableException(RagFailureReasons.EmbeddingModelUnavailable);
+            }
+            (ids, mask) = EnsureTrailingEos(ids, mask, eos);
+        }
+
+        (ids, mask) = Truncate(ids, mask, config.MaxTokens);
 
         _factory.EnsureNativeProviderInitialized();
         using var lease = _factory.Acquire(new OnnxModelSpec(OnnxModel.RagText, modelPath));
-        var session = lease.Session;
+        return Infer(lease.Session, ids, mask, config);
+    }
 
-        // Some exports of BERT-family encoders keep `token_type_ids` in the
-        // graph and some drop it. Supplying an input the graph does not declare
-        // is an error, and omitting one it does declare is a different error, so
-        // the graph is asked rather than assumed.
-        if (session.InputNames.Contains(config.TokenTypeIdsTensor, StringComparer.Ordinal))
+    /// Everything after tokenization, against a session: input construction,
+    /// the run, output selection, pooling, Matryoshka truncation and
+    /// normalization. Static and session-shaped so it is testable with a fake
+    /// session and no weights.
+    internal static float[] Infer(
+        IOnnxSession session, long[] ids, long[] mask, TextEmbeddingModelConfig config)
+    {
+        var inputNames = session.InputNames;
+        if (HasKvCacheInputs(inputNames))
         {
-            inputs.Add(NamedOnnxValue.CreateFromTensor(
-                config.TokenTypeIdsTensor, new DenseTensor<long>(new long[length], new[] { 1, length })));
+            throw new TextEmbeddingUnavailableException(RagFailureReasons.EmbeddingModelUnavailable);
         }
 
-        var outputs = session.Run(inputs);
+        var outputs = session.Run(BuildInputs(inputNames, ids, mask, config));
         var output = outputs.FirstOrDefault(o =>
                          string.Equals(o.Name, config.OutputTensor, StringComparison.Ordinal))
                      is { Name: not null } named && named.Data.Length > 0
@@ -229,12 +252,99 @@ public sealed class OnnxTextEmbeddingProvider : ITextEmbeddingProvider, IDisposa
         return Finalize(pooled, config);
     }
 
+    /// A decoder exported for generation carries its KV cache as inputs. This
+    /// provider refuses such a graph (see the class comment) instead of
+    /// guessing the cache's shape.
+    internal static bool HasKvCacheInputs(IReadOnlyList<string> inputNames)
+        => inputNames.Any(n => n.StartsWith("past_key_values", StringComparison.Ordinal)
+                               || n.StartsWith("past.", StringComparison.Ordinal));
+
+    /// The tensors the graph asks for, and only those. Batch size is 1.
+    internal static List<NamedOnnxValue> BuildInputs(
+        IReadOnlyList<string> inputNames, long[] ids, long[] mask, TextEmbeddingModelConfig config)
+    {
+        var length = ids.Length;
+        var inputs = new List<NamedOnnxValue>
+        {
+            NamedOnnxValue.CreateFromTensor(
+                config.InputIdsTensor, new DenseTensor<long>(ids, new[] { 1, length })),
+            NamedOnnxValue.CreateFromTensor(
+                config.AttentionMaskTensor, new DenseTensor<long>(mask, new[] { 1, length })),
+        };
+
+        // Some exports of BERT-family encoders keep `token_type_ids` in the
+        // graph and some drop it. Supplying an input the graph does not declare
+        // is an error, and omitting one it does declare is a different error, so
+        // the graph is asked rather than assumed. The same holds for the
+        // position ids a decoder export declares.
+        if (inputNames.Contains(config.TokenTypeIdsTensor, StringComparer.Ordinal))
+        {
+            inputs.Add(NamedOnnxValue.CreateFromTensor(
+                config.TokenTypeIdsTensor, new DenseTensor<long>(new long[length], new[] { 1, length })));
+        }
+        if (inputNames.Contains(config.PositionIdsTensor, StringComparer.Ordinal))
+        {
+            inputs.Add(NamedOnnxValue.CreateFromTensor(
+                config.PositionIdsTensor,
+                new DenseTensor<long>(PositionIds(mask), new[] { 1, length })));
+        }
+        return inputs;
+    }
+
+    /// Positions count ATTENDED tokens: `cumsum(mask) - 1`, with padding set to
+    /// 1 — the convention transformers uses for padded decoder batches. With no
+    /// padding this is exactly 0..T-1, which is what the reference forward pass
+    /// uses. (Under left padding the reference instead numbers the pads too;
+    /// RoPE scores depend only on position DIFFERENCES between attended tokens,
+    /// which a constant shift leaves unchanged.)
+    internal static long[] PositionIds(IReadOnlyList<long> mask)
+    {
+        var positions = new long[mask.Count];
+        long seen = 0;
+        for (var t = 0; t < mask.Count; t++)
+        {
+            if (mask[t] == 0)
+            {
+                positions[t] = 1;
+                continue;
+            }
+            positions[t] = seen++;
+        }
+        return positions;
+    }
+
+    /// The id of a token string, or null unless it encodes to exactly one id.
+    /// Cached per tokenizer file: tokenizers are immutable once loaded.
+    private static long? ResolveSingleTokenId(HuggingFaceTokenizer tokenizer, string token)
+    {
+        var ids = tokenizer.Encode(token, addSpecialTokens: false).First().Ids;
+        return ids.Count == 1 ? (long)ids[0] : null;
+    }
+
+    /// Makes the attended sequence END with `eosId`, appending it when the
+    /// tokenizer did not. Padding (mask 0) is dropped first — at batch size 1 it
+    /// carries nothing, and an EOS appended after a pad would not be the last
+    /// ATTENDED token for long once a batch re-pads it.
+    internal static (long[] Ids, long[] Mask) EnsureTrailingEos(
+        IReadOnlyList<long> ids, IReadOnlyList<long> attentionMask, long eosId)
+    {
+        var kept = new List<long>(ids.Count + 1);
+        for (var t = 0; t < ids.Count; t++)
+        {
+            if (t < attentionMask.Count && attentionMask[t] == 0) continue;
+            kept.Add(ids[t]);
+        }
+        if (kept.Count == 0 || kept[^1] != eosId) kept.Add(eosId);
+        return (kept.ToArray(), Enumerable.Repeat(1L, kept.Count).ToArray());
+    }
+
     /// Truncation that keeps the sequence WELL-FORMED.
     ///
     /// A plain `Take(max)` drops the closing separator token, and the model was
     /// trained to expect it — the resulting vector is not obviously wrong, it is
     /// quietly displaced. So the tail token is carried onto the end of the
-    /// truncated sequence.
+    /// truncated sequence. For a last-token model the tail token is the EOS that
+    /// EnsureTrailingEos put there, so it stays the token that gets pooled.
     internal static (long[] Ids, long[] Mask) Truncate(
         IReadOnlyList<long> ids, IReadOnlyList<long> attentionMask, int maxTokens)
     {
@@ -249,9 +359,11 @@ public sealed class OnnxTextEmbeddingProvider : ITextEmbeddingProvider, IDisposa
         return (kept, mask);
     }
 
-    private static float[] Pool(OnnxOutputTensor output, long[] mask, TextEmbeddingModelConfig config)
+    /// One sentence vector of the GRAPH's hidden size, from a pre-pooled
+    /// `[1, hidden]` output or a `[1, T, hidden]` token output.
+    internal static float[] Pool(OnnxOutputTensor output, long[] mask, TextEmbeddingModelConfig config)
     {
-        var dimension = config.Dimension;
+        var dimension = config.GraphDimension;
 
         // A pre-pooled 2-D output ([1, dim]) is already a sentence vector.
         if (output.Shape.Count == 2 && output.Shape[1] == dimension)
@@ -273,6 +385,21 @@ public sealed class OnnxTextEmbeddingProvider : ITextEmbeddingProvider, IDisposa
             return pooled;
         }
 
+        if (config.Pooling == TextEmbeddingPooling.Last)
+        {
+            // The last ATTENDED position, which is T-1 under left padding and
+            // the position before the first pad under right padding. Reading
+            // T-1 unconditionally would pool a pad token under right padding.
+            var last = -1;
+            for (var t = Math.Min(tokens, mask.Length) - 1; t >= 0; t--)
+            {
+                if (mask[t] != 0) { last = t; break; }
+            }
+            if (last < 0) throw new TextEmbeddingUnavailableException(RagFailureReasons.EmbeddingFailed);
+            Array.Copy(output.Data, last * dimension, pooled, 0, dimension);
+            return pooled;
+        }
+
         // Masked mean. Unmasked mean would average the padding positions in,
         // which moves short texts toward one point in the space.
         double weight = 0;
@@ -288,8 +415,16 @@ public sealed class OnnxTextEmbeddingProvider : ITextEmbeddingProvider, IDisposa
         return pooled;
     }
 
-    private static float[] Finalize(float[] vector, TextEmbeddingModelConfig config)
+    /// Matryoshka truncation, then the finite check and L2 normalization.
+    ///
+    /// Order matters: a Matryoshka model is trained so that the FIRST N
+    /// components are a usable embedding, but cutting a normalized vector
+    /// leaves it shorter than 1, and cosine over stored unit vectors would then
+    /// be a scaled dot product. So the cut comes first and the norm after.
+    internal static float[] Finalize(float[] vector, TextEmbeddingModelConfig config)
     {
+        if (vector.Length > config.Dimension) vector = vector[..config.Dimension];
+
         double sumSquares = 0;
         foreach (var value in vector)
         {

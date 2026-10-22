@@ -38,7 +38,7 @@ admin dashboard is derived from the number (no stored column).
 | `normal`      | 50       | (reserved)                                                       |
 | `maintenance` | 100      | `media.derivatives.backfill`, `metadata.embedded.backfill`, `storage.reconcile` |
 | `cleanup`     | 150      | (reserved; the hosted janitor/sweepers run independently)        |
-| `compute`     | 200      | (reserved for future AI: tagging, embeddings, OCR, …)            |
+| `compute`     | 200      | AI work, incl. `ai.documents.index` (owner document indexing)    |
 
 `JobQueue.EnqueueAsync` stamps the registry default when a caller doesn't pin a
 priority, so imports land in `foreground` and backfills in `maintenance`
@@ -99,6 +99,23 @@ enqueue (no checkpoint) re-attempts everything still outstanding.
   re-run is a no-op; a blob whose extraction fails stays `Failed` and is
   retried by a fresh enqueue or `--failed-only`. The per-slice result
   distinguishes completed / skipped / failed.
+
+- **`ai.documents.index`** — owner-private document indexing (extract → chunk →
+  embed → visual). Candidates are keyset-paged per owner through
+  `IOwnerDocumentSource`; the checkpoint holds the owner, the source kind and
+  the last finished source id (versioned, internal). Per-source, per-phase
+  state lives in `document_source_states` (missing row = implicit pending), so
+  a completed source is skipped by its revision, a permanent skip is not
+  re-read until the bytes change, and a retryable failure is retried until
+  `Ai:DocumentIndexing:MaxAttemptsPerSource` (or `--retry-failed`). Safe yield
+  points are between sources and between phases; cancellation leaves the phase
+  `pending` (`cancelled`), never `failed`. Enqueued by upload / restore / admin
+  import (non-blocking, only when `Ai:Enabled` and
+  `Ai:DocumentExtractionEnabled`), or by `documents backfill`. Resource limits
+  under `Ai:DocumentIndexing:` — `MaxConcurrentJobs` (1), `GateWaitSeconds`
+  (10; a job that cannot enter re-queues itself), `MaxAttemptsPerSource` (3),
+  `ParallelTextAndVisualModels` (false). The older `ai.documents.*.backfill`
+  skeletons remain registered and harmless.
 
 `storage.reconcile` and the hosted cleanup sweepers are not sliced yet — see
 *Extending* below.

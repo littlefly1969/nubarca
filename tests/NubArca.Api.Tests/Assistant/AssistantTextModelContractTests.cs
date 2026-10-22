@@ -26,6 +26,10 @@ internal sealed class CapturingProviderHandler : HttpMessageHandler
     public string? Authorization { get; private set; }
     public int Calls { get; private set; }
 
+    /// Awaited before answering, with the request's own token: a slow
+    /// provider that the client's deadline can actually interrupt.
+    public Func<CancellationToken, Task>? Stall { get; set; }
+
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -35,6 +39,7 @@ internal sealed class CapturingProviderHandler : HttpMessageHandler
             ? null
             : $"{request.Headers.Authorization.Scheme} {request.Headers.Authorization.Parameter}";
         Body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+        if (Stall is { } stall) await stall(cancellationToken);
         return _respond(request);
     }
 
@@ -207,11 +212,11 @@ public sealed class AssistantTextModelContractTests
     [Fact]
     public async Task A_Slow_Provider_Times_Out_Rather_Than_Hanging()
     {
-        var (model, _) = Build(_ =>
-        {
-            Thread.Sleep(TimeSpan.FromSeconds(2));
-            return CapturingProviderHandler.Answer("too late");
-        });
+        // The provider stalls until the client's deadline cancels the request.
+        // A blocking sleep raced the deadline's timer on a loaded runner: the
+        // in-memory answer could arrive before the timer fired.
+        var (model, handler) = Build(_ => CapturingProviderHandler.Answer("too late"));
+        handler.Stall = token => Task.Delay(TimeSpan.FromSeconds(30), token);
 
         var result = await model.CompleteAsync(ExternalProfile(timeoutSeconds: 1), Conversation);
         Assert.False(result.Ok);

@@ -192,11 +192,7 @@ public sealed class CurrentDerivationMigrationTests : IAsyncLifetime
         // And the same boundary refuses them to the embedder, so a superseded
         // reading cannot acquire fresh vectors either.
         var embeddable = await OwnerDocumentEligibility
-            .EligibleChunks(
-                ctx.DocumentChunks.AsNoTracking(),
-                ctx.DocumentTexts.AsNoTracking(),
-                ctx.FileItems.AsNoTracking(),
-                _owner)
+            .EligibleChunks(ctx, OwnerDocumentEligibility.FileKindOnly, _owner)
             .CountAsync();
         Assert.Equal(0, embeddable);
     }

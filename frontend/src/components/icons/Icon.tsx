@@ -68,6 +68,8 @@ export type IconName =
   | 'list'
   | 'list-add'
   | 'list-remove'
+  // The owner's document search: a page with text lines.
+  | 'document'
   // MailArchive: the mail destination and an attachment marker.
   | 'mail'
   | 'attachment';
@@ -124,6 +126,7 @@ const PATHS: Record<IconName, string> = {
   list: 'M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01',
   'list-add': 'M9 6h11M9 12h6M9 18h6M4.5 6h.01M4.5 12h.01M4.5 18h.01M19 13v8M15 17h8',
   'list-remove': 'M9 6h11M9 12h6M9 18h6M4.5 6h.01M4.5 12h.01M4.5 18h.01M15 17h8',
+  document: 'M6 3h8l4 4v14H6zM14 3v4h4M9 11h6M9 14h6M9 17h4',
   // An envelope: a rectangle with its flap folded to the centre.
   mail: 'M3 6h18v12H3zM3 7l9 6 9-6',
   // A paper clip.

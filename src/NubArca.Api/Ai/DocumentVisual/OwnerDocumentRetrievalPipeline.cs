@@ -1,3 +1,4 @@
+using NubArca.Api.Domain.Ai;
 using NubArca.Api.Rag;
 using NubArca.Api.Rag.Domains;
 
@@ -6,8 +7,9 @@ namespace NubArca.Api.Ai.DocumentVisual;
 /// One question, answered from one person's documents, by both signals.
 ///
 /// Bounded TEXT evidence and two mode tokens. There is deliberately no field
-/// for a visual unit, a page, a score or a file id: what leaves this pipeline is
-/// what may reach a prompt, and nothing else needs to.
+/// for a visual unit or a visual score: a visual hit only ever names files to
+/// scope a text pass. Each evidence item carries its own TEXT provenance (file,
+/// page, typed locator) from the chunk it came from.
 public sealed record OwnerDocumentRetrievalResult(
     IReadOnlyList<RagEvidence> Evidence,
     RagRetrievalOutcome Outcome,
@@ -15,11 +17,20 @@ public sealed record OwnerDocumentRetrievalResult(
     string VisualMode,
     int GlobalEvidence,
     int VisualExpandedEvidence,
-    IReadOnlyList<Guid> VisualCandidateFileIds)
+    IReadOnlyList<Guid> VisualCandidateFileIds,
+    /// The global text pass's sanitized reason (`rag_index_unavailable`,
+    /// `rag_corpus_too_large`, …), so a caller can tell "nothing indexed" from
+    /// "nothing matched" without a second read.
+    string? TextReason = null,
+    /// The visual pass's own hits (owner-prefiltered, current index, active
+    /// profiles), so an EXPLORATORY caller can show "this page looks like your
+    /// question" separately from text evidence. Never evidence: the chat gate
+    /// does not read this.
+    IReadOnlyList<DocumentVisualHit>? VisualHits = null)
 {
     public static OwnerDocumentRetrievalResult From(RagRetrievalResult text, string visualMode)
         => new(text.Evidence, text.Outcome, text.Mode, visualMode,
-               text.Evidence.Count, 0, Array.Empty<Guid>());
+               text.Evidence.Count, 0, Array.Empty<Guid>(), text.Reason);
 }
 
 /// THE RETRIEVAL HALF OF "ANSWER FROM MY DOCUMENTS", as one object.
@@ -40,6 +51,7 @@ public sealed record OwnerDocumentRetrievalResult(
 public sealed class OwnerDocumentRetrievalPipeline
 {
     private static readonly RagDomainDefinition Domain = RagDomainRegistry.UserDocuments;
+    private static readonly IReadOnlyCollection<string> FileKind = new[] { DocumentSourceKinds.File };
 
     private readonly IRagRetriever _knowledge;
     private readonly IOwnerDocumentVisualRetriever? _visual;
@@ -57,13 +69,30 @@ public sealed class OwnerDocumentRetrievalPipeline
         int maxEvidence,
         int maxCharacters,
         bool useVisual = true,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyCollection<Guid>? allowedSourceIds = null,
+        IReadOnlyCollection<string>? allowedSourceKinds = null)
     {
+        // `allowedSourceIds` / `allowedSourceKinds` are a SERVER-SIDE narrowing
+        // (see RagQuery.AllowedSourceIds): applied to the already-eligible
+        // corpus, they can only remove candidates. Null means every source of
+        // every registered kind.
         var global = await _knowledge.RetrieveAsync(
-            new RagQuery(Domain.DomainKey, question, ownerUserId, maxEvidence, maxCharacters),
+            new RagQuery(Domain.DomainKey, question, ownerUserId, maxEvidence, maxCharacters)
+            {
+                AllowedSourceIds = allowedSourceIds,
+                AllowedSourceKinds = allowedSourceKinds,
+            },
             cancellationToken);
 
-        if (!useVisual || _visual is null)
+        // VISUAL IS FILE-ONLY, by construction: the renderer needs a file's
+        // bytes, and the visual index is keyed by FileItem. Another kind is
+        // answered by the text signals alone, and a question narrowed to kinds
+        // that exclude `file` has no visual pass to run.
+        var filesAllowed = allowedSourceKinds is null
+            || allowedSourceKinds.Contains(DocumentSourceKinds.File, StringComparer.Ordinal);
+
+        if (!useVisual || _visual is null || !filesAllowed)
         {
             return OwnerDocumentRetrievalResult.From(global, DocumentVisualModes.Unavailable);
         }
@@ -85,7 +114,14 @@ public sealed class OwnerDocumentRetrievalPipeline
         var scoped = await _knowledge.RetrieveAsync(
             new RagQuery(Domain.DomainKey, question, ownerUserId, maxEvidence, maxCharacters)
             {
-                AllowedFileItemIds = visual.CandidateFileIds,
+                // Intersected with the caller's own narrowing, so the visual
+                // pass can never reach a file the global pass was not allowed.
+                // The kind is pinned to `file`: these are FileItem ids, and an
+                // id of any other kind must not be able to match one.
+                AllowedSourceIds = allowedSourceIds is null
+                    ? visual.CandidateFileIds
+                    : visual.CandidateFileIds.Where(allowedSourceIds.Contains).ToList(),
+                AllowedSourceKinds = FileKind,
             },
             cancellationToken);
 
@@ -114,6 +150,8 @@ public sealed class OwnerDocumentRetrievalPipeline
             visual.Mode,
             global.Evidence.Count,
             expanded.Count,
-            visual.CandidateFileIds);
+            visual.CandidateFileIds,
+            global.Reason,
+            visual.Hits);
     }
 }
