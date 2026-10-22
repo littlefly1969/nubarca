@@ -548,6 +548,7 @@ public static class FolderTrashEndpoints
             HttpContext httpContext,
             [FromServices] IFolderService folders,
             [FromServices] IAuditLogger audit,
+            [FromServices] NubArca.Api.Ai.Documents.Sources.IDocumentSourceChangeSink documentSources,
             CancellationToken cancellationToken) =>
         {
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
@@ -560,6 +561,11 @@ public static class FolderTrashEndpoints
                 {
                     return Results.NotFound();
                 }
+
+                // A restored folder brings back any number of files: one
+                // owner-scoped indexing pass, not a job per file. Inert unless
+                // the document capability is enabled.
+                await documentSources.OwnerSourcesChangedAsync(ownerUserId, cancellationToken);
 
                 await audit.LogAsync(
                     actor: ownerUserId,

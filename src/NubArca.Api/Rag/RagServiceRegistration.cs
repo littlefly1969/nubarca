@@ -112,6 +112,24 @@ public static class RagServiceRegistration
 
         services.AddScoped<Ai.Documents.OwnerDocumentIndexer>();
 
+        // ---- owner-private document SOURCES and automatic indexing ----------
+        //
+        // One registration per source kind (only `file` in this build; see
+        // docs/document-intelligence/source-contract.md). The job, its state
+        // store and the change signal are registered unconditionally and are
+        // INERT unless `Ai:Enabled` and `Ai:DocumentExtractionEnabled` are set:
+        // the sink enqueues nothing and the job no-ops.
+        services.AddScoped<Ai.Documents.Sources.IOwnerDocumentSource,
+            Ai.Documents.Sources.FileItemDocumentSource>();
+        services.AddScoped<Ai.Documents.Sources.OwnerDocumentSources>();
+        services.AddScoped<Ai.Documents.Sources.IDocumentSourceChangeSink,
+            Ai.Documents.Indexing.JobQueueDocumentSourceChangeSink>();
+        services.AddSingleton<Ai.Documents.Indexing.DocumentIndexingGate>();
+        services.AddScoped<Ai.Documents.Indexing.DocumentSourceStateStore>();
+        services.AddScoped<Ai.Documents.Indexing.DocumentSourceIndexProcessor>();
+        services.AddScoped<Ai.Documents.Indexing.DocumentIndexProgressService>();
+        services.AddScoped<Jobs.IJobHandler, Ai.Documents.Indexing.AiDocumentsIndexJobHandler>();
+
         // ---- visual document retrieval -----------------------------------
         //
         // Registered unconditionally alongside the text pipeline, and INERT

@@ -9,7 +9,7 @@ using NubArca.Api.Ai.TextEmbeddings;
 using NubArca.Api.Data;
 using NubArca.Api.Domain.Ai;
 using NubArca.Api.Jobs;
-using NubArca.Api.Rag.Domains;
+using NubArca.Api.Rag;
 
 namespace NubArca.Api.Ai.Documents.Indexing;
 
@@ -170,17 +170,19 @@ public sealed class AiDocumentsIndexJobHandler : IJobHandler
             () => context.ShouldYield(processedThisSlice));
 
         // ---- one source -----------------------------------------------------
-        if (payload.SourceId is { } sourceId && payload.OwnerUserId is { } owner)
+        if (payload.SourceId is { } sourceId && payload.OwnerUserId is { } sourceOwner)
         {
             var source = _sources.For(payload.SourceKind ?? DocumentSourceKinds.File);
-            var candidate = source is null ? null : await source.GetCandidateAsync(owner, sourceId, cancellationToken);
+            var candidate = source is null
+                ? null
+                : await source.GetCandidateAsync(sourceOwner, sourceId, cancellationToken);
             if (source is null || candidate is null)
             {
                 await NoOpAsync(context, "not-a-candidate");
                 return;
             }
 
-            var result = await _processor.ProcessAsync(source, owner, candidate, settings, cancellationToken);
+            var result = await _processor.ProcessAsync(source, sourceOwner, candidate, settings, cancellationToken);
             await context.ReportProgressAsync(1, 1, result.Outcome ?? "unchanged", cancellationToken);
             if (result.Yielded)
             {

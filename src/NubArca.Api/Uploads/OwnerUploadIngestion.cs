@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
+using NubArca.Api.Ai.Documents.Sources;
 using NubArca.Api.Audit;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
+using NubArca.Api.Domain.Ai;
 using NubArca.Api.Files;
 using NubArca.Api.Folders;
 using NubArca.Api.Ingestion;
@@ -80,6 +82,7 @@ public sealed class OwnerUploadIngestion : IOwnerUploadIngestion
     private readonly IFolderService _folders;
     private readonly IAuditLogger _audit;
     private readonly IPostIngestionMediaPipelineService _mediaPipeline;
+    private readonly IDocumentSourceChangeSink? _documentSources;
     private readonly ILogger<OwnerUploadIngestion> _logger;
 
     public OwnerUploadIngestion(
@@ -88,8 +91,10 @@ public sealed class OwnerUploadIngestion : IOwnerUploadIngestion
         IFolderService folders,
         IAuditLogger audit,
         IPostIngestionMediaPipelineService mediaPipeline,
-        ILogger<OwnerUploadIngestion> logger)
+        ILogger<OwnerUploadIngestion> logger,
+        IDocumentSourceChangeSink? documentSources = null)
     {
+        _documentSources = documentSources;
         _db = db;
         _files = files;
         _folders = folders;
@@ -165,6 +170,15 @@ public sealed class OwnerUploadIngestion : IOwnerUploadIngestion
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Post-ingest scheduling failed after upload; file will be picked up by a later backfill.");
+        }
+
+        // THE DOCUMENT CHANGE SIGNAL. Records that a source changed and returns:
+        // the upload never waits for extraction or embeddings. Inert unless the
+        // document capability is enabled; a non-document file enqueues nothing.
+        if (_documentSources is not null)
+        {
+            await _documentSources.SourceChangedAsync(
+                DocumentSourceKinds.File, request.OwnerUserId, created.Id, cancellationToken);
         }
 
         return created;
