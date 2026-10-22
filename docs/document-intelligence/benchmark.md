@@ -266,7 +266,31 @@ What these show:
   the reference text.
 - `tesseract` eng+ita, all four variants: see the table below.
 
-<!-- TESSERACT_RESULTS -->
+| Variant | Pages | CER [95 % CI] | WER | Word recall | Omission | Hallucination | Reading-order error | Pages/s | p50 / p95 ms | Failures |
+|---|---|---|---|---|---|---|---|---|---|---|
+| clean | 59 | 0.079 [0.026, 0.148] | 0.113 | 0.980 | 0.006 | 0.005 | 0.000 | 1.01 | 985 / 1367 | 0 % |
+| scan | 59 | 0.097 [0.040, 0.172] | 0.156 | 0.961 | 0.007 | 0.008 | 0.000 | 0.68 | 1465 / 1822 | 0 % |
+| photo | 59 | 0.186 [0.126, 0.255] | 0.250 | 0.906 | 0.105 | 0.005 | 0.000 | 0.84 | 1242 / 1713 | 0 % |
+| lowdpi | 59 | 0.144 [0.083, 0.221] | 0.252 | 0.929 | 0.006 | 0.016 | 0.000 | 1.52 | 694 / 922 | 0 % |
+
+How to read the Tesseract numbers:
+
+- **The mean CER is pulled up by chart slides.** The worst pages are deck
+  slides whose chart labels Tesseract reads but the reference text leaves out,
+  which gives a CER above 1. The hallucination metric ignores chart labels, and
+  that is why it stays low.
+- **Photos lose content.** About 10 % of reference lines go missing, mostly in
+  tables photographed at an angle.
+- **Reading order** was correct on every page, including the two-column
+  newsletter. The metric itself does detect swapped columns; a unit test checks
+  it.
+- **Formulas, TEDS and peak RSS:**
+  - Formula match is near zero: Tesseract does not read rendered formulas.
+  - TEDS is about 0 because Tesseract emits no table structure.
+  - Peak RSS was 260 MiB.
+- **Threading.** These numbers were taken with `OMP_THREAD_LIMIT=1`. The same
+  24-page core subset with `--tesseract-omp 4` failed on all 24 pages at a
+  30 s timeout here, which is the hang described in section 6.
 
 `rapidocr-ppocrv5` and the VLM adapters were not run here because their
 weights cannot be fetched. On the target they are recorded skips until
