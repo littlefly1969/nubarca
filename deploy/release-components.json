@@ -5,6 +5,7 @@
       "description": "API and worker image, lean (runtime) and OpenVINO (openvino) variants. paths is the image's whole build input (deploy/tests/releaseManifest.test.mjs checks it against the Dockerfile and the project): the help corpus is built from README.md, ARCHITECTURE.md and docs/.",
       "paths": [
         "src/NubArca.Api",
+        "tools/nubarca-pst-importer",
         "global.json",
         "assets/brand/nubarca/runtime/web",
         "mobile/assets/fonts",

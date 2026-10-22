@@ -353,6 +353,51 @@ jobs:
       - name: Build
         run: npm run build
 
+  # MailArchive's read-only PST engine: the Rust quality gate, then the .NET
+  # side against the binary just built (the fast lane skips those tests,
+  # having no binary). The PST fixtures are committed under the tool.
+  pst-importer:
+    name: PST engine (Rust) and its .NET integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: tools/nubarca-pst-importer
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.90 --profile minimal --component rustfmt,clippy
+          rustup default 1.90
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace --locked
+
+      - name: Build the release binary
+        run: cargo build --release --locked -p nubarca-pst-importer
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: .NET against the real engine
+        working-directory: .
+        env:
+          NUBARCA_PST_IMPORTER_BIN: ${{ github.workspace }}/tools/nubarca-pst-importer/target/release/nubarca-pst-importer
+        run: dotnet test tests/NubArca.Api.Tests/NubArca.Api.Tests.csproj --filter "FullyQualifiedName~MailArchiveRealEngineTests"
+
   # A browser running /tv is a NubArca display: paired, assigned, taken over
   # by a game and handed back, reloaded, revoked — end to end, in a real
   # headless Chrome against a real API and database. See

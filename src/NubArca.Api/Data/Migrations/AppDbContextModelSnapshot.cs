@@ -20,6 +20,7 @@ namespace NubArca.Api.Data.Migrations
                 .HasAnnotation("ProductVersion", "10.0.4")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
+            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "pg_trgm");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("NubArca.Api.Domain.AccessRole", b =>
@@ -3744,6 +3745,559 @@ namespace NubArca.Api.Data.Migrations
                     NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("OwnerUserId", "PrivateVaultId", "ParentFolderId", "Name"), false);
 
                     b.ToTable("folders", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailArchive", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("FingerprintScheme")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int>("FolderCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Format")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime?>("LastImportedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("MessageCount")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ScanCompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("SourceFileItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceFileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("SourceFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<long>("SourceSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceFileItemId")
+                        .HasDatabaseName("ix_mail_archives_source_file");
+
+                    b.HasIndex("OwnerUserId", "SourceFingerprint")
+                        .IsUnique()
+                        .HasDatabaseName("ux_mail_archives_owner_fingerprint");
+
+                    b.ToTable("mail_archives", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailAttachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AttachmentKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ContentId")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("FileItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsInline")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("MimeType")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("OriginalName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("SkipReason")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FileItemId")
+                        .HasDatabaseName("ix_mail_attachments_file_item");
+
+                    b.HasIndex("MessageId", "AttachmentKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_mail_attachments_message_key");
+
+                    b.ToTable("mail_attachments", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailDeletionTombstone", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DeletedMessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("SourceMessageKey")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerUserId", "DeletedMessageId")
+                        .HasDatabaseName("ix_mail_tombstones_owner_message");
+
+                    b.HasIndex("OwnerUserId", "SourceFingerprint", "SourceMessageKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_mail_tombstones_owner_source_message");
+
+                    b.ToTable("mail_deletion_tombstones", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailFolder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ArchiveId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContainerClass")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("Depth")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MessageCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ParentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PathJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SourceFolderKey")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ParentId");
+
+                    b.HasIndex("ArchiveId", "Ordinal")
+                        .HasDatabaseName("ix_mail_folders_archive_ordinal");
+
+                    b.HasIndex("ArchiveId", "SourceFolderKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_mail_folders_archive_source");
+
+                    b.ToTable("mail_folders", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailImportItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ArchiveId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FailureCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("FailureMessage")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("LastOutcome")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid?>("LastRunId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceFolderKey")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("SourceMessageKey")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArchiveId", "Ordinal")
+                        .HasDatabaseName("ix_mail_import_items_archive_ordinal");
+
+                    b.HasIndex("ArchiveId", "SourceMessageKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_mail_import_items_archive_message");
+
+                    b.HasIndex("LastRunId", "LastOutcome")
+                        .HasDatabaseName("ix_mail_import_items_run_outcome");
+
+                    b.ToTable("mail_import_items", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailImportRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AlreadyPresentMessages")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("ArchiveId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AttachmentsCreated")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("AttachmentsReused")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("AttachmentsSkipped")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<int>("FailedMessages")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ImportedMessages")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("JobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Phase")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int>("ProcessedMessages")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ScanErrors")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ScanIssuesJson")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ScannedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("SkippedDeletedMessages")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int>("TotalMessages")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArchiveId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_mail_import_runs_one_active")
+                        .HasFilter("\"Status\" IN ('queued', 'running')");
+
+                    b.HasIndex("ArchiveId", "CreatedAt")
+                        .HasDatabaseName("ix_mail_import_runs_archive_created");
+
+                    b.ToTable("mail_import_runs", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ArchiveId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AttachmentCount")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("BlobObjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DocumentFormat")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("DocumentSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("DocumentVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("FolderId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FromAddress")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<string>("FromName")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<bool>("HasAttachments")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ImportedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("InternetMessageId")
+                        .HasMaxLength(998)
+                        .HasColumnType("character varying(998)");
+
+                    b.Property<string>("MessageClass")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Preview")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
+                    b.Property<DateTime?>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SearchFrom")
+                        .IsRequired()
+                        .HasMaxLength(700)
+                        .HasColumnType("character varying(700)");
+
+                    b.Property<string>("SearchRecipients")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
+                    b.Property<string>("SearchSubject")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("SentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("SortDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SourceMessageKey")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Subject")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("ToSummary")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BlobObjectId")
+                        .HasDatabaseName("ix_mail_messages_blob_object");
+
+                    b.HasIndex("SearchFrom")
+                        .HasDatabaseName("ix_mail_messages_search_from_trgm");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("SearchFrom"), "gin");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("SearchFrom"), new[] { "gin_trgm_ops" });
+
+                    b.HasIndex("SearchRecipients")
+                        .HasDatabaseName("ix_mail_messages_search_recipients_trgm");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("SearchRecipients"), "gin");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("SearchRecipients"), new[] { "gin_trgm_ops" });
+
+                    b.HasIndex("SearchSubject")
+                        .HasDatabaseName("ix_mail_messages_search_subject_trgm");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("SearchSubject"), "gin");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("SearchSubject"), new[] { "gin_trgm_ops" });
+
+                    b.HasIndex("ArchiveId", "SourceMessageKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_mail_messages_archive_source");
+
+                    b.HasIndex("ArchiveId", "SortDate", "Id")
+                        .HasDatabaseName("ix_mail_messages_archive_date");
+
+                    b.HasIndex("FolderId", "SortDate", "Id")
+                        .HasDatabaseName("ix_mail_messages_folder_date");
+
+                    b.HasIndex("OwnerUserId", "SortDate", "Id")
+                        .HasDatabaseName("ix_mail_messages_owner_date");
+
+                    b.ToTable("mail_messages", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailMessageText", b =>
+                {
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("SortDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(100000)
+                        .HasColumnType("character varying(100000)");
+
+                    b.HasKey("MessageId");
+
+                    b.ToTable("mail_message_texts", (string)null);
                 });
 
             modelBuilder.Entity("NubArca.Api.Domain.MediaDuplicateCleanupRun", b =>
@@ -8772,6 +9326,104 @@ namespace NubArca.Api.Data.Migrations
                         .WithMany()
                         .HasForeignKey("PrivateVaultId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailArchive", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NubArca.Api.Domain.FileItem", null)
+                        .WithMany()
+                        .HasForeignKey("SourceFileItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailAttachment", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.FileItem", null)
+                        .WithMany()
+                        .HasForeignKey("FileItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("NubArca.Api.Domain.Mail.MailMessage", null)
+                        .WithMany()
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailDeletionTombstone", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailFolder", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.Mail.MailArchive", null)
+                        .WithMany()
+                        .HasForeignKey("ArchiveId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("NubArca.Api.Domain.Mail.MailFolder", null)
+                        .WithMany()
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailImportItem", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.Mail.MailArchive", null)
+                        .WithMany()
+                        .HasForeignKey("ArchiveId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailImportRun", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.Mail.MailArchive", null)
+                        .WithMany()
+                        .HasForeignKey("ArchiveId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailMessage", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.Mail.MailArchive", null)
+                        .WithMany()
+                        .HasForeignKey("ArchiveId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NubArca.Api.Domain.BlobObject", null)
+                        .WithMany()
+                        .HasForeignKey("BlobObjectId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("NubArca.Api.Domain.Mail.MailFolder", null)
+                        .WithMany()
+                        .HasForeignKey("FolderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailMessageText", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.Mail.MailMessage", null)
+                        .WithOne()
+                        .HasForeignKey("NubArca.Api.Domain.Mail.MailMessageText", "MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("NubArca.Api.Domain.MediaLibraryRule", b =>

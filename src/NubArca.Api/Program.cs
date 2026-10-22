@@ -1,3 +1,4 @@
+using NubArca.Api.MailArchive;
 using System.Net;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
@@ -1241,6 +1242,8 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // Party/TV/Private Vault. The ALPR analysis runs on the worker (Compute band)
     // via a model profile/config separate from the AI face substrate.
     builder.Services.AddNubArcaPlates();
+    // MailArchive (owner-private PST import + consultation).
+    builder.Services.AddNubArcaMailArchive(builder.Configuration);
 
     // Aesthetics Lab (Laboratorio estetico): owner-private, opt-in, EXPERIMENTAL
     // isolated space for local HumanAesExpert analysis. Standalone entity (never
@@ -1851,6 +1854,7 @@ app.MapPrivateVaultEndpoints();
 // as part of the modular-monolith cleanup. Same routes, same owner-private
 // behavior; see that file for the implementation.
 app.MapPlatesEndpoints();
+app.MapMailArchiveEndpoints();
 
 // Aesthetics Lab (Laboratorio estetico) owner-facing endpoints live in
 // Endpoints/AestheticsEndpoints.cs — extracted as part of the

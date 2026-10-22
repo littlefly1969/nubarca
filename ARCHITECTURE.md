@@ -2027,6 +2027,25 @@ One image corresponds to one job/run, so a failed item does not invalidate a who
 
 The TV Personal Area creates a short-lived owner-scoped upload session. Only the hash of the capability token is stored. The public mobile page can upload into that lab session but cannot browse the owner's lab, normal library, or TV session. Expired/revoked sessions are rejected and an optional cleanup service removes old rows.
 
+## 20A. MailArchive (PST mail archive)
+
+MailArchive is an owner-private bounded context for Outlook PST archives imported offline. Operations and limits: `docs/mailarchive/operations.md`; the frozen contract: `docs/mailarchive/contract.md`.
+
+### 20A.1 Data ownership
+
+- `MailArchive` is one PST per owner, identified by a peppered fingerprint of the source content (never by name or Message-ID). `MailImportRun` and `MailImportItem` record each import and each message's progress; `MailFolder` mirrors the PST folder tree.
+- `MailMessage` is **immutable** and is **not** a `FileItem`. It owns exactly one content-addressed document blob (the normalized `nubarca-mail-message` JSON). That owner row is counted by `BlobReferenceAuditService` and released on hard delete, the same pattern as Plates. No route updates a message.
+- Attachments are ordinary `FileItem`s under `Posta/<archive>/<folder path>` with normal dedup and quota. `MailAttachment` links a message to a `FileItemId` (`ON DELETE SET NULL`) and holds **no** blob reference, so a mail link never calls `ReleaseAsync`.
+- Deleting a message writes `MailDeletionTombstone` (owner, archive fingerprint, stable PST message key) and keeps the attachment files. Re-import skips tombstoned messages.
+
+### 20A.2 Import pipeline
+
+`mail.import` is a Normal-priority, sliced, checkpointed and cancellable job. It copies the source file to a read-only working copy under `MailArchive:WorkRootPath`, scans with the Rust engine (`tools/nubarca-pst-importer`, protocol `nubarca-pst/1`, a child process with bounded output and timeouts), then extracts messages in ordinal order through one engine session. Attachments are created under upload-operation claims keyed by message and attachment, so a crash between file creation and message completion adopts the file instead of duplicating it; a message completes in one transaction with its document blob. A run is reconciled with its job's terminal state when read.
+
+### 20A.3 Privacy boundary
+
+Every `/api/mail` route is owner-scoped with generic not-found and `no-store`. HTML bodies are sanitized server-side by an allow-list and rendered in a script-less sandboxed iframe. Responses, logs and stored errors never carry storage keys, hashes, blob ids, paths or message content. Mail data never reaches public shares, Party, TV or AI pipelines.
+
 ## 21. TV architecture
 
 ### 21.1 Pairing and limited TV session

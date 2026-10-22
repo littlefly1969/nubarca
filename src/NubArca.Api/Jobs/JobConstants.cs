@@ -108,4 +108,15 @@ public static class JobTypes
     // N independent jobs, never a monolith). Compute band. Opt-in/experimental,
     // disabled by default. The payload carries only the AestheticAnalysisRun id.
     public const string AestheticsAnalyze = "ai.aesthetics.human-aesexpert.analyze";
+
+    // MailArchive: import (or resume the import of) ONE owner-private PST
+    // archive. Sliceable and resumable from the persisted manifest; Normal
+    // band so foreground uploads go first. The payload carries only the
+    // MailImportRun id.
+    public const string MailImport = "mail.import";
+
+    // MailArchive: give ONE owner's messages that predate mail_message_texts
+    // their searchable text, rebuilt from each message's document blob.
+    // Sliceable, keyset-checkpointed; Maintenance band. Payload: the owner id.
+    public const string MailTextsBackfill = "mail.texts.backfill";
 }
