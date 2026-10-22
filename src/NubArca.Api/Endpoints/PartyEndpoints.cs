@@ -19,10 +19,7 @@ namespace NubArca.Api.Endpoints;
 // Party (public event albums + owner-side moderation). Covers three route
 // groups that were non-contiguous in Program.cs:
 //   1. PUBLIC party album read/media/upload (/api/party/{token}/...) —
-//      anonymous, token-scoped. A public "Beauty Lab" upload block sat
-//      between this group and group 2 in the original file
-//      (/api/beauty-lab-upload/*, Aesthetics feature, NOT Party) and stays
-//      in Program.cs untouched.
+//      anonymous, token-scoped.
 //   2. PUBLIC party face search (/api/party/{token}/face-search/...) —
 //      anonymous, view-token-scoped.
 //   3. Owner-side album Party settings + upload moderation
@@ -31,7 +28,8 @@ namespace NubArca.Api.Endpoints;
 //      during the album-extraction slice specifically so it could move here
 //      with the rest of Party.
 // Consolidating all three into one MapPartyEndpoints() call is safe: none of
-// these route templates overlap the Beauty Lab, photo-export, or album
+// these route templates overlap the photo-export or album
+
 // templates that remain inline, so registration order does not affect
 // matching.
 public static class PartyEndpoints

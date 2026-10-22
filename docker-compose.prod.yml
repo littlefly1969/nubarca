@@ -386,22 +386,6 @@ services:
       Party__FaceSearch__MaxResults: ${Party__FaceSearch__MaxResults:-100}
       Ai__External__BaseUrl: ${Ai__External__BaseUrl:-}
       Ai__External__ApiKeyRef: ${Ai__External__ApiKeyRef:-}
-      # Owner-private Aesthetics Lab. The model itself runs in the optional
-      # internal human-aesexpert sidecar; these settings only enable and bind
-      # the API contract. Disabled/empty by default.
-      HumanAesExpert__Enabled: ${HumanAesExpert__Enabled:-false}
-      HumanAesExpert__ProfileKey: ${HumanAesExpert__ProfileKey:-human-aesexpert-1b-expert-v1}
-      HumanAesExpert__DefaultCapabilities: ${HumanAesExpert__DefaultCapabilities:-expert_scores}
-      HumanAesExpert__AllowExpertScores: ${HumanAesExpert__AllowExpertScores:-true}
-      HumanAesExpert__AllowScoreHead: ${HumanAesExpert__AllowScoreHead:-false}
-      HumanAesExpert__AllowMetaVoter: ${HumanAesExpert__AllowMetaVoter:-false}
-      HumanAesExpert__AllowTextAssessment: ${HumanAesExpert__AllowTextAssessment:-false}
-      HumanAesExpert__MaximumBatchItems: ${HumanAesExpert__MaximumBatchItems:-20}
-      HumanAesExpert__RequestTimeoutSeconds: ${HumanAesExpert__RequestTimeoutSeconds:-120}
-      HumanAesExpert__SidecarBaseUrl: ${HumanAesExpert__SidecarBaseUrl:-}
-      HumanAesExpert__PreprocessingProfileKey: ${HumanAesExpert__PreprocessingProfileKey:-human-aesexpert-official-v1}
-      HumanAesExpert__MaxUploadBytes: ${HumanAesExpert__MaxUploadBytes:-26214400}
-      HumanAesExpert__Pepper: ${HumanAesExpert__Pepper:-}
       # Password recovery by email. OFF by default: with Mail__Enabled=false the
       # rest of authentication is completely unaffected, the forgot-password
       # page explains that recovery is unavailable, and the administrator's
@@ -699,21 +683,6 @@ services:
       Party__MaxUploadBytes: ${Party__MaxUploadBytes:-52428800}
       Ai__External__BaseUrl: ${Ai__External__BaseUrl:-}
       Ai__External__ApiKeyRef: ${Ai__External__ApiKeyRef:-}
-      # Mirror the API exactly: analysis jobs execute in this worker and call
-      # the internal HumanAesExpert sidecar.
-      HumanAesExpert__Enabled: ${HumanAesExpert__Enabled:-false}
-      HumanAesExpert__ProfileKey: ${HumanAesExpert__ProfileKey:-human-aesexpert-1b-expert-v1}
-      HumanAesExpert__DefaultCapabilities: ${HumanAesExpert__DefaultCapabilities:-expert_scores}
-      HumanAesExpert__AllowExpertScores: ${HumanAesExpert__AllowExpertScores:-true}
-      HumanAesExpert__AllowScoreHead: ${HumanAesExpert__AllowScoreHead:-false}
-      HumanAesExpert__AllowMetaVoter: ${HumanAesExpert__AllowMetaVoter:-false}
-      HumanAesExpert__AllowTextAssessment: ${HumanAesExpert__AllowTextAssessment:-false}
-      HumanAesExpert__MaximumBatchItems: ${HumanAesExpert__MaximumBatchItems:-20}
-      HumanAesExpert__RequestTimeoutSeconds: ${HumanAesExpert__RequestTimeoutSeconds:-120}
-      HumanAesExpert__SidecarBaseUrl: ${HumanAesExpert__SidecarBaseUrl:-}
-      HumanAesExpert__PreprocessingProfileKey: ${HumanAesExpert__PreprocessingProfileKey:-human-aesexpert-official-v1}
-      HumanAesExpert__MaxUploadBytes: ${HumanAesExpert__MaxUploadBytes:-26214400}
-      HumanAesExpert__Pepper: ${HumanAesExpert__Pepper:-}
       # deleted-content-import-skip: MUST match the api service's value (the
       # worker reads the tombstone ledger the api writes). Same variable → same
       # value from .env.

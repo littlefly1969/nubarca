@@ -32,8 +32,7 @@ export type MediaSelectionActionId =
   | 'excluded'
   | 'trash'
   | 'album'
-  | 'plates'
-  | 'beauty-lab';
+  | 'plates';
 
 export interface MediaSelectionAction {
   id: MediaSelectionActionId;
@@ -92,10 +91,8 @@ const MOVE_TO: readonly Candidate[] = [
   },
 ];
 
-// The photo-only Laboratory destinations carry the SAME composite the
-// Laboratory itself requires: the shell permission plus the section's own. A
-// user holding Plates but not Aesthetics gets exactly one of them here, just as
-// they get exactly one tab there.
+// The photo-only Laboratory destination carries the SAME composite the
+// Laboratory itself requires: the shell permission plus the section's own.
 const ADD_TO: readonly Candidate[] = [
   {
     id: 'album',
@@ -116,13 +113,6 @@ const ADD_TO: readonly Candidate[] = [
     icon: 'plates',
     capability: (c) => c.canUsePhotoOnlyDestinations,
     permissions: [PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryPlates],
-  },
-  {
-    id: 'beauty-lab',
-    labelKey: 'gallery.ws.destAesthetics',
-    icon: 'aesthetics',
-    capability: (c) => c.canUsePhotoOnlyDestinations,
-    permissions: [PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryAesthetics],
   },
 ];
 

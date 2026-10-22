@@ -67,7 +67,6 @@ test('non-media screens leave transport keys to the platform', () => {
   for (const screen of [
     '../screens/PersonalLibraryScreen.tsx',
     '../screens/AlbumItemsScreen.tsx',
-    '../screens/BeautyLabScreen.tsx',
   ]) {
     const source = code(screen);
     assert.match(source, /if \(isMediaTransportEvent\(eventType\)\) return;/,

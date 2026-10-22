@@ -31,7 +31,7 @@ NubArca is a self-hosted personal cloud optimized for a single server and a smal
 - embedded metadata, media derivatives, video probing, and optional HLS playback;
 - resumable browser uploads, server-side imports, photo organization, and archive export;
 - optional local AI for photo similarity, semantic retrieval, face processing, and People;
-- segregated private or specialist surfaces: Private Vault, Plates, and Aesthetics Lab;
+- segregated private or specialist surfaces: Private Vault and Plates;
 - paired TV access, a PIN-protected Personal Area, native TV media playback, and TV OTA updates.
 
 NubArca is not designed as a horizontally scaled SaaS control plane. The production defaults deliberately target one PostgreSQL instance, one API instance, and at most one active job worker on a personal server. The schema is multi-user and every private operation is owner-scoped, but the authorization model is intentionally single-level — USER → ROLE → PERMISSIONS: a user holds exactly one role, the role owns its permissions, and the built-in Administrator role controls operator functions (see §7.1).
@@ -69,15 +69,15 @@ Blob-derived facts are shared by all logical references to the same bytes. User-
 
 ### 3.5 Derived data is regenerable
 
-Thumbnails, medium previews, posters, preview strips, HLS ladders, face crops, embeddings, clusters, ALPR results, and aesthetic results are derived artifacts. Their persistence and retention vary by subsystem, but none is the authoritative copy of an original file.
+Thumbnails, medium previews, posters, preview strips, HLS ladders, face crops, embeddings, clusters, and ALPR results are derived artifacts. Their persistence and retention vary by subsystem, but none is the authoritative copy of an original file.
 
 ### 3.6 Public access is capability-scoped
 
-Unauthenticated access is granted only through narrowly scoped random capabilities: file share tokens, Party tokens, Party upload/search sessions, and Beauty Lab upload tokens. Raw tokens are returned only at creation/activation boundaries; persisted rows contain hashes or derived keys. A public capability never becomes a general authenticated session.
+Unauthenticated access is granted only through narrowly scoped random capabilities: file share tokens, Party tokens, and Party upload/search sessions. Raw tokens are returned only at creation/activation boundaries; persisted rows contain hashes or derived keys. A public capability never becomes a general authenticated session.
 
 ### 3.7 Private bounded contexts are exclusion-first
 
-Private Vault content is removed from normal EF queries through global query filters. Plates and Aesthetics Lab use standalone entities rather than `FileItem`, preventing accidental inclusion in Files, Gallery, People, Party, TV, Vault, search, or normal sharing. Boundary enforcement is structural, not merely a UI convention.
+Private Vault content is removed from normal EF queries through global query filters. Plates uses standalone entities rather than `FileItem`, preventing accidental inclusion in Files, Gallery, People, Party, TV, Vault, search, or normal sharing. Boundary enforcement is structural, not merely a UI convention.
 
 ### 3.8 Expensive work is explicit and durable
 
@@ -85,7 +85,7 @@ Long or failure-prone operations use the PostgreSQL-backed job queue. Jobs are l
 
 ### 3.9 Optional capabilities fail closed
 
-AI, HLS, server imports, staged uploads, cleanup sweepers, startup migrations, Aesthetics analysis, and model-backed Plates analysis are controlled by configuration. Missing models, sidecars, binaries, or feature flags make the capability unavailable or no-op; they do not silently substitute an unsafe external service.
+AI, HLS, server imports, staged uploads, cleanup sweepers, startup migrations, and model-backed Plates analysis are controlled by configuration. Missing models, sidecars, binaries, or feature flags make the capability unavailable or no-op; they do not silently substitute an unsafe external service.
 
 ## 4. System context and runtime topology
 
@@ -110,7 +110,6 @@ flowchart LR
 
     API -. optional query inference .-> Models[ONNX / direct OpenVINO models]
     Worker -. optional batch inference .-> Models
-    Worker -. optional internal HTTP .-> Aes[HumanAesExpert sidecar]
     API -. optional internal HTTP .-> Decoder[Natural-command decoder sidecar]
 ```
 
@@ -155,7 +154,6 @@ The root Compose fragments are additive deployment overlays, not independent Nub
 | Overlay | Runtime effect | Boundary |
 |---|---|---|
 | `docker-compose.nlu.yml` | Adds the optional natural-command decoder used when the gallery interpreter is configured for the model-backed path | Internal network only, read-only model mount, no published port |
-| `docker-compose.human-aesexpert.yml` | Adds the HumanAesExpert service consumed by Aesthetics jobs | Internal network only, read-only model mount, no original/derived blob-store mount, no published port |
 | `docker-compose.openvino-direct.yml` | Builds/configures API and worker for in-process OpenVINO execution with independently selected detector, recognizer, and photo-image devices | Model files are mounted read-only; GPU modes map the required device explicitly |
 | `docker-compose.facedirect-api.yml` | Applies the pinned complete direct-inference API/worker image configuration for face and SigLIP image/text towers | Separate API/worker compile caches and explicit per-model device placement |
 
@@ -176,7 +174,6 @@ These fragments are selected according to the deployed inference topology and co
 | `src/NubArca.Api/Party/`, `Tv/`, `TvUpdates/` | Public event albums, paired TV projections, Personal Area, OTA publications |
 | `src/NubArca.Api/Vault/` | Private Vault authentication and exclusion-first logical moves |
 | `src/NubArca.Api/Plates/` | Segregated ALPR and privacy-redaction domain |
-| `src/NubArca.Api/Aesthetics/` | Segregated HumanAesExpert/Beauty Lab domain |
 | `frontend/` | React web application, public Party/upload pages, browser TV fallback |
 | `mobile/` | Expo authenticated gallery client with one-way device-media sync |
 | `tv/` | Native React Native TV client, pairing/personal state machine, media cache, OTA |
@@ -205,12 +202,12 @@ The web client uses React, TypeScript, Vite, React Router, `@tanstack/react-virt
 - Files home, Trash, Shares, Albums, Party moderation;
 - unified Media workspace with active and excluded scopes;
 - Similar Photos and People;
-- Plates and Aesthetics Lab;
+- Plates;
 - Private Vault;
 - resumable Upload and Cloud Functions;
 - TV pairing/device management and browser TV mode;
 - admin storage, import, and jobs pages;
-- public Party, Party upload, and Beauty Lab upload pages.
+- public Party and Party upload pages.
 
 Legacy `/gallery` and `/videos` routes redirect into the unified `/media` workspace while preserving compatible query state.
 
@@ -330,7 +327,7 @@ signing key used for store-delivered installations. See
 ```text
 pairing -> mode selection -> Party
                          \-> Personal PIN -> Personal Home
-                                           -> Gallery / Videos / Beauty Lab
+                                           -> Gallery / Videos
 ```
 
 The native client persists only the limited TV session cookie. Personal unlock authority is held in memory and revalidated periodically. Returning from the Personal Area locks it; changing the owner PIN invalidates existing grants. Media is downloaded through authenticated endpoints into a controlled cache for native rendering. `expo-updates` checks for a published update in the background and applies a downloaded update on a later cold launch rather than disrupting the current session.
@@ -368,11 +365,11 @@ what an endpoint names. `NubArca.Api.Access` owns the whole model:
 - `PermissionCatalog` is the authoritative list of feature-surface keys
   (`people.access`, `people.cluster.rebuild`, `semantic-search.access` for
   photos and videos, `document-search.access` for documents, `mail.access`,
-  `laboratory.access`, `laboratory.plates`, `laboratory.aesthetics`,
+  `laboratory.access`, `laboratory.plates`,
   `cloud-functions.access`, `private-vault.access`, `party.access` and its four
   feature keys, `tv.manage`, `cast.access`, `admin.dashboard`,
   `admin.users.manage`, `admin.import`, `admin.jobs.manage`,
-  `admin.roles.manage` — twenty-two). The unit is a feature surface, not a CRUD
+  `admin.roles.manage` — twenty-one). The unit is a feature surface, not a CRUD
   verb: owner isolation is an unconditional property of every query and is
   never expressed as a permission. Each definition also carries the two
   structural facts a role editor cannot be correct without: `Parent` (a
@@ -557,8 +554,7 @@ Fixed-window, remote-IP-partitioned policies cover at least:
 - Vault setup/unlock;
 - TV pairing and Personal unlock;
 - Party public reads, media, uploads, and face search;
-- semantic search and TV natural-command interpretation;
-- Beauty Lab public upload.
+- semantic search and TV natural-command interpretation.
 
 The public media policy is intentionally separate from public metadata/listing limits because a slideshow produces many more thumbnail, preview, and segment requests than page navigation.
 
@@ -574,13 +570,12 @@ The backend remains one minimal-API host, but its routes form clear architectura
 - `/api/people`, `/api/admin/ai`;
 - `/api/private-vault`;
 - `/api/plates`;
-- `/api/aesthetics-lab` and `/api/beauty-lab-upload`;
 - `/api/party`;
 - `/api/tv`, `/api/tv-personal`, `/api/tv-devices`, and TV update endpoints.
 
 The route map is not itself the business layer. Endpoints resolve identity and request contracts, call scoped services, and return sanitized projections or streams.
 
-`Program.cs` remains the application composition root (middleware, DI, rate limiting, route registration order). The endpoint-module extraction is complete: endpoint mappings are split into modules under `src/NubArca.Api/Endpoints/` (`AuthEndpoints`, `AdminUserEndpoints`, `AdminJobsEndpoints`, `AdminImportEndpoints`, `StagingUploadEndpoints`, `PeopleEndpoints`, `AlbumEndpoints`, `PartyEndpoints`, `TvEndpoints`, `PlatesEndpoints`, `AestheticsEndpoints`, `GalleryMediaEndpoints`, `FileEndpoints`, `FolderTrashEndpoints`, `ShareLinkEndpoints`, `PrivateVaultEndpoints`, `PhotoOrganizerEndpoints`, `PhotoExportEndpoints`, `AdminAiEndpoints`), each a `MapXxxEndpoints(this IEndpointRouteBuilder)` extension called from `Program.cs` at the same point the routes used to be defined inline. `AlbumEndpoints` covers only true album CRUD/membership/TV-visibility; `PartyEndpoints` covers both the public `/api/party/*` surface and the album-nested Party routes (`/api/albums/{id}/party-settings`, `/api/albums/{id}/party-uploads/*`); `TvEndpoints` covers TV pairing/session, owner-side TV device management, the TV Personal Area (PIN + TV-session-authenticated personal gallery/videos/media/aesthetics), and TV Party-album browsing/media delivery; `PlatesEndpoints` covers the owner-private Plates (Targhe) surface (upload, gallery import, list/detail/delete, thumbnail/preview/original media incl. face-redacted variants, and ALPR analysis request/status); `AestheticsEndpoints` covers the owner-private Aesthetics/Beauty Lab surface (public TV QR mobile upload plus the owner-facing list/upload/analyze lab); `GalleryMediaEndpoints` covers the unified gallery/media query surface (`/api/images`, `/api/videos`, `/api/media`, `/api/albums/{albumId}/media`); `FileEndpoints` covers FileItem-scoped media delivery (content/thumbnail/preview/video/HLS renditions/poster/video-preview-strip), metadata, privacy-safe download, duplicates, similar-photo search, and the file lifecycle (upload/rename/move/delete/restore); `FolderTrashEndpoints` covers folder listing, Trash, and the folder lifecycle (create/rename/move/delete-preview/delete/restore); `ShareLinkEndpoints` covers owner-side share create/list/revoke plus the public, anonymous, rate-limited `/s/{token}` short-URL download; `PrivateVaultEndpoints` covers the owner-private Vault (v0) status/setup/unlock/lock, browse, move-in/move-out, and vault-scoped derived-media delivery (thumbnail/preview/poster/info) — never original bytes or Range streams; `PhotoOrganizerEndpoints` covers Media Library (gallery membership rules + per-file exclusion) and the owner-scoped date-taken reorganization workflow (dry-run/run/status); `PhotoExportEndpoints` covers the read-only owner-private photo archive export sessions (manifest + per-file original download, cookie-or-bearer-token authorized); `AdminAiEndpoints` covers the admin-only medium-preview derivative rebuild status/trigger and the AI substrate status/diagnostics/face-settings surface — aggregate/status data only, never raw vectors, blob ids, SHA, storage keys, or physical paths. Five endpoints remain intentionally inline in `Program.cs`: `/health` and `/health/ready` (liveness/readiness probes, composition-root infrastructure by nature), `GET /api/storage/me` (owner-scoped usage, `IStorageAccountingService`), `GET /api/admin/storage-stats` (admin-only aggregate counters, `IStorageStatsService` — a distinct, admin-namespaced service, not the same domain as `storage/me` despite the shared word "storage"), and `GET /api/search` (owner-scoped file search). None of the three domain endpoints is large or cohesive enough on its own or paired with another to justify a dedicated module without creating a single-trivial-handler file. This is a modular-monolith cleanup, not a microservices split: one process, one deployable, the same middleware pipeline and DI container.
+`Program.cs` remains the application composition root (middleware, DI, rate limiting, route registration order). The endpoint-module extraction is complete: endpoint mappings are split into modules under `src/NubArca.Api/Endpoints/` (`AuthEndpoints`, `AdminUserEndpoints`, `AdminJobsEndpoints`, `AdminImportEndpoints`, `StagingUploadEndpoints`, `PeopleEndpoints`, `AlbumEndpoints`, `PartyEndpoints`, `TvEndpoints`, `PlatesEndpoints`, `GalleryMediaEndpoints`, `FileEndpoints`, `FolderTrashEndpoints`, `ShareLinkEndpoints`, `PrivateVaultEndpoints`, `PhotoOrganizerEndpoints`, `PhotoExportEndpoints`, `AdminAiEndpoints`), each a `MapXxxEndpoints(this IEndpointRouteBuilder)` extension called from `Program.cs` at the same point the routes used to be defined inline. `AlbumEndpoints` covers only true album CRUD/membership/TV-visibility; `PartyEndpoints` covers both the public `/api/party/*` surface and the album-nested Party routes (`/api/albums/{id}/party-settings`, `/api/albums/{id}/party-uploads/*`); `TvEndpoints` covers TV pairing/session, owner-side TV device management, the TV Personal Area (PIN + TV-session-authenticated personal gallery/videos/media), and TV Party-album browsing/media delivery; `PlatesEndpoints` covers the owner-private Plates (Targhe) surface (upload, gallery import, list/detail/delete, thumbnail/preview/original media incl. face-redacted variants, and ALPR analysis request/status); `GalleryMediaEndpoints` covers the unified gallery/media query surface (`/api/images`, `/api/videos`, `/api/media`, `/api/albums/{albumId}/media`); `FileEndpoints` covers FileItem-scoped media delivery (content/thumbnail/preview/video/HLS renditions/poster/video-preview-strip), metadata, privacy-safe download, duplicates, similar-photo search, and the file lifecycle (upload/rename/move/delete/restore); `FolderTrashEndpoints` covers folder listing, Trash, and the folder lifecycle (create/rename/move/delete-preview/delete/restore); `ShareLinkEndpoints` covers owner-side share create/list/revoke plus the public, anonymous, rate-limited `/s/{token}` short-URL download; `PrivateVaultEndpoints` covers the owner-private Vault (v0) status/setup/unlock/lock, browse, move-in/move-out, and vault-scoped derived-media delivery (thumbnail/preview/poster/info) — never original bytes or Range streams; `PhotoOrganizerEndpoints` covers Media Library (gallery membership rules + per-file exclusion) and the owner-scoped date-taken reorganization workflow (dry-run/run/status); `PhotoExportEndpoints` covers the read-only owner-private photo archive export sessions (manifest + per-file original download, cookie-or-bearer-token authorized); `AdminAiEndpoints` covers the admin-only medium-preview derivative rebuild status/trigger and the AI substrate status/diagnostics/face-settings surface — aggregate/status data only, never raw vectors, blob ids, SHA, storage keys, or physical paths. Five endpoints remain intentionally inline in `Program.cs`: `/health` and `/health/ready` (liveness/readiness probes, composition-root infrastructure by nature), `GET /api/storage/me` (owner-scoped usage, `IStorageAccountingService`), `GET /api/admin/storage-stats` (admin-only aggregate counters, `IStorageStatsService` — a distinct, admin-namespaced service, not the same domain as `storage/me` despite the shared word "storage"), and `GET /api/search` (owner-scoped file search). None of the three domain endpoints is large or cohesive enough on its own or paired with another to justify a dedicated module without creating a single-trivial-handler file. This is a modular-monolith cleanup, not a microservices split: one process, one deployable, the same middleware pipeline and DI container.
 
 ## 8. Persistence architecture
 
@@ -613,7 +608,6 @@ The current context contains the following logical groups.
 | Face and People | `FaceDetection`, `FaceEmbedding`, `FaceCluster`, `FaceClusterMember`, `Person`, `PersonGroup`, `FaceAssignment`, `PersonFaceAssignment`, `IgnoredFace`, `AiSetting`, `FacePreview` | Blob-level face artifacts plus owner-level grouping, confirmation, ignore state, and display crops |
 | Private Vault | `PrivateVault`, `PrivateVaultAccessToken`; `PrivateVaultId` on normal tree rows | Exclusion-first private partition using the normal logical tree and original blobs |
 | Plates | `PlateImage`, `PlateAnalysisJob`, `PlateDetection`, `PlateAnalysisModelRun`, `PlateFaceRedactionBox`, `PlateRedactedMedia` | Standalone owner-private ALPR and privacy-redaction domain |
-| Aesthetics | `AestheticLabItem`, `AestheticAnalysisRun`, `AestheticMetric`, `AestheticTextResult`, `AestheticLabDerivative`, `AestheticUploadSession` | Standalone opt-in HumanAesExpert domain and short-lived QR upload capabilities |
 
 ### 8.3 Ownership model
 
@@ -621,7 +615,7 @@ There are three different ownership classes and they must not be conflated:
 
 1. **global byte identity** — `BlobObject`, `BlobMetadata`, and blob-level embeddings/detections can be shared by references to identical bytes;
 2. **owner-scoped logical state** — files, folders, albums, user metadata, People decisions, rules, Party configuration, TV devices, and operations belong to one user;
-3. **isolated owner-scoped domains** — Plates and Aesthetics own separate membership rows and never become normal library items.
+3. **isolated owner-scoped domains** — Plates owns separate membership rows and never become normal library items.
 
 Global blob-level AI and metadata artifacts do not make a blob publicly discoverable. Every read path starts from an authorized owner-scoped membership or capability-scoped item set.
 
@@ -668,8 +662,7 @@ The API and worker use the same `IDerivedBlobStorage`. Typical derived artifacts
 - video posters and six-frame preview strips;
 - HLS playlists and segments;
 - face preview crops;
-- Plates redacted-media cache;
-- Aesthetics thumbnail/preview renditions.
+- Plates redacted-media cache.
 
 Original and derived bytes share the same `BlobObject` table, content-addressed key format, deduplication model, and reference-count machinery; the storage abstraction determines which physical root resolves a root-relative `StorageKey`. A derivative missing from the derived root may be restored by copying identical bytes from the original root when present there, or regenerated when absent from both roots. The blob janitor deletes a reclaimed object's key from both roots idempotently, and storage reconciliation scans the union so a valid split-root derivative is not misclassified as missing source data.
 
@@ -686,7 +679,7 @@ A successful `FileItem` soft delete atomically marks the logical row and release
 
 Reference counts are an accounting invariant, not an unquestioned oracle. The repository includes audit and repair services that compare persisted counts with actual live references.
 
-A `FileItem` is not the only owner. A row that keeps bytes alive independently of any file — a Plate image, an Aesthetics Lab item, a pending album transfer, a guest book memory (§14.5.1) — takes its OWN reference to the same blob through `IBlobService.AcquireExistingAsync`, in the transaction that writes the row, and releases it when the row goes. No bytes are copied. `BlobReferenceAuditService` enumerates every owner table; a new owner that is not added there is one `repair-references` would zero, and the janitor would then delete bytes it still needs.
+A `FileItem` is not the only owner. A row that keeps bytes alive independently of any file — a Plate image, a pending album transfer, a guest book memory (§14.5.1) — takes its OWN reference to the same blob through `IBlobService.AcquireExistingAsync`, in the transaction that writes the row, and releases it when the row goes. No bytes are copied. `BlobReferenceAuditService` enumerates every owner table; a new owner that is not added there is one `repair-references` would zero, and the janitor would then delete bytes it still needs.
 
 ### 9.4 Quotas and accounting
 
@@ -1807,7 +1800,7 @@ Lower numeric values are higher priority. The implemented bands are:
 | normal | user-triggered organization, export, and on-demand HLS generation |
 | maintenance | metadata, derivatives, posters, HLS backfill, reconciliation |
 | cleanup | low-priority cleanup extension band |
-| compute | photo/face AI, Plates ALPR, Aesthetics analysis |
+| compute | photo/face AI, Plates ALPR |
 
 The specialized post-ingest numeric lanes sit between foreground and general maintenance so recent uploads become useful without allowing compute backfills to crowd out import.
 
@@ -1830,8 +1823,7 @@ The registered catalog includes:
 - photo export manifest build;
 - photo embedding, face detection, face embedding, and face clustering;
 - document extraction/embedding and tagging skeleton handlers;
-- Plates analysis;
-- Aesthetics analysis.
+- Plates analysis.
 
 The admin Jobs console resolves runtime availability, selectable AI profiles, pending counts, current progress, priority/slice state, detail, and cooperative cancellation without exposing job payload internals.
 
@@ -1851,7 +1843,7 @@ AI is disabled by default. `AiOptions` gates the substrate globally and then ind
 - deterministic — test/development vectors and controlled behavior;
 - ONNX image/text and face backends;
 - direct OpenVINO-backed ONNX execution when configured and native readiness succeeds;
-- optional internal HTTP seams for natural-command decoding and HumanAesExpert, outside the generic embedding backend.
+- an optional internal HTTP seam for natural-command decoding, outside the generic embedding backend.
 
 Model weights are deployment inputs and are not part of the repository. Provider readiness and model/profile state are visible through sanitized admin status, diagnostics, and readiness probes.
 
@@ -2011,23 +2003,9 @@ A Plate image:
 
 The privacy-redaction path may reuse an existing detector only to locate faces. `PlateFaceRedactionBox` is privacy geometry, not identity: no face embedding, cluster, or Person relation is created. `PlateRedactedMedia` is a regenerable derived cache and remains inside the Plates boundary.
 
-## 20. Aesthetics Lab and Beauty Lab
+## 20. Aesthetics Lab (retired)
 
-Aesthetics Lab is an opt-in, experimental, owner-private bounded context. `AestheticLabItem` is standalone and never a `FileItem`.
-
-### 20.1 Isolation and membership
-
-Items enter through direct upload, an authorized gallery-to-lab action, or a short-lived Beauty Lab QR upload capability created from the TV Personal Area. The lab can reuse the source blob bytes but creates independent membership and analysis records. Lab items do not enter normal Gallery, Files, search, shares, Party, People, Plates, or Vault.
-
-### 20.2 HumanAesExpert execution
-
-When enabled and configured, each selected item creates an immutable `AestheticAnalysisRun` and an independent Compute-band job. The worker calls the internal HumanAesExpert sidecar with a bounded request and versioned preprocessing/profile contract. Validated metrics are normalized into `AestheticMetric`; optional text/head outputs are stored only when the configured capability allows them.
-
-One image corresponds to one job/run, so a failed item does not invalidate a whole batch. Runs support cancellation and retry. The production feature is disabled when the sidecar URL, profile, or capability is unavailable.
-
-### 20.3 Beauty Lab QR handoff
-
-The TV Personal Area creates a short-lived owner-scoped upload session. Only the hash of the capability token is stored. The public mobile page can upload into that lab session but cannot browse the owner's lab, normal library, or TV session. Expired/revoked sessions are rejected and an optional cleanup service removes old rows.
+The experimental Aesthetics Lab, its TV Beauty Lab and the HumanAesExpert sidecar were removed in 0.4.5. Migration `RemoveAestheticsLab` released the blob references the lab held, removed its queued jobs and the `laboratory.aesthetics` permission, then dropped its tables. The section number is kept so later references stay stable.
 
 ## 20A. MailArchive (PST mail archive)
 
@@ -2064,7 +2042,7 @@ Owners can list and revoke paired devices. Revocation or expiry causes clients t
 
 Entering Personal requires the owner-configured PIN. Successful verification produces a separate bounded unlock grant tied to the TV session and PIN generation. The client keeps the raw grant in memory, periodically revalidates it, and locks on exit. A PIN change invalidates stale grants without necessarily unpairing the device.
 
-Personal endpoints expose restricted home, media, albums, People/filter data, favorite/trash/add-to-album actions, semantic interpretation, Plates handoff, and Beauty Lab actions. They do not expose general filesystem administration, shares, admin functions, storage keys, or raw metadata.
+Personal endpoints expose restricted home, media, albums, People/filter data, favorite/trash/add-to-album actions, semantic interpretation, and Plates handoff. They do not expose general filesystem administration, shares, admin functions, storage keys, or raw metadata.
 
 ### 21.3 Media delivery
 
@@ -2156,7 +2134,7 @@ the incomplete-pairing recovery and never straight into a party. At boot only a
 `401` unpairs:
 a television that powers on before its Wi-Fi keeps its credential and retries on
 a capped backoff. The assignment **preempts every local surface** — mode
-selector, manual Party browsing, Updates, PIN entry, Personal Area, Beauty Lab.
+selector, manual Party browsing, Updates, PIN entry, Personal Area.
 Preempting a personal screen is a LOCK (`flowEffects`: the grant is dropped and
 revoked, the private screen unmounts), and an unlock that lands after its PIN
 screen was preempted is revoked on arrival. BACK at the root of an assigned
@@ -2205,7 +2183,7 @@ Important configuration namespaces include:
 - `AdminImport`, `Staging`, `DeletedContent`;
 - `Ai` and model/runtime-specific sections;
 - `Party`, `TvSession`, `TvUpdates`;
-- `Plates`, `HumanAesExpert`, and Aesthetics options;
+- `Plates` options;
 - `ForwardedHeaders`, `RateLimits`;
 - `BlobJanitor`, `FileItemSweeper`.
 
@@ -2244,7 +2222,6 @@ Optional disabled capabilities do not make the entire API unready. Configured ca
 Cleanup loops are opt-in and independent:
 
 - staged-session cleanup removes expired temporary upload data;
-- Beauty Lab upload-session cleanup removes expired/revoked capabilities;
 - file-item sweeper permanently removes old soft-deleted logical rows;
 - blob janitor removes unreferenced original blobs after grace.
 
@@ -2438,7 +2415,7 @@ Changes to architecture-sensitive code should include tests for:
 
 ### 25.1 Production-capable core
 
-The 0.3.0 architecture treats the following as implemented product paths: authentication, owner file tree, immutable blob storage/dedup, Trash, shares, albums, media workspace, image/video derivatives, metadata, direct video streaming, optional HLS, jobs, admin import, staged upload, organizer, photo export, Party, paired TV and Personal Area, local photo/face AI when configured, People, Private Vault exclusion, Plates, and Aesthetics/Beauty Lab when configured.
+The 0.3.0 architecture treats the following as implemented product paths: authentication, owner file tree, immutable blob storage/dedup, Trash, shares, albums, media workspace, image/video derivatives, metadata, direct video streaming, optional HLS, jobs, admin import, staged upload, organizer, photo export, Party, paired TV and Personal Area, local photo/face AI when configured, People, Private Vault exclusion, and Plates.
 
 “Implemented” does not mean enabled by default. Model- or process-dependent paths remain unavailable until an operator supplies the required local models, binaries, sidecar, flags, and shared storage.
 
@@ -2470,7 +2447,7 @@ New implementations must preserve the existing ownership, token, immutable-blob,
 | Per-owner tree transaction lock | Serializes conflicting hierarchy mutations at the correct tenancy boundary |
 | Query-time safe projections | Makes forbidden fields difficult to leak and avoids loading raw entities into HTTP serialization |
 | Global Vault filters | Makes privacy exclusion the default behavior instead of an opt-in predicate on every feature |
-| Standalone Plates and Aesthetics entities | Prevents specialist/private content from entering normal library joins by construction |
+| Standalone Plates entities | Prevents specialist/private content from entering normal library joins by construction |
 | Durable database jobs with leases | Survives process restart and makes progress, cancellation, retry, and ownership observable |
 | Cooperative priority scheduling | Bounds maintenance interference on explicit user work without abandoning a single-server design |
 | Optional local AI with profile identity | Keeps inference private and reproducible while allowing models/runtimes to evolve without mixing artifacts |
@@ -2505,7 +2482,6 @@ When changing a subsystem, review the following implementation anchors together 
 | Print | `Print/`, `Domain/Print/`, `Endpoints/PrintEndpoints.cs`, `src/NubArca.PrintAgent/`, `docs/print-agent.md` |
 | Vault | `Vault/`, `PrivateVault*` entities/configurations, global query filters |
 | Plates | `Plates/`, Plate entities/configurations and job handler |
-| Aesthetics | `Aesthetics/`, Aesthetic entities/configurations, HumanAesExpert deployment docs |
 | Web routes and clients | `frontend/src/App.tsx`, feature modules, API clients, tests |
 | Mobile | `mobile/App.tsx`, `mobile/src/` |
 | Deployment/operations | `docker-compose.prod.yml`, optional root Compose inference overlays, `.env.example`, `deploy/`, `docs/OPERATIONS.md` |

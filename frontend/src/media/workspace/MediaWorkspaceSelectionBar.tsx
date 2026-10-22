@@ -9,8 +9,8 @@ import type { MediaSelectionActionId, MediaSelectionActionModel } from './mediaS
 // offers TWO grouped commands organised by what they mean —
 //
 //   Move to …  the media changes state or place (Personal, Excluded, Trash)
-//   Add to  …  the media stays put and gains an association (Album, Plates,
-//              Aesthetics)
+//   Add to  …  the media stays put and gains an association (Album, List,
+//              Plates)
 //
 // — plus whatever the current context makes a first-class action (Restore out of
 // Excluded, Remove from THIS album). Every entry comes from the pure action

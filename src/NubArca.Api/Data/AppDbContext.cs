@@ -273,22 +273,6 @@ public class AppDbContext : DbContext
     public DbSet<PlateFaceRedactionBox> PlateFaceRedactionBoxes => Set<PlateFaceRedactionBox>();
     public DbSet<PlateRedactedMedia> PlateRedactedMedia => Set<PlateRedactedMedia>();
 
-    // Owner-private, opt-in, experimental Aesthetics Lab (Laboratorio estetico):
-    // isolated image membership + immutable versioned HumanAesExpert analysis
-    // runs, normalized metrics, optional text, and derived renditions. NEVER a
-    // FileItem; never Gallery/Files/search/Party/TV/public. See
-    // AestheticLabItem / AestheticAnalysisRun / AestheticMetric /
-    // AestheticTextResult / AestheticLabDerivative.
-    public DbSet<AestheticLabItem> AestheticLabItems => Set<AestheticLabItem>();
-    public DbSet<AestheticAnalysisRun> AestheticAnalysisRuns => Set<AestheticAnalysisRun>();
-    public DbSet<AestheticMetric> AestheticMetrics => Set<AestheticMetric>();
-    public DbSet<AestheticTextResult> AestheticTextResults => Set<AestheticTextResult>();
-    public DbSet<AestheticLabDerivative> AestheticLabDerivatives => Set<AestheticLabDerivative>();
-
-    // Short-lived, owner-scoped QR upload capabilities for the TV "Beauty Lab"
-    // mobile-handoff flow (hash-only token; upload-into-lab authority only).
-    public DbSet<AestheticUploadSession> AestheticUploadSessions => Set<AestheticUploadSession>();
-
     // The generic RAG substrate: source identity, domain membership, passage,
     // canonical embedding. SYSTEM knowledge (product help, the NubArca
     // repository) — deliberately not the owner-private document tables above,

@@ -18,7 +18,7 @@
 #
 # Rollback is a pure Compose/config change: point the pinned images back at the
 # previous release. (The Python OpenVINO sidecars were removed with the SigLIP
-# direct milestone; HumanAesExpert is not affected.)
+# direct milestone.)
 x-openvino-direct-env: &openvino-direct-env
   Ai__Onnx__ExecutionProvider: openvino-direct
   Ai__Onnx__ModelDir: /models/ai

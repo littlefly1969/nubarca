@@ -72,7 +72,6 @@ public sealed class TvPersonalGalleryTests : IDisposable
         Assert.Equal(HttpStatusCode.Unauthorized, bulk.StatusCode);
         foreach (var url in new[]
         {
-            "/api/tv/personal/gallery/add-to-beauty-lab",
             "/api/tv/personal/gallery/add-to-plates",
             "/api/tv/personal/gallery/trash",
         })
@@ -853,7 +852,6 @@ public sealed class TvPersonalGalleryTests : IDisposable
 
         foreach (var url in new[]
         {
-            "/api/tv/personal/gallery/add-to-beauty-lab",
             "/api/tv/personal/gallery/add-to-plates",
         })
         {
@@ -884,9 +882,7 @@ public sealed class TvPersonalGalleryTests : IDisposable
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.NotNull((await db.FileItems.SingleAsync(f => f.Id == ownFile)).DeletedAt);
         Assert.Null((await db.FileItems.SingleAsync(f => f.Id == foreignFile)).DeletedAt);
-        Assert.Single(await db.AestheticLabItems.Where(item => item.OwnerUserId == ownerId).ToListAsync());
         Assert.Single(await db.PlateImages.Where(item => item.OwnerUserId == ownerId).ToListAsync());
-        Assert.Empty(await db.AestheticAnalysisRuns.Where(run => run.OwnerUserId == ownerId).ToListAsync());
         Assert.Empty(await db.PlateAnalysisJobs.Where(job => job.OwnerUserId == ownerId).ToListAsync());
     }
 

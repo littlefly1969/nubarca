@@ -261,6 +261,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Data only, no schema change. It inserts two role_permissions rows giving the built-in Member role the new mail.access and document-search.access permission keys, guarded so an existing row is not duplicated and skipped when no Member role exists. No table, column, index or constraint is created or altered. The previous application neither knows nor checks these keys: its MailArchive and document routes answer any signed-in user, so rolling the image back leaves every flow working, and its role editor only lists catalogue keys it knows. Down() deletes nothing: a pre-existing or operator-granted row cannot be told apart from one Up() inserted, and the previous application treats keys outside its catalogue as inert. No file, blob, message or document text is touched."
+    },
+    "20261022200650_RemoveAestheticsLab": {
+      "automated": false,
+      "previousApplicationCompatible": false,
+      "reason": "Retires the Aesthetics Lab and DELETES what it stored. Before dropping its six tables (aesthetic_lab_derivatives, aesthetic_metrics, aesthetic_text_results, aesthetic_upload_sessions, aesthetic_analysis_runs, aesthetic_lab_items) it releases the one blob reference each lab item and each lab derivative owned, with the same rule BlobService uses (decrement while positive, PurgeEligibleAt set on the transition to zero): a blob a FileItem still references keeps that reference, and bytes only the lab used become purge-eligible for the BlobJanitor. It also deletes queued or finished background jobs of type ai.aesthetics.human-aesexpert.analyze and role_permissions rows naming laboratory.aesthetics. The lab's images, analysis runs, metrics, texts and upload sessions are gone and cannot be recovered from the schema: Down() recreates empty tables and does not restore blob references, so only the pre-migration backup brings the data back. The previous application reads and writes these tables on every Aesthetics Lab and TV Beauty Lab request and would fail there, so an image-only rollback is not safe and the release takes the manual, backed-up path rather than the guided updater."
     }
   }
 }

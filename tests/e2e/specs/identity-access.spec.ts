@@ -216,12 +216,11 @@ test.describe('roles and permissions', () => {
     await adminContext.close();
   });
 
-  test('the Laboratory shows the section a user holds and refuses the one they do not', async ({
+  test('the Laboratory opens on the section a user holds', async ({
     page, health,
   }) => {
     void health;
-    // laboratory.access + laboratory.plates, seeded. Plates is usable;
-    // Aesthetics is not offered and is refused if reached directly.
+    // laboratory.access + laboratory.plates, seeded. Plates is usable.
     await signIn(page, LAB_PLATES.email, LAB_PLATES.password);
 
     expect(await visibleDestinations(page)).toContain(DESTINATION.laboratory);
@@ -230,15 +229,9 @@ test.describe('roles and permissions', () => {
     // A bare /lab lands on the first section this user may actually open.
     await expect(page).toHaveURL(/\/lab\/plates/);
     await expect(page.getByTestId('forbidden-page')).toHaveCount(0);
-    // Only one tab, because the other section is not theirs.
-    await expect(page.getByRole('link', { name: 'Estetica' })).toHaveCount(0);
 
-    await page.goto('/lab/aesthetics');
-    await expect(page.getByTestId('forbidden-page')).toBeVisible();
-
-    // Server-side, the same split.
+    // Server-side, the same.
     expect((await page.request.get('/api/plates/images')).status()).toBe(200);
-    expect((await page.request.get('/api/aesthetics-lab/items')).status()).toBe(403);
   });
 
   test('an Administrator sees the administration destinations', async ({ page, health }) => {
@@ -434,8 +427,6 @@ test.describe('roles and permissions', () => {
     const preview = detail.getByTestId('role-permission-preview');
     await expect(preview.locator('[data-permission="laboratory.plates"]'))
       .toHaveAttribute('data-included', 'yes');
-    await expect(preview.locator('[data-permission="laboratory.aesthetics"]'))
-      .toHaveAttribute('data-included', 'no');
     await expect(preview.locator('[data-permission="people.access"]'))
       .toHaveAttribute('data-included', 'no');
     await page.keyboard.press('Escape');
@@ -449,12 +440,9 @@ test.describe('roles and permissions', () => {
     await userPage.goto('/lab');
     await expect(userPage).toHaveURL(/\/lab\/plates/);
     await expect(userPage.getByTestId('forbidden-page')).toHaveCount(0);
-    await userPage.goto('/lab/aesthetics');
-    await expect(userPage.getByTestId('forbidden-page')).toBeVisible();
 
     // Server-side, the same split — whatever the browser shows.
     expect((await userPage.request.get('/api/plates/images')).status()).toBe(200);
-    expect((await userPage.request.get('/api/aesthetics-lab/items')).status()).toBe(403);
     expect((await userPage.request.get('/api/people')).status()).toBe(403);
     expect((await userPage.request.get('/api/media/semantic?q=colour')).status()).toBe(403);
 

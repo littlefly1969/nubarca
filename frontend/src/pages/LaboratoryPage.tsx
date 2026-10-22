@@ -4,19 +4,19 @@ import { usePermissions } from '../auth/usePermissions';
 import { useI18n } from '../i18n';
 import type { MessageKey } from '../i18n';
 
-// The Laboratory (Laboratorio): one primary-navigation destination holding the
-// two owner-private experimental surfaces that used to sit beside each other in
-// the nav as unrelated top-level entries.
+// The Laboratory (Laboratorio): one primary-navigation destination for the
+// owner-private experimental surfaces. Today that is Plates alone; the shell
+// stays so a section can be added or retired without moving the nav entry.
 //
 // The tabs are ROUTES, not component state. A tab that lived in useState would
 // be lost on refresh, unlinkable, and invisible to Back/Forward — so each
-// section owns a URL (/lab/plates, /lab/aesthetics) and the shell renders
+// section owns a URL (/lab/plates) and the shell renders
 // whichever one the router matched through <Outlet />.
 //
-// They share a shell, a heading and a tab strip. They share nothing else:
-// Plates talks to /api/plates/*, Aesthetics to /api/aesthetics/*, and this file
-// deliberately knows about neither. Combining their APIs, storage, permissions
-// or data models is explicitly NOT what this is.
+// Sections share a shell, a heading and a tab strip. They share nothing else:
+// Plates talks to /api/plates/*, and this file deliberately knows nothing about
+// it. Combining sections' APIs, storage, permissions or data models is
+// explicitly NOT what this is.
 //
 // The strip is a <nav> of links rather than an ARIA tablist. Route-backed tabs
 // ARE navigation: links give keyboard operation, focus order, middle-click,
@@ -28,14 +28,12 @@ interface LabSection {
   to: string;
   labelKey: MessageKey;
   // The section's own permission. The shell permission (laboratory.access) is
-  // required on top of it — that is the composite the server authorizes, so a
-  // user with Plates but not Aesthetics sees the Laboratory with one tab.
+  // required on top of it — that is the composite the server authorizes.
   permission: PermissionKey;
 }
 
 export const LAB_SECTIONS: readonly LabSection[] = [
   { to: '/lab/plates', labelKey: 'lab.plates', permission: PERMISSIONS.laboratoryPlates },
-  { to: '/lab/aesthetics', labelKey: 'lab.aesthetics', permission: PERMISSIONS.laboratoryAesthetics },
 ] as const;
 
 /** Where a bare /lab lands when the user holds every section. */
@@ -76,8 +74,8 @@ export function LaboratoryPage() {
 }
 
 // The index route for a bare /lab: land on the first section this user may
-// open rather than always on Plates, which would greet a user who only holds
-// Aesthetics with a forbidden page on their own Laboratory.
+// open rather than always on the first one, which would greet a user who holds
+// only a later section with a forbidden page on their own Laboratory.
 export function LaboratoryIndexRedirect() {
   const perms = usePermissions();
   const target = firstAllowedLabRoute(perms.all);

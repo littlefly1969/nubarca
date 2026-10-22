@@ -9,10 +9,9 @@ const src = (path: string) => read(import.meta.url, path);
 
 const library = src('../screens/PersonalLibraryScreen.tsx');
 const albumItems = src('../screens/AlbumItemsScreen.tsx');
-const beautyLab = src('../screens/BeautyLabScreen.tsx');
 const launcher = src('../components/TvContextActionsLauncher.tsx');
 
-const SCREENS = { library, albumItems, beautyLab };
+const SCREENS = { library, albumItems };
 
 // ------------------------------------------------------------- the matrix
 
@@ -48,8 +47,6 @@ test('the formerly MENU-only functions are all covered', () => {
     ['PersonalLibrary', 'open filters'],
     ['AlbumItems', 'start the slideshow'],
     ['AlbumItems', 'show all photos (exit face filter)'],
-    ['BeautyLab', 'add images'],
-    ['BeautyLab', 'enter selection mode'],
   ];
   for (const [screen, action] of required) {
     const found = capabilitiesForScreen(screen).find((c) => c.action === action);
@@ -101,7 +98,6 @@ test('the launcher goes inert while the rail owns focus', () => {
   }
   assert.match(library, /const gridFocusable = gridInteractive && !overlayVisible;/);
   assert.match(albumItems, /const gridFocusable = !overlayVisible;/);
-  assert.match(beautyLab, /const gridFocusable = !overlay\.visible;/);
 });
 
 test('the launcher disables rather than unmounts', () => {
@@ -114,7 +110,6 @@ test('the launcher disables rather than unmounts', () => {
 test('the grid is non-focusable while the rail owns focus', () => {
   assert.match(library, /focusable=\{gridFocusable\}/);
   assert.match(albumItems, /focusable=\{gridFocusable\}/);
-  assert.match(beautyLab, /focusable=\{gridFocusable\}/);
 });
 
 test('focus restoration keys on media identity, not coordinates', () => {
@@ -155,24 +150,4 @@ test('MENU still works as an accelerator and still closes the surface', () => {
     assert.match(source, /eventType === 'menu'/, `${name} dropped MENU support`);
     assert.match(source, /(hideOverlay|overlay\.hide)\(\);/, `${name}: MENU must still close`);
   }
-});
-
-test('Beauty Lab no longer instructs the user to press a key it may not have', () => {
-  const it = src('../i18n/it.ts');
-  const en = src('../i18n/en.ts');
-  // The empty state used to say "Press MENU" — on a remote without one, the
-  // whole feature was unreachable and the copy was the only instruction.
-  assert.doesNotMatch(it, /beautyLab\.empty':[^\n]*MENU/);
-  assert.doesNotMatch(en, /beautyLab\.empty':[^\n]*MENU/);
-  assert.match(it, /beautyLab\.empty':[^\n]*Azioni/);
-  assert.match(en, /beautyLab\.empty':[^\n]*Actions/);
-});
-
-test('Beauty Lab keeps the Actions entry in its empty state', () => {
-  // The one screen where the empty state is exactly when the action matters
-  // most: with no images, "Add images" is the only thing worth doing.
-  const launcherAt = beautyLab.indexOf('<TvContextActionsLauncher');
-  const emptyAt = beautyLab.indexOf("items.length === 0 && !loading");
-  assert.ok(launcherAt > 0 && launcherAt < emptyAt,
-    'the launcher must render before (and outside) the empty/grid branch');
 });

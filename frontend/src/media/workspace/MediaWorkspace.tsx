@@ -38,7 +38,7 @@ export interface MediaPhotoDestination {
   // whether this destination may be offered at all (photos only, and the
   // Laboratory permissions the server requires); the page supplies only what
   // happens when it is chosen.
-  id: 'plates' | 'beauty-lab';
+  id: 'plates';
   // Returns an optional already-localized notice to surface on success.
   run(ids: string[]): Promise<string | void> | string | void;
 }

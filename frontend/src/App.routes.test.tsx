@@ -62,7 +62,7 @@ describe('App route table (anonymous)', () => {
   // protected, so an anonymous visitor lands on /login rather than seeing an
   // unguarded workspace or a dead route.
   it('protects the whole Laboratory subtree', async () => {
-    for (const path of ['/lab', '/lab/plates', '/lab/aesthetics']) {
+    for (const path of ['/lab', '/lab/plates']) {
       await expectLanded(path);
       cleanup();
     }
@@ -204,14 +204,6 @@ describe('App route table (anonymous)', () => {
     render(<App />);
     await waitFor(() => {
       expect(window.location.pathname).toBe('/party/token-abc/upload');
-    });
-  });
-
-  it('keeps the public beauty-lab upload route public', async () => {
-    goto('/beauty-lab-upload/token-xyz');
-    render(<App />);
-    await waitFor(() => {
-      expect(window.location.pathname).toBe('/beauty-lab-upload/token-xyz');
     });
   });
 

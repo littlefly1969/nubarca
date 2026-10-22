@@ -761,7 +761,7 @@ export function TvPersonalGallery({ grant, onBack, onPersonalError }: TvPersonal
       setSelection(failed.length > 0 ? failed : null);
       if (failed.length === 0) setQuickSelect(false);
       setSelectionLayer('none');
-      const label = destination === 'beauty-lab' ? L('Laboratorio bellezza', 'Beauty Lab') : L('Targhe', 'Plates');
+      const label = L('Targhe', 'Plates');
       setToast(L(
         `${label}: ${result.succeeded} aggiunte, ${result.skipped} non aggiunte.`,
         `${label}: ${result.succeeded} added, ${result.skipped} not added.`,
@@ -1292,8 +1292,7 @@ export function TvPersonalGallery({ grant, onBack, onPersonalError }: TvPersonal
       {selectionLayer === 'destination' && selection !== null && (
         <div className="tv-gallery-dialog" role="dialog" aria-modal="true" data-tv-focus-scope="true">
           <h2>{L('Aggiungi a', 'Add to')}</h2><p>{tn(selection.length, 'tvGallery.selectedCount')}</p>
-          <button type="button" autoFocus disabled={bulkBusy} onClick={() => void runDestination('beauty-lab')}>{L('Laboratorio bellezza', 'Beauty Lab')}</button>
-          <button type="button" disabled={bulkBusy} onClick={() => void runDestination('plates')}>{L('Targhe', 'Plates')}</button>
+          <button type="button" autoFocus disabled={bulkBusy} onClick={() => void runDestination('plates')}>{L('Targhe', 'Plates')}</button>
           <button type="button" disabled={bulkBusy} onClick={() => setSelectionLayer('none')}>{L('Annulla', 'Cancel')}</button>
         </div>
       )}

@@ -6,7 +6,6 @@ import { useI18n } from '../i18n';
 interface Props {
   onChooseParty: () => void;
   onChoosePersonal: () => void;
-  onChooseBeautyLab: () => void;
   onChooseUpdates: () => void;
   // e.g. "The PIN was changed. Enter the new PIN." after a stale-grant lock.
   notice?: string | null;
@@ -19,11 +18,11 @@ interface Props {
 // label (not a separate focusable element). BACK here closes the app — it must
 // never enter a mode.
 //
-// Updates is the fourth entry and deliberately the LAST one: it carries no lock
+// Updates is the third entry and deliberately the LAST one: it carries no lock
 // glyph because it needs no PIN, and it must not take the initial focus away
 // from Party, which is what this TV is normally opened for.
 export function ModeSelectScreen({
-  onChooseParty, onChoosePersonal, onChooseBeautyLab, onChooseUpdates, notice = null,
+  onChooseParty, onChoosePersonal, onChooseUpdates, notice = null,
 }: Props) {
   const { t } = useI18n();
   return (
@@ -33,7 +32,6 @@ export function ModeSelectScreen({
       <View style={styles.options}>
         <FocusableButton label={t('mode.party')} onPress={onChooseParty} hasTVPreferredFocus />
         <FocusableButton label={t('mode.personal')} onPress={onChoosePersonal} />
-        <FocusableButton label={t('mode.beautyLab')} onPress={onChooseBeautyLab} />
         <FocusableButton label={t('mode.updates')} onPress={onChooseUpdates} />
       </View>
     </View>

@@ -68,8 +68,7 @@ test('downloads without reloading and records a pending update', async () => {
 });
 
 test('the startup prefetch never reloads the app', async () => {
-  // A background reload would interrupt a running slideshow or Beauty Lab
-  // analysis. A downloaded update stays pending until the user asks, or until
+  // A background reload would interrupt a running slideshow. A downloaded update stays pending until the user asks, or until
   // the next cold launch.
   const { fake, calls } = counting({ available: true });
   await startBackgroundUpdateCheck(fake);

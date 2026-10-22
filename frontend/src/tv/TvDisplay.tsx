@@ -9,7 +9,6 @@ import {
 } from '@nubarca/api-client';
 import { toLanguage, useI18n } from '../i18n';
 import { TvBrowser } from '../pages/TvBrowser';
-import { TvBeautyLab } from '../pages/TvBeautyLab';
 import { TvCodeGate, TvModeSelect, TvPersonalArea } from '../pages/TvPairedExperience';
 import {
   CONTROL_POLL_MS, backoffMs, shouldHeartbeat, toAssignmentView,
@@ -306,12 +305,6 @@ export function TvDisplay() {
     dispatch({ type: 'LOCK', reason: body?.error === 'pin_changed' ? 'pinChanged' : undefined });
   }, [dispatch]);
 
-  const personalError = useCallback((error: unknown): boolean => {
-    if (error instanceof ApiError && error.status === 401) { onSessionInvalid(); return true; }
-    if (error instanceof ApiError && error.status === 403) { personalForbidden(error); return true; }
-    return false;
-  }, [onSessionInvalid, personalForbidden]);
-
   const chrome = sessionLive && (
     <div className={`tvd-chrome${idle ? ' tvd-chrome--idle' : ''}`}>
       {!online && <span className="tvd-offline" role="status" data-testid="tv-reconnecting">{t('tv.reconnecting')}</span>}
@@ -403,7 +396,6 @@ export function TvDisplay() {
             notice={flow.notice}
             onChooseParty={() => dispatch({ type: 'CHOOSE_PARTY' })}
             onChoosePersonal={() => dispatch({ type: 'CHOOSE_PERSONAL' })}
-            onChooseBeautyLab={() => dispatch({ type: 'CHOOSE_BEAUTY_LAB' })}
           />
         );
       case 'party':
@@ -442,15 +434,6 @@ export function TvDisplay() {
             onLock={() => dispatch({ type: 'LOCK' })}
             onForbidden={personalForbidden}
             onSessionInvalid={onSessionInvalid}
-          />
-        );
-      case 'beautyLab':
-        if (grant === null) return null;
-        return (
-          <TvBeautyLab
-            grant={grant}
-            onBack={() => dispatch({ type: 'LOCK' })}
-            onPersonalError={personalError}
           />
         );
       default:

@@ -16,11 +16,6 @@ namespace NubArca.Api.Storage;
 //                                   existing row owns one reference)
 //   * plate_redacted_media.BlobObjectId (owner-private Plates redacted-media
 //                                   cache; derived artifact, one ref per row)
-//   * aesthetic_lab_items.BlobObjectId (owner-private Aesthetics Lab; hard-
-//                                   deleted, so every existing row owns one
-//                                   reference)
-//   * aesthetic_lab_derivatives.BlobObjectId (Aesthetics Lab derived renditions;
-//                                   derived artifact, one ref per row)
 //   * album_transfer_items.BlobObjectId (SHARE-COPY-01 detached-copy manifests;
 //                                   ONLY while the parent transfer is pending —
 //                                   accept/decline/cancel/expire release)
@@ -225,24 +220,6 @@ public sealed class BlobReferenceAuditService
             .GroupBy(s => s.FaceCropBlobObjectId!.Value)
             .Select(g => new { g.Key, Count = g.Count() })
             .ToListAsync(cancellationToken);
-        // Owner-private Aesthetics Lab: each lab item owns exactly one reference
-        // to its blob. Delete is a HARD delete that releases the reference in the
-        // same transaction (AestheticLabService.RemoveAsync), so — like
-        // PlateImage — every existing row owns one reference. Omitting this would
-        // make RepairAsync zero a live lab blob and let the janitor delete bytes
-        // the lab needs.
-        var labItemRefs = await _db.AestheticLabItems.AsNoTracking()
-            .GroupBy(i => i.BlobObjectId)
-            .Select(g => new { g.Key, Count = g.Count() })
-            .ToListAsync(cancellationToken);
-        // Aesthetics Lab derived renditions (small/medium): each row owns exactly
-        // one reference to its DERIVED blob (mirrors FileThumbnail). Released when
-        // the row or its lab item is removed. Omitting this would let RepairAsync
-        // zero a live derived blob and the janitor delete bytes the cache needs.
-        var labDerivativeRefs = await _db.AestheticLabDerivatives.AsNoTracking()
-            .GroupBy(d => d.BlobObjectId)
-            .Select(g => new { g.Key, Count = g.Count() })
-            .ToListAsync(cancellationToken);
         // SHARE-COPY-01 pending detached copies: while a transfer is PENDING its
         // manifest owns one reference per item, which is precisely what keeps a
         // pending copy alive when the sender permanently deletes the source
@@ -314,14 +291,6 @@ public sealed class BlobReferenceAuditService
             computed[r.Key] = computed.TryGetValue(r.Key, out var v) ? v + r.Count : r.Count;
         }
         foreach (var r in faceCropRefs)
-        {
-            computed[r.Key] = computed.TryGetValue(r.Key, out var v) ? v + r.Count : r.Count;
-        }
-        foreach (var r in labItemRefs)
-        {
-            computed[r.Key] = computed.TryGetValue(r.Key, out var v) ? v + r.Count : r.Count;
-        }
-        foreach (var r in labDerivativeRefs)
         {
             computed[r.Key] = computed.TryGetValue(r.Key, out var v) ? v + r.Count : r.Count;
         }

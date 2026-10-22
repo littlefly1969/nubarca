@@ -57,23 +57,18 @@ describe('move-to destinations', () => {
 });
 
 describe('add-to destinations', () => {
-  it('offers Album, Plates and Beauty for an all-photo selection with every permission', () => {
-    expect(ids(model([photo, photo]).addTo)).toEqual(['album', 'list', 'plates', 'beauty-lab']);
+  it('offers Album, List and Plates for an all-photo selection with every permission', () => {
+    expect(ids(model([photo, photo]).addTo)).toEqual(['album', 'list', 'plates']);
   });
 
-  it('omits both Laboratory destinations without laboratory access', () => {
+  it('omits the Laboratory destination without laboratory access', () => {
     const noLab = ALL.filter((p) => p !== PERMISSIONS.laboratoryAccess);
     expect(ids(model([photo], noLab).addTo)).toEqual(['album', 'list']);
   });
 
-  it('offers Plates but not Beauty when only the Plates section is held', () => {
+  it('offers Plates when the Plates section is held with the shell', () => {
     const platesOnly = [PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryPlates];
     expect(ids(model([photo], platesOnly).addTo)).toEqual(['album', 'list', 'plates']);
-  });
-
-  it('offers Beauty but not Plates when only the Aesthetics section is held', () => {
-    const aestheticsOnly = [PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryAesthetics];
-    expect(ids(model([photo], aestheticsOnly).addTo)).toEqual(['album', 'list', 'beauty-lab']);
   });
 
   it('offers no photo-only destination for a video selection', () => {
@@ -119,7 +114,7 @@ describe('contextual actions', () => {
     expect(ids(list.contextual)).not.toContain('remove-from-album');
     // Every ordinary operation stays available from a list.
     expect(ids(list.moveTo)).toEqual(['personal', 'excluded', 'trash']);
-    expect(ids(list.addTo)).toEqual(['album', 'list', 'plates', 'beauty-lab']);
+    expect(ids(list.addTo)).toEqual(['album', 'list', 'plates']);
     // …and a list action never leaks into the library or an album.
     expect(ids(model([photo]).contextual)).not.toContain('remove-from-list');
     expect(ids(model([photo], ALL, { source: 'album' }).contextual)).not.toContain('remove-from-list');

@@ -30,12 +30,11 @@ const PERSONAL_REVALIDATE_MS = 15_000;
 
 /** Mode selection: shown on every start of a GENERAL display; never auto-reopens a mode. */
 export function TvModeSelect({
-  notice, onChooseParty, onChoosePersonal, onChooseBeautyLab,
+  notice, onChooseParty, onChoosePersonal,
 }: {
   notice: ModeNotice;
   onChooseParty: () => void;
   onChoosePersonal: () => void;
-  onChooseBeautyLab: () => void;
 }) {
   const { t } = useI18n();
   return (
@@ -62,12 +61,6 @@ export function TvModeSelect({
           onClick={onChoosePersonal}
         >
           {t('tv.modePersonal')} <span aria-hidden="true">🔒</span>
-        </button>
-        <button
-          type="button" className="tv-mode-option" data-testid="tv-mode-beauty-lab"
-          onClick={onChooseBeautyLab}
-        >
-          {t('tv.modeBeautyLab')} <span aria-hidden="true">🔒</span>
         </button>
       </div>
     </div>

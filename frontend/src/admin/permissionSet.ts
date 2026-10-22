@@ -2,7 +2,7 @@ import type { PermissionCatalogEntry } from '@nubarca/api-client';
 
 // The dependency rule, as a pure function.
 //
-// `laboratory.plates` and `laboratory.aesthetics` are meaningless without
+// A Laboratory section such as `laboratory.plates` is meaningless without
 // `laboratory.access` — the server refuses to store a role carrying a section
 // without its shell, and the endpoint policy would refuse the request anyway.
 // So the editor makes the broken state unreachable rather than reporting it

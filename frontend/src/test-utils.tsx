@@ -255,7 +255,6 @@ export const MEMBER_PERMISSIONS: readonly string[] = [
   PERMISSIONS.mailAccess,
   PERMISSIONS.laboratoryAccess,
   PERMISSIONS.laboratoryPlates,
-  PERMISSIONS.laboratoryAesthetics,
   PERMISSIONS.cloudFunctionsAccess,
   PERMISSIONS.privateVaultAccess,
   PERMISSIONS.partyAccess,

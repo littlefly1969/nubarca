@@ -9,9 +9,9 @@
 //
 //   loading ── SESSION_READY ──▶ mode ── CHOOSE_PARTY ──▶ party
 //      │            │             │  ◀── PARTY_EXIT ───────┘
-//      │            │             └── CHOOSE_PERSONAL / CHOOSE_BEAUTY_LAB ──▶ pin
+//      │            │             └── CHOOSE_PERSONAL ──▶ pin
 //      │            │                    │  ◀── PIN_CANCELLED
-//      │            │                    └── UNLOCKED ──▶ personalHome | beautyLab
+//      │            │                    └── UNLOCKED ──▶ personalHome
 //      │            │                          │ OPEN_LIBRARY ▶ personalLibrary
 //      │            │                          │ ◀─ LIBRARY_BACK┘
 //      │            │                          └── LOCK ──▶ mode
@@ -41,7 +41,7 @@ export interface PersonalHomeInfo {
 
 export type ModeNotice = 'pinChanged' | null;
 
-export type UnlockTarget = 'personal' | 'beautyLab';
+export type UnlockTarget = 'personal';
 
 export type TvFlowState =
   | { name: 'loading' }
@@ -56,8 +56,7 @@ export type TvFlowState =
   | { name: 'partyUnavailable'; party: AssignedParty }
   | { name: 'pin'; target: UnlockTarget }
   | { name: 'personalHome'; home: PersonalHomeInfo }
-  | { name: 'personalLibrary'; home: PersonalHomeInfo }
-  | { name: 'beautyLab'; home: PersonalHomeInfo };
+  | { name: 'personalLibrary'; home: PersonalHomeInfo };
 
 export type TvFlowEvent =
   | { type: 'SESSION_READY'; assignment?: AssignmentView }
@@ -65,7 +64,6 @@ export type TvFlowEvent =
   | { type: 'ASSOCIATION_INCOMPLETE' }
   | { type: 'CHOOSE_PARTY' }
   | { type: 'CHOOSE_PERSONAL' }
-  | { type: 'CHOOSE_BEAUTY_LAB' }
   | { type: 'PIN_CANCELLED' }
   | { type: 'UNLOCKED'; home: PersonalHomeInfo }
   | { type: 'OPEN_LIBRARY' }
@@ -99,15 +97,11 @@ export function tvFlowReducer(state: TvFlowState, event: TvFlowEvent): TvFlowSta
       return state.name === 'mode' ? { name: 'party' } : state;
     case 'CHOOSE_PERSONAL':
       return state.name === 'mode' ? { name: 'pin', target: 'personal' } : state;
-    case 'CHOOSE_BEAUTY_LAB':
-      return state.name === 'mode' ? { name: 'pin', target: 'beautyLab' } : state;
     case 'PIN_CANCELLED':
       return state.name === 'pin' ? MODE : state;
     case 'UNLOCKED':
       if (state.name !== 'pin') return state;
-      return state.target === 'beautyLab'
-        ? { name: 'beautyLab', home: event.home }
-        : { name: 'personalHome', home: event.home };
+      return { name: 'personalHome', home: event.home };
     case 'OPEN_LIBRARY':
       return state.name === 'personalHome' && state.home.galleryAvailable
         ? { name: 'personalLibrary', home: state.home }
@@ -176,8 +170,7 @@ export function isAssignedPartyState(
  */
 export function isPersonalState(state: TvFlowState): boolean {
   return state.name === 'personalHome'
-    || state.name === 'personalLibrary'
-    || state.name === 'beautyLab';
+    || state.name === 'personalLibrary';
 }
 
 /**

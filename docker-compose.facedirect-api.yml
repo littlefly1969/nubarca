@@ -2,8 +2,7 @@
 # ONNX substrate on BOTH services:
 #   api    → face detector + face recognizer + SigLIP2 text/query tower
 #   worker → face detector + face recognizer + SigLIP2 image tower
-# No Python OpenVINO sidecar is used by either service (HumanAesExpert is a
-# separate, experimental sidecar and is intentionally untouched).
+# No Python OpenVINO sidecar is used by either service.
 #
 # Compose alongside docker-compose.prod.yml + docker-compose.prod.local.yml +
 # --env-file .env. Images are PINNED (built from the `runtime-openvino` target,

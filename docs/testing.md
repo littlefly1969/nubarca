@@ -7,9 +7,9 @@ NubArca keeps two backend test lanes:
   lane.
 - `scripts/test-backend-full.sh` runs the fast lane first, then the tests marked
   `Category=External` in a separate process. The external lane includes
-  PostgreSQL/Testcontainers, pgvector, real FFmpeg and the opt-in live
-  HumanAesExpert sidecar. Both lanes are attempted even if the fast lane fails,
-  and the command returns a failure status if either lane fails.
+  PostgreSQL/Testcontainers, pgvector and real FFmpeg. Both lanes are attempted
+  even if the fast lane fails, and the command returns a failure status if
+  either lane fails.
 
 Separating the lanes does not remove coverage. It prevents external processes
 and containers from competing with the broad SQLite suite, while the full

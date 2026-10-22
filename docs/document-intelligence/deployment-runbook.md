@@ -424,7 +424,6 @@ Nothing has been measured there yet.
 | Office renderer (if added) | own container | ≤ 2 GB | its compose limit |
 | Private-chat LLM, 3–4B int4 | operator's endpoint | ~3–5 GB | by analogy with the NLU model (~3.0–3.5 GB, [`nlu-command-model.md`](../model-deployment/nlu-command-model.md)) |
 | Subject cutout (existing, on request) | api | ~3.3 GB | [`subject-cutout.md`](../model-deployment/subject-cutout.md) |
-| HumanAesExpert sidecar (existing, optional) | own container | ~4.8 GiB peak | measured, [`human-aesexpert.md`](../model-deployment/human-aesexpert.md) |
 
 Document-visual reuses the photo SigLIP2 checkpoint. Sessions are cached by
 model path, provider and device. If photos and documents resolve to the same

@@ -16,13 +16,6 @@ const CATALOG: PermissionCatalogEntry[] = [
     parent: PERMISSIONS.laboratoryAccess,
     assignable: true,
   },
-  {
-    key: PERMISSIONS.laboratoryAesthetics,
-    group: 'features',
-    administrative: false,
-    parent: PERMISSIONS.laboratoryAccess,
-    assignable: true,
-  },
   { key: PERMISSIONS.adminJobsManage, group: 'administration', administrative: true, parent: null, assignable: true },
   { key: PERMISSIONS.adminRolesManage, group: 'administration', administrative: true, parent: null, assignable: false },
 ];
@@ -41,7 +34,6 @@ describe('togglePermission', () => {
     const current = [
       PERMISSIONS.laboratoryAccess,
       PERMISSIONS.laboratoryPlates,
-      PERMISSIONS.laboratoryAesthetics,
       PERMISSIONS.peopleAccess,
     ];
 
@@ -50,17 +42,12 @@ describe('togglePermission', () => {
     expect(next).toEqual([PERMISSIONS.peopleAccess]);
   });
 
-  it('disabling one section leaves the other and the shell alone', () => {
-    const current = [
-      PERMISSIONS.laboratoryAccess,
-      PERMISSIONS.laboratoryPlates,
-      PERMISSIONS.laboratoryAesthetics,
-    ];
+  it('disabling a section leaves the shell alone', () => {
+    const current = [PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryPlates];
 
     const next = togglePermission(current, PERMISSIONS.laboratoryPlates, false, CATALOG);
 
     expect(next).toContain(PERMISSIONS.laboratoryAccess);
-    expect(next).toContain(PERMISSIONS.laboratoryAesthetics);
     expect(next).not.toContain(PERMISSIONS.laboratoryPlates);
   });
 

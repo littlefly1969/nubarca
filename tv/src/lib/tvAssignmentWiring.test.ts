@@ -61,11 +61,10 @@ test('the assignment drives navigation, and only through the flow reducer', () =
   assert.match(app, /dispatch\(\{ type: 'ASSIGNMENT', view \}\)/);
 
   // The mode selector no longer shows or reads an assignment — an assigned
-  // television never reaches it — and its four buttons are unchanged.
+  // television never reaches it — and its three buttons are unchanged.
   assert.doesNotMatch(modeScreen, /assignment/i);
   assert.match(modeScreen, /onPress=\{onChooseParty\}/);
   assert.match(modeScreen, /onPress=\{onChoosePersonal\}/);
-  assert.match(modeScreen, /onPress=\{onChooseBeautyLab\}/);
   assert.match(modeScreen, /onPress=\{onChooseUpdates\}/);
 
   // Manual Party browsing on a GENERAL television is still the same event.

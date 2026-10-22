@@ -213,7 +213,7 @@ test('the update surface is not a personal state', () => {
   // No PIN, no grant, no owner-private API. Treating it as personal would make
   // BACK revoke a grant it never held and re-validate a grant that is absent.
   assert.equal(isPersonalState(updates), false);
-  assert.equal(isPersonalState({ name: 'beautyLab', home: { displayName: 'x', galleryAvailable: true } }), true);
+  assert.equal(isPersonalState({ name: 'personalHome', home: { displayName: 'x', galleryAvailable: true } }), true);
 });
 
 test('the update surface cannot be entered from anywhere but mode selection', () => {
@@ -230,17 +230,16 @@ test('the update surface cannot be entered from anywhere but mode selection', ()
 test('the existing mode transitions are unchanged', () => {
   assert.deepEqual(tvFlowReducer(mode, { type: 'CHOOSE_PARTY' }), { name: 'party' });
   assert.deepEqual(tvFlowReducer(mode, { type: 'CHOOSE_PERSONAL' }), { name: 'pin', target: 'personal' });
-  assert.deepEqual(tvFlowReducer(mode, { type: 'CHOOSE_BEAUTY_LAB' }), { name: 'pin', target: 'beautyLab' });
   assert.deepEqual(tvFlowReducer({ name: 'party' }, { type: 'PARTY_EXIT' }), mode);
 });
 
 // --- the mode selector and the screen ----------------------------------------
 
-test('the mode selector has a fourth entry that does not steal the initial focus', () => {
+test('the mode selector has a last entry that does not steal the initial focus', () => {
   const source = modeSelect;
   const buttons = [...source.matchAll(/<FocusableButton\s+label=\{t\('([^']+)'\)\}/g)]
     .map((match) => match[1]);
-  assert.deepEqual(buttons, ['mode.party', 'mode.personal', 'mode.beautyLab', 'mode.updates']);
+  assert.deepEqual(buttons, ['mode.party', 'mode.personal', 'mode.updates']);
   // Party is what this TV is normally opened for; Updates must never take the
   // remote's first press.
   assert.match(source, /label=\{t\('mode\.party'\)\}[^/]*hasTVPreferredFocus/);

@@ -7,7 +7,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using NubArca.Api.Admin;
-using NubArca.Api.Aesthetics;
 using NubArca.Api.Ai;
 using NubArca.Api.Ai.Backends;
 using NubArca.Api.Ai.Faces;
@@ -2473,14 +2472,6 @@ public static class CliEntryPoint
 
             // MailArchive: the worker runs the mail.import job.
             services.AddNubArcaMailArchive(configuration);
-
-            // Aesthetics Lab: the worker runs the ai.aesthetics.human-aesexpert.
-            // analyze job, so the Aesthetics service graph (incl. the sidecar
-            // HttpClient) + its config must be present under the CLI/worker host
-            // too (parity with the web host).
-            services.Configure<NubArca.Api.Aesthetics.AestheticsOptions>(
-                configuration.GetSection(NubArca.Api.Aesthetics.AestheticsOptions.SectionName));
-            services.AddNubArcaAesthetics();
         }
 
         // The Assistant/RAG substrate, outside the Postgres block for the same

@@ -6,10 +6,9 @@
 //
 // It exists because the defect it describes was invisible in review. Several
 // screens put real functions — the media-kind tabs, Filters, Slideshow, "show
-// all photos" after a face search, Beauty Lab's Add images — exclusively inside
+// all photos" after a face search — exclusively inside
 // a MENU overlay. Every one of them worked perfectly on the Fire TV remote used
 // to test them, and none of them existed at all on a remote with no MENU key.
-// Beauty Lab's empty state even instructed the user to press it.
 //
 // A comment cannot catch that coming back. A matrix can: the entries below are
 // data, the tests assert over them, and a function added with `menuOnly` has to
@@ -85,20 +84,6 @@ export const TV_CAPABILITIES: readonly TvCapability[] = [
   { screen: 'AlbumItems', action: 'return to the album list',
     fiveWayRoute: 'BACK', accelerators: ['Actions rail → back command'] },
 
-  // --- Beauty Lab ----------------------------------------------------------
-  { screen: 'BeautyLab', action: 'add images',
-    fiveWayRoute: 'UP to Actions → SELECT → rail → SELECT "Aggiungi immagini"', accelerators: ['MENU'] },
-  { screen: 'BeautyLab', action: 'enter selection mode',
-    fiveWayRoute: 'UP to Actions → SELECT → rail → SELECT "Seleziona"', accelerators: ['MENU'] },
-  { screen: 'BeautyLab', action: 'start / cancel / retry an analysis',
-    fiveWayRoute: 'UP to Actions → SELECT → rail → SELECT the command', accelerators: ['MENU'] },
-  { screen: 'BeautyLab', action: 'compare scores',
-    fiveWayRoute: 'UP to Actions → SELECT → rail → SELECT "Confronta"', accelerators: ['MENU'] },
-  { screen: 'BeautyLab', action: 'load more images',
-    fiveWayRoute: 'DOWN to the load-more control → SELECT', accelerators: [] },
-  { screen: 'BeautyLab', action: 'leave and lock',
-    fiveWayRoute: 'BACK', accelerators: [] },
-
   // --- Fullscreen viewer ---------------------------------------------------
   // Directions here are owned by the viewer's remote policy, not by focus:
   // see video/remoteMap.ts. That is the second input mode, and it is safe only
@@ -117,7 +102,7 @@ export const TV_CAPABILITIES: readonly TvCapability[] = [
     fiveWayRoute: 'BACK', accelerators: [] },
 
   // --- Other screens -------------------------------------------------------
-  { screen: 'ModeSelect', action: 'choose Party / Personal / Beauty Lab / Updates',
+  { screen: 'ModeSelect', action: 'choose Party / Personal / Updates',
     fiveWayRoute: 'UP/DOWN to the entry → SELECT', accelerators: [] },
   { screen: 'Updates', action: 'check, install, authorize, go back',
     fiveWayRoute: 'UP/DOWN to the control → SELECT; BACK returns', accelerators: [] },

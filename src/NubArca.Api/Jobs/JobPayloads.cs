@@ -94,9 +94,3 @@ public sealed record PlateAnalysisJobPayload(Guid AnalysisJobId);
 public sealed record MailImportJobPayload(Guid ImportRunId);
 
 public sealed record MailTextsBackfillJobPayload(Guid OwnerUserId);
-
-// Aesthetics Lab: the aesthetic_analysis_runs row holds the owner + target lab
-// item + requested capabilities + status; the payload references it by RUN id
-// only — never image bytes, blob id, SHA, path, person names, prompts, or model
-// output.
-public sealed record AestheticAnalysisJobPayload(Guid RunId);

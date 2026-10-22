@@ -16,7 +16,6 @@ const MEMBER_KEYS = [
   PERMISSIONS.semanticSearchAccess,
   PERMISSIONS.laboratoryAccess,
   PERMISSIONS.laboratoryPlates,
-  PERMISSIONS.laboratoryAesthetics,
   PERMISSIONS.cloudFunctionsAccess,
   PERMISSIONS.privateVaultAccess,
   PERMISSIONS.tvManage,
@@ -90,13 +89,6 @@ const PERMISSION_CATALOG = [
   { key: PERMISSIONS.laboratoryAccess, group: 'features', administrative: false, parent: null, assignable: true },
   {
     key: PERMISSIONS.laboratoryPlates,
-    group: 'features',
-    administrative: false,
-    parent: PERMISSIONS.laboratoryAccess,
-    assignable: true,
-  },
-  {
-    key: PERMISSIONS.laboratoryAesthetics,
     group: 'features',
     administrative: false,
     parent: PERMISSIONS.laboratoryAccess,
@@ -218,9 +210,9 @@ describe('AdminRolesPage', () => {
 
       expect(checkbox(PERMISSIONS.laboratoryAccess)).not.toBeChecked();
 
-      await user.click(checkbox(PERMISSIONS.laboratoryAesthetics));
+      await user.click(checkbox(PERMISSIONS.laboratoryPlates));
 
-      expect(checkbox(PERMISSIONS.laboratoryAesthetics)).toBeChecked();
+      expect(checkbox(PERMISSIONS.laboratoryPlates)).toBeChecked();
       expect(checkbox(PERMISSIONS.laboratoryAccess)).toBeChecked();
     });
 

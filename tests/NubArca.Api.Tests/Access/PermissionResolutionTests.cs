@@ -66,8 +66,8 @@ public sealed class PermissionResolutionTests : IDisposable
         var administrator = roles.Single(r => r.Key == RoleKeys.Administrator);
         Assert.True(administrator.IsAdministrator);
         Assert.Equal(PermissionCatalog.AllKeys, administrator.Permissions);
-        // Seventeen feature permissions plus five administrative ones.
-        Assert.Equal(22, administrator.Permissions.Count);
+        // Sixteen feature permissions plus five administrative ones.
+        Assert.Equal(21, administrator.Permissions.Count);
 
         Assert.Equal(RoleDefaults.MemberPermissions, roles.Single(r => r.Key == RoleKeys.Member).Permissions);
         Assert.Empty(roles.Single(r => r.Key == RoleKeys.Restricted).Permissions);
@@ -266,7 +266,6 @@ public sealed class PermissionResolutionTests : IDisposable
         // The role editor and the composite endpoint policies both read this,
         // so the two cannot drift apart.
         Assert.Equal(Permissions.LaboratoryAccess, PermissionCatalog.ParentOf(Permissions.LaboratoryPlates));
-        Assert.Equal(Permissions.LaboratoryAccess, PermissionCatalog.ParentOf(Permissions.LaboratoryAesthetics));
         Assert.Null(PermissionCatalog.ParentOf(Permissions.LaboratoryAccess));
     }
 
@@ -275,7 +274,7 @@ public sealed class PermissionResolutionTests : IDisposable
     {
         Assert.True(PermissionCatalog.IsAdministratorOnly(Permissions.AdminRolesManage));
         Assert.DoesNotContain(Permissions.AdminRolesManage, PermissionCatalog.AssignableKeys);
-        Assert.Equal(21, PermissionCatalog.AssignableKeys.Count);
-        Assert.Equal(22, PermissionCatalog.AllKeys.Count);
+        Assert.Equal(20, PermissionCatalog.AssignableKeys.Count);
+        Assert.Equal(21, PermissionCatalog.AllKeys.Count);
     }
 }

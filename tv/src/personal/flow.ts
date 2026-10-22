@@ -78,10 +78,9 @@ export interface PersonalHomeInfo {
 // line in the UI. Never carries hash/generation/grant details.
 export type ModeNotice = 'pinChanged' | null;
 
-// The PIN screen is a SHARED gate: after unlock it navigates to the ORIGINAL
-// requested target — Personal Area or Beauty Lab. Both reuse the SAME PIN + the
-// SAME in-memory grant; Beauty Lab never mints a second PIN or grant type.
-export type UnlockTarget = 'personal' | 'beautyLab';
+// The PIN screen gates the Personal Area: after unlock it navigates to the
+// ORIGINAL requested target.
+export type UnlockTarget = 'personal';
 
 // One album the user opened from the Personal Area album shelf. Only what the
 // items screen needs to render its header — never a cover URL cache or counts
@@ -113,8 +112,7 @@ export type TvFlowState =
   | { name: 'personalHome'; home: PersonalHomeInfo }
   | { name: 'personalLibrary'; home: PersonalHomeInfo }
   | { name: 'personalAlbums'; home: PersonalHomeInfo }
-  | { name: 'personalAlbumItems'; home: PersonalHomeInfo; album: PersonalAlbumRef }
-  | { name: 'beautyLab'; home: PersonalHomeInfo };
+  | { name: 'personalAlbumItems'; home: PersonalHomeInfo; album: PersonalAlbumRef };
 
 export type TvFlowEvent =
   // From startup OR a completed pairing, carrying the FIRST server read of the
@@ -125,7 +123,6 @@ export type TvFlowEvent =
   | { type: 'ASSOCIATION_INCOMPLETE' }
   | { type: 'CHOOSE_PARTY' }
   | { type: 'CHOOSE_PERSONAL' }
-  | { type: 'CHOOSE_BEAUTY_LAB' }
   | { type: 'CHOOSE_UPDATES' }
   | { type: 'UPDATES_BACK' }
   | { type: 'PIN_CANCELLED' }
@@ -182,16 +179,12 @@ export function tvFlowReducer(state: TvFlowState, event: TvFlowEvent): TvFlowSta
       return state.name === 'updates' ? MODE : state;
     case 'CHOOSE_PERSONAL':
       return state.name === 'mode' ? { name: 'pin', target: 'personal' } : state;
-    case 'CHOOSE_BEAUTY_LAB':
-      return state.name === 'mode' ? { name: 'pin', target: 'beautyLab' } : state;
     case 'PIN_CANCELLED':
       return state.name === 'pin' ? MODE : state;
     case 'UNLOCKED':
       // Navigate to the ORIGINAL requested target the PIN gate was opened for.
       if (state.name !== 'pin') return state;
-      return state.target === 'beautyLab'
-        ? { name: 'beautyLab', home: event.home }
-        : { name: 'personalHome', home: event.home };
+      return { name: 'personalHome', home: event.home };
     case 'OPEN_LIBRARY':
       return state.name === 'personalHome' && state.home.galleryAvailable
         ? { name: 'personalLibrary', home: state.home }
@@ -222,7 +215,7 @@ export function tvFlowReducer(state: TvFlowState, event: TvFlowEvent): TvFlowSta
         ? { name: 'personalAlbums', home: state.home }
         : state;
     case 'LOCK':
-      // BACK from the Personal Area OR Beauty Lab root, an explicit lock, or a
+      // BACK from the Personal Area root, an explicit lock, or a
       // server-side grant invalidation (reason 'pinChanged' when the owner
       // changed the code): always back to mode selection — never to pairing,
       // the TV association stays valid.
@@ -297,8 +290,7 @@ export function isPersonalState(state: TvFlowState): boolean {
   return state.name === 'personalHome'
     || state.name === 'personalLibrary'
     || state.name === 'personalAlbums'
-    || state.name === 'personalAlbumItems'
-    || state.name === 'beautyLab';
+    || state.name === 'personalAlbumItems';
 }
 
 /**

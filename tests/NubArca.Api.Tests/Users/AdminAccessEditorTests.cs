@@ -120,7 +120,6 @@ public sealed class AdminAccessEditorTests : IDisposable
 
         var target = await _factory.LoginAsync("lab-user@example.com");
         Assert.NotEqual(HttpStatusCode.Forbidden, (await target.GetAsync("/api/plates/images")).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await target.GetAsync("/api/aesthetics-lab/items")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await target.GetAsync("/api/people")).StatusCode);
     }
 

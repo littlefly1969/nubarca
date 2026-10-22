@@ -43,8 +43,6 @@ public static class PermissionCatalog
         new(Permissions.LaboratoryAccess, PermissionGroups.Features, false),
         new(Permissions.LaboratoryPlates, PermissionGroups.Features, false,
             Parent: Permissions.LaboratoryAccess),
-        new(Permissions.LaboratoryAesthetics, PermissionGroups.Features, false,
-            Parent: Permissions.LaboratoryAccess),
         new(Permissions.CloudFunctionsAccess, PermissionGroups.Features, false),
         new(Permissions.PrivateVaultAccess, PermissionGroups.Features, false),
         new(Permissions.PartyAccess, PermissionGroups.Features, false),

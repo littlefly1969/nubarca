@@ -11,9 +11,6 @@ export interface BulkActionBarProps {
   onRemoveFromAlbum?: () => void;
   // Only supplied when a safe trash action exists for this surface.
   onMoveToTrash?: () => void;
-  // Only supplied where the owner-private Aesthetics Lab add is offered
-  // (the gallery). Reuses this selection instead of a separate picker.
-  onAddToAestheticsLab?: () => void;
   onClear(): void;
   busy?: boolean;
 }
@@ -23,7 +20,6 @@ export function BulkActionBar({
   onAddToAlbum,
   onRemoveFromAlbum,
   onMoveToTrash,
-  onAddToAestheticsLab,
   onClear,
   busy = false,
 }: BulkActionBarProps) {
@@ -65,17 +61,6 @@ export function BulkActionBar({
             data-testid="bulk-move-to-trash"
           >
             {t('gallerySel.moveToTrash')}
-          </button>
-        )}
-        {onAddToAestheticsLab && (
-          <button
-            type="button"
-            className="row-action"
-            onClick={onAddToAestheticsLab}
-            disabled={busy}
-            data-testid="bulk-add-to-aesthetics-lab"
-          >
-            {t('gallerySel.addToAestheticsLab')}
           </button>
         )}
         <button

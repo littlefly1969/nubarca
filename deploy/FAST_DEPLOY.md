@@ -80,8 +80,8 @@ An empty result means the containers will crash-loop on boot. Generate one with
 Never source `.env`. Let Compose read it through `--env-file .env`; sourcing it
 can truncate the semicolon-delimited PostgreSQL connection string.
 
-Do not use `--remove-orphans`. The HumanAesExpert and direct-import containers
-may legitimately be managed by separate Compose invocations.
+Do not use `--remove-orphans`. The direct-import containers may legitimately be
+managed by separate Compose invocations.
 
 ## Print Agent bundle boundary
 
@@ -503,7 +503,7 @@ arguments to the running application. Writing
 CLI four arguments whose first is `dotnet`; no subcommand matches, and the
 process falls through to **starting a full API host** — which then applies
 pending migrations itself through `Database:MigrateOnStartup` and, far worse,
-starts BlobJanitor, FileItemSweeper and the staging/aesthetics cleanup services
+starts BlobJanitor, FileItemSweeper and the staging cleanup services
 against production data, listening on 8080 inside the Compose network until
 somebody notices and stops it. It looks like a hung migration. Check
 `docker ps` if `db migrate` does not return within a few seconds.
