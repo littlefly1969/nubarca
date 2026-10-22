@@ -13,12 +13,17 @@ originating repository and is deliberately not reproduced here.
   the section and the exact place: PDF page, slide, sheet or section. Nothing
   is ever shown from another person's files, the Private area or the trash.
 - **Pages that only look like the search** (a chart, a table, a diagram) are
-  listed apart, as places to look. They are never used to answer in the
-  Assistant: the chat still answers only from text that says it.
+  listed apart, as places to look, with a message that says no text confirms
+  them (or that text search is not available yet) rather than "nothing
+  found". They are never used to answer in the Assistant: the chat still
+  answers only from text that says it.
 - **Indexing is a background job per document**, with progress and per-step
   state, started automatically on upload and restore when document AI is
   enabled. It is off by default; `documents backfill` and `documents progress`
   are the operator commands.
+- **A replaced document answers only from its new content.** From the moment
+  a file is replaced, its old text no longer appears in search or in the
+  Assistant, even before it has been read again.
 - **Ready for other sources.** The index is keyed by source, so a later source
   such as imported mail can be searched the same way without touching files.
 - **Benchmark harness** (`scripts/document-bench`) for choosing the text

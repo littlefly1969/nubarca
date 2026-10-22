@@ -172,7 +172,7 @@ it('lists visual-only pages apart, as places to look and not as an answer', asyn
     'POST /api/documents/search': () =>
       jsonResponse({
         ...OK_RESULT,
-        status: 'no_evidence',
+        status: 'visual_only',
         documents: [],
         visualMatches: [
           {
@@ -188,12 +188,41 @@ it('lists visual-only pages apart, as places to look and not as an answer', asyn
   });
   await searchFor('consumi trimestrali');
 
-  // The text answer still says "nothing", and the page is offered separately.
-  expect(await screen.findByText(/Nessun documento risponde/)).toBeTruthy();
+  // The text answer says no TEXT confirms it — not "nothing found" — and the
+  // page is offered separately.
+  expect(await screen.findByText(/Nessun testo conferma questa ricerca/)).toBeTruthy();
+  expect(screen.queryByText(/Nessun documento risponde/)).toBeNull();
   const section = screen.getByRole('region', { name: 'Pagine simili alla ricerca' });
   expect(section.textContent).toContain('consumi.pdf');
   expect(section.textContent).toMatch(/4/);
   expect(section.textContent).toContain('il cui testo non la conferma');
+});
+
+it('says the text search is missing when only pages could be searched', async () => {
+  renderPage({
+    'POST /api/documents/search': () =>
+      jsonResponse({
+        ...OK_RESULT,
+        status: 'visual_only',
+        reason: 'rag_index_unavailable',
+        documents: [],
+        visualMatches: [
+          {
+            sourceKind: 'file',
+            sourceId: FILE_ID,
+            name: 'grafico.pdf',
+            rank: 1,
+            page: 2,
+            locator: { kind: 'page', index: 2, label: null },
+          },
+        ],
+      }),
+  });
+  await searchFor('grafico');
+
+  expect(await screen.findByText(/La ricerca nel testo non è ancora disponibile/)).toBeTruthy();
+  const section = screen.getByRole('region', { name: 'Pagine simili alla ricerca' });
+  expect(section.textContent).toContain('grafico.pdf');
 });
 
 it('shows no visual section when there are no visual matches', async () => {

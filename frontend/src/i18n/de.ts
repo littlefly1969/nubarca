@@ -477,6 +477,8 @@ const de: Partial<Record<MessageKey, string>> = {
   'documents.searching': 'Suche läuft…',
   'documents.empty': 'Gib ein, was du suchst: Wörter, Namen, Zahlen oder eine Frage.',
   'documents.noEvidence': 'Kein Dokument passt zu dieser Suche. Versuch es mit anderen Wörtern.',
+  'documents.visualOnly': 'Kein Text bestätigt diese Suche, aber einige Seiten ähneln ihr: Du findest sie unten.',
+  'documents.visualOnlyTextUnavailable': 'Die Textsuche ist noch nicht verfügbar, aber einige Seiten ähneln deiner Suche: Du findest sie unten.',
   'documents.notIndexed': 'Deine Dokumente wurden noch nicht für die Suche gelesen. Versuch es später noch einmal.',
   'documents.unavailable': 'Die Dokumentensuche ist gerade nicht verfügbar.',
   'documents.error': 'Die Suche ist fehlgeschlagen. Versuch es gleich noch einmal.',

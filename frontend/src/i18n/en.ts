@@ -480,6 +480,8 @@ const en: Partial<Record<MessageKey, string>> = {
   'documents.searching': 'Searching…',
   'documents.empty': 'Type what you are looking for: words, names, figures or a question.',
   'documents.noEvidence': 'No document answers this search. Try different words.',
+  'documents.visualOnly': 'No text confirms this search, but some pages look like it: they are listed below.',
+  'documents.visualOnlyTextUnavailable': 'Text search is not available yet, but some pages look like your search: they are listed below.',
   'documents.notIndexed': 'Your documents have not been read for search yet. Try again later.',
   'documents.unavailable': 'Document search is not available right now.',
   'documents.error': 'The search failed. Try again shortly.',

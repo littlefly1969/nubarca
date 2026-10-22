@@ -491,6 +491,8 @@ const it = {
   'documents.searching': 'Sto cercando…',
   'documents.empty': 'Scrivi cosa cerchi: parole, nomi, cifre o una domanda.',
   'documents.noEvidence': 'Nessun documento risponde a questa ricerca. Prova con altre parole.',
+  'documents.visualOnly': 'Nessun testo conferma questa ricerca, ma alcune pagine le somigliano: le trovi qui sotto.',
+  'documents.visualOnlyTextUnavailable': 'La ricerca nel testo non è ancora disponibile, ma alcune pagine somigliano alla ricerca: le trovi qui sotto.',
   'documents.notIndexed': 'I tuoi documenti non sono ancora stati letti per la ricerca. Riprova più tardi.',
   'documents.unavailable': 'La ricerca nei documenti non è disponibile in questo momento.',
   'documents.error': 'La ricerca non è riuscita. Riprova fra poco.',

@@ -477,6 +477,8 @@ const es: Partial<Record<MessageKey, string>> = {
   'documents.searching': 'Buscando…',
   'documents.empty': 'Escribe lo que buscas: palabras, nombres, cifras o una pregunta.',
   'documents.noEvidence': 'Ningún documento responde a esta búsqueda. Prueba con otras palabras.',
+  'documents.visualOnly': 'Ningún texto confirma esta búsqueda, pero algunas páginas se le parecen: las encontrarás abajo.',
+  'documents.visualOnlyTextUnavailable': 'La búsqueda en el texto aún no está disponible, pero algunas páginas se parecen a tu búsqueda: las encontrarás abajo.',
   'documents.notIndexed': 'Tus documentos aún no se han leído para la búsqueda. Vuelve a intentarlo más tarde.',
   'documents.unavailable': 'La búsqueda en documentos no está disponible en este momento.',
   'documents.error': 'La búsqueda ha fallado. Vuelve a intentarlo en breve.',

@@ -41,7 +41,9 @@ export interface DocumentVisualMatch {
   locator: DocumentLocator | null;
 }
 
-export type DocumentSearchStatus = 'ok' | 'no_evidence' | 'not_indexed' | 'unavailable';
+/// `visual_only`: no text answers, but pages that look like the search are in
+/// `visualMatches`; `reason` is set when the text search itself could not run.
+export type DocumentSearchStatus = 'ok' | 'no_evidence' | 'visual_only' | 'not_indexed' | 'unavailable';
 
 export interface DocumentSearchResult {
   status: DocumentSearchStatus;

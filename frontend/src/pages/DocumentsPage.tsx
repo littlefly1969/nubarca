@@ -127,7 +127,13 @@ export function DocumentsPage() {
           {modeLabel(result)}
           {result.visualUsed && <> · {t('documents.visualUsed')}</>}
         </p>
-        {result.status !== 'ok' || result.documents.length === 0 ? (
+        {result.status === 'visual_only' ? (
+          // Not "nothing found": the text did not answer (or could not be
+          // searched), and the pages below are the only thing to look at.
+          <p className="muted">
+            {t(result.reason ? 'documents.visualOnlyTextUnavailable' : 'documents.visualOnly')}
+          </p>
+        ) : result.status !== 'ok' || result.documents.length === 0 ? (
           <p className="muted">{t('documents.noEvidence')}</p>
         ) : (
           <>

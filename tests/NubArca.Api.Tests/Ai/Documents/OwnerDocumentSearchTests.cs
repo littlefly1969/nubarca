@@ -463,8 +463,10 @@ public sealed class OwnerDocumentSearchTests : IAsyncLifetime
 
         var (json, body) = await SearchAsync(_clientA, ChartQuestion);
 
-        // Nothing in the text says it, so there is no evidence and no document.
-        Assert.Equal("no_evidence", json.GetProperty("status").GetString());
+        // Nothing in the text says it, so there is no document; the status says
+        // "only pages that look like it", not "nothing found".
+        Assert.Equal("visual_only", json.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("reason").ValueKind);
         Assert.Equal(0, json.GetProperty("documents").GetArrayLength());
 
         var match = Assert.Single(json.GetProperty("visualMatches").EnumerateArray());
@@ -484,6 +486,53 @@ public sealed class OwnerDocumentSearchTests : IAsyncLifetime
         {
             Assert.DoesNotContain(forbidden, body, StringComparison.OrdinalIgnoreCase);
         }
+    }
+
+    [Fact]
+    public async Task When_Text_Cannot_Be_Searched_Visual_Pages_Are_Still_Offered_And_Say_Why()
+    {
+        // An owner whose text is not indexed at all, but whose visual pass has
+        // a page: the page is offered, and the status names the missing text
+        // half instead of "not indexed, nothing to show".
+        _visual = new FakeVisualRetriever();
+        await BuildAsync();
+        var (ownerC, clientC) = await _factory.CreateAuthenticatedClientAsync("c@example.invalid");
+        Guid fileId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var blob = AddBlob(db, Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"));
+            var file = new FileItem
+            {
+                Id = Guid.NewGuid(),
+                OwnerUserId = ownerC,
+                BlobObjectId = blob.Id,
+                Name = "grafico.pdf",
+                MimeType = "application/pdf",
+                SizeBytes = 512,
+                CreatedAt = DateTime.UtcNow,
+                EffectiveDateTaken = DateTime.UtcNow,
+                EffectiveDateTakenSource = "uploaded",
+            };
+            db.FileItems.Add(file);
+            await db.SaveChangesAsync();
+            fileId = file.Id;
+        }
+        _visual.Hits.Add(await AddVisualPageAsync(fileId, page: 2));
+
+        var (json, _) = await SearchAsync(clientC, ChartQuestion);
+
+        Assert.Equal("visual_only", json.GetProperty("status").GetString());
+        Assert.Equal("rag_index_unavailable", json.GetProperty("reason").GetString());
+        Assert.Equal(0, json.GetProperty("documents").GetArrayLength());
+        var match = Assert.Single(json.GetProperty("visualMatches").EnumerateArray());
+        Assert.Equal(fileId, match.GetProperty("sourceId").GetGuid());
+        Assert.Equal(2, match.GetProperty("page").GetInt32());
+
+        // Another owner asking the same question gets nothing of C's.
+        var (other, otherBody) = await SearchAsync(_clientB, ChartQuestion);
+        Assert.DoesNotContain(fileId.ToString(), otherBody, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual("visual_only", other.GetProperty("status").GetString());
     }
 
     [Fact]

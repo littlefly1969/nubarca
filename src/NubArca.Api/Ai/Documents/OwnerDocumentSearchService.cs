@@ -22,6 +22,14 @@ public static class OwnerDocumentSearchStatuses
     /// The corpus exists but cannot be searched (over the chunk ceiling, …).
     /// `Reason` carries the sanitized token.
     public const string Unavailable = "unavailable";
+
+    /// No TEXT answers the search, but pages that look like it exist and are
+    /// listed in `VisualMatches` — places to look, never evidence. `Reason` is
+    /// null when the text search ran and simply found nothing, and the text
+    /// pass's sanitized token when the text search itself could not run (not
+    /// indexed yet, over the ceiling): the pages are still the owner's own,
+    /// rejoined live, so they are shown rather than hidden behind it.
+    public const string VisualOnly = "visual_only";
 }
 
 /// One search, as the SERVER states it. `SourceKinds` and `AllowedSourceIds`
@@ -174,6 +182,24 @@ public sealed class OwnerDocumentSearchService
         if (retrieval.Outcome == RagRetrievalOutcome.Unavailable)
         {
             var notIndexed = retrieval.TextReason is null or RagFailureReasons.IndexUnavailable;
+
+            // Text cannot be searched, but the visual pass ran on its own
+            // index: its pages are still offered as places to look, and the
+            // status says the text half is missing rather than "nothing found".
+            var visualFallback = await VisualOnlyAsync(
+                ownerUserId, retrieval.VisualHits, Array.Empty<OwnerDocumentSearchHit>(),
+                request.AllowedSourceIds, cancellationToken);
+            if (visualFallback.Count > 0)
+            {
+                return new OwnerDocumentSearchResult(
+                    OwnerDocumentSearchStatuses.VisualOnly,
+                    notIndexed ? RagFailureReasons.IndexUnavailable : retrieval.TextReason,
+                    retrieval.TextMode, retrieval.VisualMode,
+                    VisualUsed: false,
+                    Array.Empty<OwnerDocumentSearchHit>(),
+                    visualFallback);
+            }
+
             return OwnerDocumentSearchResult.Empty(
                 notIndexed ? OwnerDocumentSearchStatuses.NotIndexed : OwnerDocumentSearchStatuses.Unavailable,
                 notIndexed ? null : retrieval.TextReason,
@@ -192,7 +218,9 @@ public sealed class OwnerDocumentSearchService
             ownerUserId, retrieval.VisualHits, hits, request.AllowedSourceIds, cancellationToken);
 
         return new OwnerDocumentSearchResult(
-            hits.Count > 0 ? OwnerDocumentSearchStatuses.Ok : OwnerDocumentSearchStatuses.NoEvidence,
+            hits.Count > 0 ? OwnerDocumentSearchStatuses.Ok
+                : visualOnly.Count > 0 ? OwnerDocumentSearchStatuses.VisualOnly
+                : OwnerDocumentSearchStatuses.NoEvidence,
             null, retrieval.TextMode, retrieval.VisualMode,
             VisualUsed: retrieval.VisualExpandedEvidence > 0,
             hits,
