@@ -1,0 +1,9 @@
+# ONNX Runtime / OpenVINO raw-runtime lanes and the PP-OCRv5 adapter.
+onnxruntime==1.31.0
+openvino==2026.4.1
+tokenizers==0.23.3
+rapidocr==3.10.0
+# Written with a trailing .0 (PEP 440 pads release segments, so it is the same
+# exact pin): the bare four-part version reads as an IP literal to the identity check.
+opencv-python-headless==5.0.0.93.0
+huggingface_hub==2.2.0

@@ -1,0 +1,15 @@
+# Golden-set generation, metrics, lexical lane, report. Pinned: the golden set is
+# byte-reproducible only with exactly these versions (fonts, PNG and JPEG encoders,
+# pdfium rasteriser all come from these wheels).
+numpy==2.5.4
+pillow==13.0.0
+reportlab==5.0.1
+python-docx==1.2.0
+python-pptx==1.0.2
+openpyxl==3.1.5
+matplotlib==3.11.2
+pypdfium2==5.14.0
+psutil==7.2.2
+rapidfuzz==3.14.6
+apted==1.0.3
+pytest==9.1.1

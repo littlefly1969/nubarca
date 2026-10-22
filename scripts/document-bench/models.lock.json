@@ -1,0 +1,111 @@
+{
+  "_comment": "Pinned candidates for the document benchmark. Revisions were read from https://huggingface.co/api/models/<repo> on 2026-10-21. fetch-models.sh downloads exactly these commits and refuses any entry whose revision is TODO. Licences are as declared on the model card at that commit and must be re-checked before anything is promoted.",
+  "models": {
+    "e5-small": {
+      "lane": "text", "repo": "intfloat/multilingual-e5-small",
+      "revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3", "license": "MIT",
+      "allow": ["*.json", "*.txt", "sentencepiece.bpe.model", "model.safetensors", "1_Pooling/*", "onnx/*"],
+      "baseline": true
+    },
+    "qwen3-emb-0.6b": {
+      "lane": "text", "repo": "Qwen/Qwen3-Embedding-0.6B",
+      "revision": "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3", "license": "Apache-2.0",
+      "allow": ["*.json", "*.txt", "model.safetensors", "1_Pooling/*"]
+    },
+    "qwen3-emb-0.6b-ov-int8": {
+      "lane": "text", "repo": "OpenVINO/Qwen3-Embedding-0.6B-int8-ov",
+      "revision": "80d352d7061ec3e5caa3f26dc4e1f67bb8a21a5e", "license": "Apache-2.0",
+      "allow": ["*.json", "*.txt", "*.jinja", "openvino_model.xml", "openvino_model.bin", "1_Pooling/*"]
+    },
+    "qwen3-emb-0.6b-onnx": {
+      "lane": "text", "repo": "onnx-community/Qwen3-Embedding-0.6B-ONNX",
+      "revision": "TODO", "license": "Apache-2.0", "optional": true,
+      "allow": ["*.json", "onnx/model.onnx", "onnx/model.onnx_data"],
+      "todo": "Community export; not pinned because its metadata was not read in this slice. Pin after reviewing the export (a failed upstream ONNX export is reported on the HF forum)."
+    },
+    "granite-311m": {
+      "lane": "text", "repo": "ibm-granite/granite-embedding-311m-multilingual-r2",
+      "revision": "44399559930365213510b1ee2eb15ded83374f0e", "license": "Apache-2.0",
+      "allow": ["*.json", "model.safetensors", "1_Pooling/*", "onnx/*", "openvino_model.*", "openvino/openvino_model_qint8_quantized.*"]
+    },
+    "granite-97m": {
+      "lane": "text", "repo": "ibm-granite/granite-embedding-97m-multilingual-r2",
+      "revision": "835ad14087e140460703cf0fae09f97d469d65c2", "license": "Apache-2.0",
+      "allow": ["*.json", "model.safetensors", "1_Pooling/*", "onnx/*", "openvino_model.*", "openvino/openvino_model_qint8_quantized.*"]
+    },
+    "bge-m3": {
+      "lane": "text", "repo": "BAAI/bge-m3",
+      "revision": "5617a9f61b028005a4858fdac845db406aefb181", "license": "MIT",
+      "allow": ["*.json", "sentencepiece.bpe.model", "pytorch_model.bin", "1_Pooling/*", "onnx/*"],
+      "optional": true
+    },
+    "qwen3-reranker-0.6b": {
+      "lane": "rerank", "repo": "Qwen/Qwen3-Reranker-0.6B",
+      "revision": "e61197ed45024b0ed8a2d74b80b4d909f1255473", "license": "Apache-2.0",
+      "allow": ["*.json", "*.txt", "*.jinja", "model.safetensors", "1_LogitScore/*"]
+    },
+    "bge-reranker-v2-m3": {
+      "lane": "rerank", "repo": "BAAI/bge-reranker-v2-m3",
+      "revision": "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e", "license": "Apache-2.0",
+      "allow": ["*.json", "sentencepiece.bpe.model", "model.safetensors"]
+    },
+    "ppocrv5-onnx": {
+      "lane": "ocr", "repo": "monkt/paddleocr-onnx",
+      "revision": "7b02d0a30a07ba2b92ad1ff5a8941ae2c633de65", "license": "Apache-2.0",
+      "allow": ["detection/v5/*", "languages/latin/*", "languages/english/*"]
+    },
+    "paddleocr-vl-1.5-gguf": {
+      "lane": "ocr", "repo": "PaddlePaddle/PaddleOCR-VL-1.5-GGUF",
+      "revision": "cc977c16989848c264d813ec1705cb181b7a21ee", "license": "Apache-2.0",
+      "allow": ["PaddleOCR-VL-1.5.gguf", "PaddleOCR-VL-1.5-mmproj.gguf", "chat_template.jinja", "README.md"]
+    },
+    "paddleocr-vl-1.5": {
+      "lane": "ocr", "repo": "PaddlePaddle/PaddleOCR-VL-1.5",
+      "revision": "2a4195faa5e7914c12f2fc601d72c81caf8d2da5", "license": "Apache-2.0",
+      "allow": ["*"], "optional": true
+    },
+    "xiaomi-ocr-0-gguf": {
+      "lane": "ocr", "repo": "prithivMLmods/Xiaomi-OCR-0-GGUF",
+      "revision": "0f0e77db7c97c409bb87347e6c2f151829651947", "license": "Apache-2.0",
+      "allow": ["Xiaomi-OCR-0.Q4_K_M.gguf", "Xiaomi-OCR-0.mmproj-bf16.gguf", "README.md"],
+      "note": "Community quantisation; the Xiaomi-OCR-0 authors state they have not evaluated community conversions."
+    },
+    "xiaomi-ocr-0": {
+      "lane": "ocr", "repo": "SeerRay-Lab/Xiaomi-OCR-0",
+      "revision": "ff990be318c4c68f7e621dd690231200f47e48c4", "license": "Apache-2.0",
+      "allow": ["*.json", "*.jinja", "model.safetensors"], "optional": true
+    },
+    "glm-ocr": {
+      "lane": "ocr", "repo": "zai-org/GLM-OCR",
+      "revision": "2e85a62840ccac27daa451df36c736c4636b8628", "license": "MIT",
+      "allow": ["*.json", "*.jinja", "model.safetensors"]
+    },
+    "siglip2-so400m": {
+      "lane": "visual", "repo": "google/siglip2-so400m-patch14-384",
+      "revision": "c65677ac77ca25276518923f7c58cbf5d81ea602", "license": "Apache-2.0",
+      "allow": ["*.json", "*.model", "model.safetensors"], "baseline": true
+    },
+    "neomme-260m": {
+      "lane": "visual", "repo": "Hcompany/NeoMME-260M-Retriever",
+      "revision": "0dcb6c924435bd0bf5d504dba9ba2bb63acd8595", "license": "Apache-2.0",
+      "allow": ["*.json", "*.jinja", "model.safetensors", "LICENSE"]
+    },
+    "neomme-260m-st-late": {
+      "lane": "visual", "repo": "Hcompany/NeoMME-260M-Retriever-ST-late",
+      "revision": "023be2a8ab9d797f5aa76f5bf8b5dde78d819659", "license": "Apache-2.0",
+      "allow": ["*"], "optional": true
+    },
+    "vultron-flash-0.8b": {
+      "lane": "visual", "repo": "vultr/VultronRetrieverFlash-Qwen3.5-0.8B",
+      "revision": "6f6b6757e9ea3ad93f4f2cbd839bc6f2f0b93739", "license": "Apache-2.0",
+      "allow": ["*.json", "*.jinja", "model.safetensors", "1_Dense/*", "2_Normalize/*", "3_MultiVectorMask/*", "additional_chat_templates/*", "LICENSE", "NOTICE"],
+      "optional": true
+    },
+    "qwen3-vl-emb-2b": {
+      "lane": "visual", "repo": "Qwen/Qwen3-VL-Embedding-2B",
+      "revision": "9f2f7e710d6d81056aa5c0a4f04764fec6bb7bda", "license": "Apache-2.0",
+      "allow": ["*.json", "*.txt", "*.jinja", "model.safetensors", "1_Pooling/*"],
+      "optional": true
+    }
+  }
+}
