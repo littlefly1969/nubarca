@@ -178,7 +178,7 @@ test('verify refuses an image whose component changed after it was built', () =>
   assert.match(result.stderr, /component frontend changed after/);
 });
 
-test('verify refuses an API image older than a documentation change its help corpus is built from', () => {
+test('a documentation-only change reuses the API image, which no longer carries a help corpus', () => {
   const { cwd, base, frontend, head } = checkout();
   mkdirSync(join(cwd, 'docs'), { recursive: true });
   writeFileSync(join(cwd, 'docs/guide.md'), 'new help\n');
@@ -187,10 +187,9 @@ test('verify refuses an API image older than a documentation change its help cor
   const docs = git(cwd, 'rev-parse', 'HEAD');
   const previous = manifest(head, { api: base, frontend, agent: base });
   const planned = JSON.parse(run('plan', cwd, docs, write(previous)).stdout);
-  assert.deepEqual(planned.build, ['api'], 'a docs-only commit rebuilds the API image');
+  assert.deepEqual(planned.build, [], 'a docs-only commit rebuilds nothing');
   const result = run('verify', write(manifest(docs, { api: base, frontend, agent: base })), docs, cwd);
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /component api changed after/);
+  assert.equal(result.status, 0, result.stderr);
   assert.ok(head);
 });
 
@@ -323,13 +322,6 @@ for (const [name, component] of Object.entries(componentsFile.components)) {
     assert.deepEqual(missing, [], `${name} paths miss build inputs`);
   });
 }
-
-test('the API image declares the documentation its help corpus is built from', () => {
-  const sources = dockerfileSources(readFileSync(resolve(root, 'src/NubArca.Api/Dockerfile'), 'utf8'));
-  for (const doc of ['README.md', 'ARCHITECTURE.md', 'docs/']) assert.ok(sources.includes(doc), doc);
-  const paths = componentsFile.components.api.paths;
-  for (const doc of ['README.md', 'ARCHITECTURE.md', 'docs/guide.md']) assert.ok(covered(paths, doc), doc);
-});
 
 test('the build-input check catches an undeclared input', () => {
   const sources = dockerfileSources('FROM x AS a\nCOPY --from=a /x /y\nCOPY README.md \\\n  other.md ./\nCOPY docs/ docs/\n');
