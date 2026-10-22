@@ -496,6 +496,8 @@ const en: Partial<Record<MessageKey, string>> = {
   'documents.modeHybrid': 'Keyword and meaning search',
   'documents.modeFallback': 'Keyword search (meaning search unavailable)',
   'documents.visualUsed': 'also by page appearance',
+  'documents.visualMatchesTitle': 'Pages that look similar',
+  'documents.visualMatchesHint': 'Charts, tables or diagrams that look like your search, but whose text does not confirm it. Open them to check.',
   'nav.parties': 'Parties',
 
   // --- The guest experience: invitation, party, memories ---

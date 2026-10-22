@@ -29,6 +29,18 @@ export interface DocumentSearchHit {
   passages: DocumentSearchPassage[];
 }
 
+/// A page that LOOKS like the question (a chart, a table, a diagram) in a
+/// document whose text did not answer it. Where to look, never an answer: it
+/// has a page and no passage. Always a file; `sourceId` is the caller's own.
+export interface DocumentVisualMatch {
+  sourceKind: 'file' | string;
+  sourceId: string;
+  name: string;
+  rank: number;
+  page: number | null;
+  locator: DocumentLocator | null;
+}
+
 export type DocumentSearchStatus = 'ok' | 'no_evidence' | 'not_indexed' | 'unavailable';
 
 export interface DocumentSearchResult {
@@ -41,6 +53,7 @@ export interface DocumentSearchResult {
   visualMode: string;
   visualUsed: boolean;
   documents: DocumentSearchHit[];
+  visualMatches: DocumentVisualMatch[];
 }
 
 export interface DocumentSignal {

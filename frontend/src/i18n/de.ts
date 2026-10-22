@@ -493,6 +493,8 @@ const de: Partial<Record<MessageKey, string>> = {
   'documents.modeHybrid': 'Stichwort- und Bedeutungssuche',
   'documents.modeFallback': 'Stichwortsuche (Bedeutungssuche nicht verfügbar)',
   'documents.visualUsed': 'auch nach Seitenbild',
+  'documents.visualMatchesTitle': 'Ähnlich aussehende Seiten',
+  'documents.visualMatchesHint': 'Diagramme, Tabellen oder Schemata, die deiner Suche ähneln, deren Text sie aber nicht bestätigt. Öffne sie zur Prüfung.',
   'nav.parties': 'Partys',
   'partyGuest.location': 'Wo',
   'partyGuest.openMaps': 'In Maps öffnen',

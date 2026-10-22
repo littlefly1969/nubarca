@@ -166,3 +166,41 @@ it('shows an error rather than stale results when the search fails', async () =>
   await searchFor('penale');
   expect(await screen.findByText(/La ricerca non è riuscita/)).toBeTruthy();
 });
+
+it('lists visual-only pages apart, as places to look and not as an answer', async () => {
+  renderPage({
+    'POST /api/documents/search': () =>
+      jsonResponse({
+        ...OK_RESULT,
+        status: 'no_evidence',
+        documents: [],
+        visualMatches: [
+          {
+            sourceKind: 'file',
+            sourceId: FILE_ID,
+            name: 'consumi.pdf',
+            rank: 1,
+            page: 4,
+            locator: { kind: 'page', index: 4, label: null },
+          },
+        ],
+      }),
+  });
+  await searchFor('consumi trimestrali');
+
+  // The text answer still says "nothing", and the page is offered separately.
+  expect(await screen.findByText(/Nessun documento risponde/)).toBeTruthy();
+  const section = screen.getByRole('region', { name: 'Pagine simili alla ricerca' });
+  expect(section.textContent).toContain('consumi.pdf');
+  expect(section.textContent).toMatch(/4/);
+  expect(section.textContent).toContain('il cui testo non la conferma');
+});
+
+it('shows no visual section when there are no visual matches', async () => {
+  renderPage({
+    'POST /api/documents/search': () => jsonResponse({ ...OK_RESULT, visualMatches: [] }),
+  });
+  await searchFor('penale');
+  expect(await screen.findByText('contratto.pdf')).toBeTruthy();
+  expect(screen.queryByText('Pagine simili alla ricerca')).toBeNull();
+});

@@ -103,6 +103,19 @@ public static class OwnerDocumentSearchEndpoints
                         p.LocatorKind, p.LocatorIndex, p.LocatorLabel),
                 }),
             }),
+            // Pages that LOOK like the question, with no text behind them:
+            // where to look, never evidence. Same reviewed exception — the
+            // caller's own file id — and nothing else that addresses anything.
+            visualMatches = result.VisualOnly.Select(v => new
+            {
+                sourceKind = v.SourceKind,
+                sourceId = v.SourceId,
+                name = v.Name,
+                rank = v.Rank,
+                page = v.Page,
+                locator = PrivateDocumentAssistantEndpoints.LocatorDto(
+                    v.LocatorKind, v.LocatorIndex, v.LocatorLabel),
+            }),
         };
     }
 }

@@ -21,7 +21,12 @@ public sealed record OwnerDocumentRetrievalResult(
     /// The global text pass's sanitized reason (`rag_index_unavailable`,
     /// `rag_corpus_too_large`, …), so a caller can tell "nothing indexed" from
     /// "nothing matched" without a second read.
-    string? TextReason = null)
+    string? TextReason = null,
+    /// The visual pass's own hits (owner-prefiltered, current index, active
+    /// profiles), so an EXPLORATORY caller can show "this page looks like your
+    /// question" separately from text evidence. Never evidence: the chat gate
+    /// does not read this.
+    IReadOnlyList<DocumentVisualHit>? VisualHits = null)
 {
     public static OwnerDocumentRetrievalResult From(RagRetrievalResult text, string visualMode)
         => new(text.Evidence, text.Outcome, text.Mode, visualMode,
@@ -146,6 +151,7 @@ public sealed class OwnerDocumentRetrievalPipeline
             global.Evidence.Count,
             expanded.Count,
             visual.CandidateFileIds,
-            global.Reason);
+            global.Reason,
+            visual.Hits);
     }
 }

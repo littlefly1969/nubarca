@@ -493,6 +493,8 @@ const es: Partial<Record<MessageKey, string>> = {
   'documents.modeHybrid': 'Búsqueda por palabras y significado',
   'documents.modeFallback': 'Búsqueda por palabras (búsqueda por significado no disponible)',
   'documents.visualUsed': 'también por el aspecto de las páginas',
+  'documents.visualMatchesTitle': 'Páginas de aspecto similar',
+  'documents.visualMatchesHint': 'Gráficos, tablas o esquemas que se parecen a tu búsqueda, pero cuyo texto no la confirma. Ábrelos para comprobarlo.',
   'nav.parties': 'Fiestas',
   'partyGuest.location': 'Dónde',
   'partyGuest.openMaps': 'Abrir en Maps',

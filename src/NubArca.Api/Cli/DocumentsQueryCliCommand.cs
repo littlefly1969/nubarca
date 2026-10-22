@@ -99,6 +99,17 @@ internal static class DocumentsQueryCliCommand
             }
         }
 
+        stdout.WriteLine($"visual_matches={result.VisualOnly.Count}");
+        foreach (var v in result.VisualOnly)
+        {
+            var match = expected is null
+                ? "n/a"
+                : expected.Contains(v.Name, StringComparer.Ordinal) ? "true" : "false";
+            stdout.WriteLine(
+                $"visual rank={v.Rank} page={Show(v.Page)} "
+                + $"locator={v.LocatorKind ?? "-"}:{Show(v.LocatorIndex)} expected={match}");
+        }
+
         if (expected is not null)
         {
             stdout.WriteLine($"expected_first_rank={Show(firstExpected)}");

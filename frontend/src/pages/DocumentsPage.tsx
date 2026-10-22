@@ -6,6 +6,7 @@ import {
   type DocumentSearchHit,
   type DocumentSearchPassage,
   type DocumentSearchResult,
+  type DocumentVisualMatch,
   type DocumentsStatus,
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
@@ -140,7 +141,43 @@ export function DocumentsPage() {
             </ol>
           </>
         )}
+        {(result.visualMatches ?? []).length > 0 && renderVisualMatches(result.visualMatches)}
       </div>
+    );
+  }
+
+  // Pages that LOOK like the question but whose text did not answer it. Kept
+  // apart from the results and said plainly: a place to look, not an answer.
+  function renderVisualMatches(matches: DocumentVisualMatch[]) {
+    return (
+      <section className="documents-visual" aria-label={t('documents.visualMatchesTitle')}>
+        <h2 className="documents-visual-title">{t('documents.visualMatchesTitle')}</h2>
+        <p className="muted">{t('documents.visualMatchesHint')}</p>
+        <ol className="documents-list">
+          {matches.map((m) => (
+            <li key={`${m.sourceKind}:${m.sourceId}`} className="documents-result documents-result-visual">
+              <div className="documents-result-head">
+                <h3 className="documents-result-name">{m.name}</h3>
+                {m.sourceKind === 'file' && (
+                  <a
+                    className="documents-open"
+                    href={downloadUrl(m.sourceId)}
+                    rel="noopener noreferrer"
+                    aria-label={t('documents.openLabel', { name: m.name })}
+                  >
+                    {t('documents.open')}
+                  </a>
+                )}
+              </div>
+              <div className="documents-passage-meta">
+                {locationBadges({ page: m.page, locator: m.locator, section: null }).map((badge) => (
+                  <span key={badge} className="documents-badge">{badge}</span>
+                ))}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </section>
     );
   }
 
@@ -179,7 +216,9 @@ export function DocumentsPage() {
 
   // Typed location → words. A real PDF page is "Pagina 3"; a slide, a sheet or
   // a Word section is said as itself, never as a page.
-  function locationBadges(p: DocumentSearchPassage): string[] {
+  function locationBadges(
+    p: Pick<DocumentSearchPassage, 'page' | 'locator' | 'section'>,
+  ): string[] {
     const badges: string[] = [];
     if (p.page !== null) badges.push(t('documents.page', { n: p.page }));
     const loc = p.locator;

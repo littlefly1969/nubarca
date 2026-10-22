@@ -1,4 +1,7 @@
+using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Ai.DocumentVisual;
+using NubArca.Api.Data;
+using NubArca.Api.Domain.Ai;
 using NubArca.Api.Rag;
 using NubArca.Api.Rag.Retrieval;
 
@@ -54,14 +57,33 @@ public sealed record OwnerDocumentSearchHit(
     int Rank,
     IReadOnlyList<OwnerDocumentSearchPassage> Passages);
 
+/// A page that LOOKS like the question — a chart, a table, a diagram — in a
+/// document whose text did not clear the evidence gate. Where to look, never
+/// evidence: no passage, no snippet, and nothing the Assistant may say. Always
+/// a `file` (the visual index is file-only); `SourceId` is the caller's own
+/// FileItemId, as in OwnerDocumentSearchHit.
+public sealed record OwnerDocumentVisualMatch(
+    string SourceKind,
+    Guid SourceId,
+    string Name,
+    int Rank,
+    int? Page,
+    string? LocatorKind,
+    int? LocatorIndex,
+    string? LocatorLabel);
+
 public sealed record OwnerDocumentSearchResult(
     string Status,
     string? Reason,
     string TextMode,
     string VisualMode,
     bool VisualUsed,
-    IReadOnlyList<OwnerDocumentSearchHit> Documents)
+    IReadOnlyList<OwnerDocumentSearchHit> Documents,
+    IReadOnlyList<OwnerDocumentVisualMatch>? VisualMatches = null)
 {
+    public IReadOnlyList<OwnerDocumentVisualMatch> VisualOnly
+        => VisualMatches ?? Array.Empty<OwnerDocumentVisualMatch>();
+
     public static OwnerDocumentSearchResult Empty(string status, string? reason, string textMode, string visualMode)
         => new(status, reason, textMode, visualMode, false, Array.Empty<OwnerDocumentSearchHit>());
 }
@@ -79,6 +101,12 @@ public sealed record OwnerDocumentSearchResult(
 /// "show me the near misses" mode, because the near misses are what a cosine
 /// returns for every question in a small library.
 ///
+/// The one addition is VISUAL-ONLY MATCHES, listed apart from the documents:
+/// a page made of a chart, a table or a diagram can look like the question
+/// while its text says little. Those come from the visual pass's own floors
+/// (positive cosine, relative to the best match), carry a page and no text,
+/// and are never evidence — the Assistant does not see them.
+///
 /// No generative model, no tool, no second retrieval round. The owner is the
 /// caller's; the domain is the constant `user-documents` inside the pipeline.
 public sealed class OwnerDocumentSearchService
@@ -92,13 +120,17 @@ public sealed class OwnerDocumentSearchService
     public const int MaxEvidenceCharacters = 160_000;
     public const int MaxSnippetCharacters = 320;
 
+    public const int MaxVisualMatches = 5;
+
     private readonly OwnerDocumentRetrievalPipeline _pipeline;
+    private readonly AppDbContext _db;
     private readonly ILogger<OwnerDocumentSearchService> _log;
 
     public OwnerDocumentSearchService(
-        OwnerDocumentRetrievalPipeline pipeline, ILogger<OwnerDocumentSearchService> log)
+        OwnerDocumentRetrievalPipeline pipeline, AppDbContext db, ILogger<OwnerDocumentSearchService> log)
     {
         _pipeline = pipeline;
+        _db = db;
         _log = log;
     }
 
@@ -147,20 +179,89 @@ public sealed class OwnerDocumentSearchService
                 notIndexed ? null : retrieval.TextReason,
                 retrieval.TextMode, retrieval.VisualMode);
         }
-        if (retrieval.Outcome != RagRetrievalOutcome.Strong || retrieval.Evidence.Count == 0)
-        {
-            return OwnerDocumentSearchResult.Empty(
-                OwnerDocumentSearchStatuses.NoEvidence, null, retrieval.TextMode, retrieval.VisualMode);
-        }
 
-        var terms = RagQueryShape.For(text, expandAliases: false).AllTerms;
-        var hits = Group(ownerUserId, retrieval.Evidence, terms, documents);
+        var hits = retrieval.Outcome == RagRetrievalOutcome.Strong && retrieval.Evidence.Count > 0
+            ? Group(ownerUserId, retrieval.Evidence,
+                RagQueryShape.For(text, expandAliases: false).AllTerms, documents)
+            : new List<OwnerDocumentSearchHit>();
+
+        // EXPLORATION IS NOT AN ANSWER. Pages that look like the question but
+        // whose text did not clear the gate are listed apart, as places to
+        // look — the evidence gate above, and the Assistant's, are unchanged.
+        var visualOnly = await VisualOnlyAsync(
+            ownerUserId, retrieval.VisualHits, hits, request.AllowedSourceIds, cancellationToken);
 
         return new OwnerDocumentSearchResult(
             hits.Count > 0 ? OwnerDocumentSearchStatuses.Ok : OwnerDocumentSearchStatuses.NoEvidence,
             null, retrieval.TextMode, retrieval.VisualMode,
             VisualUsed: retrieval.VisualExpandedEvidence > 0,
-            hits);
+            hits,
+            visualOnly);
+    }
+
+    /// The best page of each visually matched FILE that has no text hit, in
+    /// visual rank order. The hits are already owner-prefiltered against the
+    /// current index; the live FileItem is joined again here anyway, because
+    /// this is the last place before the wire and the name comes from it.
+    private async Task<IReadOnlyList<OwnerDocumentVisualMatch>> VisualOnlyAsync(
+        Guid ownerUserId,
+        IReadOnlyList<DocumentVisualHit>? visualHits,
+        IReadOnlyList<OwnerDocumentSearchHit> textHits,
+        IReadOnlyCollection<Guid>? allowedSourceIds,
+        CancellationToken cancellationToken)
+    {
+        if (visualHits is not { Count: > 0 }) return Array.Empty<OwnerDocumentVisualMatch>();
+
+        var shown = textHits
+            .Where(h => h.SourceKind == DocumentSourceKinds.File)
+            .Select(h => h.SourceId)
+            .ToHashSet();
+        var best = visualHits
+            .Where(h => !shown.Contains(h.FileItemId))
+            // The caller's server-side narrowing applies here too: it can only
+            // remove, never widen what the visual pass named.
+            .Where(h => allowedSourceIds is null || allowedSourceIds.Contains(h.FileItemId))
+            .OrderBy(h => h.Rank)
+            .GroupBy(h => h.FileItemId)
+            .Select(g => g.First())
+            .Take(MaxVisualMatches)
+            .ToList();
+        if (best.Count == 0) return Array.Empty<OwnerDocumentVisualMatch>();
+
+        var unitIds = best.Select(h => h.VisualUnitId).ToList();
+        var rows = await (
+                from unit in _db.DocumentVisualUnits.AsNoTracking()
+                join index in _db.DocumentVisualIndexes.AsNoTracking() on unit.DocumentVisualIndexId equals index.Id
+                join file in OwnerDocumentEligibility.Eligible(_db.FileItems.AsNoTracking(), ownerUserId)
+                    on index.FileItemId equals file.Id
+                where unitIds.Contains(unit.Id)
+                      && index.OwnerUserId == ownerUserId
+                      // Pages of the CURRENT bytes only: a replaced document's
+                      // old pages are not a place to look any more.
+                      && index.SourceBlobObjectId == file.BlobObjectId
+                select new
+                {
+                    UnitId = unit.Id,
+                    FileId = file.Id,
+                    file.Name,
+                    unit.SourcePage,
+                    unit.SourceLocatorKind,
+                    unit.SourceLocatorIndex,
+                    unit.SourceLocatorLabel,
+                })
+            .ToListAsync(cancellationToken);
+        var byUnit = rows.ToDictionary(r => r.UnitId);
+
+        var matches = new List<OwnerDocumentVisualMatch>();
+        foreach (var hit in best)
+        {
+            if (!byUnit.TryGetValue(hit.VisualUnitId, out var row) || row.FileId != hit.FileItemId) continue;
+            matches.Add(new OwnerDocumentVisualMatch(
+                DocumentSourceKinds.File, row.FileId, row.Name, matches.Count + 1,
+                row.SourcePage, row.SourceLocatorKind, row.SourceLocatorIndex,
+                string.IsNullOrWhiteSpace(row.SourceLocatorLabel) ? null : row.SourceLocatorLabel));
+        }
+        return matches;
     }
 
     /// Evidence, in fused order, folded into documents in order of their best

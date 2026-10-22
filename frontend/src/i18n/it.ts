@@ -507,6 +507,8 @@ const it = {
   'documents.modeHybrid': 'Ricerca per parole e significato',
   'documents.modeFallback': 'Ricerca per parole (ricerca per significato non disponibile)',
   'documents.visualUsed': 'anche dall’aspetto delle pagine',
+  'documents.visualMatchesTitle': 'Pagine simili alla ricerca',
+  'documents.visualMatchesHint': 'Grafici, tabelle o schemi che somigliano alla ricerca, ma il cui testo non la conferma. Aprili per verificare.',
   'nav.parties': 'Feste',
 
   // --- L'esperienza ospite: invito, festa, ricordi ---

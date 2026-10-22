@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NubArca.Api.Ai.DocumentVisual;
 using NubArca.Api.Ai.Documents;
 using NubArca.Api.Assistant;
 using NubArca.Api.Cli;
@@ -61,6 +62,9 @@ public sealed class OwnerDocumentSearchTests : IAsyncLifetime
 
     private readonly List<string> _forbiddenStrings = new();
 
+    // Set by a test BEFORE BuildAsync to stand in for the visual pass.
+    private FakeVisualRetriever? _visual;
+
     public Task InitializeAsync() => Task.CompletedTask;
 
     public Task DisposeAsync()
@@ -88,8 +92,14 @@ public sealed class OwnerDocumentSearchTests : IAsyncLifetime
             ["Assistant:Models:private:Label"] = "Local Model",
         });
         _factory.ConfigureExtraServices = services =>
+        {
             services.AddHttpClient<IAssistantTextModel, OpenAiCompatibleTextModel>()
                 .ConfigurePrimaryHttpMessageHandler(() => _handler);
+            if (_visual is not null)
+            {
+                services.AddSingleton<IOwnerDocumentVisualRetriever>(_visual);
+            }
+        };
         _factory.EnsureDatabaseCreated();
 
         (_ownerA, _clientA) = await _factory.CreateAuthenticatedClientAsync("a@example.invalid");
@@ -437,6 +447,225 @@ public sealed class OwnerDocumentSearchTests : IAsyncLifetime
         Assert.Contains("expected_first_rank=1", text, StringComparison.Ordinal);
         Assert.DoesNotContain("SECRET", text, StringComparison.Ordinal);
         Assert.DoesNotContain(fileId.ToString(), text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---- visual-only matches: exploration, never evidence ---------------------
+
+    private const string ChartQuestion = "andamento dei consumi energetici trimestrali";
+
+    [Fact]
+    public async Task A_Page_That_Only_Looks_Like_The_Question_Is_Listed_Apart_With_Its_Page()
+    {
+        _visual = new FakeVisualRetriever();
+        await BuildAsync();
+        var chart = await AddVisualOnlyDocumentAsync(_ownerA, "consumi.pdf", page: 4);
+        _visual.Hits.Add(chart);
+
+        var (json, body) = await SearchAsync(_clientA, ChartQuestion);
+
+        // Nothing in the text says it, so there is no evidence and no document.
+        Assert.Equal("no_evidence", json.GetProperty("status").GetString());
+        Assert.Equal(0, json.GetProperty("documents").GetArrayLength());
+
+        var match = Assert.Single(json.GetProperty("visualMatches").EnumerateArray());
+        Assert.Equal("file", match.GetProperty("sourceKind").GetString());
+        Assert.Equal(chart.FileItemId, match.GetProperty("sourceId").GetGuid());
+        Assert.Equal("consumi.pdf", match.GetProperty("name").GetString());
+        Assert.Equal(1, match.GetProperty("rank").GetInt32());
+        Assert.Equal(4, match.GetProperty("page").GetInt32());
+        Assert.Equal("page", match.GetProperty("locator").GetProperty("kind").GetString());
+        Assert.Equal(4, match.GetProperty("locator").GetProperty("index").GetInt32());
+
+        // A place to look carries no text, no score and no internal id.
+        Assert.False(match.TryGetProperty("snippet", out _));
+        Assert.DoesNotContain("score", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(chart.VisualUnitId.ToString(), body, StringComparison.OrdinalIgnoreCase);
+        foreach (var forbidden in _forbiddenStrings)
+        {
+            Assert.DoesNotContain(forbidden, body, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task A_Document_With_Text_Evidence_Is_Not_Repeated_As_A_Visual_Match()
+    {
+        _visual = new FakeVisualRetriever();
+        await BuildAsync();
+        var manualPage = await AddVisualPageAsync(_manualA, page: 1);
+        var chart = await AddVisualOnlyDocumentAsync(_ownerA, "consumi.pdf", page: 4);
+        _visual.Hits.Add(manualPage);
+        _visual.Hits.Add(chart with { Rank = 2 });
+
+        var (json, _) = await SearchAsync(_clientA, Question);
+
+        Assert.Equal("ok", json.GetProperty("status").GetString());
+        Assert.Equal(_manualA, json.GetProperty("documents")[0].GetProperty("sourceId").GetGuid());
+        var match = Assert.Single(json.GetProperty("visualMatches").EnumerateArray());
+        Assert.Equal(chart.FileItemId, match.GetProperty("sourceId").GetGuid());
+    }
+
+    [Fact]
+    public async Task Visual_Matches_Are_Rejoined_Against_The_Live_Library()
+    {
+        _visual = new FakeVisualRetriever();
+        await BuildAsync();
+        // What a buggy or stale visual pass could name: another owner's page, a
+        // vaulted, a deleted, an excluded file, and pages of replaced bytes.
+        _visual.Hits.Add(await AddVisualPageAsync(_notesB, page: 1));
+        _visual.Hits.Add(await AddVisualPageAsync(_vaultA, page: 1));
+        _visual.Hits.Add(await AddVisualPageAsync(_deletedA, page: 1));
+        _visual.Hits.Add(await AddVisualPageAsync(_excludedA, page: 1));
+        var stale = await AddVisualOnlyDocumentAsync(_ownerA, "sostituito.pdf", page: 2);
+        _visual.Hits.Add(stale);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var file = await db.FileItems.SingleAsync(f => f.Id == stale.FileItemId);
+            file.BlobObjectId = AddBlob(db, Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N")).Id;
+            await db.SaveChangesAsync();
+        }
+
+        var (json, body) = await SearchAsync(_clientA, ChartQuestion);
+
+        Assert.Equal(0, json.GetProperty("visualMatches").GetArrayLength());
+        foreach (var id in new[] { _notesB, _vaultA, _deletedA, _excludedA, stale.FileItemId })
+        {
+            Assert.DoesNotContain(id.ToString(), body, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task Server_Side_Narrowing_Also_Narrows_Visual_Matches()
+    {
+        _visual = new FakeVisualRetriever();
+        await BuildAsync();
+        var chart = await AddVisualOnlyDocumentAsync(_ownerA, "consumi.pdf", page: 4);
+        _visual.Hits.Add(chart);
+        using var scope = _factory.Services.CreateScope();
+        var search = scope.ServiceProvider.GetRequiredService<OwnerDocumentSearchService>();
+
+        var narrowed = await search.SearchAsync(_ownerA, new OwnerDocumentSearchRequest(
+            ChartQuestion, AllowedSourceIds: new[] { _manualA }));
+        Assert.Empty(narrowed.VisualOnly);
+
+        var otherKind = await search.SearchAsync(_ownerA, new OwnerDocumentSearchRequest(
+            ChartQuestion, SourceKinds: new[] { "email" }));
+        Assert.Empty(otherKind.VisualOnly);
+
+        var own = await search.SearchAsync(_ownerA, new OwnerDocumentSearchRequest(
+            ChartQuestion, AllowedSourceIds: new[] { chart.FileItemId }));
+        Assert.Equal(chart.FileItemId, Assert.Single(own.VisualOnly).SourceId);
+    }
+
+    [Fact]
+    public async Task The_Chat_Gate_Does_Not_Move_For_A_Visual_Only_Match()
+    {
+        _visual = new FakeVisualRetriever();
+        await BuildAsync();
+        _visual.Hits.Add(await AddVisualOnlyDocumentAsync(_ownerA, "consumi.pdf", page: 4));
+
+        var response = await _clientA.PostAsJsonAsync(
+            "/api/assistant/documents/chat", new { message = ChartQuestion });
+        var body = await response.Content.ReadAsStringAsync();
+
+        // The same question that lists the page in search gets no answer, no
+        // citation and no model call: a right-looking page is not evidence.
+        Assert.False(JsonDocument.Parse(body).RootElement.GetProperty("ok").GetBoolean());
+        Assert.DoesNotContain("consumi.pdf", body, StringComparison.Ordinal);
+        Assert.Equal(0, _handler.Calls);
+    }
+
+    [Fact]
+    public void Cli_Prints_Visual_Matches_Without_Name_Or_Id()
+    {
+        var fileId = Guid.NewGuid();
+        var result = new OwnerDocumentSearchResult(
+            "no_evidence", null, "lexical", "dense-exact", false,
+            Array.Empty<OwnerDocumentSearchHit>(),
+            new[] { new OwnerDocumentVisualMatch("file", fileId, "SECRET_CHART.pdf", 1, 4, "page", 4, null) });
+
+        var output = new StringWriter();
+        DocumentsQueryCliCommand.Print(output, result, new[] { "SECRET_CHART.pdf" }, 12);
+        var text = output.ToString();
+
+        Assert.Contains("visual_matches=1", text, StringComparison.Ordinal);
+        Assert.Contains("visual rank=1 page=4 locator=page:4 expected=true", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("SECRET", text, StringComparison.Ordinal);
+        Assert.DoesNotContain(fileId.ToString(), text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// An eligible file of `owner` whose text says nothing about the chart
+    /// question, with one rendered page — the chart the question describes.
+    private async Task<DocumentVisualHit> AddVisualOnlyDocumentAsync(Guid owner, string name, int page)
+    {
+        Guid fileId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var profileId = await db.AiProfiles
+                .Where(p => p.Key == DocumentTextSources.NativeProfileKey).Select(p => p.Id).SingleAsync();
+            fileId = Indexed(db, profileId, owner, name, "Figura 1. Fonte: ufficio tecnico.").File;
+            await db.SaveChangesAsync();
+        }
+        return await AddVisualPageAsync(fileId, page);
+    }
+
+    private async Task<DocumentVisualHit> AddVisualPageAsync(Guid fileId, int page)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var file = await db.FileItems.IgnoreQueryFilters().SingleAsync(f => f.Id == fileId);
+        // Any real profile satisfies the key; the fake pass never reads vectors.
+        var profileId = await db.AiProfiles.Select(p => p.Id).FirstAsync();
+        var index = new DocumentVisualIndex
+        {
+            Id = Guid.NewGuid(),
+            FileItemId = file.Id,
+            OwnerUserId = file.OwnerUserId,
+            SourceBlobObjectId = file.BlobObjectId,
+            RenderProfileKey = "test-render",
+            EmbeddingProfileId = profileId,
+            Status = AiArtifactStatuses.Completed,
+            UnitCount = 1,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var unit = new DocumentVisualUnit
+        {
+            Id = Guid.NewGuid(),
+            DocumentVisualIndexId = index.Id,
+            Ordinal = page - 1,
+            RenderKind = "pdf-page",
+            SourcePage = page,
+            SourceLocatorKind = DocumentLocatorKinds.Page,
+            SourceLocatorIndex = page,
+            Width = 10,
+            Height = 10,
+            PixelHash = new string('c', 64),
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.DocumentVisualIndexes.Add(index);
+        db.DocumentVisualUnits.Add(unit);
+        await db.SaveChangesAsync();
+        return new DocumentVisualHit(file.Id, unit.Id, Rank: 1, Score: 0.9, DocumentVisualModes.DenseExact);
+    }
+
+    /// Stands in for the visual pass: returns exactly the hits a test placed,
+    /// so the search's own re-join is what is under test.
+    private sealed class FakeVisualRetriever : IOwnerDocumentVisualRetriever
+    {
+        public List<DocumentVisualHit> Hits { get; } = new();
+
+        public Task<DocumentVisualRetrievalResult> RetrieveAsync(
+            DocumentVisualQuery query, CancellationToken cancellationToken = default)
+        {
+            var hits = Hits.Select((h, i) => h with { Rank = i + 1 }).ToList();
+            return Task.FromResult(new DocumentVisualRetrievalResult(
+                hits, hits.Select(h => h.FileItemId).Distinct().ToList(),
+                DocumentVisualModes.DenseExact, "test-visual", null));
+        }
+
+        public Task<string?> CheckReadinessAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<string?>(null);
     }
 
     // ---- fixture ------------------------------------------------------------

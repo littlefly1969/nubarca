@@ -562,6 +562,20 @@ vaulted, a deleted and a library-excluded document with derived rows left in
 place, forged body fields, and a second owner holding identical bytes, each
 asserted absent from the complete response body.
 
+**Visual-only matches are exploration, not evidence.** A page made of a chart,
+a table or a diagram can look like the question while its text says little, so
+the evidence gate refuses it, correctly. Search lists such pages apart, in
+`visualMatches` (at most five, one per file, in visual rank order): `sourceKind`
+(always `file`), the caller's own `sourceId`, `name`, `rank`, `page` and the
+typed `locator` — no snippet, no score, no unit or index id. A file that already
+has a text hit is not repeated there. Each match is re-joined against the live
+library (owner, not deleted, not vaulted, not excluded) and against the file's
+CURRENT bytes, and the server-side narrowings apply to it as to text. The
+Assistant does not read `visualMatches`: the same question that lists a page
+here gets no answer, no citation and no model call in the chat. The page
+labels the section "pages that look like your search, whose text does not
+confirm it". Proved in `OwnerDocumentSearchTests` (visual-only section).
+
 `GET /api/assistant/documents/status` reports, besides the model boundary,
 `visualEnabled`/`visualReason`, an `indexing` block of counts
 (`candidateFiles`, `indexedFiles`, `notIndexedFiles`, `chunks`,
