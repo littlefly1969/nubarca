@@ -245,6 +245,10 @@ public sealed class MailArchiveImportTests : IDisposable
         Assert.Single(await Subjects("to=dario")); // Bcc counts as a recipient
         Assert.Equal(2, (await Subjects("subject=RELAZIONE")).Count);
         Assert.Single(await Subjects("q=日本語"));
+        // The body is searched too: its text, and embedded messages' text.
+        Assert.Equal(["Senza allegati — àèìòù 日本語"], await Subjects("q=solo%20TESTO"));
+        Assert.Equal(["Inoltro con messaggio incorporato"], await Subjects("q=testo%20originale"));
+        Assert.Empty(await Subjects("q=testo%20inesistente"));
         Assert.Equal(2, (await Subjects("after=2024-03-01T00:00:00Z&before=2024-03-03T00:00:00Z")).Count);
         Assert.Single(await Subjects("hasAttachments=false"));
 
@@ -307,6 +311,8 @@ public sealed class MailArchiveImportTests : IDisposable
 
         Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/mail/messages/{message.Id}")).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/mail/messages/{message.Id}")).StatusCode);
+        // Its searchable text leaves with it.
+        Assert.False(await InDbAsync(factory, db => db.MailMessageTexts.AnyAsync(t => t.MessageId == message.Id)));
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/mail/messages/{message.Id}")).StatusCode);
         Assert.DoesNotContain((await GetAsync<MailMessagePage>(client, $"/api/mail/messages?archiveId={archive.Id}")).Items,
             m => m.Id == message.Id);

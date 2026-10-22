@@ -250,6 +250,25 @@ public class MailAttachmentConfiguration : IEntityTypeConfiguration<MailAttachme
     }
 }
 
+public class MailMessageTextConfiguration : IEntityTypeConfiguration<MailMessageText>
+{
+    public void Configure(EntityTypeBuilder<MailMessageText> builder)
+    {
+        builder.ToTable("mail_message_texts");
+        builder.HasKey(t => t.MessageId);
+        builder.Property(t => t.MessageId).ValueGeneratedNever();
+        builder.Property(t => t.Text).IsRequired().HasMaxLength(MailMessageText.MaxChars);
+        builder.Property(t => t.SortDate).HasColumnType("timestamp with time zone");
+        // Full-text search: the migration adds a GIN index on
+        // to_tsvector('simple', "Text") (an expression index EF cannot model),
+        // which MailMessageQueryService's tsquery predicate uses.
+        builder.HasOne<MailMessage>()
+            .WithOne()
+            .HasForeignKey<MailMessageText>(t => t.MessageId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
 public class MailDeletionTombstoneConfiguration : IEntityTypeConfiguration<MailDeletionTombstone>
 {
     public void Configure(EntityTypeBuilder<MailDeletionTombstone> builder)

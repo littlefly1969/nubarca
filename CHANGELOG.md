@@ -13,9 +13,9 @@ originating repository and is deliberately not reproduced here.
   failures, can be stopped and resumed, and never imports a message twice.
 - **Read your mail** in the mail view (folder tree, message list, reader) or
   as documents, and **search** by sender, recipient, subject, dates and
-  attachments (the quick search covers subject, sender and recipients; the
-  message body is not searched yet). HTML mail is cleaned and shown without
-  scripts or remote images.
+  attachments. The quick search also looks in the message text, including
+  forwarded messages, by word beginnings («fattur» finds «fatture»). HTML
+  mail is cleaned and shown without scripts or remote images.
 - **Attachments become normal files** under `Posta/<archivio>/…` in Files,
   with the usual dedup. A file opened from Files shows the email it came
   from.

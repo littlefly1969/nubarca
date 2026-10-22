@@ -132,6 +132,48 @@ public static partial class MailHtmlSanitizer
         return output.ToString();
     }
 
+    // The text an HTML body shows, for the search index only: the same
+    // tokenizer, elements dropped with their content skipped, every tag a
+    // word boundary, character references decoded.
+    public static string ToText(string html)
+    {
+        var output = new StringBuilder(html.Length / 2);
+        var tokenizer = new HtmlTokenizer(new StringReader(html)) { DecodeCharacterReferences = true };
+        var skipping = new Stack<string>();
+        while (tokenizer.ReadNextToken(out var token))
+        {
+            switch (token)
+            {
+                case HtmlTagToken tag:
+                    var name = tag.Name.ToLowerInvariant();
+                    if (skipping.Count > 0)
+                    {
+                        if (tag.IsEndTag && skipping.Peek() == name)
+                        {
+                            skipping.Pop();
+                        }
+                        else if (!tag.IsEndTag && !tag.IsEmptyElement && DroppedWithContent.Contains(name))
+                        {
+                            skipping.Push(name);
+                        }
+                    }
+                    else if (!tag.IsEndTag && !tag.IsEmptyElement && DroppedWithContent.Contains(name))
+                    {
+                        skipping.Push(name);
+                    }
+                    output.Append(' ');
+                    break;
+                case HtmlDataToken data when token is not HtmlScriptDataToken:
+                    if (skipping.Count == 0)
+                    {
+                        output.Append(data.Data);
+                    }
+                    break;
+            }
+        }
+        return output.ToString();
+    }
+
     private static void WriteStartTag(StringBuilder output, string name, HtmlTagToken tag, Func<string, string?> resolveCid)
     {
         output.Append('<').Append(name);

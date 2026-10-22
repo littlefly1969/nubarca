@@ -4503,7 +4503,7 @@ const de: Partial<Record<MessageKey, string>> = {
   'mail.list.hasAttachments': 'Mit Anhängen',
   'mail.search.label': 'E-Mail-Suche',
   'mail.search.q': 'E-Mails durchsuchen',
-  'mail.search.qPlaceholder': 'Nach Betreff, Absender oder Empfängern suchen',
+  'mail.search.qPlaceholder': 'Nach Betreff, Absender, Empfängern oder Text suchen',
   'mail.search.advanced': 'Erweiterte Suche',
   'mail.search.clear': 'Suche zurücksetzen',
   'mail.search.from': 'Von (Absender)',

@@ -88,6 +88,10 @@ public sealed class MailMessageDeletionService
                     .SetProperty(i => i.MessageId, (Guid?)null)
                     .SetProperty(i => i.UpdatedAt, now), cancellationToken);
 
+            await _db.MailMessageTexts
+                .Where(t => t.MessageId == message.Id)
+                .ExecuteDeleteAsync(cancellationToken);
+
             var blobId = message.BlobObjectId;
             _db.MailMessages.Remove(message);
             await _db.SaveChangesAsync(cancellationToken);

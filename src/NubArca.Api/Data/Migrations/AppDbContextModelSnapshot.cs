@@ -4189,6 +4189,27 @@ namespace NubArca.Api.Data.Migrations
                     b.ToTable("mail_messages", (string)null);
                 });
 
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailMessageText", b =>
+                {
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("SortDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(100000)
+                        .HasColumnType("character varying(100000)");
+
+                    b.HasKey("MessageId");
+
+                    b.ToTable("mail_message_texts", (string)null);
+                });
+
             modelBuilder.Entity("NubArca.Api.Domain.MediaDuplicateCleanupRun", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9295,6 +9316,15 @@ namespace NubArca.Api.Data.Migrations
                         .WithMany()
                         .HasForeignKey("FolderId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Mail.MailMessageText", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.Mail.MailMessage", null)
+                        .WithOne()
+                        .HasForeignKey("NubArca.Api.Domain.Mail.MailMessageText", "MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

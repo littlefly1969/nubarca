@@ -4849,7 +4849,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'mail.list.hasAttachments': 'With attachments',
   'mail.search.label': 'Mail search',
   'mail.search.q': 'Search mail',
-  'mail.search.qPlaceholder': 'Search by subject, sender or recipients',
+  'mail.search.qPlaceholder': 'Search by subject, sender, recipients or text',
   'mail.search.advanced': 'Advanced search',
   'mail.search.clear': 'Clear search',
   'mail.search.from': 'From (sender)',

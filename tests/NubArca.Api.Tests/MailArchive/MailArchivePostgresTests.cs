@@ -228,7 +228,7 @@ public sealed class MailArchivePostgresTests : IAsyncLifetime
     }
 
     [SkippableFact]
-    public async Task Search_on_postgres_uses_the_trigram_indexes_and_stays_owner_scoped()
+    public async Task Search_on_postgres_uses_the_trigram_and_full_text_indexes_and_stays_owner_scoped()
     {
         Skip.IfNot(_fixture.Available, "Docker is not available; integration test skipped.");
         var (factory, baseFactory) = NewFactory(FakePstEngine.Sample());
@@ -259,7 +259,13 @@ public sealed class MailArchivePostgresTests : IAsyncLifetime
                         LATERAL (SELECT * FROM mail_messages WHERE "ArchiveId" = {a} AND "OwnerUserId" = {o} LIMIT 1) m
                     """);
             }
-            await db.Database.ExecuteSqlRawAsync("ANALYZE mail_messages;");
+            await db.Database.ExecuteSqlRawAsync("""
+                INSERT INTO mail_message_texts ("MessageId", "OwnerUserId", "SortDate", "Text")
+                SELECT "Id", "OwnerUserId", "SortDate", 'testo del messaggio ' || "SourceMessageKey" || ' ' || md5("Id"::text)
+                    || ' saluti cordiali'
+                FROM mail_messages WHERE "SourceMessageKey" LIKE 'm:seed%';
+                """);
+            await db.Database.ExecuteSqlRawAsync("ANALYZE mail_messages; ANALYZE mail_message_texts;");
         }
 
         var cases = new (string Label, MailMessageQuery Query, string Index)[]
@@ -268,6 +274,9 @@ public sealed class MailArchivePostgresTests : IAsyncLifetime
             ("from", new MailMessageQuery(null, null, null, "carla@example", null, null, null, null, null, null, 50), "ix_mail_messages_search_from_trgm"),
             ("to", new MailMessageQuery(null, null, null, null, "bob@example", null, null, null, null, null, 50), "ix_mail_messages_search_recipients_trgm"),
             ("q", new MailMessageQuery(null, null, "relazione", null, null, null, null, null, null, null, 50), "ix_mail_messages_search_subject_trgm"),
+            // A word of the sample's body only ("Testo originale", embedded),
+            // by prefix: through the full-text index.
+            ("q body", new MailMessageQuery(null, null, "origin", null, null, null, null, null, null, null, 50), "ix_mail_message_texts_fts"),
         };
         foreach (var (label, query, index) in cases)
         {
@@ -286,6 +295,7 @@ public sealed class MailArchivePostgresTests : IAsyncLifetime
             _output.WriteLine($"[{label}] {stopwatch.ElapsedMilliseconds} ms over {2 * seeded + 8} rows\n{plan}");
             Assert.Contains(index, plan);
             Assert.DoesNotContain("Seq Scan on mail_messages", plan);
+            Assert.DoesNotContain("Seq Scan on mail_message_texts", plan);
         }
     }
 

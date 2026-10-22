@@ -306,6 +306,7 @@ public class AppDbContext : DbContext
     public DbSet<Domain.Mail.MailFolder> MailFolders => Set<Domain.Mail.MailFolder>();
     public DbSet<Domain.Mail.MailMessage> MailMessages => Set<Domain.Mail.MailMessage>();
     public DbSet<Domain.Mail.MailAttachment> MailAttachments => Set<Domain.Mail.MailAttachment>();
+    public DbSet<Domain.Mail.MailMessageText> MailMessageTexts => Set<Domain.Mail.MailMessageText>();
     public DbSet<Domain.Mail.MailDeletionTombstone> MailDeletionTombstones => Set<Domain.Mail.MailDeletionTombstone>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

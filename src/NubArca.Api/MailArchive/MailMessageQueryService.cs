@@ -82,11 +82,6 @@ public sealed class MailMessageQueryService
         {
             messages = messages.Where(m => m.SearchRecipients.Contains(to));
         }
-        if (Term(query.Q) is { } q)
-        {
-            messages = messages.Where(m => m.SearchSubject.Contains(q)
-                || m.SearchFrom.Contains(q) || m.SearchRecipients.Contains(q));
-        }
         if (query.After is DateTime after)
         {
             var a = DateTime.SpecifyKind(after, DateTimeKind.Utc);
@@ -111,11 +106,36 @@ public sealed class MailMessageQueryService
                 || (m.SortDate == cursorDate && m.Id.CompareTo(cursorId) < 0));
         }
 
-        return messages
-            .OrderByDescending(m => m.SortDate)
-            .ThenByDescending(m => m.Id)
-            .Take(limit + 1);
+        if (Term(query.Q) is { } q)
+        {
+            // Two pages, merged: the header matches (trigram indexes) and the
+            // body matches (full-text index), each its own top-N, so neither
+            // search has to filter every message of the owner.
+            var header = Newest(messages.Where(m => m.SearchSubject.Contains(q)
+                || m.SearchFrom.Contains(q) || m.SearchRecipients.Contains(q)), limit);
+            if (BodyMatches(owner, q) is { } texts)
+            {
+                // Ordered by the text row's own copy of the date: no index
+                // yields that order, so PostgreSQL takes every match from the
+                // full-text index and sorts them, instead of walking the
+                // owner's messages by date and testing each one's text.
+                var body = texts
+                    .Join(messages, t => t.MessageId, m => m.Id, (t, m) => new { t.SortDate, t.MessageId, Message = m })
+                    .OrderByDescending(x => x.SortDate)
+                    .ThenByDescending(x => x.MessageId)
+                    .Take(limit + 1)
+                    .Select(x => x.Message);
+                return Newest(header.Union(body), limit);
+            }
+            return header;
+        }
+        return Newest(messages, limit);
     }
+
+    private static IQueryable<MailMessage> Newest(IQueryable<MailMessage> messages, int limit) => messages
+        .OrderByDescending(m => m.SortDate)
+        .ThenByDescending(m => m.Id)
+        .Take(limit + 1);
 
     public async Task<MailMessageDetailDto?> GetAsync(Guid owner, Guid messageId, CancellationToken cancellationToken)
     {
@@ -286,6 +306,55 @@ public sealed class MailMessageQueryService
     }
 
     private static string NormalizeCid(string cid) => cid.Trim().Trim('<', '>');
+
+    // The owner's messages whose text holds every word of the term: on
+    // PostgreSQL as word prefixes, through the full-text GIN index on
+    // to_tsvector('simple', "Text") ("fattur" finds "fatture"); elsewhere as
+    // substrings. Null when the term has no word of two characters or more.
+    private IQueryable<MailMessageText>? BodyMatches(Guid owner, string term)
+    {
+        var words = Words(term);
+        if (words.Count == 0)
+        {
+            return null;
+        }
+        var texts = _db.MailMessageTexts.AsNoTracking().Where(t => t.OwnerUserId == owner);
+        if (_db.Database.IsNpgsql())
+        {
+            // Letters and digits only, so nothing in it is tsquery syntax.
+            var tsQuery = string.Join(" & ", words.Select(w => w + ":*"));
+            texts = texts.Where(t => EF.Functions.ToTsVector("simple", t.Text)
+                .Matches(EF.Functions.ToTsQuery("simple", tsQuery)));
+        }
+        else
+        {
+            foreach (var word in words)
+            {
+                texts = texts.Where(t => t.Text.Contains(word));
+            }
+        }
+        return texts;
+    }
+
+    internal static List<string> Words(string term)
+    {
+        var words = new List<string>();
+        var current = new StringBuilder();
+        foreach (var ch in term + " ")
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                current.Append(char.ToLowerInvariant(ch));
+                continue;
+            }
+            if (current.Length >= 2 && current.Length <= 64 && !words.Contains(current.ToString()))
+            {
+                words.Add(current.ToString());
+            }
+            current.Clear();
+        }
+        return words.Take(8).ToList();
+    }
 
     private static string? Term(string? raw)
     {

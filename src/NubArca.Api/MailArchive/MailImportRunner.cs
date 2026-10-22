@@ -545,7 +545,7 @@ public sealed class MailImportRunner
                     FolderId = folder.Id,
                 };
                 MailMessageProjection.Apply(pending, document, documentBytes.Length, Now);
-                state.Pending.Add((item, pending, documentBytes));
+                state.Pending.Add((item, pending, documentBytes, MailMessageTextBuilder.Build(document)));
                 state.PendingBytes += documentBytes.Length;
                 return;
             }
@@ -579,7 +579,7 @@ public sealed class MailImportRunner
                 return;
             }
 
-            await CompleteMessageAsync(message, item, state.Run, documentBytes, cancellationToken);
+            await CompleteMessageAsync(message, item, state.Run, documentBytes, MailMessageTextBuilder.Build(document), cancellationToken);
             state.Imported++;
             await ScheduleAsync(archive.OwnerUserId, createdFiles, cancellationToken);
         }
@@ -821,8 +821,13 @@ public sealed class MailImportRunner
     // The document blob and the "complete" state commit together: until then
     // the message is invisible, after it the reference is owned by the row.
     private async Task CompleteMessageAsync(
-        MailMessage message, MailImportItem item, MailImportRun run, byte[] documentBytes, CancellationToken cancellationToken)
+        MailMessage message, MailImportItem item, MailImportRun run, byte[] documentBytes, string text,
+        CancellationToken cancellationToken)
     {
+        var textRow = new MailMessageText
+        {
+            MessageId = message.Id, OwnerUserId = message.OwnerUserId, SortDate = message.SortDate, Text = text,
+        };
         var strategy = _db.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
         {
@@ -850,6 +855,12 @@ public sealed class MailImportRunner
                     .SetProperty(i => i.FailureCode, (string?)null)
                     .SetProperty(i => i.FailureMessage, (string?)null)
                     .SetProperty(i => i.UpdatedAt, now), cancellationToken);
+            // The searchable text becomes visible with the message, never before.
+            if (_db.Entry(textRow).State == EntityState.Detached)
+            {
+                _db.MailMessageTexts.Add(textRow);
+            }
+            await _db.SaveChangesAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
         });
         message.Status = MailMessageStatuses.Complete;
@@ -872,7 +883,7 @@ public sealed class MailImportRunner
         {
             await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
             var now = Now;
-            foreach (var (item, message, bytes) in state.Pending)
+            foreach (var (item, message, bytes, text) in state.Pending)
             {
                 await using var content = new MemoryStream(bytes, writable: false);
                 var blob = await _blobs.StoreAsync(content, cancellationToken);
@@ -882,6 +893,10 @@ public sealed class MailImportRunner
                 if (_db.Entry(message).State == EntityState.Detached)
                 {
                     _db.MailMessages.Add(message);
+                    _db.MailMessageTexts.Add(new MailMessageText
+                    {
+                        MessageId = message.Id, OwnerUserId = message.OwnerUserId, SortDate = message.SortDate, Text = text,
+                    });
                 }
                 item.Status = MailImportItemStatuses.Imported;
                 item.MessageId = message.Id;
@@ -1064,7 +1079,7 @@ public sealed class MailImportRunner
         public Dictionary<string, MailFolder> Folders { get; } = folders;
         public Dictionary<Guid, Guid?> AttachmentFolders { get; } = new();
         public IPstExtractionSession? Session { get; set; }
-        public List<(MailImportItem Item, MailMessage Message, byte[] Bytes)> Pending { get; } = [];
+        public List<(MailImportItem Item, MailMessage Message, byte[] Bytes, string Text)> Pending { get; } = [];
         public long PendingBytes { get; set; }
         public int Imported { get; set; }
         public int Failed { get; set; }

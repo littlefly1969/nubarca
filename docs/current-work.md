@@ -336,8 +336,11 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   errors is never final (only an error-free scan sets `ScanCompletedAt`), and
   the PST engine always confines itself (empty environment, unprivileged
   uid, Landlock, seccomp, rlimits): do not pass it the worker's environment
-  or skip the sandbox to "fix" an import. See
-  `docs/mailarchive/operations.md`.
+  or skip the sandbox to "fix" an import. Body search reads
+  `mail_message_texts` (derived text, written in the message's completing
+  transaction, never returned); its query orders by the text row's own
+  `SortDate` on purpose, so PostgreSQL uses the full-text index instead of
+  walking the owner's mail by date. See `docs/mailarchive/operations.md`.
 - **The Party workspace is SEVEN sections, and the same seven in every phase.**
   Riepilogo, Esperienza, Ospiti, Foto, Attività, Schermi e stampa,
   Impostazioni — plus Live, the one section that appears while the party is

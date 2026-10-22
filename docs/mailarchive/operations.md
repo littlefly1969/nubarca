@@ -167,18 +167,46 @@ and writing files, memory management). That boundary is the kernel's.
 
 ## Search
 
-The quick search (`q`) and the field filters look in the subject, the sender
-and the recipients (To/Cc/Bcc, name and address); the message **body is not
-searched** yet. Matching is a case-insensitive substring. On PostgreSQL each of
-the three columns has a trigram GIN index (`pg_trgm`, created by the
-`AddMailArchive` migration; a trusted extension, no superuser needed), and the
-owner filter is applied in the same query. Measured on PostgreSQL 16 with
-100,000 messages over two owners: every case is a Bitmap Index Scan on the
-trigram index (a BitmapOr of the three for `q`), 4–8 ms execution, 16–23 ms
-end to end through EF; no sequential scan
-(`MailArchivePostgresTests.Search_on_postgres_uses_the_trigram_indexes_and_stays_owner_scoped`).
-Terms shorter than three characters cannot use a trigram index and scan the
-owner's messages.
+The field filters (`from`, `to`, `subject`) look in the sender, the
+recipients (To/Cc/Bcc, name and address) and the subject as a
+case-insensitive substring. On PostgreSQL each of the three columns has a
+trigram GIN index (`pg_trgm`, created by the `AddMailArchive` migration; a
+trusted extension, no superuser needed), and the owner filter is applied in
+the same query. Terms shorter than three characters cannot use a trigram
+index and scan the owner's messages.
+
+The quick search (`q`) matches those three fields as above **or** the message
+text. The text (`mail_message_texts`, one row per message, written in the
+same transaction that completes it and deleted with it) is the plain-text
+body, or the visible text of the HTML body when there is none, followed by
+the subject and text of every embedded (forwarded) message; lower-cased,
+whitespace-collapsed, capped at 100,000 characters. RTF-only bodies are not
+converted. It is derived from the message's document and only ever searched,
+never returned. The text matches when it holds every word of the term (letters
+and digits, two characters or more, at most eight words) as a word prefix:
+PostgreSQL full-text search with the `simple` configuration (no stemming, no
+stop words, accents significant: «perche» does not find «perché»), through the
+GIN expression index `ix_mail_message_texts_fts` on
+`to_tsvector('simple', "Text")` created by `AddMailMessageTexts`. The header
+and body matches are two separate top-N queries merged by date, and the body
+side is ordered by the text row's own copy of the date, so PostgreSQL always
+takes the matches from the full-text index instead of walking the owner's
+mail by date and testing each text.
+
+Measured on PostgreSQL 16 with 100,000 messages (and their texts) over two
+owners: the field filters are a Bitmap Index Scan on their trigram index,
+1–8 ms execution; `q` is a BitmapOr of the three trigram indexes plus a
+Bitmap Index Scan on the full-text index, 6–16 ms execution, 20–65 ms end to
+end through EF; no sequential scan of either table
+(`MailArchivePostgresTests.Search_on_postgres_uses_the_trigram_and_full_text_indexes_and_stays_owner_scoped`).
+A very common word prefix (one that most messages contain) makes the body side
+sort every match; that is the cost of correct date order and stays linear in
+the number of matches.
+
+Messages imported by a build without `mail_message_texts` have no text row
+and are found by their header fields only; importing the same PST again does
+not add it (the messages are already present). A text backfill is not part of
+this release.
 
 ## Measured performance (engine, release build, 4-core Xeon 2.8 GHz)
 
@@ -190,12 +218,26 @@ owner's messages.
 
 End to end through the API, job and storage (real binary, SQLite test host,
 same machine): 2,000 messages in 53 folders with 200 attachments imported in
-27 s, about 74 messages/s. The cost is the per-message transaction and
-document blob, not the engine; expect roughly 20–25 minutes per 100,000
-messages before PostgreSQL tuning.
+27 s, about 74 messages/s.
+
+On PostgreSQL 16 (Testcontainers, same machine; real binary; generated PSTs
+with 10% of messages carrying an attachment; opt-in test
+`MailArchivePostgresTests.Volume_import_end_to_end_on_postgres` with
+`NUBARCA_MAIL_VOLUME_PST`): 1,000 messages at 68 msg/s and 5,000 at 75–94
+msg/s, against 39–40 msg/s before batching; roughly 18–25 minutes per 100,000
+messages. Items are processed in groups of up to 25 (never past the job
+slice's item budget): one round trip marks the group importing, and its
+messages without attachments complete together in one transaction (their
+document blobs, rows, texts and manifest items); the checkpoint only moves
+past committed groups, so a crash redoes the group with no duplicate. A
+message with attachments still commits on its own after its files. What
+remains is the per-blob cost of the content-addressed store (a shared storage
+lock, the reference-count update and the row, about 7 ms per document) and
+the attachment files' own ingestion; going further needs a batched blob API in
+the core storage, which this feature does not change.
 
 Attachment bytes are streamed block by block, so engine memory does not grow
-with attachment size. The .NET side processes one message at a time.
+with attachment size.
 
 Attachment names: a clash in the target folder costs at most two indexed
 lookups (the original name, then the source-derived name), independent of how

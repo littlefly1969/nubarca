@@ -325,7 +325,7 @@ type MailFileOrigin = { messageId: string; archiveId: string; archiveName: strin
 | `GET /api/mail/runs/{id}` | `MailRun` |
 | `GET /api/mail/runs/{id}/failures?cursor=` | `{ items: [{ folderPath: string[]; position: number; code: string; message: string | null }], nextCursor }` |
 | `POST /api/mail/runs/{id}/cancel` | `202 MailRun`; `409 not_active` |
-| `GET /api/mail/messages` | `MailMessagePage`. Query: `archiveId`, `folderId`, `q` (subject, sender or any recipient — the body is not searched yet), `from`, `to` (any recipient), `subject`, `after`, `before` (ISO dates, inclusive/exclusive), `hasAttachments`, `cursor`, `limit` (1–100, default 50). Order: date desc, then id. Keyset cursor (opaque). |
+| `GET /api/mail/messages` | `MailMessagePage`. Query: `archiveId`, `folderId`, `q` (subject, sender or any recipient as a substring, or every word of it in the message text as a word prefix — see operations.md §Search), `from`, `to` (any recipient), `subject`, `after`, `before` (ISO dates, inclusive/exclusive), `hasAttachments`, `cursor`, `limit` (1–100, default 50). Order: date desc, then id. Keyset cursor (opaque). |
 | `GET /api/mail/messages/{id}` | `MailMessageDetail` |
 | `DELETE /api/mail/messages/{id}` | `204` (also when already deleted by this owner) |
 | `GET /api/mail/file-origins/{fileItemId}` | `{ items: MailFileOrigin[] }` (empty when the file has no live origin) |

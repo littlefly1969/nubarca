@@ -4895,7 +4895,7 @@ const it = {
   'mail.list.hasAttachments': 'Con allegati',
   'mail.search.label': 'Ricerca nella posta',
   'mail.search.q': 'Cerca nella posta',
-  'mail.search.qPlaceholder': 'Cerca per oggetto, mittente o destinatari',
+  'mail.search.qPlaceholder': 'Cerca per oggetto, mittente, destinatari o testo',
   'mail.search.advanced': 'Ricerca avanzata',
   'mail.search.clear': 'Azzera la ricerca',
   'mail.search.from': 'Da (mittente)',

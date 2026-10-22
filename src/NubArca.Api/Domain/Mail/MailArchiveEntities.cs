@@ -228,6 +228,26 @@ public class MailMessage
     public DateTime? ImportedAt { get; set; }
 }
 
+/// <summary>
+/// The searchable text of one message: its body (plain text, or the HTML
+/// body's text) and the subjects and bodies of the messages embedded in it,
+/// lower-cased, whitespace-collapsed and capped. Derived from the document
+/// blob and written with the message's completion; it is search data only,
+/// never shown, and leaves with the message.
+/// </summary>
+public class MailMessageText
+{
+    // Well inside PostgreSQL's 1 MB tsvector limit.
+    public const int MaxChars = 100_000;
+
+    public Guid MessageId { get; set; }
+    public Guid OwnerUserId { get; set; }
+    // The message's SortDate (immutable, like the message): body search
+    // orders its matches by it without touching mail_messages.
+    public DateTime SortDate { get; set; }
+    public string Text { get; set; } = string.Empty;
+}
+
 public static class MailMessageStatuses
 {
     public const string Importing = "importing";

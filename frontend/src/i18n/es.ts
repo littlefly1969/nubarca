@@ -4503,7 +4503,7 @@ const es: Partial<Record<MessageKey, string>> = {
   'mail.list.hasAttachments': 'Con adjuntos',
   'mail.search.label': 'Búsqueda en el correo',
   'mail.search.q': 'Buscar en el correo',
-  'mail.search.qPlaceholder': 'Buscar por asunto, remitente o destinatarios',
+  'mail.search.qPlaceholder': 'Buscar por asunto, remitente, destinatarios o texto',
   'mail.search.advanced': 'Búsqueda avanzada',
   'mail.search.clear': 'Borrar la búsqueda',
   'mail.search.from': 'De (remitente)',
