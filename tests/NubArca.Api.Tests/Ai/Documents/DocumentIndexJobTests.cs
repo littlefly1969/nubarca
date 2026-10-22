@@ -739,7 +739,8 @@ public sealed class DocumentIndexJobTests
         public string Kind => KindName;
 
         public IQueryable<EligibleSourceRow> Eligible(AppDbContext db, Guid ownerUserId)
-            => db.Users.Where(_ => false).Select(u => new EligibleSourceRow { SourceId = u.Id });
+            => db.Users.Where(_ => false)
+                .Select(u => new EligibleSourceRow { SourceId = u.Id, OwnerUserId = u.Id, DisplayName = u.DisplayName });
 
         public Task<IReadOnlyList<DocumentSourceCandidate>> ListCandidatesAsync(
             Guid ownerUserId, Guid? afterSourceId, int take, CancellationToken cancellationToken = default)
@@ -772,7 +773,8 @@ public sealed class DocumentIndexJobTests
         public string Kind => KindName;
 
         public IQueryable<EligibleSourceRow> Eligible(AppDbContext db, Guid ownerUserId)
-            => db.Users.Where(_ => false).Select(u => new EligibleSourceRow { SourceId = u.Id });
+            => db.Users.Where(_ => false)
+                .Select(u => new EligibleSourceRow { SourceId = u.Id, OwnerUserId = u.Id, DisplayName = u.DisplayName });
 
         public Task<IReadOnlyList<DocumentSourceCandidate>> ListCandidatesAsync(
             Guid ownerUserId, Guid? afterSourceId, int take, CancellationToken cancellationToken = default)

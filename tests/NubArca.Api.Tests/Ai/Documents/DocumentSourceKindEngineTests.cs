@@ -514,7 +514,8 @@ public sealed class DocumentSourceKindEngineTests : IAsyncLifetime
                     .Select(u => new EligibleSourceRow { SourceId = e.Id, OwnerUserId = u.Id, DisplayName = e.Name });
                 union = union is null ? branch : union.Concat(branch);
             }
-            return union ?? db.Users.Where(_ => false).Select(u => new EligibleSourceRow { SourceId = u.Id });
+            return union ?? db.Users.Where(_ => false)
+                .Select(u => new EligibleSourceRow { SourceId = u.Id, OwnerUserId = u.Id, DisplayName = u.DisplayName });
         }
 
         private IEnumerable<Entry> LiveFor(Guid owner) => _entries.Where(e => e.Owner == owner && e.Live);

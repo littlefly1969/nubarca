@@ -103,8 +103,11 @@ public interface IOwnerDocumentSourceEligibility
     /// This owner's sources of this kind that may be knowledge RIGHT NOW,
     /// recomputed from the kind's live rows on every call. Composable: the
     /// engine joins it inside its own query (never materialized), so it must
-    /// be translatable by EF for every supported provider. `SourceKind` may be
-    /// left empty — the engine stamps the discriminator itself.
+    /// be translatable by EF for every supported provider, and it must END in
+    /// one `new EligibleSourceRow { SourceId, OwnerUserId, DisplayName }`
+    /// projection that sets all three (the engine composes over those members
+    /// and unions the kinds; a member left out cannot be translated).
+    /// `SourceKind` is left unset — the engine stamps the discriminator itself.
     ///
     /// Owner-prefiltered by contract, and the engine re-checks the returned
     /// `OwnerUserId` against the asking owner anyway, so a kind that forgot
