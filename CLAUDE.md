@@ -184,6 +184,25 @@ hostname, a `NUBARCA_*` variable that falls back to a path or URL, and `cd` into
 a host checkout directory are all contract failures. Run
 `scripts/check-nubarca-identity.sh --self-test` to see the exact boundaries.
 
+## Release version
+
+Every merge into `main` is a release (`.github/workflows/release.yml`), so
+**every pull request into `main` raises the release version**:
+
+- a normal change raises the patch: `0.4.0` → `0.4.1` → `0.4.2`;
+- the minor goes up (`0.4.x` → `0.5.0`) only when the owner names a more
+  important release; never decide that on your own.
+
+Change it in `src/NubArca.Api/NubArca.Api.csproj` `<Version>`,
+`frontend/package.json` and the root of `frontend/package-lock.json`, and give
+it its own `## X.Y.Z — date` section at the top of `CHANGELOG.md`. The identity
+contract keeps backend, frontend and changelog on one version; CI's
+`scripts/check-release-version.py` refuses a PR into `main` whose version is not
+above `main`'s tip. When another PR merged first with the same number, raise it
+again. A stacked PR into another branch bumps only once, in the PR that reaches
+`main`. The NubArca TV version (`tv/`, native release contract) is separate and
+follows `docs/tv-release.md`.
+
 ## Validation commands
 
 Identity:
