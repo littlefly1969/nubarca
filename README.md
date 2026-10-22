@@ -2,7 +2,7 @@
 
 > **Your files. Your hardware. A modern private cloud.**
 
-**NubArca 0.4.0** is a self-hosted, local-first personal cloud for secure file storage and rich photo/video management. It combines immutable content-addressed storage, exact deduplication, resilient background processing and optional locally hosted AI — without turning your server into an oversized collaboration suite.
+**NubArca 0.4** is a self-hosted, local-first personal cloud for secure file storage and rich photo/video management. It combines immutable content-addressed storage, exact deduplication, resilient background processing and optional locally hosted AI — without turning your server into an oversized collaboration suite.
 
 NubArca is designed for a **single operator and their users**, running on one small server through Docker Compose.
 
@@ -18,7 +18,7 @@ NubArca is designed for a **single operator and their users**, running on one sm
 - **Cast a video to the television** — Chrome on a desktop or on Android can send a video to a Chromecast, a Google TV or any certified Google Cast receiver, and stays a real remote control while it plays. The receiver never holds a NubArca session: it is handed a short-lived, single-video capability whose permission, account and file are re-checked on every request. See [Google Cast](docs/google-cast.md).
 - **Print without exposing an owner session** — the server renders bounded 10×15 artifacts and a separately packaged headless Windows Print Agent or Linux fake simulator delivers them through a station-scoped credential. Enrollment is one-shot and ambiguous outcomes are never auto-reprinted. See [Print Agent](docs/print-agent.md).
 
-## Current state — 0.4.0
+## Current state — 0.4
 
 The core product is implemented and usable for controlled self-hosted deployments:
 
@@ -77,4 +77,4 @@ To run NubArca, start with the production runbook:
 
 ---
 
-**NubArca 0.4.0** focuses on a clear promise: private ownership of your files, resilient storage mechanics and a media experience that feels modern — all on infrastructure you control.
+**NubArca 0.4** focuses on a clear promise: private ownership of your files, resilient storage mechanics and a media experience that feels modern — all on infrastructure you control.

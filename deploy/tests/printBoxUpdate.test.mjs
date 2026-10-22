@@ -117,8 +117,10 @@ with zipfile.ZipFile(out, "w") as z:
   return { root, state, env };
 }
 
-const installed = (root) => spawnSync(join(root, 'opt/nubarca-print-agent/NubArca.PrintAgent'), ['version'],
-  { encoding: 'utf8' }).stdout.trim();
+// During the swap the agent directory is briefly absent: spawnSync then has no stdout, which reads as
+// "nothing installed" instead of throwing in the middle of a poll.
+const installed = (root) => (spawnSync(join(root, 'opt/nubarca-print-agent/NubArca.PrintAgent'), ['version'],
+  { encoding: 'utf8' }).stdout ?? '').trim();
 const result = (state) => readFileSync(join(state, 'update-result'), 'utf8').trim();
 
 function assertFinished(root, state) {
