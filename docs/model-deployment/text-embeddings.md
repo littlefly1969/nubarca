@@ -245,8 +245,12 @@ Rag__Domains__user-documents__SemanticEnabled=true
 Rag__Domains__user-documents__TextEmbeddingProfileKey=rag-text-qwen3-embedding-0.6b-768-v1
 ```
 
-- The tracked production Compose files do **not** forward `Rag__*` keys. Set
-  them through the installation's local override.
+- `docker-compose.prod.yml` forwards these two keys to api and worker. In the
+  production `.env`, write the variable with `user_documents`, because a
+  hyphen cannot appear in a Compose interpolation name:
+  `Rag__Domains__user_documents__TextEmbeddingProfileKey=…`. Other `Rag__*`
+  keys are still not forwarded. See
+  [`../document-intelligence/deployment-runbook.md`](../document-intelligence/deployment-runbook.md).
 - A switch makes semantic retrieval unavailable for chunks not yet embedded
   under the new profile. Re-embed each owner with
   `documents index --owner <id> --embed`.
