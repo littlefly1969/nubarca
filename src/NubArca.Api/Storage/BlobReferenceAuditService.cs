@@ -29,6 +29,8 @@ namespace NubArca.Api.Storage;
 //                                   so every existing row owns one reference)
 //   * party_guestbook_entries.PreviewBlobObjectId (that memory's derived
 //                                   preview, once drawn; one ref per non-null)
+//   * mail_messages.BlobObjectId    (MailArchive normalized message documents;
+//                                   hard-deleted, one ref per non-null)
 //
 // A hard interruption between the (auto-committed) refcount increment and the
 // owner-row commit — worker kill, OOM, crash — leaks one reference by design
@@ -277,6 +279,19 @@ public sealed class BlobReferenceAuditService
             .Select(g => new { g.Key, Count = g.Count() })
             .ToListAsync(cancellationToken);
 
+        // MailArchive messages: each COMPLETE message row owns exactly one
+        // reference to its normalized document blob. The reference is acquired
+        // in the same transaction that sets BlobObjectId (and flips the row to
+        // complete) and released in the same transaction as the row's hard
+        // delete (MailMessageDeletionService), so every row with a non-null
+        // BlobObjectId owns one. Attachments own nothing here: they are
+        // ordinary FileItems, already counted above.
+        var mailMessageRefs = await _db.MailMessages.AsNoTracking()
+            .Where(m => m.BlobObjectId != null)
+            .GroupBy(m => m.BlobObjectId!.Value)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+
         var computed = new Dictionary<Guid, int>(rows.Count);
         foreach (var r in fileRefs)
         {
@@ -319,6 +334,10 @@ public sealed class BlobReferenceAuditService
             computed[r.Key] = computed.TryGetValue(r.Key, out var v) ? v + r.Count : r.Count;
         }
         foreach (var r in guestbookPreviewRefs)
+        {
+            computed[r.Key] = computed.TryGetValue(r.Key, out var v) ? v + r.Count : r.Count;
+        }
+        foreach (var r in mailMessageRefs)
         {
             computed[r.Key] = computed.TryGetValue(r.Key, out var v) ? v + r.Count : r.Count;
         }

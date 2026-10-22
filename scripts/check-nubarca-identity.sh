@@ -74,6 +74,9 @@ SKIP_DIRS = (
     "node_modules/", "/bin/", "/obj/", "/dist/", "/build/",
     "TestResults/", "graphify-out/", "/.venv/", "__pycache__/",
     "playwright-report/", "test-results/",
+    # Vendored third-party source (see its NUBARCA-PATCH.md): upstream's own
+    # text, e.g. specification section numbers that look like addresses.
+    "/vendor/",
 )
 SKIP_SUFFIXES = (
     ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".svg",

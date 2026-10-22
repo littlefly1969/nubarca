@@ -1,3 +1,4 @@
+using NubArca.Api.MailArchive;
 using System.Globalization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -2461,6 +2462,9 @@ public static class CliEntryPoint
             services.Configure<NubArca.Api.Plates.PlatesFaceRedactionOptions>(
                 configuration.GetSection(NubArca.Api.Plates.PlatesFaceRedactionOptions.SectionName));
             services.AddNubArcaPlates();
+
+            // MailArchive: the worker runs the mail.import job.
+            services.AddNubArcaMailArchive(configuration);
 
             // Aesthetics Lab: the worker runs the ai.aesthetics.human-aesexpert.
             // analyze job, so the Aesthetics service graph (incl. the sidecar

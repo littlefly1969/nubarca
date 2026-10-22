@@ -56,6 +56,20 @@ COPY docs/ docs/
 RUN dotnet /app/publish/NubArca.Api.dll help-knowledge build \
         --source /src --out /app/publish/help-corpus.json --revision "$GIT_SHA"
 
+# ---- MailArchive: the read-only PST engine (tools/nubarca-pst-importer) ------
+#
+# A small Rust binary the mail.import job runs as a child process; it only
+# reads a private working copy of the PST and writes extracted parts under the
+# job's work directory. Built from THIS source revision with the committed
+# lockfile, so the bytes follow the reviewed dependency pins. Only the binary
+# reaches the runtime layer. Without it MailArchive reports
+# `importer_missing` and refuses imports; nothing else is affected.
+FROM rust:1.90-slim-bookworm AS pst-importer
+WORKDIR /src
+COPY tools/nubarca-pst-importer/ ./
+RUN cargo build --release --locked -p nubarca-pst-importer \
+    && install -D -m 0755 target/release/nubarca-pst-importer /opt/nubarca/bin/nubarca-pst-importer
+
 # ---- Gate 3A native layer: OpenVINO-enabled ORT core, fetched + verified, pinned.
 # Only the runtime-openvino target consumes this; the default runtime stays lean.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS onnx-native
@@ -126,6 +140,8 @@ RUN ln -s /opt/nubarca/media/bin/ffmpeg /usr/local/bin/ffmpeg \
     && ln -s /opt/nubarca/media/bin/ffprobe /usr/local/bin/ffprobe
 
 COPY --from=build /app/publish ./
+# MailArchive:ImporterPath defaults to this location.
+COPY --from=pst-importer /opt/nubarca/bin/nubarca-pst-importer /opt/nubarca/bin/nubarca-pst-importer
 
 # Slice 100: the high-performance libvips derivative backend ships as a
 # self-contained native library via the NetVips.Native.linux-x64 NuGet package

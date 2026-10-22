@@ -387,6 +387,13 @@ public static class AuditActions
     public const string PlateAddFromGallery = "plate.add_from_gallery";
     public const string PlateDownload = "plate.download";
     public const string PlateDelete = "plate.delete";
+
+    // MailArchive (owner-private PST import). Metadata: counts/status only —
+    // never subjects, addresses, bodies, source keys, fingerprints or paths.
+    public const string MailImportStart = "mail.import.start";
+    public const string MailImportCancel = "mail.import.cancel";
+    public const string MailImportComplete = "mail.import.complete";
+    public const string MailMessageDelete = "mail.message.delete";
     // Owner requested ALPR analysis of a plate image (metadata: job id + status).
     public const string PlateAnalyzeRequest = "plate.analysis_request";
 
@@ -503,6 +510,8 @@ public static class AuditEntityTypes
     public const string PartyMessage = "party_message";
     public const string PartyGuestbookEntry = "party_guestbook_entry";
     public const string Plate = "plate";
+    public const string MailArchive = "mail_archive";
+    public const string MailMessage = "mail_message";
     public const string AestheticLabItem = "aesthetic_lab_item";
     public const string AestheticRun = "aesthetic_run";
 }

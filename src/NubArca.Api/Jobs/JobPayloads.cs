@@ -89,6 +89,12 @@ public sealed record PhotoOrganizerJobPayload(Guid RunId);
 // status; the payload references it by id only (no image bytes, blob id, or path).
 public sealed record PlateAnalysisJobPayload(Guid AnalysisJobId);
 
+// MailArchive: the mail_import_runs row holds the owner, archive, status and
+// counters; the payload references it by id only (no path, key or fingerprint).
+public sealed record MailImportJobPayload(Guid ImportRunId);
+
+public sealed record MailTextsBackfillJobPayload(Guid OwnerUserId);
+
 // Aesthetics Lab: the aesthetic_analysis_runs row holds the owner + target lab
 // item + requested capabilities + status; the payload references it by RUN id
 // only — never image bytes, blob id, SHA, path, person names, prompts, or model

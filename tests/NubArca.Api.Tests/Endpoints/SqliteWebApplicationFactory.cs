@@ -21,6 +21,7 @@ using NubArca.Api.Files;
 using NubArca.Api.Folders;
 using NubArca.Api.Jobs;
 using NubArca.Api.Jobs.Handlers;
+using NubArca.Api.MailArchive;
 using NubArca.Api.MediaLibrary;
 using NubArca.Api.Metadata;
 using NubArca.Api.Organizer;
@@ -467,6 +468,8 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.Configure<NubArca.Api.Plates.PlatesFaceRedactionOptions>(
                 context.Configuration.GetSection(NubArca.Api.Plates.PlatesFaceRedactionOptions.SectionName));
             services.AddNubArcaPlates();
+            // MailArchive: mirrors the production/CLI registration.
+            services.AddNubArcaMailArchive(context.Configuration);
             // Aesthetics Lab: mirror production/CLI registration, then override
             // the sidecar client with a strict FAKE so worker analysis tests
             // never load the real model. AestheticsOptions binds from config

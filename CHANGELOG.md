@@ -4,6 +4,40 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.2 — 2026-10-21
+
+### MailArchive: Outlook PST archives
+
+- **Import an Outlook PST** you have uploaded to Files from **Posta →
+  Importazioni**. The import runs in the background, shows its progress and
+  failures, can be stopped and resumed, and never imports a message twice.
+- **Read your mail** in the mail view (folder tree, message list, reader) or
+  as documents, and **search** by sender, recipient, subject, dates and
+  attachments. The quick search also looks in the message text, including
+  forwarded messages, by word beginnings («fattur» finds «fatture»); mail
+  imported before text search existed is indexed in the background, and the
+  search says so until it is done. HTML
+  mail is cleaned and shown without scripts or remote images.
+- **Attachments become normal files** under `Posta/<archivio>/…` in Files,
+  with the usual dedup. A file opened from Files shows the email it came
+  from.
+- **Imported mail cannot be changed**, only read, searched and deleted.
+  Deleting a message keeps its attachments, and importing the same PST again
+  does not bring it back.
+- **A PST that cannot be fully read** ends "completed with errors" and lists
+  the unreadable folders; the next import reads it again and picks up what
+  has become readable.
+- **The PST is parsed in a sandbox**: as an unprivileged user, with no
+  inherited settings, no network, no other programs, access only to its own
+  copy of the PST and its work folder, and memory and CPU limits. What it
+  produces is read back without following links, so it cannot point
+  NubArca at any other file.
+- **PSTs written by other tools keep their recipients.** Some files (the
+  public Enron mailboxes, for one) store recipient tables in a form the PST
+  reader used to reject, so To/Cc/Bcc were missing; they are now read.
+- Everything stays private to the owner. Operations and limits:
+  `docs/mailarchive/operations.md`.
+
 ## 0.4.1 — 2026-10-20
 
 ### Every release has its own version number

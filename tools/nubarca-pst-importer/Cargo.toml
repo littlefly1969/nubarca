@@ -1,0 +1,59 @@
+[workspace]
+members = [".", "fixture-gen"]
+# The patched reader is a dependency, not ours to lint or test.
+exclude = ["vendor/outlook-pst"]
+resolver = "2"
+
+[package]
+name = "nubarca-pst-importer"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "Read-only Outlook PST extraction engine for NubArca MailArchive (protocol nubarca-pst/1)"
+publish = false
+
+[[bin]]
+name = "nubarca-pst-importer"
+path = "src/main.rs"
+
+[dependencies]
+# Microsoft's reader. Pinned exactly: the engine adapts to its public API.
+# Built from vendor/outlook-pst (1.2.0 plus one relaxed check, see
+# vendor/outlook-pst/NUBARCA-PATCH.md) through [patch.crates-io] below.
+outlook-pst = "=1.2.0"
+compressed-rtf = "=1.0.1"
+codepage = "=0.1.3"
+encoding_rs = "=0.8.35"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.145"
+sha2 = "=0.10.9"
+
+# Self-confinement (src/sandbox.rs). Linux only: the product ships the Linux binary.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "=0.2.191"
+landlock = "=0.4.4"
+seccompiler = "=0.5.0"
+
+[dev-dependencies]
+tempfile = "=3.23.0"
+# Dev-only: writes synthetic fixture PSTs at test time. Never linked into the binary.
+nubarca-pst-fixture-gen = { path = "fixture-gen" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+# Panics must unwind: per-item parsing failures are caught and classified.
+panic = "unwind"
+# Arithmetic overflow on hostile input becomes a caught, classified error.
+overflow-checks = true
+debug = false
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[patch.crates-io]
+outlook-pst = { path = "vendor/outlook-pst" }
