@@ -1,5 +1,7 @@
 [workspace]
 members = [".", "fixture-gen"]
+# The patched reader is a dependency, not ours to lint or test.
+exclude = ["vendor/outlook-pst"]
 resolver = "2"
 
 [package]
@@ -16,6 +18,8 @@ path = "src/main.rs"
 
 [dependencies]
 # Microsoft's reader. Pinned exactly: the engine adapts to its public API.
+# Built from vendor/outlook-pst (1.2.0 plus one relaxed check, see
+# vendor/outlook-pst/NUBARCA-PATCH.md) through [patch.crates-io] below.
 outlook-pst = "=1.2.0"
 compressed-rtf = "=1.0.1"
 codepage = "=0.1.3"
@@ -50,3 +54,6 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 2
+
+[patch.crates-io]
+outlook-pst = { path = "vendor/outlook-pst" }

@@ -348,6 +348,11 @@ public sealed class MailArchivePostgresTests : IAsyncLifetime
             _output.WriteLine($"MAILVOLUME-PG messages={archive.MessageCount} folders={archive.FolderCount} "
                 + $"attachments={archive.LatestRun.AttachmentsCreated + archive.LatestRun.AttachmentsReused} "
                 + $"seconds={clock.Elapsed.TotalSeconds:F1} msgPerSecond={archive.MessageCount / clock.Elapsed.TotalSeconds:F0}");
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var texts = await db.MailMessageTexts.Where(t => t.OwnerUserId == owner && t.Text != "").CountAsync();
+            _output.WriteLine($"MAILVOLUME-PG withText={texts} failed={archive.LatestRun.FailedMessages}");
+            // Every message has its text row, written with its completion.
+            Assert.Equal(archive.MessageCount, await db.MailMessageTexts.CountAsync(t => t.OwnerUserId == owner));
             var audit = await scope.ServiceProvider.GetRequiredService<BlobReferenceAuditService>().AuditAsync();
             Assert.Equal(audit.TotalBlobs, audit.MatchedReferenceCount);
         }

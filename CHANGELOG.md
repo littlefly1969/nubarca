@@ -30,6 +30,9 @@ originating repository and is deliberately not reproduced here.
   copy of the PST and its work folder, and memory and CPU limits. What it
   produces is read back without following links, so it cannot point
   NubArca at any other file.
+- **PSTs written by other tools keep their recipients.** Some files (the
+  public Enron mailboxes, for one) store recipient tables in a form the PST
+  reader used to reject, so To/Cc/Bcc were missing; they are now read.
 - Everything stays private to the owner. Operations and limits:
   `docs/mailarchive/operations.md`.
 

@@ -253,6 +253,19 @@ cyclic), folders, messages, To/Cc/Bcc, text and HTML bodies, by-value
 attachments (inline CID, duplicate names, zero-byte, multi-block, Unicode
 names).
 
+Verified end to end on a third-party PST: an EDRM Enron mailbox (Unicode,
+permute encoding, 13 MiB, 8 folders, 71 messages with text bodies and 70
+by-value attachments, as shipped in the `pst-extractor` npm package's test
+data; not committed). Through the real engine, the worker and PostgreSQL:
+71/71 messages and 70 attachments imported, every message with its
+recipients (127) and a text row, reference audit clean. It exposed a reader
+bug: `outlook-pst` 1.2.0 rejected every recipient table of that file
+(`HNPAGEMAP cFree` not matching its zero-length allocations, which real
+writers do not keep), so all To/Cc/Bcc were lost with a
+`recipients_unreadable` warning. The engine now builds a vendored copy of the
+reader with that one check relaxed (`tools/nubarca-pst-importer/vendor/outlook-pst/NUBARCA-PATCH.md`).
+OST files from the same package are refused as `unsupported`, as designed.
+
 Implemented, covered by unit tests only: embedded messages, compressed RTF
 (used when there is no text or HTML), transport headers, 8-bit strings with
 code pages, ANSI PSTs.
