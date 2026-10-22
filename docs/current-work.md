@@ -1946,6 +1946,17 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   written down in docs/rag-platform.md; never chunk/text/blob ids, hashes,
   storage keys, owner ids or scores. Chat citations now carry page/locator
   too, still with no id. `documents query --owner` is the no-names diagnostic.
+- **Document indexing is a job keyed by SOURCE, not by FileItem.**
+  `document_texts` carries `(SourceKind, SourceId)` (`file` = FileItem id
+  today; another owner-private kind such as email plugs in through
+  `IOwnerDocumentSource` and its own eligibility branch, see
+  docs/document-intelligence/source-contract.md). `ai.documents.index` runs
+  extract → chunk → embed → visual per source, sliced and checkpointed, with
+  per-phase rows in `document_source_states` (missing row = implicit pending).
+  Upload, restore and admin import signal it without waiting; nothing runs
+  unless `Ai:Enabled` and `Ai:DocumentExtractionEnabled`. A missing model is
+  `pending` with a reason, never `failed`/`skipped`; cancellation is never
+  permanent. `documents backfill` / `documents progress` are the operator verbs.
 - **A visual hit finds where to look; an eligible current text chunk is still
   what NubArca may say.** Visual document retrieval renders an owner's pages,
   embeds them locally under a DOCUMENT-specific SigLIP2 profile (shared weights
