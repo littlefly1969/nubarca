@@ -27,6 +27,7 @@ public sealed class AdminUserService : IAdminUserService
     private readonly IUserPermissionService _permissions;
     private readonly IRoleService _roles;
     private readonly TimeProvider _clock;
+    private readonly DocumentSearchGrants? _documentSearch;
 
     public AdminUserService(
         AppDbContext db,
@@ -34,8 +35,10 @@ public sealed class AdminUserService : IAdminUserService
         IAuthService auth,
         IUserPermissionService permissions,
         IRoleService roles,
-        TimeProvider clock)
+        TimeProvider clock,
+        DocumentSearchGrants? documentSearch = null)
     {
+        _documentSearch = documentSearch;
         _db = db;
         _users = users;
         _auth = auth;
@@ -257,8 +260,10 @@ public sealed class AdminUserService : IAdminUserService
             return (AdminSetRoleResult.Escalation, null);
         }
 
+        var hadDocumentSearch = await HadDocumentSearchAsync(user.Id, cancellationToken);
         user.RoleKey = normalizedRole;
         await _db.SaveChangesAsync(cancellationToken);
+        await CatchUpDocumentsAsync(user.Id, hadDocumentSearch, cancellationToken);
         return (AdminSetRoleResult.Ok, ToDto(user));
     }
 
@@ -292,10 +297,20 @@ public sealed class AdminUserService : IAdminUserService
             }
         }
 
+        var hadDocumentSearch = await HadDocumentSearchAsync(user.Id, cancellationToken);
         user.DisabledAt = disabled ? _clock.GetUtcNow().UtcDateTime : null;
         await _db.SaveChangesAsync(cancellationToken);
+        await CatchUpDocumentsAsync(user.Id, hadDocumentSearch, cancellationToken);
         return (AdminSetDisabledResult.Ok, ToDto(user));
     }
+
+    // A role change or re-enabling can give a user document-search.access; the
+    // documents they already hold are then queued for indexing.
+    private async Task<bool> HadDocumentSearchAsync(Guid userId, CancellationToken cancellationToken) =>
+        _documentSearch is not null && await _documentSearch.HeldAsync(userId, cancellationToken);
+
+    private Task CatchUpDocumentsAsync(Guid userId, bool heldBefore, CancellationToken cancellationToken) =>
+        _documentSearch?.CatchUpAsync(userId, heldBefore, cancellationToken) ?? Task.CompletedTask;
 
     // May this caller put this role on somebody?
     //

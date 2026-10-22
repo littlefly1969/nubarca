@@ -19,7 +19,8 @@ originating repository and is deliberately not reproduced here.
   its next slice as *cancelled*, resumable once the permission is back.
 - **Without Ricerca documenti**: the Documenti page, document search, the
   indexing status and the document assistant are refused, and automatic
-  indexing skips that owner.
+  indexing skips that owner. Granting it later indexes the documents the
+  owner already holds, without a manual backfill.
 - **Nobody loses anything on upgrade.** Member receives both permissions,
   Administrator always holds every permission, and Restricted and custom roles
   get them only when an operator adds them.

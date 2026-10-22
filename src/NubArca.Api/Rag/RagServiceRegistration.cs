@@ -124,6 +124,7 @@ public static class RagServiceRegistration
         services.AddScoped<Ai.Documents.Sources.OwnerDocumentSources>();
         services.AddScoped<Ai.Documents.Sources.IDocumentSourceChangeSink,
             Ai.Documents.Indexing.JobQueueDocumentSourceChangeSink>();
+        services.AddScoped<Access.DocumentSearchGrants>();
         services.AddSingleton<Ai.Documents.Indexing.DocumentIndexingGate>();
         services.AddScoped<Ai.Documents.Indexing.DocumentSourceStateStore>();
         services.AddScoped<Ai.Documents.Indexing.DocumentSourceIndexProcessor>();

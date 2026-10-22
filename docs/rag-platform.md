@@ -415,7 +415,11 @@ every previous assumption need re-checking.
 Documenti page. The `ai.documents.index` job re-reads it per owner and indexes
 nothing for an owner without it. It is separate from `semantic-search.access`,
 which covers photos and videos only, so the two are enabled per role
-independently. Member receives it on upgrade; Restricted does not.
+independently. Member receives it on upgrade; Restricted does not. Whatever
+gives a user the key (a role edit, a role change, re-enabling the account, the
+CLI `users set-role`) queues one owner pass, so documents uploaded while they
+lacked it are indexed then. The job reads the permission without the scope
+memo, so a revocation is seen by the very next slice.
 
 ```text
 FileItem the owner currently owns, is active, is not in the Vault,

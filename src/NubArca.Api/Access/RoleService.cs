@@ -21,11 +21,13 @@ public sealed class RoleService : IRoleService
 {
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly DocumentSearchGrants? _documentSearch;
 
-    public RoleService(AppDbContext db, TimeProvider clock)
+    public RoleService(AppDbContext db, TimeProvider clock, DocumentSearchGrants? documentSearch = null)
     {
         _db = db;
         _clock = clock;
+        _documentSearch = documentSearch;
     }
 
     public async Task EnsureBuiltInRolesAsync(CancellationToken cancellationToken = default)
@@ -257,6 +259,9 @@ public sealed class RoleService : IRoleService
         role.UpdatedAt = _clock.GetUtcNow().UtcDateTime;
         role.Version += 1;
 
+        var hadDocumentSearch = await _db.RolePermissions.AsNoTracking().AnyAsync(
+            p => p.RoleKey == roleKey && p.PermissionKey == Permissions.DocumentSearchAccess, cancellationToken);
+
         // The whole set is replaced in one transaction, so no request ever
         // leaves a role half-edited for the users assigned to it.
         await _db.RolePermissions.Where(p => p.RoleKey == roleKey).ExecuteDeleteAsync(cancellationToken);
@@ -266,6 +271,12 @@ public sealed class RoleService : IRoleService
             _db.RolePermissions.Add(new RolePermission { RoleKey = roleKey, PermissionKey = key });
         }
         await _db.SaveChangesAsync(cancellationToken);
+
+        if (_documentSearch is not null
+            && !hadDocumentSearch && permissions.Contains(Permissions.DocumentSearchAccess))
+        {
+            await _documentSearch.CatchUpRoleAsync(roleKey, cancellationToken);
+        }
 
         var count = await _db.Users.AsNoTracking()
             .CountAsync(u => u.RoleKey == roleKey, cancellationToken);
