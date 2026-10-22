@@ -16,7 +16,41 @@ public class DocumentText
 {
     public Guid Id { get; set; }
 
-    public Guid FileItemId { get; set; }
+    // WHICH SOURCE this is a reading of: `(SourceKind, SourceId)`, see
+    // docs/document-intelligence/source-contract.md. For the `file` kind
+    // SourceId is the FileItem id; a future kind (archived email) has its own
+    // id space and no FileItem at all.
+    public string SourceKind { get; set; } = DocumentSourceKinds.File;
+
+    public Guid SourceId { get; set; }
+
+    // The source's revision token for kinds that are not content-addressed
+    // blobs. Null for the `file` kind, whose revision is SourceBlobObjectId.
+    // Internal only, like every other idempotence key.
+    public string? SourceRevision { get; set; }
+
+    // The FileItem, for the `file` kind only (null for every other kind). Kept
+    // so existing queries and the cascade on hard delete keep working.
+    //
+    // Setting it also sets the source identity, so the many places that build
+    // a file reading by naming its FileItem cannot produce a row whose
+    // `(SourceKind, SourceId)` disagrees with it. EF materializes through the
+    // backing field, so loading a row never runs this.
+    private Guid? _fileItemId;
+
+    public Guid? FileItemId
+    {
+        get => _fileItemId;
+        set
+        {
+            _fileItemId = value;
+            if (value is Guid id)
+            {
+                SourceKind = DocumentSourceKinds.File;
+                SourceId = id;
+            }
+        }
+    }
 
     // WHICH BYTES were extracted. Blobs are content-addressed and immutable, so
     // this is an exact idempotence key: unchanged means the same object id, and

@@ -1687,6 +1687,8 @@ app.MapAdminAiEndpoints();
 app.MapPeopleEndpoints();
 app.MapHelpEndpoints();
 app.MapPrivateDocumentAssistantEndpoints();
+// Owner's own document-indexing progress (counts only).
+app.MapDocumentIndexingEndpoints();
 
 // Media Library (gallery membership rules + per-file exclusion) and Photo
 // Organizer (owner-scoped date-taken reorganization) endpoints live in

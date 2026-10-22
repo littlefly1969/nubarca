@@ -62,6 +62,13 @@ public static class JobTypes
     public const string AiFacesClusterBackfill = "ai.faces.cluster.backfill";
     public const string AiTagsGenerateBackfill = "ai.tags.generate.backfill";
 
+    // Owner-private document indexing (Document Intelligence v1): extraction /
+    // OCR → chunking → text embeddings → visual index, per source, with
+    // per-phase state in document_source_states. Supersedes the two document
+    // skeletons above, which stay registered and harmless (no-op). The payload
+    // carries only a scope: one source, one owner, or every owner.
+    public const string AiDocumentsIndex = "ai.documents.index";
+
     // ONE owner's face clustering, started by that owner from the Cloud hub.
     // Deliberately a separate type from AiFacesClusterBackfill rather than a
     // flag on it: the backfill's whole shape is "walk every eligible owner",

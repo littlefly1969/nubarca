@@ -81,6 +81,41 @@ public class AiOptions
     // on request. OFF by default. Bound from "Ai:SubjectCutout:*" (env
     // Ai__SubjectCutout__*). Auto-binds — no extra Configure<> call.
     public AiSubjectCutoutOptions SubjectCutout { get; set; } = new();
+
+    // Automatic owner-document indexing (the `ai.documents.index` job). Runs
+    // only when Enabled and DocumentExtractionEnabled are both true. Bound from
+    // "Ai:DocumentIndexing:*" (env Ai__DocumentIndexing__*). Auto-binds.
+    public AiDocumentIndexingOptions DocumentIndexing { get; set; } = new();
+}
+
+// Resource and retry bounds for the background document-indexing job.
+// Every value is clamped; none means "unlimited".
+public class AiDocumentIndexingOptions
+{
+    // How many document-indexing jobs may run at once IN ONE PROCESS,
+    // independently of Jobs:MaxConcurrentJobs. One by default: extraction,
+    // OCR and embedding are all CPU-heavy, and two owners' backfills competing
+    // for the same cores finish later than one after the other.
+    public int MaxConcurrentJobs { get; set; } = 1;
+
+    // How long a job waits for a free document slot before handing its worker
+    // slot back (it re-queues and tries again).
+    public int GateWaitSeconds { get; set; } = 10;
+
+    // Retryable failures (a parse that timed out, an OCR process that failed,
+    // storage that could not be read) per source revision before automatic runs
+    // stop retrying it. A content change resets the count; `--retry-failed`
+    // ignores it.
+    public int MaxAttemptsPerSource { get; set; } = 3;
+
+    // Whether the text-embedding model and the visual (SigLIP2) model may run
+    // at the same time in this process. Off by default: two large models
+    // inferring at once is exactly the memory peak the budget is about.
+    public bool ParallelTextAndVisualModels { get; set; } = false;
+
+    public int EffectiveMaxConcurrentJobs => Math.Clamp(MaxConcurrentJobs, 1, 4);
+    public int EffectiveGateWaitSeconds => Math.Clamp(GateWaitSeconds, 0, 120);
+    public int EffectiveMaxAttemptsPerSource => Math.Clamp(MaxAttemptsPerSource, 1, 20);
 }
 
 // TV natural-language gallery command interpreter + semantic-search tunables.

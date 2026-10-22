@@ -507,6 +507,54 @@ hash, `StorageKey`, filesystem path or owner id. A citation exists so a person
 can open their document, not so anything can address it, and an identifier on
 the wire is a durable handle to private content sitting in somebody else's logs.
 
+### Automatic indexing, and its state
+
+With `Ai:Enabled` and `Ai:DocumentExtractionEnabled` both on, indexing is no
+longer something an operator runs. An upload, a file restore, a folder restore
+and an admin import each signal `IDocumentSourceChangeSink`, which enqueues one
+`ai.documents.index` job (compute priority) and never blocks the request. With
+either flag off — the default — the sink is inert and nothing is queued.
+
+The job reads candidates through `IOwnerDocumentSource` (one implementation per
+source kind; only `file` is registered), keyset-paged per owner, and runs
+extract → chunk → embed (when `Ai:DocumentEmbeddingsEnabled` and the domain's
+semantic profile resolve) → visual (when the visual profile is enabled). It
+yields between sources and between phases, so a foreground import waits at most
+one bounded slice; its checkpoint is the owner, the kind and the last finished
+source, never a candidate list.
+
+Progress is recorded per source and phase in `document_source_states`:
+`pending`, `running`, `completed`, `skipped` (permanent, content-related),
+`failed` (retryable, with an attempt count, capped by
+`Ai:DocumentIndexing:MaxAttemptsPerSource`), plus a reason token, the source
+revision, and the profile and format versions. A missing row is implicit
+pending; rows are written only for sources the job has touched. A missing model
+or an unresolvable profile leaves the phase `pending` with a reason, never
+`failed` or `skipped`. Cancellation and a killed worker leave `pending`
+(`cancelled`), and a row left `running` by a dead worker is simply retried. A
+new revision of the same source resets its attempts. A permanent skip at one
+revision is not re-read until the bytes change.
+
+Resource control: one document job at a time
+(`Ai:DocumentIndexing:MaxConcurrentJobs`, default 1; a job that cannot enter
+within `GateWaitSeconds` re-queues itself); the text embedder and the visual
+model never run concurrently unless `ParallelTextAndVisualModels` is set;
+`Ai:MaxConcurrency` still bounds each model. Both PDFium renderers share one
+process-wide gate.
+
+Parsing is bounded too. PdfPig and the OpenXml SDK run under a
+wall-clock budget, `Ai:DocumentExtraction:ParseTimeoutSeconds` (default 120 s,
+clamped to 5–1800); a
+timeout is `parse-timeout`, retryable. Managed parsers cannot be interrupted, so
+a parser stuck inside one library call is ABANDONED rather than stopped: it keeps
+its pool thread and its bytes until the call returns, and its result is
+discarded. A PDF the parser rejects as malformed is now `pdf-invalid`
+(permanent); rows written earlier with `office-package-invalid` stay readable.
+
+The exact-cosine vector pass reads at most 20,000 candidate vectors per owner.
+Above that it reports `rag_corpus_too_large` (semantic unavailable, lexical
+still answers) instead of silently ranking a sample.
+
 ## Rich document ingestion
 
 A supported document in somebody's library is compiled into owner-private text
@@ -947,6 +995,10 @@ dotnet NubArca.Api.dll documents status --owner <user-id>
 dotnet NubArca.Api.dll documents index  --owner <user-id> --embed
 dotnet NubArca.Api.dll documents index  --owner <user-id> --limit 20
 
+dotnet NubArca.Api.dll documents backfill --owner <user-id> [--retry-failed] [--limit N]
+dotnet NubArca.Api.dll documents backfill --all-owners [--retry-failed]
+dotnet NubArca.Api.dll documents progress [--owner <user-id>]
+
 dotnet NubArca.Api.dll documents visual-seed-profiles
 dotnet NubArca.Api.dll documents visual-index    --owner <user-id> [--limit N]
 dotnet NubArca.Api.dll documents visual-status   --owner <user-id>
@@ -955,10 +1007,13 @@ dotnet NubArca.Api.dll documents visual-evaluate --owner <user-id> --queries cas
 
 A separate verb rather than `rag index --domain user-documents --owner …`,
 because which corpus a command touches should be visible in the command that was
-typed rather than in its arguments. There is deliberately no "all owners" mode:
-the one legitimate use — backfilling after enabling the feature — is served by
-running it per owner, which is also the form that can be stopped halfway without
-ambiguity. Nothing these commands print is a document name, a heading, an
+typed rather than in its arguments. `index` has deliberately no "all owners"
+mode. `backfill` enqueues the automatic `ai.documents.index` job instead of
+working in the terminal; `--all-owners` must be spelled out, and even then the
+job walks one owner at a time, so it can be stopped halfway without ambiguity.
+`backfill` is refused while automatic indexing is disabled. `progress` (and
+`GET /api/documents/indexing/status` for the signed-in owner) prints counts per
+phase and status and per reason token. Nothing these commands print is a document name, a heading, an
 excerpt or a storage key; an operator diagnosing an indexing problem needs counts
 and reason tokens, and a terminal that echoed somebody's filenames would put them
 in a scrollback buffer, a screenshot and a support ticket.

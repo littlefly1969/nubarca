@@ -71,6 +71,17 @@ public static class AiDistanceMetrics
 //               text, capability not applicable). Never used for an unavailable
 //               provider/environment condition.
 //  - Failed:    a real processing error on a processable target (retryable).
+/// The kinds of owner-private document SOURCE (see the source contract). Only
+/// `file` is implemented; `email` plugs in later through the same seam.
+public static class DocumentSourceKinds
+{
+    public const string File = "file";
+
+    /// Every kind this build registers. Eligibility is the union of these
+    /// kinds' predicates, and nothing else.
+    public static readonly IReadOnlyList<string> Registered = new[] { File };
+}
+
 public static class AiArtifactStatuses
 {
     public const string Completed = "completed";

@@ -161,10 +161,17 @@ public static class OwnerDocumentEligibility
         IQueryable<FileItem> files,
         Guid ownerUserId,
         IReadOnlyCollection<Guid>? allowedFileItemIds = null)
+        // THE UNION OF THE REGISTERED SOURCE KINDS' BRANCHES (see
+        // DocumentSourceKinds.Registered and the source contract). This build
+        // registers one kind, `file`, so the union is the file branch: a reading
+        // joins its live FileItem through the source identity. A future kind
+        // adds its own branch here — its own live predicate, never a shared
+        // owner column — and a reading of a kind with no branch is in no corpus.
         => from chunk in chunks
            join document in documents on chunk.DocumentTextId equals document.Id
-           join file in Eligible(files, ownerUserId) on document.FileItemId equals file.Id
-           where chunk.OwnerUserId == ownerUserId
+           join file in Eligible(files, ownerUserId) on document.SourceId equals file.Id
+           where document.SourceKind == DocumentSourceKinds.File
+                 && chunk.OwnerUserId == ownerUserId
                  // The narrowing, applied in the DATABASE and before any limit,
                  // so a scoped question reads only the scoped rows.
                  && (allowedFileItemIds == null || allowedFileItemIds.Contains(file.Id))

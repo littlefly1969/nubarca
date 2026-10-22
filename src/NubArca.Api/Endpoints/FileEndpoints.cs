@@ -752,6 +752,7 @@ public static class FileEndpoints
             HttpContext httpContext,
             [FromServices] IFileItemService files,
             [FromServices] IAuditLogger audit,
+            [FromServices] NubArca.Api.Ai.Documents.Sources.IDocumentSourceChangeSink documentSources,
             CancellationToken cancellationToken) =>
         {
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
@@ -764,6 +765,11 @@ public static class FileEndpoints
                 {
                     return Results.NotFound();
                 }
+
+                // A restored document is eligible again; make sure it is indexed.
+                // Inert unless the document capability is enabled.
+                await documentSources.SourceChangedAsync(
+                    NubArca.Api.Domain.Ai.DocumentSourceKinds.File, ownerUserId, id, cancellationToken);
 
                 await audit.LogAsync(
                     actor: ownerUserId,

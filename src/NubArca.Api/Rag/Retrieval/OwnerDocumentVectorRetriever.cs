@@ -27,22 +27,22 @@ namespace NubArca.Api.Rag.Retrieval;
 /// a few thousand dot products is microseconds. When that stops being true,
 /// there is a measurement to do and a slice to do it in.
 ///
-/// The candidate set is bounded regardless, so a library that grew past what
-/// this approach suits degrades into an ARBITRARY N rather than into an
-/// unbounded read. Arbitrary, not newest: the bound is applied after ordering by
-/// `chunk.Id`, and those ids are random v4 GUIDs, so their sort order carries no
-/// chronology whatsoever — it is stable between two identical questions and
-/// otherwise meaningless. Ordering exists to make the truncation deterministic,
-/// not to make it a good choice. An owner past `MaxCandidateVectors` is getting
-/// a silently partial semantic pass, and picking WHICH partial set is worth
-/// having deserves the benchmark this slice does not have; recency, if it ever
-/// becomes the answer, needs a timestamp column to order by.
+/// The candidate set is bounded regardless. An owner whose eligible vectors
+/// exceed `MaxCandidateVectors` gets semantic retrieval reported UNAVAILABLE
+/// (`rag_corpus_too_large`) and the lexical path answers — the same refusal the
+/// lexical index makes at its own ceiling. Ranking an arbitrary subset instead
+/// would be a silently partial semantic pass: plausible results with no signal
+/// that most of the corpus was never compared.
 public sealed class OwnerDocumentVectorRetriever
 {
     /// Ceiling on how many of an owner's vectors are ranked in one question.
     /// Not a tuning knob for relevance — it is the bound that keeps one
     /// question from turning into an unbounded read.
     public const int MaxCandidateVectors = 20_000;
+
+    /// The ceiling actually applied. Only a test lowers it, to exercise the
+    /// over-the-bound path without writing twenty thousand vectors.
+    internal int CandidateCeiling { get; init; } = MaxCandidateVectors;
 
     private readonly AppDbContext _db;
     private readonly OwnerDocumentCorpusSource _corpus;
@@ -138,8 +138,17 @@ public sealed class OwnerDocumentVectorRetriever
                   && embedding.Dimension == dimension
             orderby row.Chunk.Id
             select new { row.Chunk.Id, embedding.EmbeddingBytes })
-            .Take(MaxCandidateVectors)
+            // One past the ceiling, so "exactly at the bound" and "over it" are
+            // distinguishable without a second count query.
+            .Take(CandidateCeiling + 1)
             .ToListAsync(cancellationToken);
+
+        if (candidates.Count > CandidateCeiling)
+        {
+            // DEGRADED, SAID OUT LOUD. Not a sample: the caller answers
+            // lexically and the reason travels with the outcome.
+            return RagVectorSearchOutcome.Unavailable(RagFailureReasons.CorpusTooLarge);
+        }
 
         if (candidates.Count == 0)
         {
