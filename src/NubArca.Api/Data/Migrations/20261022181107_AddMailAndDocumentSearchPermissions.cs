@@ -45,13 +45,12 @@ namespace NubArca.Api.Data.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            // Only the rows this migration added: Member, named explicitly.
-            migrationBuilder.Sql(
-                """
-                DELETE FROM role_permissions
-                WHERE "RoleKey" = 'Member'
-                  AND "PermissionKey" IN ('mail.access', 'document-search.access');
-                """);
+            // Deliberately nothing. Up() is guarded, so a row present before it
+            // ran (a pre-seeded database) or granted afterwards by an operator
+            // cannot be told apart from one Up() inserted; deleting by key would
+            // take those too. Leaving the rows is safe: the previous application
+            // does not know either key, and a role row naming a key outside the
+            // catalogue is inert there. Re-applying Up() later is a no-op.
         }
     }
 }

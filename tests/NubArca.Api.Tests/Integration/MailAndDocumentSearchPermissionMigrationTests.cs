@@ -83,12 +83,10 @@ public sealed class MailAndDocumentSearchPermissionMigrationTests : IAsyncLifeti
     }
 
     [Fact]
-    public async Task Applying_It_Twice_Is_A_No_Op()
+    public async Task Applying_It_Again_After_A_Rollback_Is_A_No_Op()
     {
         Skip.IfNot(Available, "Docker is not available for the PostgreSQL integration container.");
 
-        await MigrateAsync(PreviousMigration);
-        await MigrateAsync(MigrationUnderTest);
         await MigrateAsync(PreviousMigration);
         await ExecuteAsync(
             """
@@ -96,18 +94,28 @@ public sealed class MailAndDocumentSearchPermissionMigrationTests : IAsyncLifeti
             VALUES ('Member', 'mail.access');
             """);
         await MigrateAsync(MigrationUnderTest);
+        await MigrateAsync(PreviousMigration);
+        await MigrateAsync(MigrationUnderTest);
 
         var member = await PermissionsOfAsync(RoleKeys.Member);
         Assert.All(Keys, key => Assert.Equal(1, member.Count(k => k == key)));
     }
 
+    // Up() cannot tell a row it inserted from one that was already there or
+    // that an operator granted later, so the rollback deletes nothing; the
+    // previous application ignores keys it does not know.
     [Fact]
-    public async Task Rollback_Removes_Only_The_Rows_It_Added()
+    public async Task Rollback_Leaves_Every_Permission_Row_In_Place()
     {
         Skip.IfNot(Available, "Docker is not available for the PostgreSQL integration container.");
 
         await MigrateAsync(PreviousMigration);
         await SeedCustomRoleAsync();
+        await ExecuteAsync(
+            """
+            INSERT INTO role_permissions ("RoleKey", "PermissionKey")
+            VALUES ('Member', 'mail.access');
+            """);
         await MigrateAsync(MigrationUnderTest);
         await ExecuteAsync(
             """
@@ -115,11 +123,14 @@ public sealed class MailAndDocumentSearchPermissionMigrationTests : IAsyncLifeti
             VALUES (@role, 'mail.access');
             """,
             ("role", CustomRole));
+        var memberBefore = await PermissionsOfAsync(RoleKeys.Member);
+        var customBefore = await PermissionsOfAsync(CustomRole);
 
         await MigrateAsync(PreviousMigration);
 
-        Assert.DoesNotContain(await PermissionsOfAsync(RoleKeys.Member), k => Keys.Contains(k));
-        Assert.Contains("mail.access", await PermissionsOfAsync(CustomRole));
+        Assert.Equal(memberBefore, await PermissionsOfAsync(RoleKeys.Member));
+        Assert.Equal(customBefore, await PermissionsOfAsync(CustomRole));
+        Assert.All(Keys, key => Assert.Contains(key, memberBefore));
     }
 
     // ---- plumbing ---------------------------------------------------------
