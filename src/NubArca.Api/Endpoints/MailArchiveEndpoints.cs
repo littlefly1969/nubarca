@@ -55,9 +55,12 @@ public static class MailArchiveEndpoints
         group.MapGet("/archives", async (
             HttpContext http,
             [FromServices] MailArchiveService service,
+            [FromServices] MailTextBackfillService texts,
             CancellationToken cancellationToken) =>
         {
             NoStore(http);
+            // Opening the mail starts the text backfill if it is owed.
+            await texts.EnsureAsync(Owner(http), cancellationToken);
             var items = await service.ListArchivesAsync(Owner(http), cancellationToken);
             return Results.Ok(new { items });
         }).WithName("ListMailArchives");

@@ -228,6 +228,37 @@ public sealed class MailArchivePostgresTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    public async Task The_text_backfill_runs_on_postgres_and_makes_old_mail_searchable()
+    {
+        Skip.IfNot(_fixture.Available, "Docker is not available; integration test skipped.");
+        var (factory, baseFactory) = NewFactory(FakePstEngine.Sample());
+        using var _ = baseFactory;
+        var (owner, archiveId) = await ImportSampleAsync(factory);
+        var query = new MailMessageQuery(archiveId, null, "testo originale", null, null, null, null, null, null, null, 50);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.MailMessageTexts.Where(t => t.OwnerUserId == owner).ExecuteDeleteAsync();
+            var page = await scope.ServiceProvider.GetRequiredService<MailMessageQueryService>().SearchAsync(owner, query, CancellationToken.None);
+            Assert.Empty(page!.Items);
+            Assert.True(page.BodySearchIncomplete);
+        }
+        for (var i = 0; i < 100; i++)
+        {
+            using var scope = factory.Services.CreateScope();
+            if (await scope.ServiceProvider.GetRequiredService<JobProcessor>().ProcessAvailableAsync(10) == 0) break;
+        }
+        using (var scope = factory.Services.CreateScope())
+        {
+            var page = await scope.ServiceProvider.GetRequiredService<MailMessageQueryService>().SearchAsync(owner, query, CancellationToken.None);
+            Assert.Equal(["Inoltro con messaggio incorporato"], page!.Items.Select(m => m.Subject).ToList());
+            Assert.False(page.BodySearchIncomplete);
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.Equal(4, await db.MailMessageTexts.CountAsync(t => t.OwnerUserId == owner));
+        }
+    }
+
+    [SkippableFact]
     public async Task Search_on_postgres_uses_the_trigram_and_full_text_indexes_and_stays_owner_scoped()
     {
         Skip.IfNot(_fixture.Available, "Docker is not available; integration test skipped.");

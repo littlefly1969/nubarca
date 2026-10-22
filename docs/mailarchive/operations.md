@@ -12,6 +12,7 @@ what an operator needs to run it.
 |---|---|---|
 | `nubarca-pst-importer` | `tools/nubarca-pst-importer`, installed in the api image at `/opt/nubarca/bin/nubarca-pst-importer` | Read-only Rust engine (Microsoft's `outlook-pst` reader). Speaks `nubarca-pst/1` over stdin/stdout. Never writes a PST. |
 | `mail.import` job | worker, Normal priority | Copies the source PST to a private working copy, scans folders and messages, extracts each message through one long-lived engine session, stores the normalized document and creates attachment files. Sliced, checkpointed, cancellable and resumable. |
+| `mail.texts.backfill` job | worker, Maintenance priority | One owner: gives searchable text to messages that have none (imported before `mail_message_texts` existed), rebuilt from each message's stored document. Keyset-paged by message id, sliced, checkpointed, cancellable and resumable. |
 | `/api/mail/*` | api | Status, sources, archives, runs, failures, folders, message search and detail, delete, file origins. Every route is owner-scoped and `no-store`. |
 | `/mail` | web | Imports tab, mail view, documents view and structured search. |
 
@@ -203,10 +204,29 @@ A very common word prefix (one that most messages contain) makes the body side
 sort every match; that is the cost of correct date order and stays linear in
 the number of matches.
 
-Messages imported by a build without `mail_message_texts` have no text row
-and are found by their header fields only; importing the same PST again does
-not add it (the messages are already present). A text backfill is not part of
-this release.
+Messages imported by a build without `mail_message_texts` (the first
+MailArchive release) have no text row, and importing the same PST again does
+not add one (the messages are already present). The `mail.texts.backfill` job
+gives it to them: it reads each such message's stored document blob (never
+the PST, never an attachment, nothing else written), builds the same text an
+import would, and inserts it only while the message is still complete and has
+no row (`ON CONFLICT DO NOTHING`), so a message deleted meanwhile stays
+deleted and a concurrent import cannot be duplicated. A document that cannot
+be read gets an empty text, so coverage completes and the message still opens
+as before. The job is queued per owner, idempotently, the first time that
+owner opens the mail (`GET /api/mail/archives`) or runs a quick search with
+words while some of their messages lack text; meanwhile the search page says
+`bodySearchIncomplete: true` and the web app shows that the text search of
+earlier imports is still being prepared. After an upgrade nothing is needed
+from the operator: the backfill runs as each owner opens their mail, at
+Maintenance priority behind imports. To check coverage (zero once every owner
+is done):
+
+```sql
+SELECT count(*) FROM mail_messages m
+WHERE m."Status" = 'complete'
+  AND NOT EXISTS (SELECT 1 FROM mail_message_texts t WHERE t."MessageId" = m."Id");
+```
 
 ## Measured performance (engine, release build, 4-core Xeon 2.8 GHz)
 

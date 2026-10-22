@@ -21,12 +21,15 @@ public sealed class MailMessageQueryService
 
     private readonly AppDbContext _db;
     private readonly IBlobService _blobs;
+    private readonly MailTextBackfillService _texts;
     private readonly ILogger<MailMessageQueryService> _logger;
 
-    public MailMessageQueryService(AppDbContext db, IBlobService blobs, ILogger<MailMessageQueryService> logger)
+    public MailMessageQueryService(AppDbContext db, IBlobService blobs, MailTextBackfillService texts,
+        ILogger<MailMessageQueryService> logger)
     {
         _db = db;
         _blobs = blobs;
+        _texts = texts;
         _logger = logger;
     }
 
@@ -51,7 +54,10 @@ public sealed class MailMessageQueryService
                 m.SortDate, m.HasAttachments, m.AttachmentCount, m.Preview))
             .ToList();
         var next = rows.Count > limit ? EncodeCursor(rows[limit - 1].SortDate, rows[limit - 1].Id) : null;
-        return new MailMessagePage(items, next);
+        // Only a term with words reaches the text; say when it cannot reach all of it.
+        var bodySearchIncomplete = Term(query.Q) is { } q && Words(q).Count > 0
+            && await _texts.EnsureAsync(owner, cancellationToken);
+        return new MailMessagePage(items, next, bodySearchIncomplete);
     }
 
     // The filtered, ordered page (one row more than the limit, to know if

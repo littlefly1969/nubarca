@@ -4500,6 +4500,7 @@ const de: Partial<Record<MessageKey, string>> = {
   'mail.list.moreError': 'Weitere Nachrichten konnten nicht geladen werden. Bitte versuche es erneut.',
   'mail.list.empty': 'Keine Nachrichten in diesem Ordner.',
   'mail.list.noResults': 'Keine Nachricht entspricht der Suche.',
+  'mail.list.bodySearchIncomplete': 'Die Textsuche für früher importierte Nachrichten wird noch vorbereitet: Einige werden vorerst nur über Betreff, Absender und Empfänger gefunden.',
   'mail.list.hasAttachments': 'Mit Anhängen',
   'mail.search.label': 'E-Mail-Suche',
   'mail.search.q': 'E-Mails durchsuchen',

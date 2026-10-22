@@ -287,7 +287,7 @@ type MailMessageSummary = {
   date: string | null; hasAttachments: boolean; attachmentCount: number; preview: string | null;
 };
 
-type MailMessagePage = { items: MailMessageSummary[]; nextCursor: string | null };
+type MailMessagePage = { items: MailMessageSummary[]; nextCursor: string | null; bodySearchIncomplete?: boolean }; // true: `q` had words, but some of the owner's messages have no searchable text yet (backfill running)
 
 type MailAttachmentView = {
   id: string; name: string; mimeType: string | null; sizeBytes: number | null;

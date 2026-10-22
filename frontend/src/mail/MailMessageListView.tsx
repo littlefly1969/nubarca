@@ -27,12 +27,21 @@ export function MailMessageListView({ list, selectedId, hrefFor, searching }: Ma
       </div>
     );
   }
+  const incomplete = searching && list.bodySearchIncomplete && (
+    <p className="muted" role="note" data-testid="mail-body-search-incomplete">{t('mail.list.bodySearchIncomplete')}</p>
+  );
   if (list.items.length === 0) {
-    return <p className="muted" data-testid="mail-list-empty">{searching ? t('mail.list.noResults') : t('mail.list.empty')}</p>;
+    return (
+      <>
+        {incomplete}
+        <p className="muted" data-testid="mail-list-empty">{searching ? t('mail.list.noResults') : t('mail.list.empty')}</p>
+      </>
+    );
   }
 
   return (
     <>
+      {incomplete}
       <ul className="mail-message-list" aria-label={t('mail.list.label')} data-testid="mail-message-list">
         {list.items.map((m) => {
           const selected = m.id === selectedId;

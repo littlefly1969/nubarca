@@ -4846,6 +4846,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'mail.list.moreError': 'Could not load more messages. Please try again.',
   'mail.list.empty': 'No messages in this folder.',
   'mail.list.noResults': 'No message matches the search.',
+  'mail.list.bodySearchIncomplete': 'Text search for previously imported messages is still being prepared: for now some are found only by subject, sender and recipients.',
   'mail.list.hasAttachments': 'With attachments',
   'mail.search.label': 'Mail search',
   'mail.search.q': 'Search mail',

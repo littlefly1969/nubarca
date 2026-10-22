@@ -96,6 +96,9 @@ export interface MailMessageSummary {
 export interface MailMessagePage {
   items: MailMessageSummary[];
   nextCursor: string | null;
+  // The quick search also reads the message text, but some messages have no
+  // searchable text yet (imported before it existed; being added).
+  bodySearchIncomplete?: boolean;
 }
 
 export type MailAttachmentState = 'available' | 'file_deleted' | 'not_extracted';

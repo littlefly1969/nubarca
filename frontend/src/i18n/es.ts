@@ -4500,6 +4500,7 @@ const es: Partial<Record<MessageKey, string>> = {
   'mail.list.moreError': 'No se pudieron cargar más mensajes. Inténtalo de nuevo.',
   'mail.list.empty': 'No hay mensajes en esta carpeta.',
   'mail.list.noResults': 'Ningún mensaje coincide con la búsqueda.',
+  'mail.list.bodySearchIncomplete': 'La búsqueda en el texto de los mensajes importados anteriormente aún se está preparando: por ahora algunos solo se encuentran por asunto, remitente y destinatarios.',
   'mail.list.hasAttachments': 'Con adjuntos',
   'mail.search.label': 'Búsqueda en el correo',
   'mail.search.q': 'Buscar en el correo',

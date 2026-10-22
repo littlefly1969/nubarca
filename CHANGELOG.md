@@ -14,7 +14,9 @@ originating repository and is deliberately not reproduced here.
 - **Read your mail** in the mail view (folder tree, message list, reader) or
   as documents, and **search** by sender, recipient, subject, dates and
   attachments. The quick search also looks in the message text, including
-  forwarded messages, by word beginnings («fattur» finds «fatture»). HTML
+  forwarded messages, by word beginnings («fattur» finds «fatture»); mail
+  imported before text search existed is indexed in the background, and the
+  search says so until it is done. HTML
   mail is cleaned and shown without scripts or remote images.
 - **Attachments become normal files** under `Posta/<archivio>/…` in Files,
   with the usual dedup. A file opened from Files shows the email it came

@@ -52,6 +52,23 @@ describe('mail view', () => {
     expect(within(tree).getByRole('button', { name: /^Clienti/ })).toHaveAttribute('aria-current', 'true');
   });
 
+  it('says when the text search cannot reach every message yet, only while searching', async () => {
+    installFetchMock(baseHandlers({
+      'GET /api/mail/messages': (req) => jsonResponse({
+        items: [summary('m1')],
+        nextCursor: null,
+        bodySearchIncomplete: messagesQuery(req).has('q'),
+      }),
+    }));
+    renderMail('/mail?archive=arc-1&q=fattura');
+    expect(await screen.findByTestId('mail-body-search-incomplete')).toHaveTextContent('ancora in preparazione');
+    cleanup();
+
+    renderMail('/mail?archive=arc-1');
+    expect(await screen.findAllByTestId('mail-message-row')).toHaveLength(1);
+    expect(screen.queryByTestId('mail-body-search-incomplete')).not.toBeInTheDocument();
+  });
+
   it('pages with nextCursor and never asks for more than one page at a time', async () => {
     const mock = installFetchMock(baseHandlers({
       'GET /api/mail/messages': (req) => {

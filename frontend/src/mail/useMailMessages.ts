@@ -13,6 +13,7 @@ export interface MailMessageList {
   status: MailListStatus;
   items: MailMessageSummary[];
   nextCursor: string | null;
+  bodySearchIncomplete: boolean;
   loadingMore: boolean;
   loadMoreError: boolean;
   loadMore: () => void;
@@ -31,6 +32,7 @@ export function useMailMessages(filters: MailFilters | null): MailMessageList {
   const [status, setStatus] = useState<MailListStatus>('loading');
   const [items, setItems] = useState<MailMessageSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [bodySearchIncomplete, setBodySearchIncomplete] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
@@ -48,12 +50,14 @@ export function useMailMessages(filters: MailFilters | null): MailMessageList {
     setStatus('loading');
     setItems([]);
     setNextCursor(null);
+    setBodySearchIncomplete(false);
     setLoadMoreError(false);
     searchMailMessages(filtersRef.current, null, controller.signal, MAIL_PAGE_SIZE)
       .then((page) => {
         if (controller.signal.aborted) return;
         setItems(page.items ?? []);
         setNextCursor(page.nextCursor ?? null);
+        setBodySearchIncomplete(page.bodySearchIncomplete === true);
         setStatus('ready');
       })
       .catch((err: unknown) => {
@@ -93,5 +97,5 @@ export function useMailMessages(filters: MailFilters | null): MailMessageList {
     setItems((prev) => prev.filter((m) => m.id !== id));
   }, []);
 
-  return { status, items, nextCursor, loadingMore, loadMoreError, loadMore, reload, remove };
+  return { status, items, nextCursor, bodySearchIncomplete, loadingMore, loadMoreError, loadMore, reload, remove };
 }

@@ -340,7 +340,9 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   `mail_message_texts` (derived text, written in the message's completing
   transaction, never returned); its query orders by the text row's own
   `SortDate` on purpose, so PostgreSQL uses the full-text index instead of
-  walking the owner's mail by date. See `docs/mailarchive/operations.md`.
+  walking the owner's mail by date. Messages without a text row are
+  backfilled per owner by `mail.texts.backfill` from their stored documents;
+  never fill them by re-importing the PST. See `docs/mailarchive/operations.md`.
 - **The Party workspace is SEVEN sections, and the same seven in every phase.**
   Riepilogo, Esperienza, Ospiti, Foto, Attività, Schermi e stampa,
   Impostazioni — plus Live, the one section that appears while the party is

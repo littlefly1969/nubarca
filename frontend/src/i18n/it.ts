@@ -4892,6 +4892,7 @@ const it = {
   'mail.list.moreError': 'Impossibile caricare altri messaggi. Riprova.',
   'mail.list.empty': 'Nessun messaggio in questa cartella.',
   'mail.list.noResults': 'Nessun messaggio corrisponde alla ricerca.',
+  'mail.list.bodySearchIncomplete': 'La ricerca nel testo dei messaggi importati in precedenza è ancora in preparazione: per ora alcuni si trovano solo per oggetto, mittente e destinatari.',
   'mail.list.hasAttachments': 'Con allegati',
   'mail.search.label': 'Ricerca nella posta',
   'mail.search.q': 'Cerca nella posta',

@@ -25,6 +25,7 @@ public static class MailArchiveServiceRegistration
         services.AddScoped<MailImportRunner>();
         services.AddScoped<MailMessageQueryService>();
         services.AddScoped<MailMessageDeletionService>();
+        services.AddScoped<MailTextBackfillService>();
         return services;
     }
 }

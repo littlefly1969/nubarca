@@ -72,7 +72,11 @@ public sealed record MailMessageSummaryDto(
     int AttachmentCount,
     string? Preview);
 
-public sealed record MailMessagePage(IReadOnlyList<MailMessageSummaryDto> Items, string? NextCursor);
+// BodySearchIncomplete: the term was also looked for in the message text,
+// but some of the owner's messages have no searchable text yet (imported
+// before it existed; a background job is adding it).
+public sealed record MailMessagePage(IReadOnlyList<MailMessageSummaryDto> Items, string? NextCursor,
+    bool BodySearchIncomplete = false);
 
 public sealed record MailAttachmentViewDto(
     Guid Id,

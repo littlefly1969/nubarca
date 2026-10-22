@@ -107,4 +107,9 @@ public static class JobTypes
     // band so foreground uploads go first. The payload carries only the
     // MailImportRun id.
     public const string MailImport = "mail.import";
+
+    // MailArchive: give ONE owner's messages that predate mail_message_texts
+    // their searchable text, rebuilt from each message's document blob.
+    // Sliceable, keyset-checkpointed; Maintenance band. Payload: the owner id.
+    public const string MailTextsBackfill = "mail.texts.backfill";
 }

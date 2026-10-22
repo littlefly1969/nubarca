@@ -91,6 +91,8 @@ public static class JobScheduling
         // A PST import is user-initiated but long: Normal, so it is sliced and
         // yields to foreground uploads and imports.
         JobTypes.MailImport => Normal,
+        // Rebuilding search text from stored documents: background upkeep.
+        JobTypes.MailTextsBackfill => Maintenance,
         _ => Normal,
     };
 

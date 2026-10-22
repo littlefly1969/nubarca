@@ -259,6 +259,69 @@ public sealed class MailArchiveImportTests : IDisposable
     }
 
     [Fact]
+    public async Task Mail_imported_before_texts_existed_becomes_searchable_by_its_text_after_the_backfill()
+    {
+        var (factory, client, owner, archive) = await ImportedAsync(this);
+        // As a pre-text import left it: no text rows at all.
+        await InDbAsync(factory, db => db.MailMessageTexts.Where(t => t.OwnerUserId == owner).ExecuteDeleteAsync());
+        async Task<MailMessagePage> Search(string q) =>
+            await GetAsync<MailMessagePage>(client, $"/api/mail/messages?archiveId={archive.Id}&q={q}");
+
+        var before = await Search("testo%20originale");
+        Assert.Empty(before.Items);
+        Assert.True(before.BodySearchIncomplete);
+        // A header-only search is not affected and does not claim otherwise.
+        Assert.False((await GetAsync<MailMessagePage>(client, $"/api/mail/messages?archiveId={archive.Id}&q=%40")).BodySearchIncomplete);
+
+        // A message deleted before the backfill reaches it gets no text row.
+        var deleted = (await Search("relazione")).Items.Single(m => m.Subject == "Relazione trimestrale");
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/mail/messages/{deleted.Id}")).StatusCode);
+
+        // Searching again does not queue a second job.
+        await Search("testo");
+        Assert.Equal(1, await InDbAsync(factory, db => db.BackgroundJobs.CountAsync(j => j.Type == JobTypes.MailTextsBackfill)));
+        await RunJobsAsync(factory);
+
+        var after = await Search("testo%20originale");
+        Assert.Equal(["Inoltro con messaggio incorporato"], after.Items.Select(m => m.Subject).ToList());
+        Assert.False(after.BodySearchIncomplete);
+        Assert.Equal(3, await InDbAsync(factory, db => db.MailMessageTexts.CountAsync(t => t.OwnerUserId == owner)));
+        Assert.False(await InDbAsync(factory, db => db.MailMessageTexts.AnyAsync(t => t.MessageId == deleted.Id)));
+        // Nothing but texts was written: no file, no blob reference changed.
+        var audit = await AuditAsync(factory);
+        Assert.Equal(audit.TotalBlobs, audit.MatchedReferenceCount);
+    }
+
+    [Fact]
+    public async Task The_text_backfill_is_resumable_slice_by_slice()
+    {
+        var engine = PlainMessages(7);
+        var factory = NewFactory(engine, settings: new() { ["Jobs:MaintenanceSliceItemBudget"] = "2" });
+        var (owner, client) = await factory.CreateAuthenticatedClientAsync();
+        var started = await StartAsync(client, await UploadPstAsync(client));
+        await RunJobsAsync(factory);
+        await InDbAsync(factory, db => db.MailMessageTexts.Where(t => t.OwnerUserId == owner).ExecuteDeleteAsync());
+
+        Assert.True((await GetAsync<MailMessagePage>(client, $"/api/mail/messages?archiveId={started.Archive.Id}&q=testo")).BodySearchIncomplete);
+        var texts = 0;
+        for (var slice = 0; slice < 20 && texts < 7; slice++)
+        {
+            using (var scope = factory.Services.CreateScope())
+            {
+                await scope.ServiceProvider.GetRequiredService<JobProcessor>().ProcessAvailableAsync(1);
+            }
+            var now = await InDbAsync(factory, db => db.MailMessageTexts.CountAsync(t => t.OwnerUserId == owner));
+            Assert.InRange(now - texts, 0, 2);
+            texts = now;
+        }
+        Assert.Equal(7, texts);
+        // "testo" is only in the bodies.
+        var page = await GetAsync<MailMessagePage>(client, $"/api/mail/messages?archiveId={started.Archive.Id}&q=testo");
+        Assert.Equal(7, page.Items.Count);
+        Assert.False(page.BodySearchIncomplete);
+    }
+
+    [Fact]
     public async Task Attachment_file_leads_back_to_its_message_even_after_rename_and_move()
     {
         var (factory, client, owner, archive) = await ImportedAsync(this);
