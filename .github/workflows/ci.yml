@@ -33,6 +33,24 @@ jobs:
       - name: Verify NubArca identity contract
         run: scripts/check-nubarca-identity.sh
 
+      # Every merge into main is a release, so a pull request into main must
+      # raise the release version above main's current one (CLAUDE.md,
+      # "Release version"). Compared with main's tip, not the PR's base, so two
+      # PRs that picked the same number cannot both merge.
+      - name: Check out main's release version
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: .release-base
+          persist-credentials: false
+          sparse-checkout: src/NubArca.Api/NubArca.Api.csproj
+          sparse-checkout-cone-mode: false
+
+      - name: Verify the release version goes up
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        run: python3 scripts/check-release-version.py .release-base/src/NubArca.Api/NubArca.Api.csproj
+
       # BRAND-APP-01 §G. The brand contract is machine-checkable, so it is
       # checked: primitives against the canonical manifest, and the mobile
       # client strictly — splash configuration, token values, product spelling
