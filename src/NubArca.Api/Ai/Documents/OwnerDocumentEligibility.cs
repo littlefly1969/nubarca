@@ -208,6 +208,16 @@ public static class OwnerDocumentEligibility
                      // convention.
                      && document.IsCurrent
                      && document.Status == AiArtifactStatuses.Completed
+                     // ...AND A READING OF WHAT THE SOURCE IS NOW. IsCurrent is
+                     // only demoted when the job re-reads a replaced source, so
+                     // between the replacement and that job the old reading is
+                     // still current; the live revision closes that window in
+                     // this same query. `file` keeps its revision in the blob
+                     // id, every other kind in SourceRevision; a branch that
+                     // supplies no revision matches nothing.
+                     && (document.SourceKind == DocumentSourceKinds.File
+                         ? source.LiveBlobObjectId != null && document.SourceBlobObjectId == source.LiveBlobObjectId
+                         : source.LiveRevision != null && document.SourceRevision == source.LiveRevision)
                select new EligibleChunk
                {
                    Chunk = chunk,
@@ -241,6 +251,8 @@ public static class OwnerDocumentEligibility
                     SourceId = r.SourceId,
                     OwnerUserId = r.OwnerUserId,
                     DisplayName = r.DisplayName,
+                    LiveBlobObjectId = r.LiveBlobObjectId,
+                    LiveRevision = r.LiveRevision,
                 });
             union = union is null ? branch : union.Concat(branch);
         }
@@ -253,6 +265,8 @@ public static class OwnerDocumentEligibility
                 SourceId = d.SourceId,
                 OwnerUserId = d.OwnerUserId,
                 DisplayName = d.SourceKind,
+                LiveBlobObjectId = null,
+                LiveRevision = null,
             });
     }
 

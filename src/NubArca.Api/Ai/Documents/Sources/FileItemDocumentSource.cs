@@ -189,6 +189,10 @@ public sealed class FileItemDocumentEligibility : IOwnerDocumentSourceEligibilit
                 // The file NAME: what a person recognises. Never the logical
                 // folder path, the storage key or a physical path.
                 DisplayName = f.Name,
+                // The LIVE revision: a reading of the bytes this file named
+                // before it was replaced is not a reading of this file.
+                LiveBlobObjectId = f.BlobObjectId,
+                LiveRevision = null,
             });
 }
 

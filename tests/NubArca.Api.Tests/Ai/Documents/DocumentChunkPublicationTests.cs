@@ -252,7 +252,7 @@ public sealed class DocumentChunkPublicationTests : IAsyncLifetime
             var e = _entries.Single();
             return db.Users.AsNoTracking()
                 .Where(u => u.Id == e.Owner && u.Id == ownerUserId)
-                .Select(u => new EligibleSourceRow { SourceId = e.Id, OwnerUserId = u.Id, DisplayName = "Nota" });
+                .Select(u => new EligibleSourceRow { SourceId = e.Id, OwnerUserId = u.Id, DisplayName = "Nota", LiveBlobObjectId = null, LiveRevision = e.Revision });
         }
 
         private DocumentSourceCandidate? Candidate(Guid owner, Guid id)

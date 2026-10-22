@@ -330,6 +330,121 @@ public sealed class DocumentSourceKindEngineTests : IAsyncLifetime
         Assert.Equal(derivedBefore, await DerivedCountsAsync(_archiveA));
     }
 
+    // ---- a replaced source answers only from its CURRENT revision -----------
+    //
+    // The job demotes a superseded reading when it re-reads the source, but it
+    // runs after the replacement commits. In between, the old reading is still
+    // IsCurrent; these prove the live revision, checked in the same eligibility
+    // query, is what keeps it out of every surface — before any job runs.
+
+    [Fact]
+    public async Task A_Replaced_File_Stops_Answering_From_Its_Old_Bytes_Before_The_Job_Runs()
+    {
+        await BackfillAsync(_ownerA);
+        var derivedBefore = await FileDerivedCountsAsync(_manualA);
+        Assert.True(derivedBefore.Chunks > 0 && derivedBefore.Vectors > 0);
+
+        // The file now names other bytes. No signal, no job, no cleanup.
+        await ReplaceFileBytesAsync(_manualA, "# Ricetta\n\nLa torta di mele cuoce quaranta minuti a 180 gradi.");
+
+        await AssertSourceAbsentEverywhereAsync(_manualA, "sciacquare la cartuccia");
+        // The old reading is still in the database; it is simply not authority.
+        Assert.Equal(derivedBefore, await FileDerivedCountsAsync(_manualA));
+
+        // Once the job reads the new bytes, the file answers again — from them.
+        await BackfillAsync(_ownerA);
+        using var scope = _factory.Services.CreateScope();
+        var corpus = await scope.ServiceProvider.GetRequiredService<OwnerDocumentCorpusSource>().LoadAsync(_ownerA);
+        var manual = corpus.Chunks.Where(c => c.DocumentSourceId == _manualA).ToList();
+        Assert.Contains(manual, c => c.Text.Contains("torta di mele", StringComparison.Ordinal));
+        Assert.DoesNotContain(manual, c => c.Text.Contains("sciacquare", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_Kind_Whose_Live_Revision_Moved_Stops_Answering_Before_The_Job_Runs()
+    {
+        await BackfillAsync(_ownerA);
+        var derivedBefore = await DerivedCountsAsync(_archiveA);
+        Assert.True(derivedBefore.Chunks > 0 && derivedBefore.Vectors > 0);
+
+        // The kind's own row now carries another revision (a message edited,
+        // re-imported). Still live, still this owner's — just not what was read.
+        _archive.SetRevision(_archiveA, "rev-2");
+
+        await AssertSourceAbsentEverywhereAsync(_archiveA, ArchiveSentinelA);
+        Assert.Equal(derivedBefore, await DerivedCountsAsync(_archiveA));
+
+        await BackfillAsync(_ownerA);
+        using var scope = _factory.Services.CreateScope();
+        var corpus = await scope.ServiceProvider.GetRequiredService<OwnerDocumentCorpusSource>().LoadAsync(_ownerA);
+        Assert.Contains(corpus.Chunks, c => c.DocumentSourceId == _archiveA);
+    }
+
+    /// Lexical corpus, owner search, vector retrieval and the Assistant's
+    /// prompt: none of them may carry the source or its text.
+    private async Task AssertSourceAbsentEverywhereAsync(Guid sourceId, string oldText)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var sp = scope.ServiceProvider;
+
+        var corpus = await sp.GetRequiredService<OwnerDocumentCorpusSource>().LoadAsync(_ownerA);
+        Assert.DoesNotContain(corpus.Chunks, c => c.DocumentSourceId == sourceId);
+        Assert.DoesNotContain(corpus.Chunks, c => c.Text.Contains(oldText, StringComparison.Ordinal));
+
+        var search = await sp.GetRequiredService<OwnerDocumentSearchService>()
+            .SearchAsync(_ownerA, new OwnerDocumentSearchRequest(Question));
+        Assert.DoesNotContain(search.Documents, d => d.SourceId == sourceId);
+
+        var index = new RagLexicalIndex(corpus, RagRankingProfiles.For(RagDomainKey.UserDocuments));
+        var vector = await sp.GetRequiredService<OwnerDocumentVectorRetriever>()
+            .SearchAsync(index, _ownerA, Question, 10);
+        Assert.DoesNotContain(vector.Hits, h => h.Chunk.DocumentSourceId == sourceId);
+
+        await sp.GetRequiredService<PrivateDocumentAssistantService>()
+            .AskAsync(_ownerA, Question, Array.Empty<PrivateDocumentTurn>());
+        if (_handler.Body is { } prompt)
+        {
+            Assert.DoesNotContain(oldText, prompt, StringComparison.Ordinal);
+        }
+    }
+
+    private async Task ReplaceFileBytesAsync(Guid fileId, string content)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var bytes = Encoding.UTF8.GetBytes(content);
+        var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        var key = $"objects/{sha[..2]}/{sha[2..4]}/{sha}";
+        var path = Path.Combine(_factory.StorageRoot, key.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllBytesAsync(path, bytes);
+
+        var blob = new BlobObject
+        {
+            Id = Guid.NewGuid(),
+            Sha256 = sha,
+            StorageKey = key,
+            SizeBytes = bytes.Length,
+            ReferenceCount = 1,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.BlobObjects.Add(blob);
+        var file = await db.FileItems.SingleAsync(f => f.Id == fileId);
+        file.BlobObjectId = blob.Id;
+        file.SizeBytes = bytes.Length;
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<(int Texts, int Chunks, int Vectors)> FileDerivedCountsAsync(Guid fileId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var texts = db.DocumentTexts.Where(d => d.SourceKind == DocumentSourceKinds.File && d.SourceId == fileId);
+        var chunks = db.DocumentChunks.Where(c => texts.Any(t => t.Id == c.DocumentTextId));
+        return (await texts.CountAsync(), await chunks.CountAsync(),
+            await db.DocumentChunkEmbeddings.CountAsync(e => chunks.Any(c => c.Id == e.DocumentChunkId)));
+    }
+
     [Fact]
     public async Task A_Source_That_Is_Not_Live_Is_Not_Embedded()
     {
@@ -484,6 +599,7 @@ public sealed class DocumentSourceKindEngineTests : IAsyncLifetime
             public string Name { get; init; } = string.Empty;
             public string Body { get; init; } = string.Empty;
             public bool Live { get; set; } = true;
+            public string Revision { get; set; } = "rev-1";
         }
 
         private readonly List<Entry> _entries = new();
@@ -502,6 +618,8 @@ public sealed class DocumentSourceKindEngineTests : IAsyncLifetime
 
         public void SetLive(Guid id, bool live) => _entries.Single(e => e.Id == id).Live = live;
 
+        public void SetRevision(Guid id, string revision) => _entries.Single(e => e.Id == id).Revision = revision;
+
         public IQueryable<EligibleSourceRow> Eligible(AppDbContext db, Guid ownerUserId)
         {
             IQueryable<EligibleSourceRow>? union = null;
@@ -511,11 +629,11 @@ public sealed class DocumentSourceKindEngineTests : IAsyncLifetime
                 var forget = ForgetOwnerClause;
                 var branch = db.Users.AsNoTracking()
                     .Where(u => u.Id == e.Owner && e.Live && (forget || u.Id == ownerUserId))
-                    .Select(u => new EligibleSourceRow { SourceId = e.Id, OwnerUserId = u.Id, DisplayName = e.Name });
+                    .Select(u => new EligibleSourceRow { SourceId = e.Id, OwnerUserId = u.Id, DisplayName = e.Name, LiveBlobObjectId = null, LiveRevision = e.Revision });
                 union = union is null ? branch : union.Concat(branch);
             }
             return union ?? db.Users.Where(_ => false)
-                .Select(u => new EligibleSourceRow { SourceId = u.Id, OwnerUserId = u.Id, DisplayName = u.DisplayName });
+                .Select(u => new EligibleSourceRow { SourceId = u.Id, OwnerUserId = u.Id, DisplayName = u.DisplayName, LiveBlobObjectId = null, LiveRevision = null });
         }
 
         private IEnumerable<Entry> LiveFor(Guid owner) => _entries.Where(e => e.Owner == owner && e.Live);
@@ -526,13 +644,13 @@ public sealed class DocumentSourceKindEngineTests : IAsyncLifetime
                 .Where(e => afterSourceId is null || e.Id.CompareTo(afterSourceId.Value) > 0)
                 .OrderBy(e => e.Id)
                 .Take(take)
-                .Select(e => new DocumentSourceCandidate(e.Id, "rev-1", e.Name))
+                .Select(e => new DocumentSourceCandidate(e.Id, e.Revision, e.Name))
                 .ToList());
 
         public Task<DocumentSourceCandidate?> GetCandidateAsync(
             Guid ownerUserId, Guid sourceId, CancellationToken cancellationToken = default)
             => Task.FromResult(LiveFor(ownerUserId).Where(e => e.Id == sourceId)
-                .Select(e => new DocumentSourceCandidate(e.Id, "rev-1", e.Name)).FirstOrDefault());
+                .Select(e => new DocumentSourceCandidate(e.Id, e.Revision, e.Name)).FirstOrDefault());
 
         public Task<DocumentSourceLoad> LoadAsync(
             Guid ownerUserId, DocumentSourceCandidate candidate, CancellationToken cancellationToken = default)

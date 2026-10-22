@@ -79,14 +79,25 @@ public enum DocumentSourceLoadKind
 
 /// One live, eligible source of one kind, as the engine joins it: the id the
 /// derived rows are keyed by, the LIVE owner (read off the kind's own row, not
-/// a derived copy) and the name a citation shows. Nothing else — a citation
-/// needs a name, and a kind's other columns stay inside the kind.
+/// a derived copy), the name a citation shows, and the LIVE CONTENT REVISION.
+/// Nothing else — a citation needs a name, and a kind's other columns stay
+/// inside the kind.
+///
+/// The revision is what keeps a replaced source from answering with its old
+/// text in the window between the replacement and the job that re-reads it: a
+/// reading answers only while it was made from the revision the source has
+/// NOW. The `file` kind sets `LiveBlobObjectId` (its revision is the blob, as
+/// `DocumentText.SourceBlobObjectId` records it); every other kind sets
+/// `LiveRevision` to the same string its candidates carry. A kind that sets
+/// neither has no reading that matches, so it fails closed.
 public sealed class EligibleSourceRow
 {
     public string SourceKind { get; init; } = string.Empty;
     public Guid SourceId { get; init; }
     public Guid OwnerUserId { get; init; }
     public string DisplayName { get; init; } = string.Empty;
+    public Guid? LiveBlobObjectId { get; init; }
+    public string? LiveRevision { get; init; }
 }
 
 /// THE BOUNDARY for one kind (see docs/document-intelligence/source-contract.md).
@@ -104,9 +115,11 @@ public interface IOwnerDocumentSourceEligibility
     /// recomputed from the kind's live rows on every call. Composable: the
     /// engine joins it inside its own query (never materialized), so it must
     /// be translatable by EF for every supported provider, and it must END in
-    /// one `new EligibleSourceRow { SourceId, OwnerUserId, DisplayName }`
-    /// projection that sets all three (the engine composes over those members
-    /// and unions the kinds; a member left out cannot be translated).
+    /// one `new EligibleSourceRow { SourceId, OwnerUserId, DisplayName,
+    /// LiveBlobObjectId, LiveRevision }` projection that sets all five (the
+    /// engine composes over those members and unions the kinds; a member left
+    /// out cannot be translated). The revision member the kind does not use is
+    /// set to null explicitly.
     /// `SourceKind` is left unset — the engine stamps the discriminator itself.
     ///
     /// Owner-prefiltered by contract, and the engine re-checks the returned

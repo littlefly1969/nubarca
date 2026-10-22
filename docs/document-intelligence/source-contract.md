@@ -46,12 +46,26 @@ public sealed class EligibleSourceRow
     public Guid SourceId { get; init; }
     public Guid OwnerUserId { get; init; }    // the LIVE owner, off the kind's own row
     public string DisplayName { get; init; }  // what a citation and a search hit show
+    public Guid? LiveBlobObjectId { get; init; } // `file` only: the blob the file names NOW
+    public string? LiveRevision { get; init; }   // every other kind: its revision NOW
 }
 ```
 
 The query must be translatable for SQLite and PostgreSQL and end in one
-`new EligibleSourceRow { SourceId, OwnerUserId, DisplayName }` projection that
-sets all three members. `IOwnerDocumentSource` extends this interface, so a
+`new EligibleSourceRow { SourceId, OwnerUserId, DisplayName, LiveBlobObjectId,
+LiveRevision }` projection that sets all five members (the unused revision
+member explicitly to null).
+
+**Live content revision.** A reading answers only while it was made from the
+revision the source has now, checked in the same eligibility query: for `file`
+`document_texts.SourceBlobObjectId == FileItem.BlobObjectId`, for every other
+kind `document_texts.SourceRevision == LiveRevision`, where `LiveRevision` is
+the same string the kind's candidates carry as `RevisionHash`. The job demotes
+a superseded reading only when it re-reads the source; between a replacement
+(a new upload over a file, an edited or re-imported message) and that job, the
+old reading is still `IsCurrent`, and this clause is what keeps it out of
+search, the lexical corpus, vector retrieval, embedding and the Assistant. A
+branch that supplies no revision matches nothing. `IOwnerDocumentSource` extends this interface, so a
 registered source is always an eligibility branch.
 
 - `file`: owner matches, not deleted, not in the Private Vault, in the media
@@ -64,7 +78,8 @@ allowedKinds)` is the union of the registered kinds' branches (one branch, no
 UNION, when only `file` is registered; otherwise a UNION ALL of small scalar
 source rows, one SELECT per registered kind), joined to `document_texts` on
 `(SourceKind, SourceId)` with the current, completed reading and the owner on
-the chunk, the reading and the source row all required. It returns the chunk,
+the chunk, the reading and the source row all required, and the reading's
+revision equal to the source's live revision. It returns the chunk,
 its reading and the source's kind, id, live owner and display name. Embedding,
 the lexical corpus, vector retrieval, search and the Assistant all read through
 it; the kinds come from `OwnerDocumentSources.Eligibility` (DI), and a caller
