@@ -75,7 +75,7 @@ ROUTER_MANUAL = Doc(
             P("Connect the WAN port (blue) to your fibre or DSL modem with the supplied Cat6 "
               "cable, then connect the power adapter (12 V, 1.5 A). The router is ready when "
               "the Internet LED turns solid white, which normally takes about 90 seconds."),
-            P("Open a browser and go to http://192.168.8.1 or http://halyard.setup. The "
+            P("Open a browser and go to http://10.8.0.1 or http://halyard.setup. The "
               "default administrator password is printed on the label under the device; you "
               "will be asked to change it at first login."),
             H("2. LED Indicators"),
@@ -95,7 +95,7 @@ ROUTER_MANUAL = Doc(
               "release it. All settings, including Wi-Fi names and passwords, are erased."),
             P("If the router does not boot after a failed firmware update, hold RESET while "
               "connecting the power and keep it pressed for 30 seconds to enter recovery mode; "
-              "then upload the firmware file from http://192.168.8.1/recovery."),
+              "then upload the firmware file from http://10.8.0.1/recovery."),
             H("4. Technical Specifications"),
             T("router-specs", (
                 ("Feature", "Specification"),

@@ -481,7 +481,7 @@ QUERIES: tuple[Q, ...] = (
       (R(RT, 1, 2, "Internet | Solid red | WAN cable connected but no Internet access"),
        R(RT, 3, 2, "Internet LED solid red: restart the modem first, then the router.")), ""),
     Q("q132", "default IP address of the admin page", "en", ("en-en", "codes", "short"),
-      (R(RT, 1, 2, "Open a browser and go to http://192.168.8.1 or http://halyard.setup."),), "192.168.8.1"),
+      (R(RT, 1, 2, "Open a browser and go to http://10.8.0.1 or http://halyard.setup."),), "10.8.0.1"),
     Q("q133", "Power LED blinking amber", "en", ("en-en", "technical", "table", "short", "cross-page"),
       (R(RT, 1, 2, "Power | Blinking amber | Firmware update in progress — do not unplug"),
        R(RT, 2, 1, "until the Power LED blinks amber")), ""),
