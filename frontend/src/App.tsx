@@ -20,6 +20,7 @@ import { AdminUpdatesPage } from './pages/AdminUpdatesPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
 import { AlbumDetailPage } from './pages/AlbumDetailPage';
 import { HelpPage } from './pages/HelpPage';
+import { DocumentsPage } from './pages/DocumentsPage';
 import { AlbumsPage } from './pages/AlbumsPage';
 import { PartiesPage } from './pages/PartiesPage';
 import { PartyWorkspacePage } from './pages/PartyWorkspacePage';
@@ -174,6 +175,7 @@ export function App() {
             <Route path="/albums" element={<AlbumsPage />} />
             <Route path="/albums/:albumId" element={<AlbumDetailPage />} />
             <Route path="/lists" element={<ListsPage />} />
+            <Route path="/documents" element={<DocumentsPage />} />
             <Route path="/lists/:listId" element={<ListDetailPage key="list" />} />
             {/* THE Party destination. `party.access` alone opens it: which
                 capabilities appear inside a party is the workspace's own

@@ -501,11 +501,63 @@ one question.
 
 ### What a citation may say
 
-The document's NAME and the SECTION heading — both things the owner wrote or
-chose. Never a `FileItemId`, `DocumentTextId`, chunk id, `BlobObjectId`, blob
-hash, `StorageKey`, filesystem path or owner id. A citation exists so a person
-can open their document, not so anything can address it, and an identifier on
-the wire is a durable handle to private content sitting in somebody else's logs.
+The document's NAME, the SECTION heading, and WHERE in the document — the real
+PDF page, or the typed locator (`page` / `section` / `sheet` / `slide`, its
+index and label; see "Location is typed"). All of it is something the owner
+wrote, chose, or can see by opening the file. Never a `FileItemId`,
+`DocumentTextId`, chunk id, `BlobObjectId`, blob hash, `StorageKey`, filesystem
+path or owner id. A citation exists so a person can open their document, not so
+anything can address it, and an identifier on the wire is a durable handle to
+private content sitting in somebody else's logs.
+
+The locator travels typed from `DocumentChunk` through `RagIndexedChunk` and
+`RagEvidence` into the citation (`page`, `locator: {kind, index, label}`), and
+the prompt names it too ("contratto.pdf — Recesso — page 3"), so a model that
+cites a page cites the page the passage came from rather than inventing one.
+
+### Search returns the owner's own file id
+
+`POST /api/documents/search` (`{ query, limit }`, authenticated, per-user rate
+limit `private-document-search`) is "find it in my documents": the same
+`OwnerDocumentRetrievalPipeline` the Assistant answers from — lexical, dense
+when semantic is on for `user-documents`, the visual pass when it is available,
+fused by rank — behind the same evidence gate, with **no model call**. Results
+are grouped by document, at most three passages each, each passage a bounded
+(320-character) excerpt centred on the match with its section and locator. The
+response says which retrieval ran (`mode`: `lexical`, `hybrid` or
+`lexical-fallback-<reason>`; `visualMode`, `visualUsed`) so "semantic is off"
+never reads as "search is broken".
+
+**Reviewed exception to the rule above.** Each document carries
+`sourceKind: "file"` and `sourceId` — the CALLER'S OWN `FileItemId` — so the
+page can open the file. Why this one id is acceptable:
+
+- it is the id every other owner endpoint (listing, details, thumbnails,
+  `/api/files/{id}/content`) already returns to the same owner, so it discloses
+  nothing the owner could not already list;
+- every use of it is re-authorized server-side against the caller — a leaked id
+  opens nothing for anybody else;
+- it never appears in a chat citation, a prompt, a log line or a CLI line;
+- nothing else rides with it: no chunk id, `DocumentText` id, blob id, hash,
+  storage key, owner id or score (fusion scores of two passes are not
+  comparable, so the response carries ranks only).
+
+The request has no owner, domain, file or source field. The search service
+accepts optional `SourceKinds` and `AllowedSourceIds` SERVER-SIDE only, as a
+narrowing applied to the already-eligible corpus, so it can only remove
+candidates (see "Narrowing a text pass, correctly"); the HTTP body cannot reach
+either. Isolation is proved by `OwnerDocumentSearchTests`: another owner's, a
+vaulted, a deleted and a library-excluded document with derived rows left in
+place, forged body fields, and a second owner holding identical bytes, each
+asserted absent from the complete response body.
+
+`GET /api/assistant/documents/status` reports, besides the model boundary,
+`visualEnabled`/`visualReason`, an `indexing` block of counts
+(`candidateFiles`, `indexedFiles`, `notIndexedFiles`, `chunks`,
+`embeddedChunks` — null when semantic is off) and `availability` per domain and
+source kind: whether `lexical`, `semantic` and `visual` can run and, when not, a
+reason token (`disabled`, `no_profile`, `model_missing`, `not_indexed`, or the
+visual reason). Counts and tokens only — never a name.
 
 ### Automatic indexing, and its state
 
@@ -769,7 +821,8 @@ those are deliberately null, and a text canvas sheet has no counterpart in a
 Markdown file at all.
 
 Final citations therefore remain Slice-4 typed text provenance: heading/section
-for DOCX, sheet/range for XLSX, slide for PPTX, page for PDF.
+for DOCX, sheet for XLSX, slide for PPTX, page for PDF — carried from the chunk
+into every citation and search result (see "What a citation may say").
 
 ### Publication is all or nothing
 
@@ -1003,7 +1056,16 @@ dotnet NubArca.Api.dll documents visual-seed-profiles
 dotnet NubArca.Api.dll documents visual-index    --owner <user-id> [--limit N]
 dotnet NubArca.Api.dll documents visual-status   --owner <user-id>
 dotnet NubArca.Api.dll documents visual-evaluate --owner <user-id> --queries cases.tsv
+dotnet NubArca.Api.dll documents query --owner <user-id> [--limit N] [--expect name[,name]] "<question>"
 ```
+
+`documents query` runs the owner's document search exactly as the Documenti
+page does and prints the status, the modes, and per document and passage the
+fused/lexical/vector ranks, page, locator kind:index and chunk ordinal. A
+document is printed as its rank, never its name or id; `--expect` takes the
+names the operator expects, compares them in process and prints only
+`expected=true|false` and `expected_first_rank` — enough to score a benchmark
+without a filename reaching the terminal. Like `rag query`, it never generates.
 
 A separate verb rather than `rag index --domain user-documents --owner …`,
 because which corpus a command touches should be visible in the command that was

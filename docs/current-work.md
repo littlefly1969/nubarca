@@ -1936,6 +1936,16 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   and deliberately NOT cached, and private semantic retrieval is exact cosine
   over the owner's eligible vectors — a global ANN index with an owner predicate
   is not an owner-prefiltered search and fails silently.
+- **Document search returns the owner's OWN file id, and nothing else that
+  addresses anything.** `POST /api/documents/search` (`{query, limit}`, no
+  model call) and the Documenti page run the same retrieval pipeline and gate
+  as the private chat, grouped by document with bounded match-centred
+  passages, the PDF page / typed slide-sheet-section locator, and the
+  retrieval mode. Each hit carries `sourceKind: "file"` + `sourceId` (the
+  caller's FileItemId) so the file can be opened — a reviewed exception
+  written down in docs/rag-platform.md; never chunk/text/blob ids, hashes,
+  storage keys, owner ids or scores. Chat citations now carry page/locator
+  too, still with no id. `documents query --owner` is the no-names diagnostic.
 - **A visual hit finds where to look; an eligible current text chunk is still
   what NubArca may say.** Visual document retrieval renders an owner's pages,
   embeds them locally under a DOCUMENT-specific SigLIP2 profile (shared weights

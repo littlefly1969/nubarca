@@ -6,8 +6,9 @@ namespace NubArca.Api.Ai.DocumentVisual;
 /// One question, answered from one person's documents, by both signals.
 ///
 /// Bounded TEXT evidence and two mode tokens. There is deliberately no field
-/// for a visual unit, a page, a score or a file id: what leaves this pipeline is
-/// what may reach a prompt, and nothing else needs to.
+/// for a visual unit or a visual score: a visual hit only ever names files to
+/// scope a text pass. Each evidence item carries its own TEXT provenance (file,
+/// page, typed locator) from the chunk it came from.
 public sealed record OwnerDocumentRetrievalResult(
     IReadOnlyList<RagEvidence> Evidence,
     RagRetrievalOutcome Outcome,
@@ -15,11 +16,15 @@ public sealed record OwnerDocumentRetrievalResult(
     string VisualMode,
     int GlobalEvidence,
     int VisualExpandedEvidence,
-    IReadOnlyList<Guid> VisualCandidateFileIds)
+    IReadOnlyList<Guid> VisualCandidateFileIds,
+    /// The global text pass's sanitized reason (`rag_index_unavailable`,
+    /// `rag_corpus_too_large`, …), so a caller can tell "nothing indexed" from
+    /// "nothing matched" without a second read.
+    string? TextReason = null)
 {
     public static OwnerDocumentRetrievalResult From(RagRetrievalResult text, string visualMode)
         => new(text.Evidence, text.Outcome, text.Mode, visualMode,
-               text.Evidence.Count, 0, Array.Empty<Guid>());
+               text.Evidence.Count, 0, Array.Empty<Guid>(), text.Reason);
 }
 
 /// THE RETRIEVAL HALF OF "ANSWER FROM MY DOCUMENTS", as one object.
@@ -57,10 +62,17 @@ public sealed class OwnerDocumentRetrievalPipeline
         int maxEvidence,
         int maxCharacters,
         bool useVisual = true,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyCollection<Guid>? allowedSourceIds = null)
     {
+        // `allowedSourceIds` is a SERVER-SIDE narrowing (see
+        // RagQuery.AllowedFileItemIds): it is applied to the already-eligible
+        // corpus and can only remove candidates. Null means the whole library.
         var global = await _knowledge.RetrieveAsync(
-            new RagQuery(Domain.DomainKey, question, ownerUserId, maxEvidence, maxCharacters),
+            new RagQuery(Domain.DomainKey, question, ownerUserId, maxEvidence, maxCharacters)
+            {
+                AllowedFileItemIds = allowedSourceIds,
+            },
             cancellationToken);
 
         if (!useVisual || _visual is null)
@@ -85,7 +97,11 @@ public sealed class OwnerDocumentRetrievalPipeline
         var scoped = await _knowledge.RetrieveAsync(
             new RagQuery(Domain.DomainKey, question, ownerUserId, maxEvidence, maxCharacters)
             {
-                AllowedFileItemIds = visual.CandidateFileIds,
+                // Intersected with the caller's own narrowing, so the visual
+                // pass can never reach a file the global pass was not allowed.
+                AllowedFileItemIds = allowedSourceIds is null
+                    ? visual.CandidateFileIds
+                    : visual.CandidateFileIds.Where(allowedSourceIds.Contains).ToList(),
             },
             cancellationToken);
 
@@ -114,6 +130,7 @@ public sealed class OwnerDocumentRetrievalPipeline
             visual.Mode,
             global.Evidence.Count,
             expanded.Count,
-            visual.CandidateFileIds);
+            visual.CandidateFileIds,
+            global.Reason);
     }
 }

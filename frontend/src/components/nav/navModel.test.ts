@@ -15,7 +15,7 @@ describe('primary navigation model', () => {
   // before roles existed.
   it('keeps every normal-user destination for a Member', () => {
     expect(allRoutes(MEMBER_PERMISSIONS)).toEqual([
-      '/', '/media', '/albums', '/lists', '/people', '/parties',
+      '/', '/media', '/albums', '/lists', '/documents', '/people', '/parties',
       '/lab', '/shares', '/cloud-functions', '/private', '/trash',
     ]);
   });
@@ -99,7 +99,7 @@ describe('primary navigation model', () => {
     // Files, media, albums, lists, shares and trash are not gated at all —
     // which is why Restricted needs no permission to keep them.
     expect(allRoutes(RESTRICTED)).toEqual([
-      '/', '/media', '/albums', '/lists', '/shares', '/trash',
+      '/', '/media', '/albums', '/lists', '/documents', '/shares', '/trash',
     ]);
   });
 

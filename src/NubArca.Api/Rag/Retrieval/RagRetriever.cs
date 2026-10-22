@@ -443,7 +443,15 @@ public sealed class RagRetriever : IRagRetriever
                 // unstamped evidence for an owner-scoped domain, so a system
                 // chunk that reached a private result fails there rather than
                 // being relabelled with the caller's id on the way past.
-                OwnerUserId: chunk.OwnerUserId));
+                OwnerUserId: chunk.OwnerUserId,
+                // Provenance, copied from the chunk like the owner: which file
+                // and where in it. Null for every system domain.
+                FileItemId: chunk.FileItemId,
+                Page: chunk.Page,
+                LocatorKind: chunk.LocatorKind,
+                LocatorIndex: chunk.LocatorIndex,
+                LocatorLabel: chunk.LocatorLabel,
+                Ordinal: chunk.Ordinal));
         }
 
         return evidence;
