@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NubArca.Api.Access;
 using NubArca.Api.Ai.Documents;
 using NubArca.Api.Ai.Documents.Indexing;
 using NubArca.Api.Ai.Documents.Sources;
@@ -410,6 +411,30 @@ public sealed class DocumentIndexJobTests
     }
 
     [Fact]
+    public async Task Owners_Without_Document_Search_Access_Are_Not_Indexed()
+    {
+        using var f = Factory(Enabled);
+        var alice = await AddUserAsync(f);
+        var bob = await AddUserAsync(f, RoleKeys.Restricted);
+        var alices = await AddFileAsync(f, alice, "manuale.md", Manual);
+        var bobs = await AddFileAsync(f, bob, "ricetta.md", Recipe);
+
+        // Every owner: Bob, without document-search.access, is skipped.
+        await RunAsync(f, new DocumentIndexJobPayload(AllOwners: true));
+        // His own change signal and his own backfill index nothing either.
+        await RunAsync(f, new DocumentIndexJobPayload(
+            OwnerUserId: bob, SourceKind: DocumentSourceKinds.File, SourceId: bobs.Id));
+        await RunAsync(f, new DocumentIndexJobPayload(OwnerUserId: bob));
+
+        Assert.Equal(DocumentSourceStatuses.Completed,
+            (await StateAsync(f, alices.Id, DocumentSourcePhases.Embed))!.Status);
+        using var scope = f.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.False(await db.DocumentSourceStates.AnyAsync(s => s.OwnerUserId == bob));
+        Assert.False(await db.DocumentTexts.AnyAsync(d => d.OwnerUserId == bob));
+    }
+
+    [Fact]
     public async Task A_Deleted_Source_Stops_Counting_At_Once()
     {
         using var f = Factory(Enabled);
@@ -536,7 +561,7 @@ public sealed class DocumentIndexJobTests
         return context;
     }
 
-    private static async Task<Guid> AddUserAsync(SqliteWebApplicationFactory f)
+    private static async Task<Guid> AddUserAsync(SqliteWebApplicationFactory f, string roleKey = RoleKeys.Member)
     {
         using var scope = f.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -546,6 +571,7 @@ public sealed class DocumentIndexJobTests
             Id = id,
             Email = $"owner-{id:N}@example.invalid",
             DisplayName = "Owner",
+            RoleKey = roleKey,
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();

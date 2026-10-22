@@ -30,6 +30,14 @@ const PERMISSION_META: Record<string, PermissionPresentation> = {
     labelKey: 'perm.semanticSearchAccess',
     descriptionKey: 'permDesc.semanticSearchAccess',
   },
+  [PERMISSIONS.documentSearchAccess]: {
+    labelKey: 'perm.documentSearchAccess',
+    descriptionKey: 'permDesc.documentSearchAccess',
+  },
+  [PERMISSIONS.mailAccess]: {
+    labelKey: 'perm.mailAccess',
+    descriptionKey: 'permDesc.mailAccess',
+  },
   [PERMISSIONS.laboratoryAccess]: {
     labelKey: 'perm.laboratoryAccess',
     descriptionKey: 'permDesc.laboratoryAccess',

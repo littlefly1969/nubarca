@@ -76,6 +76,20 @@ describe('DetailsPanel: Origine email', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('asks nothing without mail.access', async () => {
+    const mock = installFetchMock({});
+    render(
+      <AuthedWrapper permissions={[]}>
+        <MemoryRouter>
+          <DetailsPanel entry={FILE} currentParentId={null} onClose={() => {}} onOutcome={() => {}} onOpen={() => {}} />
+        </MemoryRouter>
+      </AuthedWrapper>,
+    );
+    expect(await screen.findByRole('button', { name: 'Rename' })).toBeInTheDocument();
+    expect(mock.calls).toHaveLength(0);
+    expect(screen.queryByTestId('mail-file-origin')).not.toBeInTheDocument();
+  });
+
   it('asks nothing for a folder', async () => {
     const mock = installFetchMock({});
     renderPanel(FOLDER);

@@ -256,6 +256,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Purely additive. It creates one new table, mail_message_texts (the lower-cased searchable body text of a mail message and a copy of its sort date, keyed by the message id with ON DELETE CASCADE from mail_messages), and a GIN expression index on to_tsvector('simple', \"Text\") over it. No existing table, column, index or constraint is altered and no row is written or backfilled; the table starts empty. The previous application neither reads nor writes it, so rolling the image back leaves every flow unchanged: messages imported meanwhile have no text row and are found by subject, sender and recipients only, and a message deleted meanwhile takes its text row with it through the cascade. Down() drops the index and the table; the text is derived from each message's document blob, which is untouched."
+    },
+    "20261022181107_AddMailAndDocumentSearchPermissions": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Data only, no schema change. It inserts two role_permissions rows giving the built-in Member role the new mail.access and document-search.access permission keys, guarded so an existing row is not duplicated and skipped when no Member role exists. No table, column, index or constraint is created or altered. The previous application neither knows nor checks these keys: its MailArchive and document routes answer any signed-in user, so rolling the image back leaves every flow working, and its role editor only lists catalogue keys it knows. Down() deletes exactly those two Member rows; no file, blob, message or document text is touched."
     }
   }
 }

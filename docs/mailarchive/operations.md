@@ -78,6 +78,22 @@ Attachment files count against the owner's quota like any upload; a quota
 failure fails that message (retryable), not the run. Message documents are
 small and are not counted against the quota.
 
+## Who can use it
+
+MailArchive is enabled per role with the **`mail.access`** permission
+(*Posta*, in the role editor). Administrator always holds it; Member receives
+it on upgrade (migration `AddMailAndDocumentSearchPermissions`), so nobody who
+used mail before loses it; Restricted and custom roles do not, until an
+operator adds it. Without it every `/api/mail` route answers 403, the Posta
+entry and the "Origine email" panel disappear, and the import and search-text
+jobs do nothing for that owner: an import already running ends `cancelled` at
+its next slice and can be resumed once the permission is back. Data already
+imported is kept.
+
+Searching the mail *by meaning* will additionally need `document-search.access`
+(the documents permission), which is separate from `semantic-search.access`
+(photos and videos).
+
 ## Running an import
 
 1. Upload the `.pst` to Files (any route: web upload, resumable upload, admin

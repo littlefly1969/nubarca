@@ -99,8 +99,17 @@ describe('primary navigation model', () => {
     // Files, media, albums, lists, shares and trash are not gated at all —
     // which is why Restricted needs no permission to keep them.
     expect(allRoutes(RESTRICTED)).toEqual([
-      '/', '/media', '/albums', '/lists', '/documents', '/mail', '/shares', '/trash',
+      '/', '/media', '/albums', '/lists', '/shares', '/trash',
     ]);
+  });
+
+  it('omits Documenti and Posta without their own permissions', () => {
+    expect(allRoutes(RESTRICTED)).not.toContain('/documents');
+    expect(allRoutes(RESTRICTED)).not.toContain('/mail');
+    // Semantic search on media does not open the documents.
+    expect(allRoutes([PERMISSIONS.semanticSearchAccess])).not.toContain('/documents');
+    expect(allRoutes([PERMISSIONS.documentSearchAccess])).toContain('/documents');
+    expect(allRoutes([PERMISSIONS.mailAccess])).toContain('/mail');
   });
 
   it('omits People without people.access', () => {
@@ -139,6 +148,8 @@ describe('primary navigation model', () => {
     const gated = Object.fromEntries(items.map((i) => [i.to, i.permission]));
 
     expect(gated['/people']).toBe(PERMISSIONS.peopleAccess);
+    expect(gated['/documents']).toBe(PERMISSIONS.documentSearchAccess);
+    expect(gated['/mail']).toBe(PERMISSIONS.mailAccess);
     expect(gated['/lab']).toBe(PERMISSIONS.laboratoryAccess);
     expect(gated['/cloud-functions']).toBe(PERMISSIONS.cloudFunctionsAccess);
     expect(gated['/private']).toBe(PERMISSIONS.privateVaultAccess);
@@ -148,7 +159,7 @@ describe('primary navigation model', () => {
     expect(gated['/admin/jobs']).toBe(PERMISSIONS.adminJobsManage);
     expect(gated['/admin/updates']).toBe(PERMISSIONS.adminDashboard);
 
-    for (const core of ['/', '/media', '/albums', '/lists', '/mail', '/shared-albums', '/shares', '/trash']) {
+    for (const core of ['/', '/media', '/albums', '/lists', '/shared-albums', '/shares', '/trash']) {
       expect(gated[core]).toBeUndefined();
     }
   });

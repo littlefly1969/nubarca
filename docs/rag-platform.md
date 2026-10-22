@@ -409,6 +409,14 @@ become N under a slow model.
 than to the installation. Everything below exists because that one change makes
 every previous assumption need re-checking.
 
+**Who may use it.** Every owner-private document surface requires the
+`document-search.access` permission: `POST /api/documents/search`,
+`GET /api/documents/indexing/status`, `/api/assistant/documents/*` and the
+Documenti page. The `ai.documents.index` job re-reads it per owner and indexes
+nothing for an owner without it. It is separate from `semantic-search.access`,
+which covers photos and videos only, so the two are enabled per role
+independently. Member receives it on upgrade; Restricted does not.
+
 ```text
 FileItem the owner currently owns, is active, is not in the Vault,
 is in their media library, and whose type NubArca reads as text

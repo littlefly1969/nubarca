@@ -1,13 +1,15 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using NubArca.Api.Access;
 using NubArca.Api.Ai;
 using NubArca.Api.Ai.Documents.Indexing;
 using NubArca.Api.Http;
 
 namespace NubArca.Api.Endpoints;
 
-/// "How far along is the indexing of MY documents?" Counts only.
+/// "How far along is the indexing of MY documents?" Counts only. Requires
+/// `document-search.access`, like the search it reports on.
 ///
 /// The owner comes from the authenticated identity; there is no parameter that
 /// could name anybody else. The response is counts per phase and state plus
@@ -36,7 +38,7 @@ public static class DocumentIndexingEndpoints
                 phases = result.Phases,
                 reasons = result.ReasonCounts,
             });
-        }).WithName("DocumentIndexingStatus").RequireAuthorization();
+        }).WithName("DocumentIndexingStatus").RequirePermission(Permissions.DocumentSearchAccess);
 
         return app;
     }

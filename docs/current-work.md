@@ -343,6 +343,13 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   walking the owner's mail by date. Messages without a text row are
   backfilled per owner by `mail.texts.backfill` from their stored documents;
   never fill them by re-importing the PST. See `docs/mailarchive/operations.md`.
+- **Mail and documents are gated per role, separately from media search.**
+  `mail.access` covers every `/api/mail` route and the `mail.import` /
+  `mail.texts.backfill` jobs (a revoked owner's run ends `cancelled`, never
+  failed). `document-search.access` covers document search, indexing status,
+  the document assistant and the `ai.documents.index` job (owners without it
+  are skipped). `semantic-search.access` stays photos and videos only; a future
+  mail source in document search needs both mail and documents keys.
 - **The Party workspace is SEVEN sections, and the same seven in every phase.**
   Riepilogo, Esperienza, Ospiti, Foto, Attività, Schermi e stampa,
   Impostazioni — plus Live, the one section that appears while the party is

@@ -176,13 +176,34 @@ export function App() {
             <Route path="/albums" element={<AlbumsPage />} />
             <Route path="/albums/:albumId" element={<AlbumDetailPage />} />
             <Route path="/lists" element={<ListsPage />} />
-            <Route path="/documents" element={<DocumentsPage />} />
+            <Route
+              path="/documents"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.documentSearchAccess]}>
+                  <DocumentsPage />
+                </PermissionRoute>
+              }
+            />
             <Route path="/lists/:listId" element={<ListDetailPage key="list" />} />
             {/* MailArchive: the owner's imported PST archives, read-only. The
                 message route is the same page with its reader open, so a file's
                 "Origine email" link lands inside the section, not beside it. */}
-            <Route path="/mail" element={<MailPage />} />
-            <Route path="/mail/messages/:messageId" element={<MailPage />} />
+            <Route
+              path="/mail"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.mailAccess]}>
+                  <MailPage />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/mail/messages/:messageId"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.mailAccess]}>
+                  <MailPage />
+                </PermissionRoute>
+              }
+            />
             {/* THE Party destination. `party.access` alone opens it: which
                 capabilities appear inside a party is the workspace's own
                 decision, and the server gates each of them independently. */}

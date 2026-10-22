@@ -1,11 +1,13 @@
 using Microsoft.AspNetCore.Mvc;
+using NubArca.Api.Access;
 using NubArca.Api.Ai.Documents;
 using NubArca.Api.Http;
 using NubArca.Api.Rag;
 
 namespace NubArca.Api.Endpoints;
 
-/// "Ask about my own documents." Authenticated, owner-derived, LocalTrusted-only.
+/// "Ask about my own documents." Requires `document-search.access`; owner-derived,
+/// LocalTrusted-only.
 ///
 /// THE REQUEST DTO IS THE CONTRACT, and it is the shortest one in the product: a
 /// message and a bounded history. There is no `ownerUserId`, no `domain`, no
@@ -106,7 +108,7 @@ public static class PrivateDocumentAssistantEndpoints
                     }),
                 },
             });
-        }).WithName("PrivateDocumentAssistantStatus").RequireAuthorization();
+        }).WithName("PrivateDocumentAssistantStatus").RequirePermission(Permissions.DocumentSearchAccess);
 
         app.MapPost("/api/assistant/documents/chat", async (
             HttpContext httpContext,
@@ -157,7 +159,7 @@ public static class PrivateDocumentAssistantEndpoints
                 }),
             });
         }).WithName("PrivateDocumentAssistantChat")
-          .RequireAuthorization()
+          .RequirePermission(Permissions.DocumentSearchAccess)
           .RequireRateLimiting(PrivateChatRateLimitPolicy);
 
         return app;

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using NubArca.Api.Access;
 using NubArca.Api.Audit;
 using NubArca.Api.Http;
 using NubArca.Api.MailArchive;
@@ -7,8 +8,8 @@ using NubArca.Api.MailArchive;
 namespace NubArca.Api.Endpoints;
 
 // MailArchive — owner-private consultation of imported Outlook PST archives
-// (docs/mailarchive/contract.md §5). Every route is authenticated and scoped
-// to the caller; a foreign or missing id is a plain 404.
+// (docs/mailarchive/contract.md §5). Every route requires `mail.access` and is
+// scoped to the caller; a foreign or missing id is a plain 404.
 //
 // There is deliberately NO route that changes a message: messages can be
 // listed, read, searched and deleted, never renamed, moved or edited. Their
@@ -17,7 +18,7 @@ public static class MailArchiveEndpoints
 {
     public static IEndpointRouteBuilder MapMailArchiveEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/mail").RequireAuthorization();
+        var group = app.MapGroup("/api/mail").RequirePermission(Permissions.MailAccess);
 
         group.MapGet("/status", (
             [FromServices] MailArchiveService service,

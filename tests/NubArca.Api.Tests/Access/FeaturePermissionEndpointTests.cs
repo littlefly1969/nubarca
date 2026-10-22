@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using NubArca.Api.Access;
 using NubArca.Api.Domain;
 using NubArca.Api.Tests.Endpoints;
@@ -59,6 +60,13 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
             Permissions.PartyGames },
         { "/api/albums/00000000-0000-0000-0000-000000000000/party-print-settings",
             Permissions.PartyPrint },
+        // MailArchive: every /api/mail route sits behind one group gate.
+        { "/api/mail/status", Permissions.MailAccess },
+        { "/api/mail/archives", Permissions.MailAccess },
+        { "/api/mail/file-origins/00000000-0000-0000-0000-000000000000", Permissions.MailAccess },
+        // Documents: their own key, separate from semantic search on media.
+        { "/api/assistant/documents/status", Permissions.DocumentSearchAccess },
+        { "/api/documents/indexing/status", Permissions.DocumentSearchAccess },
         { "/api/tv-devices", Permissions.TvManage },
         { "/api/tv-personal/pin", Permissions.TvManage },
         { "/api/admin/users", Permissions.AdminUsersManage },
@@ -143,6 +151,7 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
             "/api/albums/00000000-0000-0000-0000-000000000000/party-challenges",
             "/api/albums/00000000-0000-0000-0000-000000000000/party-print-settings",
             "/api/parties",
+            "/api/mail/status", "/api/assistant/documents/status",
         })
         {
             var response = await client.GetAsync(route);
@@ -160,6 +169,24 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
             var response = await client.GetAsync(route);
             Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
+    }
+
+    [Fact]
+    public async Task Document_Search_Is_Refused_Without_Its_Permission_Even_With_Media_Semantic_Search()
+    {
+        // The two searches are separate decisions: semantic search on photos
+        // and videos does not open the documents, and the documents key opens
+        // them on its own.
+        var (_, mediaOnly) = await _factory.CreatePermissionClientAsync(
+            "media-semantic-only@example.com", Permissions.SemanticSearchAccess);
+        var refused = await mediaOnly.PostAsJsonAsync("/api/documents/search", new { query = "contratto" });
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+
+        var (_, documents) = await _factory.CreatePermissionClientAsync(
+            "documents-only@example.com", Permissions.DocumentSearchAccess);
+        var allowed = await documents.PostAsJsonAsync("/api/documents/search", new { query = "contratto" });
+        Assert.NotEqual(HttpStatusCode.Forbidden, allowed.StatusCode);
+        Assert.NotEqual(HttpStatusCode.Unauthorized, allowed.StatusCode);
     }
 
     [Fact]

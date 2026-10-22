@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using NubArca.Api.Access;
 using NubArca.Api.Audit;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
@@ -40,6 +41,7 @@ public sealed class MailImportRunner
     private readonly IBlobService _blobs;
     private readonly IPostIngestionMediaPipelineService _pipeline;
     private readonly IAuditLogger _audit;
+    private readonly IUserPermissionService _permissions;
     private readonly MailArchiveOptions _options;
     private readonly string? _pepper;
     private readonly TimeProvider _clock;
@@ -55,6 +57,7 @@ public sealed class MailImportRunner
         IBlobService blobs,
         IPostIngestionMediaPipelineService pipeline,
         IAuditLogger audit,
+        IUserPermissionService permissions,
         IOptions<MailArchiveOptions> options,
         IOptions<DeletedContentOptions> deletedContent,
         TimeProvider clock,
@@ -69,6 +72,7 @@ public sealed class MailImportRunner
         _blobs = blobs;
         _pipeline = pipeline;
         _audit = audit;
+        _permissions = permissions;
         _options = options.Value;
         _pepper = deletedContent.Value.Pepper;
         _clock = clock;
@@ -83,6 +87,16 @@ public sealed class MailImportRunner
             return; // finished or gone: a redelivered job is a no-op
         }
         var archive = await _db.MailArchives.FirstAsync(a => a.Id == run.ArchiveId, cancellationToken);
+
+        // Re-read on every slice: revoking mail.access stops an import already
+        // under way. The run ends cancelled, never failed — nothing about the
+        // archive is wrong, and the owner can resume it once allowed again.
+        var effective = await _permissions.GetEffectiveAsync(run.OwnerUserId, cancellationToken);
+        if (!effective.Has(Permissions.MailAccess))
+        {
+            await MarkCancelledAsync(run);
+            return;
+        }
 
         run.Status = MailImportRunStatuses.Running;
         run.StartedAt ??= Now;

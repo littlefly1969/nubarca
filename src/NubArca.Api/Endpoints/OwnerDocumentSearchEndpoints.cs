@@ -1,11 +1,13 @@
 using Microsoft.AspNetCore.Mvc;
+using NubArca.Api.Access;
 using NubArca.Api.Ai.Documents;
 using NubArca.Api.Http;
 using NubArca.Api.Rag;
 
 namespace NubArca.Api.Endpoints;
 
-/// "Find it in my documents." Authenticated, owner-derived, no model.
+/// "Find it in my documents." Requires `document-search.access`; owner-derived,
+/// no model.
 ///
 /// THE REQUEST DTO IS THE CONTRACT: a query and a result count. No owner, no
 /// domain, no file id, no folder, no model, no mode. A client cannot widen the
@@ -57,7 +59,7 @@ public static class OwnerDocumentSearchEndpoints
 
             return Results.Ok(ToWire(result));
         }).WithName("OwnerDocumentSearch")
-          .RequireAuthorization()
+          .RequirePermission(Permissions.DocumentSearchAccess)
           .RequireRateLimiting(SearchRateLimitPolicy);
 
         return app;
