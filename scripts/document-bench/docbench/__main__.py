@@ -98,6 +98,8 @@ def main(argv=None) -> int:
     p.add_argument("--only", default="", help="comma-separated lock keys")
     p.add_argument("--include-optional", action="store_true")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--pin-unpinned", action="store_true",
+                   help="resolve pin_at_fetch entries to their current commit and record it")
 
     args = parser.parse_args(argv)
     if args.command == "generate":

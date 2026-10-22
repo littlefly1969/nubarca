@@ -159,7 +159,7 @@ class StMultiVector(VisualModel):
 
 
 class StDense(VisualModel):
-    """A single-vector multimodal sentence-transformers model (Qwen3-VL-Embedding)."""
+    """A single-vector multimodal sentence-transformers model (Qwen3-VL-Embedding, WeMM)."""
 
     def __init__(self, name: str, lock: str, prompt: str, models_dir: Path, threads: int):
         self.name, self.lock, self.prompt = name, lock, prompt
@@ -189,7 +189,7 @@ class StDense(VisualModel):
 
 
 VISUAL_MODELS = ("siglip2-so400m", "neomme-260m", "neomme-260m-st-late", "vultron-flash-0.8b",
-                 "qwen3-vl-emb-2b")
+                 "qwen3-vl-emb-2b", "wemm-emb-2b")
 
 
 def load_visual(name: str, models_dir: Path, threads: int) -> VisualModel:
@@ -203,6 +203,13 @@ def load_visual(name: str, models_dir: Path, threads: int) -> VisualModel:
         return StMultiVector(name, "vultron-flash-0.8b", "sum", models_dir, threads)
     if name == "qwen3-vl-emb-2b":
         return StDense(name, "qwen3-vl-emb-2b",
+                       "Retrieve the document page that answers the user's question.",
+                       models_dir, threads)
+    if name == "wemm-emb-2b":
+        # Its query instruction was not readable from the authoring environment;
+        # the Qwen3-VL one is recorded in the run and replaced at pin time if the
+        # card names another.
+        return StDense(name, "wemm-emb-2b",
                        "Retrieve the document page that answers the user's question.",
                        models_dir, threads)
     raise SystemExit(f"unknown visual model {name!r}; known: {', '.join(VISUAL_MODELS)}")

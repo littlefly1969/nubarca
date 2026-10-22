@@ -34,6 +34,12 @@ XIAOMI_PAGE_PROMPT = (
 # Region prompts by block kind, per engine family (from the model cards).
 PADDLE_PROMPTS = {"text": "OCR:", "table": "Table Recognition:", "formula": "Formula Recognition:",
                   "chart": "Chart Recognition:"}
+# OvisOCR2 and WeVisDoc publish no prompt this environment could read; a neutral
+# page-to-Markdown instruction, recorded in every run's describe(), so a later
+# prompt from the card is a visible change rather than a silent one.
+PAGE_TO_MARKDOWN_PROMPT = (
+    "Convert this document page to Markdown. Keep the reading order, write tables as "
+    "Markdown tables and formulas as LaTeX, and do not add anything that is not on the page.")
 GLM_PROMPTS = {"text": "Text Recognition:", "table": "Table Recognition:",
                "formula": "Formula Recognition:", "chart": "Text Recognition:"}
 
@@ -297,9 +303,14 @@ class TransformersVlm(Engine):
         cls = getattr(transformers, model_class)
         torch.set_num_threads(threads)
         start = time.perf_counter()
-        self.processor = AutoProcessor.from_pretrained(str(path), local_files_only=True)
-        self.model = cls.from_pretrained(str(path), local_files_only=True,
-                                         torch_dtype=torch.float32).eval()
+        # Never trust_remote_code: a model that needs its own Python to load is
+        # a recorded skip here, not code executed from a download.
+        try:
+            self.processor = AutoProcessor.from_pretrained(str(path), local_files_only=True)
+            self.model = cls.from_pretrained(str(path), local_files_only=True,
+                                             torch_dtype=torch.float32).eval()
+        except Exception as exc:  # noqa: BLE001
+            raise Unavailable(f"load failed: {type(exc).__name__}: {str(exc)[:300]}") from exc
         self.load_seconds = time.perf_counter() - start
         self.torch = torch
         self.page_prompt, self.region_prompts = page_prompt, region_prompts
@@ -331,11 +342,14 @@ class TransformersVlm(Engine):
 
 
 ENGINES = ("pdf-textlayer", "tesseract", "rapidocr-ppocrv5", "paddleocr-vl-1.5-gguf",
-           "xiaomi-ocr-0-gguf", "glm-ocr", "xiaomi-ocr-0", "paddleocr-vl-1.5")
+           "xiaomi-ocr-0-gguf", "glm-ocr", "xiaomi-ocr-0", "paddleocr-vl-1.5", "paddleocr-vl-1.6",
+           "ovisocr2", "wevisdoc-2b")
 
 ENGINE_LOCK = {"rapidocr-ppocrv5": "ppocrv5-onnx", "paddleocr-vl-1.5-gguf": "paddleocr-vl-1.5-gguf",
                "xiaomi-ocr-0-gguf": "xiaomi-ocr-0-gguf", "glm-ocr": "glm-ocr",
-               "xiaomi-ocr-0": "xiaomi-ocr-0", "paddleocr-vl-1.5": "paddleocr-vl-1.5"}
+               "xiaomi-ocr-0": "xiaomi-ocr-0", "paddleocr-vl-1.5": "paddleocr-vl-1.5",
+               "paddleocr-vl-1.6": "paddleocr-vl-1.6", "ovisocr2": "ovisocr2",
+               "wevisdoc-2b": "wevisdoc-2b"}
 
 
 def load_engine(name: str, args) -> Engine:
@@ -368,4 +382,13 @@ def load_engine(name: str, args) -> Engine:
         return TransformersVlm(name, args.models_dir, "paddleocr-vl-1.5",
                                ("AutoModelForImageTextToText",), PADDLE_PROMPTS["text"],
                                PADDLE_PROMPTS, args.threads, args.max_tokens)
+    if name == "paddleocr-vl-1.6":
+        return TransformersVlm(name, args.models_dir, "paddleocr-vl-1.6",
+                               ("AutoModelForImageTextToText",), PADDLE_PROMPTS["text"],
+                               PADDLE_PROMPTS, args.threads, args.max_tokens)
+    if name in ("ovisocr2", "wevisdoc-2b"):
+        return TransformersVlm(name, args.models_dir, name,
+                               ("AutoModelForImageTextToText", "AutoModelForMultimodalLM"),
+                               PAGE_TO_MARKDOWN_PROMPT, {"text": PAGE_TO_MARKDOWN_PROMPT},
+                               args.threads, args.max_tokens)
     raise SystemExit(f"unknown OCR engine {name!r}; known: {', '.join(ENGINES)}")

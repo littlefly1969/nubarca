@@ -126,6 +126,9 @@ $F --dry-run                                                      # shows repo@s
 $F --only e5-small,granite-97m,granite-311m,qwen3-emb-0.6b,qwen3-emb-0.6b-ov-int8
 $F --only ppocrv5-onnx,glm-ocr,paddleocr-vl-1.5-gguf,xiaomi-ocr-0-gguf
 $F --only siglip2-so400m,neomme-260m
+# The #216 review shortlist: not pinned yet, resolved to today's commit here.
+$F --pin-unpinned --only paddleocr-vl-1.6,ovisocr2,wevisdoc-2b,wemm-emb-2b
+cat "$NUBARCA_BENCH_MODELS_DIR/PINNED.json"                       # send this back to be committed
 # Optional, if time and disk allow:
 # $F --only qwen3-reranker-0.6b,bge-reranker-v2-m3
 # $F --only vultron-flash-0.8b,qwen3-vl-emb-2b,neomme-260m-st-late,bge-m3
@@ -134,7 +137,10 @@ du -sh "$NUBARCA_BENCH_MODELS_DIR"/*
 
 Each model directory gets a `FETCHED.json` with the repo, the revision and the
 SHA-256 of every file. `qwen3-emb-0.6b-onnx` is refused on purpose: its pin is
-`TODO`.
+`TODO`. The four review-shortlist entries are fetched only with
+`--pin-unpinned`, which prints `PINNED <key>: <repo>@<sha>` and any licence
+mismatch; `wemm-emb-2b` is measured but cannot be promoted until its licence is
+resolved.
 
 ## 5. Run the lanes, offline, in priority order
 

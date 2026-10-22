@@ -63,16 +63,16 @@ if want ocr; then
 fi
 
 if want ocr-vlm; then
-  for engine in paddleocr-vl-1.5-gguf xiaomi-ocr-0-gguf glm-ocr; do
+  for engine in paddleocr-vl-1.5-gguf xiaomi-ocr-0-gguf glm-ocr paddleocr-vl-1.6 ovisocr2 wevisdoc-2b; do
     bench ocr --engine "$engine" --subset core --variants clean,scan,photo
   done
-  for engine in paddleocr-vl-1.5-gguf glm-ocr; do
+  for engine in paddleocr-vl-1.5-gguf glm-ocr paddleocr-vl-1.6; do
     bench ocr --engine "$engine" --subset core --variants clean,scan --mode region
   done
 fi
 
 if want visual; then
-  for model in siglip2-so400m neomme-260m neomme-260m-st-late vultron-flash-0.8b qwen3-vl-emb-2b; do
+  for model in siglip2-so400m neomme-260m neomme-260m-st-late vultron-flash-0.8b qwen3-vl-emb-2b wemm-emb-2b; do
     bench visual --model "$model" --batch 2
   done
 fi

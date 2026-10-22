@@ -143,8 +143,8 @@ never triggers a download.
 | Parity | `parity --reference st-run --candidate ort/ov-run` | — | Cosine similarity of embeddings and top-10 overlap: a raw runtime must reproduce the reference before its speed counts. |
 | Chunking | `text --chunking …` | `nubarca-char1600` (today's `RichDocumentChunker` rules: one block per PDF page or DOCX paragraph or table, slide plus a separate notes block, sheet rendered as `Header=value \| …`, split at 1600 characters, no overlap) versus `struct-tok512-ov64`, `struct-tok256-ov32`, `struct-tok512-ov0` | The structure-aware variants drop furniture, pack units within a section up to a token budget with sentence overlap, keep tables as their own chunks with header rows repeated, and prefix `Title › Section`. |
 | Rerank | `text … --rerank R` | `bge-reranker-v2-m3`, `qwen3-reranker-0.6b` | Reranks the hybrid top-30. |
-| OCR | `ocr --engine E` | `pdf-textlayer` (control), `tesseract` (eng+ita, NubArca's order), `rapidocr-ppocrv5` (ONNX); VLM adapters `paddleocr-vl-1.5-gguf` and `xiaomi-ocr-0-gguf` via llama.cpp `llama-server`, plus `glm-ocr` and `paddleocr-vl-1.5` via transformers | `--subset core` is a 24-page mix of tables, formulas, charts and columns that keeps slow VLMs tractable. `--mode region` crops the **oracle** layout regions, giving an upper bound for a layout-first pipeline (not available for `photo`). `predictions.jsonl` feeds `text --ocr-override` to measure retrieval on OCR'd text. |
-| Visual | `visual --model V` | `siglip2-so400m` (current baseline), `neomme-260m` (dense and late interaction), optional `neomme-260m-st-late`, `vultron-flash-0.8b`, `qwen3-vl-emb-2b` | Indexes the stored-format page image. |
+| OCR | `ocr --engine E` | `pdf-textlayer` (control), `tesseract` (eng+ita, NubArca's order), `rapidocr-ppocrv5` (ONNX); VLM adapters `paddleocr-vl-1.5-gguf` and `xiaomi-ocr-0-gguf` via llama.cpp `llama-server`, plus `glm-ocr`, `paddleocr-vl-1.5`, `paddleocr-vl-1.6`, `ovisocr2` and `wevisdoc-2b` via transformers (never `trust_remote_code`: a model that needs its own code to load is a recorded skip) | `--subset core` is a 24-page mix of tables, formulas, charts and columns that keeps slow VLMs tractable. `--mode region` crops the **oracle** layout regions, giving an upper bound for a layout-first pipeline (not available for `photo`). `predictions.jsonl` feeds `text --ocr-override` to measure retrieval on OCR'd text. |
+| Visual | `visual --model V` | `siglip2-so400m` (current baseline), `neomme-260m` (dense and late interaction), optional `neomme-260m-st-late`, `vultron-flash-0.8b`, `qwen3-vl-emb-2b`, `wemm-emb-2b` | Indexes the stored-format page image. |
 | Fusion | `fuse --text-run T --visual-run V` | Page-level RRF grid (k 20/60 × visual weight 0.25/0.5/1), and visual narrowing to top 50 followed by text | |
 | Report | `report` | — | Writes `results/SUMMARY.md`. |
 
@@ -160,6 +160,26 @@ revision is not a 40-hex SHA. The SHAs were read from the Hugging Face API on
 - The NeoMME sentence-transformers *dense* variant is not in the lock. Its
   metadata could not be read. The dense score comes from `neomme-260m` through
   transformers.
+- `paddleocr-vl-1.6`, `ovisocr2`, `wevisdoc-2b` and `wemm-emb-2b` were added
+  after the 2026-10-21 pinning, from the #216 review, and Hugging Face is not
+  reachable from the authoring environment. They are marked `pin_at_fetch`:
+  `fetch --pin-unpinned` resolves each to its current commit on the target,
+  fetches exactly that commit, and writes `PINNED.json` next to the weights for
+  the operator to commit back into the lock. Plain `TODO` entries stay refused.
+- None of the four is excluded in advance. What is known, from the model cards,
+  and what the run has to confirm:
+  - `paddleocr-vl-1.6` (0.9B, Apache-2.0) is the successor of 1.5 with the same
+    prompts. Its card recommends the official pipeline for whole pages; see
+    the next point.
+  - `ovisocr2` (~0.8B, Apache-2.0, from Qwen3.5-0.8B) and `wevisdoc-2b` (2B,
+    Apache-2.0, from Qwen3-VL-2B) publish no prompt that could be read here, so
+    both use a neutral page-to-Markdown prompt that every run records.
+    WeVisDoc is served upstream with vLLM on GPU; on CPU it is expected to be
+    the slowest engine, and the core subset bounds it.
+  - `wemm-emb-2b` (2.7B, one 2048-d Matryoshka vector) has an **unresolved
+    licence**: the card metadata says `other`, the LICENSE file is reported as
+    Apache-2.0. It may be measured; it may not be promoted until that is
+    settled. In fp32 it needs about 11 GB, inside the 20 GB budget.
 - The official PaddleOCR-VL pipeline, with its separate layout model, is not
   wired. The GGUF (llama.cpp) and transformers paths are.
 - `llama.cpp` is built from a ref the operator chooses

@@ -8,6 +8,7 @@
 #   ... fetch-models.sh --dry-run                  # show what would be fetched
 #   ... fetch-models.sh --only e5-small,granite-97m
 #   ... fetch-models.sh --include-optional         # bge-m3, Qwen3-VL, Vultron, ...
+#   ... fetch-models.sh --pin-unpinned --only <keys>  # review shortlist, ~13 GB more
 #
 # Runs inside the benchmark image (build it first, see
 # docs/document-intelligence/benchmark.md) so the host gets no Python packages.

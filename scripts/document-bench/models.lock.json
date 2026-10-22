@@ -1,5 +1,5 @@
 {
-  "_comment": "Pinned candidates for the document benchmark. Revisions were read from https://huggingface.co/api/models/<repo> on 2026-10-21. fetch-models.sh downloads exactly these commits and refuses any entry whose revision is TODO. Licences are as declared on the model card at that commit and must be re-checked before anything is promoted.",
+  "_comment": "Pinned candidates for the document benchmark. Revisions were read from https://huggingface.co/api/models/<repo> on 2026-10-21. fetch-models.sh downloads exactly these commits and refuses any entry whose revision is TODO, except that fetch --pin-unpinned resolves entries marked pin_at_fetch (named after 2026-10-21, when Hugging Face was not reachable from the authoring environment) to their current commit on the target and writes PINNED.json for the operator to commit back here. Licences are as declared on the model card at that commit and must be re-checked before anything is promoted.",
   "models": {
     "e5-small": {
       "lane": "text", "repo": "intfloat/multilingual-e5-small",
@@ -64,6 +64,12 @@
       "revision": "2a4195faa5e7914c12f2fc601d72c81caf8d2da5", "license": "Apache-2.0",
       "allow": ["*"], "optional": true
     },
+    "paddleocr-vl-1.6": {
+      "lane": "ocr", "repo": "PaddlePaddle/PaddleOCR-VL-1.6",
+      "revision": "TODO", "license": "Apache-2.0", "pin_at_fetch": true,
+      "allow": ["*.json", "*.txt", "*.jinja", "*.py", "*.safetensors", "*.model"],
+      "note": "0.9B successor of 1.5 (May 2026). transformers>=5 AutoModelForImageTextToText with the 1.5 element prompts. The card recommends the official PaddleOCR pipeline (separate layout model) for whole pages; that pipeline is not wired, so page mode measures the bare VLM and region mode the layout-first upper bound."
+    },
     "xiaomi-ocr-0-gguf": {
       "lane": "ocr", "repo": "prithivMLmods/Xiaomi-OCR-0-GGUF",
       "revision": "0f0e77db7c97c409bb87347e6c2f151829651947", "license": "Apache-2.0",
@@ -79,6 +85,18 @@
       "lane": "ocr", "repo": "zai-org/GLM-OCR",
       "revision": "2e85a62840ccac27daa451df36c736c4636b8628", "license": "MIT",
       "allow": ["*.json", "*.jinja", "model.safetensors"]
+    },
+    "ovisocr2": {
+      "lane": "ocr", "repo": "ATH-MaaS/OvisOCR2",
+      "revision": "TODO", "license": "Apache-2.0", "pin_at_fetch": true,
+      "allow": ["*.json", "*.txt", "*.jinja", "*.py", "*.safetensors", "*.model"],
+      "note": "~0.8B, post-trained from Qwen3.5-0.8B (Jul 2026). Its prompt was not readable from this environment: the adapter uses a neutral page-to-Markdown prompt, recorded in every run. Replace it with the card's prompt at pin time if the card names one."
+    },
+    "wevisdoc-2b": {
+      "lane": "ocr", "repo": "tencent/WeVisDoc-2B",
+      "revision": "TODO", "license": "Apache-2.0", "pin_at_fetch": true,
+      "allow": ["*.json", "*.txt", "*.jinja", "*.py", "*.safetensors", "*.model"],
+      "note": "2B end-to-end page parser fine-tuned from Qwen3-VL-2B (Markdown, LaTeX, HTML tables). Upstream serves it with vLLM on GPU; here it runs through transformers on CPU, core subset only. Expected to be the slowest OCR engine: measured, not presumed."
     },
     "siglip2-so400m": {
       "lane": "visual", "repo": "google/siglip2-so400m-patch14-384",
@@ -106,6 +124,13 @@
       "revision": "9f2f7e710d6d81056aa5c0a4f04764fec6bb7bda", "license": "Apache-2.0",
       "allow": ["*.json", "*.txt", "*.jinja", "model.safetensors", "1_Pooling/*"],
       "optional": true
+    },
+    "wemm-emb-2b": {
+      "lane": "visual", "repo": "tencent/WeMM-Embedding-2B",
+      "revision": "TODO", "license": "UNRESOLVED (card metadata: other; LICENSE file reported as Apache-2.0)",
+      "pin_at_fetch": true,
+      "allow": ["*.json", "*.txt", "*.jinja", "*.py", "*.safetensors", "*.model", "1_Pooling/*", "2_Normalize/*", "LICENSE*", "NOTICE*"],
+      "note": "2.7B total (Qwen3.5-2B LM + vision tower), one 2048-d vector with Matryoshka 64..2048. fp32 on CPU is ~11 GB resident: inside the 20 GB AI budget, not by much. Measuring it is allowed; promoting it is not until the licence is resolved."
     }
   }
 }
