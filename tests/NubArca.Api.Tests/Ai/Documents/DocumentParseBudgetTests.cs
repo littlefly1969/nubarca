@@ -49,7 +49,7 @@ public sealed class DocumentParseBudgetTests
     }
 
     [Fact]
-    public void Both_Pdfium_Renderers_Share_The_One_Gate()
+    public async Task Both_Pdfium_Renderers_Share_The_One_Gate()
     {
         // Neither renderer may carry a private semaphore of its own again: two
         // gates over one native library are one gate too few.
@@ -59,7 +59,18 @@ public sealed class DocumentParseBudgetTests
                 .Where(f => f.FieldType == typeof(SemaphoreSlim));
             Assert.Empty(gates);
         }
-        Assert.Equal(1, PdfiumGate.Native.CurrentCount);
+        // Capacity one, proved without racing the PDF tests that run in
+        // parallel and may hold the gate right now: once we hold it, nobody
+        // else can.
+        Assert.True(await PdfiumGate.Native.WaitAsync(TimeSpan.FromSeconds(60)));
+        try
+        {
+            Assert.Equal(0, PdfiumGate.Native.CurrentCount);
+        }
+        finally
+        {
+            PdfiumGate.Native.Release();
+        }
     }
 
     [Fact]

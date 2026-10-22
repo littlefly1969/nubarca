@@ -1946,6 +1946,9 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   written down in docs/rag-platform.md; never chunk/text/blob ids, hashes,
   storage keys, owner ids or scores. Chat citations now carry page/locator
   too, still with no id. `documents query --owner` is the no-names diagnostic.
+  Pages that only LOOK like the question (charts, tables) are listed apart in
+  `visualMatches` (file, page, locator; no text) and are never evidence: the
+  chat gate does not read them.
 - **Document indexing is a job keyed by SOURCE, not by FileItem.**
   `document_texts` carries `(SourceKind, SourceId)` (`file` = FileItem id
   today; another owner-private kind such as email plugs in through
