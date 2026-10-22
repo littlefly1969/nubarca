@@ -91,7 +91,7 @@ public sealed class MailImportRunner
         // Re-read on every slice: revoking mail.access stops an import already
         // under way. The run ends cancelled, never failed — nothing about the
         // archive is wrong, and the owner can resume it once allowed again.
-        var effective = await _permissions.GetEffectiveAsync(run.OwnerUserId, cancellationToken);
+        var effective = await _permissions.GetCurrentAsync(run.OwnerUserId, cancellationToken);
         if (!effective.Has(Permissions.MailAccess))
         {
             await MarkCancelledAsync(run);

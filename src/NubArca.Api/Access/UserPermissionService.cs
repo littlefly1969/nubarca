@@ -69,6 +69,13 @@ public sealed class UserPermissionService : IUserPermissionService
         return await ResolveAsync(user, cancellationToken);
     }
 
+    public Task<EffectivePermissions> GetCurrentAsync(
+        Guid userId, CancellationToken cancellationToken = default)
+    {
+        _memo.Remove(userId);
+        return GetEffectiveAsync(userId, cancellationToken);
+    }
+
     private async Task<EffectivePermissions> ResolveAsync(User user, CancellationToken cancellationToken)
     {
         // A missing role cannot happen — users.RoleKey is a foreign key with

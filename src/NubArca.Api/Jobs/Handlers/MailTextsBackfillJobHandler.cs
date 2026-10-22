@@ -29,7 +29,7 @@ public sealed class MailTextsBackfillJobHandler : IJobHandler
             throw new ArgumentException("MailTextsBackfillJobPayload.OwnerUserId is required.");
         }
 
-        var effective = await _permissions.GetEffectiveAsync(payload.OwnerUserId, cancellationToken);
+        var effective = await _permissions.GetCurrentAsync(payload.OwnerUserId, cancellationToken);
         if (!effective.Has(Permissions.MailAccess))
         {
             return;

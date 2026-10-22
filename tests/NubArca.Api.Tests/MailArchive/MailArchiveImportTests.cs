@@ -837,6 +837,30 @@ public sealed class MailArchiveImportTests : IDisposable
     }
 
     [Fact]
+    public async Task Revoking_mail_access_between_two_slices_of_the_same_worker_scope_imports_nothing_more()
+    {
+        var engine = FakePstEngine.Sample();
+        var factory = NewFactory(engine, settings: new() { ["Jobs:MaintenanceSliceItemBudget"] = "1" });
+        var (owner, client) = await factory.CreateAuthenticatedClientAsync();
+        var started = await StartAsync(client, await UploadPstAsync(client));
+
+        // The worker keeps one scope across slices, so the permission service
+        // the runner holds has already resolved the owner once when the second
+        // slice asks again.
+        using var scope = factory.Services.CreateScope();
+        var processor = scope.ServiceProvider.GetRequiredService<JobProcessor>();
+        await processor.ProcessAvailableAsync(1);
+        var midway = await InDbAsync(factory, db => db.MailMessages.CountAsync(m => m.ArchiveId == started.Archive.Id));
+
+        await factory.SetRoleAsync(owner, RoleKeys.Restricted);
+        await processor.ProcessAvailableAsync(1);
+
+        var run = await InDbAsync(factory, db => db.MailImportRuns.AsNoTracking().SingleAsync(r => r.Id == started.Run.Id));
+        Assert.Equal("cancelled", run.Status);
+        Assert.Equal(midway, await InDbAsync(factory, db => db.MailMessages.CountAsync(m => m.ArchiveId == started.Archive.Id)));
+    }
+
+    [Fact]
     public async Task Second_start_while_running_is_a_conflict_naming_the_run()
     {
         var factory = NewFactory(FakePstEngine.Sample());

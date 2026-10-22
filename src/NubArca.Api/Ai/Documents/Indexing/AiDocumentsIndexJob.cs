@@ -278,7 +278,7 @@ public sealed class AiDocumentsIndexJobHandler : IJobHandler
     }
 
     private async Task<bool> PermittedAsync(Guid owner, CancellationToken cancellationToken) =>
-        (await _permissions.GetEffectiveAsync(owner, cancellationToken)).Has(Permissions.DocumentSearchAccess);
+        (await _permissions.GetCurrentAsync(owner, cancellationToken)).Has(Permissions.DocumentSearchAccess);
 
     private async Task<Guid?> NextOwnerAsync(Guid? after, CancellationToken cancellationToken)
     {
