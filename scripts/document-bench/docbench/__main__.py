@@ -63,7 +63,8 @@ def main(argv=None) -> int:
     _common(p)
     p.add_argument("--model", required=True)
     p.add_argument("--batch", type=int, default=2)
-    p.add_argument("--max-pixels", type=int, default=0, help="cap page pixels (0 = model default)")
+    p.add_argument("--max-side", type=int, default=0,
+                   help="downscale pages so the longest side is at most this (0 = as stored)")
 
     p = sub.add_parser("fuse", help="page-level fusion of a text run and a visual run")
     _common(p, models=False)

@@ -19,7 +19,7 @@
     },
     "qwen3-emb-0.6b-onnx": {
       "lane": "text", "repo": "onnx-community/Qwen3-Embedding-0.6B-ONNX",
-      "revision": "TODO", "license": "Apache-2.0",
+      "revision": "TODO", "license": "Apache-2.0", "optional": true,
       "allow": ["*.json", "onnx/model.onnx", "onnx/model.onnx_data"],
       "todo": "Community export; not pinned because its metadata was not read in this slice. Pin after reviewing the export (a failed upstream ONNX export is reported on the HF forum)."
     },
