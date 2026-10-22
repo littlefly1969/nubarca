@@ -1,3 +1,4 @@
+using NubArca.Api.Domain.Ai;
 using NubArca.Api.Rag;
 
 namespace NubArca.Api.Ai.Documents;
@@ -29,8 +30,15 @@ public static class OwnerDocumentAvailability
     public const string ModelMissing = "model_missing";
     public const string NotIndexed = "not_indexed";
 
+    /// The signal does not exist for this kind (visual is file-only: the
+    /// renderer needs a file's bytes).
+    public const string NotApplicable = "not_applicable";
+
+    /// `kinds` is the registered source kinds; null means `file` only (a host
+    /// with no database registers none). Lexical and semantic are reported from
+    /// the owner's whole corpus, which every kind shares.
     public static IReadOnlyList<OwnerDocumentKindAvailability> Build(
-        PrivateDocumentStatus status, string? embeddingReason)
+        PrivateDocumentStatus status, string? embeddingReason, IReadOnlyList<string>? kinds = null)
     {
         var indexing = status.Indexing ?? Rag.Retrieval.OwnerDocumentIndexingSummary.Empty;
 
@@ -50,10 +58,10 @@ public static class OwnerDocumentAvailability
             ? OwnerDocumentSignal.Ready
             : OwnerDocumentSignal.Off(status.VisualReason ?? Disabled);
 
-        // Only `file` exists in this release.
-        return new[]
-        {
-            new OwnerDocumentKindAvailability(OwnerDocumentSourceKinds.File, lexical, semantic, visual),
-        };
+        return (kinds ?? new[] { DocumentSourceKinds.File })
+            .Select(kind => new OwnerDocumentKindAvailability(
+                kind, lexical, semantic,
+                kind == DocumentSourceKinds.File ? visual : OwnerDocumentSignal.Off(NotApplicable)))
+            .ToList();
     }
 }

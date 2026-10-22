@@ -453,11 +453,12 @@ public sealed class DocumentIndexJobTests
         Assert.Equal(new int?[] { 1, 2 }, chunks.Select(c => c.LocatorIndex).ToArray());
         Assert.Equal(DocumentLocatorKinds.Section, chunks[0].LocatorKind);
 
-        // ELIGIBILITY IS PER REGISTERED KIND. This test kind registered a source
-        // but no eligibility branch, so its chunks are in nobody's corpus — and
-        // the embed phase has nothing it is allowed to embed.
+        // ELIGIBILITY IS PER REGISTERED KIND. This test kind is registered but
+        // its live predicate matches nothing, so its chunks are in nobody's
+        // corpus — and the embed phase has nothing it is allowed to embed.
         Assert.Empty(await OwnerDocumentEligibility.EligibleChunks(
-            db.DocumentChunks, db.DocumentTexts, db.FileItems, owner).ToListAsync());
+            db, scope.ServiceProvider.GetRequiredService<OwnerDocumentSources>().Eligibility, owner)
+            .ToListAsync());
 
         // Idempotent on the revision token.
         await RunAsync(f, new DocumentIndexJobPayload(OwnerUserId: owner));
@@ -737,8 +738,9 @@ public sealed class DocumentIndexJobTests
 
         public string Kind => KindName;
 
-        public IQueryable<Guid> EligibleSourceIds(AppDbContext db, Guid ownerUserId)
-            => db.Users.Where(_ => false).Select(u => u.Id);
+        public IQueryable<EligibleSourceRow> Eligible(AppDbContext db, Guid ownerUserId)
+            => db.Users.Where(_ => false)
+                .Select(u => new EligibleSourceRow { SourceId = u.Id, OwnerUserId = u.Id, DisplayName = u.DisplayName });
 
         public Task<IReadOnlyList<DocumentSourceCandidate>> ListCandidatesAsync(
             Guid ownerUserId, Guid? afterSourceId, int take, CancellationToken cancellationToken = default)
@@ -770,8 +772,9 @@ public sealed class DocumentIndexJobTests
 
         public string Kind => KindName;
 
-        public IQueryable<Guid> EligibleSourceIds(AppDbContext db, Guid ownerUserId)
-            => db.Users.Where(_ => false).Select(u => u.Id);
+        public IQueryable<EligibleSourceRow> Eligible(AppDbContext db, Guid ownerUserId)
+            => db.Users.Where(_ => false)
+                .Select(u => new EligibleSourceRow { SourceId = u.Id, OwnerUserId = u.Id, DisplayName = u.DisplayName });
 
         public Task<IReadOnlyList<DocumentSourceCandidate>> ListCandidatesAsync(
             Guid ownerUserId, Guid? afterSourceId, int take, CancellationToken cancellationToken = default)

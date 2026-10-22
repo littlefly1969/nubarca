@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Ai.Documents;
+using NubArca.Api.Ai.Documents.Sources;
 using NubArca.Api.Data;
 using NubArca.Api.Domain.Ai;
 using NubArca.Api.Rag.Domains;
@@ -12,9 +13,14 @@ namespace NubArca.Api.Rag.Retrieval;
 /// `DocumentText`, its chunks and its embeddings record an extraction that
 /// happened at some point in the past, and between then and now the file may
 /// have been deleted, moved into the Private Vault, or excluded from the
-/// library. Every load therefore JOINS to the live `FileItem` through
-/// OwnerDocumentEligibility, and a chunk whose file no longer qualifies is not
+/// library. Every load therefore JOINS to the live source — the `FileItem`, or
+/// whatever row a registered kind's own predicate names — through
+/// OwnerDocumentEligibility, and a chunk whose source no longer qualifies is not
 /// in the corpus at all — not filtered out later, not ranked and then dropped.
+///
+/// EVERY REGISTERED KIND, by registration alone: the kinds come from
+/// OwnerDocumentSources, so a new owner-private kind is searchable without an
+/// edit here.
 ///
 /// That is deliberately not left to cleanup. A sweeper that deletes orphaned
 /// chunks is housekeeping and it runs on a schedule; a privacy boundary that
@@ -29,11 +35,19 @@ namespace NubArca.Api.Rag.Retrieval;
 public sealed class OwnerDocumentCorpusSource
 {
     private readonly AppDbContext _db;
+    private readonly IReadOnlyList<IOwnerDocumentSourceEligibility> _kinds;
 
-    public OwnerDocumentCorpusSource(AppDbContext db)
+    /// `sources` is the registered kinds. DI always supplies it; a caller built
+    /// by hand without it (a unit test, a tool) gets the `file` branch only.
+    public OwnerDocumentCorpusSource(AppDbContext db, OwnerDocumentSources? sources = null)
     {
         _db = db;
+        _kinds = sources?.Eligibility ?? OwnerDocumentEligibility.FileKindOnly;
     }
+
+    /// The kinds this corpus unions over — what the vector retriever must
+    /// use too, so both signals see one corpus.
+    internal IReadOnlyList<IOwnerDocumentSourceEligibility> Kinds => _kinds;
 
     /// Everything this owner may currently be answered from.
     ///
@@ -71,7 +85,7 @@ public sealed class OwnerDocumentCorpusSource
             .OrderBy(r => r.Name).ThenBy(r => r.Ordinal)
             .Select(r => new Row(
                 r.ChunkId, r.Ordinal, r.Heading, r.Text, r.Name, r.DocumentTextId,
-                r.FileItemId, r.OwnerUserId,
+                r.SourceKind, r.SourceId, r.OwnerUserId,
                 r.Page, r.LocatorKind, r.LocatorIndex, r.LocatorLabel));
 
         var rows = await (limit is { } cap ? query.Take(cap) : query)
@@ -86,11 +100,11 @@ public sealed class OwnerDocumentCorpusSource
                 // The chunk's own id, which is what evidence cites internally.
                 Id: row.ChunkId.ToString("N"),
                 Domain: RagDomainKey.UserDocuments,
-                // SourceKey and Path are both the FILE NAME. Not the storage
-                // key, not a physical path, not the logical folder path — a
-                // citation needs to name the document a person recognises, and
-                // everything beyond the name is either forbidden to expose or
-                // detail they did not ask for.
+                // SourceKey and Path are both the source's DISPLAY NAME (for a
+                // file, its name). Not the storage key, not a physical path,
+                // not the logical folder path — a citation needs to name the
+                // document a person recognises, and everything beyond the name
+                // is either forbidden to expose or detail they did not ask for.
                 SourceKey: row.Name,
                 Path: row.Name,
                 Title: row.Name,
@@ -111,18 +125,20 @@ public sealed class OwnerDocumentCorpusSource
                 Intent: string.Empty,
                 Priority: 50,
                 ChunkId: row.ChunkId,
-                // THE LIVE OWNER, from the FileItem the eligibility join just
+                // THE LIVE OWNER, from the source row the eligibility join just
                 // verified — not the chunk's denormalized copy and not whoever
                 // asked. This is the fact the Assistant's gate checks the
                 // caller against, so it has to come from the corpus rather than
                 // from the request, or the check compares the request to
                 // itself.
                 OwnerUserId: row.OwnerUserId,
-                // The file this chunk belongs to, so the visual candidate
-                // expansion can narrow THIS index rather than build a second
-                // one. Internal, like the owner — except to its own owner's
-                // search, which uses it to open the file.
-                FileItemId: row.FileItemId,
+                // The source this chunk belongs to, so a server-side narrowing
+                // (the visual candidate expansion, a kinds filter) can narrow
+                // THIS index rather than build a second one. Internal, like the
+                // owner — except to its own owner's search, which uses it to
+                // open the source.
+                DocumentSourceKind: row.SourceKind,
+                DocumentSourceId: row.SourceId,
                 // WHERE in the document, as the extractor recorded it. Typed,
                 // never a formatted string: the citation builder and the
                 // search endpoint each render it in their own words.
@@ -231,23 +247,21 @@ public sealed class OwnerDocumentCorpusSource
     /// construction.
     private IQueryable<EligibleRow> EligibleChunks(Guid ownerUserId)
         => OwnerDocumentEligibility
-            .EligibleChunks(
-                _db.DocumentChunks.AsNoTracking(),
-                _db.DocumentTexts.AsNoTracking(),
-                _db.FileItems.AsNoTracking(),
-                ownerUserId)
+            .EligibleChunks(_db, _kinds, ownerUserId)
             .Select(r => new EligibleRow
             {
                 ChunkId = r.Chunk.Id,
                 Ordinal = r.Chunk.Ordinal,
                 Heading = r.Chunk.Heading,
                 Text = r.Chunk.Text,
-                Name = r.File.Name,
+                Name = r.DisplayName,
                 DocumentTextId = r.Document.Id,
-                FileItemId = r.File.Id,
-                // The LIVE owner. Read off the FileItem the predicate matched,
-                // so it is the same value the boundary was enforced with.
-                OwnerUserId = r.File.OwnerUserId,
+                SourceKind = r.SourceKind,
+                SourceId = r.SourceId,
+                // The LIVE owner. Read off the source row the predicate
+                // matched, so it is the same value the boundary was enforced
+                // with.
+                OwnerUserId = r.OwnerUserId,
                 Page = r.Chunk.Page,
                 LocatorKind = r.Chunk.LocatorKind,
                 LocatorIndex = r.Chunk.LocatorIndex,
@@ -271,7 +285,8 @@ public sealed class OwnerDocumentCorpusSource
         public string? Text { get; init; }
         public string Name { get; init; } = string.Empty;
         public Guid DocumentTextId { get; init; }
-        public Guid FileItemId { get; init; }
+        public string SourceKind { get; init; } = string.Empty;
+        public Guid SourceId { get; init; }
         public Guid OwnerUserId { get; init; }
         public int? Page { get; init; }
         public string? LocatorKind { get; init; }
@@ -281,7 +296,7 @@ public sealed class OwnerDocumentCorpusSource
 
     private sealed record Row(
         Guid ChunkId, int Ordinal, string? Heading, string? Text,
-        string Name, Guid DocumentTextId, Guid FileItemId, Guid OwnerUserId,
+        string Name, Guid DocumentTextId, string SourceKind, Guid SourceId, Guid OwnerUserId,
         int? Page, string? LocatorKind, int? LocatorIndex, string? LocatorLabel);
 }
 

@@ -1966,6 +1966,15 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   CI-built and digest-pinned. Phases, rollback and memory budget:
   docs/document-intelligence/deployment-runbook.md; tonight's bench:
   docs/document-intelligence/tonight-server-bench.md.
+- **A source kind joins the whole engine by registration.**
+  `OwnerDocumentEligibility.EligibleChunks` is the union of the registered
+  kinds' `IOwnerDocumentSourceEligibility.Eligible` queries (live owner and
+  display name per source, owner re-checked by the engine), and embedding,
+  the lexical corpus, vector retrieval, search (real `sourceKind`, working
+  `SourceKinds` filter) and Assistant citations (name + kind, no id) all read
+  through it. Visual stays `file`-only. `DocumentSourceKinds` is the one
+  discriminator spelling. Proved with a fake sections kind
+  (`DocumentSourceKindEngineTests`); email itself is not implemented.
 - **A visual hit finds where to look; an eligible current text chunk is still
   what NubArca may say.** Visual document retrieval renders an owner's pages,
   embeds them locally under a DOCUMENT-specific SigLIP2 profile (shared weights

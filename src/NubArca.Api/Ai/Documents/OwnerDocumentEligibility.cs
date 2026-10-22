@@ -1,5 +1,8 @@
+using NubArca.Api.Ai.Documents.Sources;
+using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Domain.Ai;
+using Microsoft.EntityFrameworkCore;
 using NubArca.Api.MediaLibrary;
 
 namespace NubArca.Api.Ai.Documents;
@@ -26,6 +29,11 @@ namespace NubArca.Api.Ai.Documents;
 /// this bounded context says `IgnoreQueryFilters()`. The explicit predicate
 /// below is stated anyway — in the one place a future refactor would remove the
 /// filter, a test that reads this file should fail.
+///
+/// `Eligible`/`Extractable` are the `file` kind's rule. `EligibleChunks` is
+/// the chunk-level boundary for EVERY registered source kind: the `file`
+/// branch is `Eligible`, and each other kind brings its own live predicate
+/// (docs/document-intelligence/source-contract.md).
 public static class OwnerDocumentEligibility
 {
     /// Every condition, as one composable predicate.
@@ -147,45 +155,112 @@ public static class OwnerDocumentEligibility
     /// alone is reading a derived row as authority, and it will happily spend
     /// local inference giving fresh vectors to a document its owner deleted last
     /// week — re-arming stale rows instead of leaving them inert.
-    /// `allowedFileItemIds` is an OPTIONAL SERVER-SIDE NARROWING, and it is the
+    /// `allowedSourceIds` is an OPTIONAL SERVER-SIDE NARROWING, and it is the
     /// fifth condition rather than a replacement for any of the four. The visual
     /// candidate expansion passes a list of this owner's own files so the text
     /// pass can be scoped to documents that LOOK relevant; every clause below
-    /// still applies to each of them, so a forged id — another owner's file, a
-    /// deleted one, a vaulted one — intersects with nothing and returns zero
+    /// still applies to each of them, so a forged id — another owner's source,
+    /// a deleted one, a vaulted one — intersects with nothing and returns zero
     /// chunks. Null means unscoped; an empty collection means nothing qualifies
-    /// and is honoured literally.
+    /// and is honoured literally. `allowedKinds` narrows the same way by kind:
+    /// a kind left out contributes no branch at all, and a kind that is not
+    /// registered was never a branch.
+    ///
+    /// THE UNION OF THE REGISTERED SOURCE KINDS' BRANCHES (see the source
+    /// contract). Each kind states its own live predicate
+    /// (IOwnerDocumentSourceEligibility.Eligible); a reading joins its live
+    /// source through `(SourceKind, SourceId)`, so a reading of a kind with no
+    /// registered branch is in no corpus. The `file` branch is exactly
+    /// `Eligible` above. With one kind registered there is no UNION in the SQL
+    /// at all; with several, the union is over small scalar source rows — one
+    /// SELECT per registered kind, a set bounded by what this build registers —
+    /// and the chunk/document join is written once.
     public static IQueryable<EligibleChunk> EligibleChunks(
-        IQueryable<DocumentChunk> chunks,
-        IQueryable<DocumentText> documents,
-        IQueryable<FileItem> files,
+        AppDbContext db,
+        IEnumerable<IOwnerDocumentSourceEligibility> kinds,
         Guid ownerUserId,
-        IReadOnlyCollection<Guid>? allowedFileItemIds = null)
-        // THE UNION OF THE REGISTERED SOURCE KINDS' BRANCHES (see
-        // DocumentSourceKinds.Registered and the source contract). This build
-        // registers one kind, `file`, so the union is the file branch: a reading
-        // joins its live FileItem through the source identity. A future kind
-        // adds its own branch here — its own live predicate, never a shared
-        // owner column — and a reading of a kind with no branch is in no corpus.
-        => from chunk in chunks
-           join document in documents on chunk.DocumentTextId equals document.Id
-           join file in Eligible(files, ownerUserId) on document.SourceId equals file.Id
-           where document.SourceKind == DocumentSourceKinds.File
-                 && chunk.OwnerUserId == ownerUserId
-                 // The narrowing, applied in the DATABASE and before any limit,
-                 // so a scoped question reads only the scoped rows.
-                 && (allowedFileItemIds == null || allowedFileItemIds.Contains(file.Id))
-                 && document.OwnerUserId == ownerUserId
-                 // THE CURRENT READING, not merely a completed one. A file may
-                 // carry several completed extractions — the native-text pass
-                 // that read a PDF before the PDF pipeline existed, or the
-                 // profile that preceded an extractor upgrade — and every one of
-                 // them is a plausible-looking answer drawn from a superseded
-                 // interpretation. Authority is the stored flag, uniquely
-                 // indexed, never a timestamp or an ordering convention.
-                 && document.IsCurrent
-                 && document.Status == AiArtifactStatuses.Completed
-           select new EligibleChunk { Chunk = chunk, Document = document, File = file };
+        IReadOnlyCollection<Guid>? allowedSourceIds = null,
+        IReadOnlyCollection<string>? allowedKinds = null)
+    {
+        var sources = EligibleSources(db, kinds, ownerUserId, allowedKinds);
+
+        return from chunk in db.DocumentChunks.AsNoTracking()
+               join document in db.DocumentTexts.AsNoTracking() on chunk.DocumentTextId equals document.Id
+               join source in sources
+                   on new { Kind = document.SourceKind, Id = document.SourceId }
+                   equals new { Kind = source.SourceKind, Id = source.SourceId }
+               where chunk.OwnerUserId == ownerUserId
+                     // The kind's own LIVE owner, checked against the asker as
+                     // well: a branch that forgot its owner clause still cannot
+                     // put another person's source in this corpus.
+                     && source.OwnerUserId == ownerUserId
+                     // The narrowing, applied in the DATABASE and before any
+                     // limit, so a scoped question reads only the scoped rows.
+                     && (allowedSourceIds == null || allowedSourceIds.Contains(source.SourceId))
+                     && document.OwnerUserId == ownerUserId
+                     // THE CURRENT READING, not merely a completed one. A source
+                     // may carry several completed extractions — the native-text
+                     // pass that read a PDF before the PDF pipeline existed, or
+                     // the profile that preceded an extractor upgrade — and every
+                     // one of them is a plausible-looking answer drawn from a
+                     // superseded interpretation. Authority is the stored flag,
+                     // uniquely indexed, never a timestamp or an ordering
+                     // convention.
+                     && document.IsCurrent
+                     && document.Status == AiArtifactStatuses.Completed
+               select new EligibleChunk
+               {
+                   Chunk = chunk,
+                   Document = document,
+                   SourceKind = source.SourceKind,
+                   SourceId = source.SourceId,
+                   OwnerUserId = source.OwnerUserId,
+                   DisplayName = source.DisplayName,
+               };
+    }
+
+    /// The registered kinds' live sources for this owner, each stamped with its
+    /// discriminator by the ENGINE (a kind cannot claim another kind's rows).
+    /// No kind left after narrowing is an empty set, never "everything".
+    public static IQueryable<EligibleSourceRow> EligibleSources(
+        AppDbContext db,
+        IEnumerable<IOwnerDocumentSourceEligibility> kinds,
+        Guid ownerUserId,
+        IReadOnlyCollection<string>? allowedKinds = null)
+    {
+        IQueryable<EligibleSourceRow>? union = null;
+        foreach (var kind in kinds)
+        {
+            if (allowedKinds is not null && !allowedKinds.Contains(kind.Kind, StringComparer.Ordinal)) continue;
+
+            var discriminator = kind.Kind;
+            var branch = kind.Eligible(db, ownerUserId)
+                .Select(r => new EligibleSourceRow
+                {
+                    SourceKind = discriminator,
+                    SourceId = r.SourceId,
+                    OwnerUserId = r.OwnerUserId,
+                    DisplayName = r.DisplayName,
+                });
+            union = union is null ? branch : union.Concat(branch);
+        }
+
+        return union ?? db.DocumentTexts.AsNoTracking()
+            .Where(_ => false)
+            .Select(d => new EligibleSourceRow
+            {
+                SourceKind = d.SourceKind,
+                SourceId = d.SourceId,
+                OwnerUserId = d.OwnerUserId,
+                DisplayName = d.SourceKind,
+            });
+    }
+
+    /// The `file` branch alone: what a caller built outside DI (an operator
+    /// tool, a unit test) unions over. Production resolves the registered
+    /// kinds from OwnerDocumentSources.
+    public static readonly IReadOnlyList<IOwnerDocumentSourceEligibility> FileKindOnly =
+        new IOwnerDocumentSourceEligibility[] { FileItemDocumentEligibility.Instance };
 
     /// Deliberately unused here, and referenced so the relationship is
     /// discoverable: media surfaces narrow through MediaLibraryScopePolicy, and
@@ -196,12 +271,16 @@ public static class OwnerDocumentEligibility
 
 /// One eligible chunk with the rows that made it eligible.
 ///
-/// The live `File` is carried rather than discarded because the callers need
-/// what only it can honestly answer: the display name for a citation, and the
-/// OWNER — which is verified live truth here, not the copy on the chunk.
+/// The live source's identity is carried rather than discarded because the
+/// callers need what only it can honestly answer: the display name for a
+/// citation, the kind and id for the owner's own search result, and the OWNER —
+/// which is verified live truth here, not the copy on the chunk.
 public sealed class EligibleChunk
 {
     public DocumentChunk Chunk { get; init; } = null!;
     public DocumentText Document { get; init; } = null!;
-    public FileItem File { get; init; } = null!;
+    public string SourceKind { get; init; } = string.Empty;
+    public Guid SourceId { get; init; }
+    public Guid OwnerUserId { get; init; }
+    public string DisplayName { get; init; } = string.Empty;
 }

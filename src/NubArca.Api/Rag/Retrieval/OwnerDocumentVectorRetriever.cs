@@ -66,10 +66,12 @@ public sealed class OwnerDocumentVectorRetriever
         Guid ownerUserId,
         string queryText,
         int take,
-        /// The SERVER-ONLY narrowing (see RagQuery.AllowedFileItemIds), applied
-        /// inside the candidate query so a scoped question ranks only scoped
-        /// vectors. It intersects with eligibility and can never widen it.
-        IReadOnlyCollection<Guid>? allowedFileItemIds = null,
+        /// The SERVER-ONLY narrowing (see RagQuery.AllowedSourceIds and
+        /// AllowedSourceKinds), applied inside the candidate query so a scoped
+        /// question ranks only scoped vectors. It intersects with eligibility
+        /// and can never widen it.
+        IReadOnlyCollection<Guid>? allowedSourceIds = null,
+        IReadOnlyCollection<string>? allowedSourceKinds = null,
         CancellationToken cancellationToken = default)
     {
         // NO OWNER, NO SEARCH. Not "no results" — the caller asked an
@@ -120,18 +122,15 @@ public sealed class OwnerDocumentVectorRetriever
 
         // OWNER AND ELIGIBILITY IN THE QUERY, BEFORE ANY LIMIT.
         //
-        // The join runs through the live FileItem, so a document deleted or
-        // moved into the Vault since it was embedded contributes no candidate at
-        // all — its vector row may still exist, and it is unreachable. The
+        // The join runs through the live source of every registered kind (the
+        // SAME kinds the lexical corpus was loaded with), so a document deleted
+        // or moved into the Vault since it was embedded contributes no candidate
+        // at all — its vector row may still exist, and it is unreachable. The
         // profile is matched exactly, because two profiles are two coordinate
         // systems and a cosine between them is a number with no meaning.
         var candidates = await (
             from row in OwnerDocumentEligibility.EligibleChunks(
-                _db.DocumentChunks.AsNoTracking(),
-                _db.DocumentTexts.AsNoTracking(),
-                _db.FileItems.AsNoTracking(),
-                ownerUserId,
-                allowedFileItemIds)
+                _db, _corpus.Kinds, ownerUserId, allowedSourceIds, allowedSourceKinds)
             join embedding in _db.DocumentChunkEmbeddings.AsNoTracking()
                 on row.Chunk.Id equals embedding.DocumentChunkId
             where embedding.ProfileId == profile.Id

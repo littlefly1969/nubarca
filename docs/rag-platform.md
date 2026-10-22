@@ -437,9 +437,16 @@ not the storage.
 
 A `DocumentText`, its chunks and its vectors record an extraction that happened
 at some point in the past. Between then and now the file may have been deleted
-or moved into the Private Vault. So **every read joins the live `FileItem`**
-through `OwnerDocumentEligibility`, and a chunk whose file no longer qualifies is
-not in the corpus at all — not filtered out afterwards.
+or moved into the Private Vault. So **every read joins the live source** — the
+`FileItem` for the `file` kind, the kind's own row for any other registered kind
+— through `OwnerDocumentEligibility.EligibleChunks`, and a chunk whose source no
+longer qualifies is not in the corpus at all — not filtered out afterwards.
+`EligibleChunks` is the union of the registered kinds' live predicates
+(`IOwnerDocumentSourceEligibility.Eligible`, see
+[the source contract](document-intelligence/source-contract.md)); lexical
+retrieval, vector retrieval and embedding all read through it, so a kind joins
+every one of them by registering its `IOwnerDocumentSource`, and the engine
+re-checks each kind's live owner against the asker.
 
 That is deliberately not left to cleanup. A sweeper that deletes orphaned rows
 runs on a schedule; a boundary that only holds once it has run fails for as long
@@ -504,7 +511,8 @@ one question.
 The document's NAME, the SECTION heading, and WHERE in the document — the real
 PDF page, or the typed locator (`page` / `section` / `sheet` / `slide`, its
 index and label; see "Location is typed"). All of it is something the owner
-wrote, chose, or can see by opening the file. Never a `FileItemId`,
+wrote, chose, or can see by opening the file — plus the source KIND (`file`, or
+a kind registered later), a category for the label. Never a `FileItemId` or other source id,
 `DocumentTextId`, chunk id, `BlobObjectId`, blob hash, `StorageKey`, filesystem
 path or owner id. A citation exists so a person can open their document, not so
 anything can address it, and an identifier on the wire is a durable handle to
@@ -528,9 +536,9 @@ response says which retrieval ran (`mode`: `lexical`, `hybrid` or
 `lexical-fallback-<reason>`; `visualMode`, `visualUsed`) so "semantic is off"
 never reads as "search is broken".
 
-**Reviewed exception to the rule above.** Each document carries
-`sourceKind: "file"` and `sourceId` — the CALLER'S OWN `FileItemId` — so the
-page can open the file. Why this one id is acceptable:
+**Reviewed exception to the rule above.** Each document carries its real
+`sourceKind` and `sourceId` — the CALLER'S OWN id for that source (for `file`,
+their `FileItemId`) — so the page can open it. Why this one id is acceptable:
 
 - it is the id every other owner endpoint (listing, details, thumbnails,
   `/api/files/{id}/content`) already returns to the same owner, so it discloses
@@ -544,9 +552,12 @@ page can open the file. Why this one id is acceptable:
 
 The request has no owner, domain, file or source field. The search service
 accepts optional `SourceKinds` and `AllowedSourceIds` SERVER-SIDE only, as a
-narrowing applied to the already-eligible corpus, so it can only remove
-candidates (see "Narrowing a text pass, correctly"); the HTTP body cannot reach
-either. Isolation is proved by `OwnerDocumentSearchTests`: another owner's, a
+narrowing applied to the already-eligible corpus (`RagQuery.AllowedSourceKinds`
+/ `AllowedSourceIds`, ANDed), so it can only remove candidates (see "Narrowing a
+text pass, correctly"); an unregistered kind matches no branch, and the HTTP
+body cannot reach either. The visual pass is file-only (the renderer needs a
+file's bytes): its scoped text pass is pinned to kind `file`, and a question
+narrowed to kinds without `file` runs no visual pass. Isolation is proved by `OwnerDocumentSearchTests`: another owner's, a
 vaulted, a deleted and a library-excluded document with derived rows left in
 place, forged body fields, and a second owner holding identical bytes, each
 asserted absent from the complete response body.
@@ -557,7 +568,7 @@ asserted absent from the complete response body.
 `embeddedChunks` — null when semantic is off) and `availability` per domain and
 source kind: whether `lexical`, `semantic` and `visual` can run and, when not, a
 reason token (`disabled`, `no_profile`, `model_missing`, `not_indexed`, or the
-visual reason). Counts and tokens only — never a name.
+visual reason; `not_applicable` for visual on a kind that is not `file`). Counts and tokens only — never a name.
 
 ### Automatic indexing, and its state
 
@@ -568,7 +579,8 @@ and an admin import each signal `IDocumentSourceChangeSink`, which enqueues one
 either flag off — the default — the sink is inert and nothing is queued.
 
 The job reads candidates through `IOwnerDocumentSource` (one implementation per
-source kind; only `file` is registered), keyset-paged per owner, and runs
+source kind; only `file` ships in the engine, another kind registers its own),
+keyset-paged per owner, and runs
 extract → chunk → embed (when `Ai:DocumentEmbeddingsEnabled` and the domain's
 semantic profile resolve) → visual (when the visual profile is enabled). It
 yields between sources and between phases, so a foreground import waits at most

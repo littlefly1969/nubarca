@@ -132,7 +132,7 @@ public sealed class RagRetriever : IRagRetriever
         var ranking = RagRankingProfiles.For(query.Domain);
         var shape = RagQueryShape.For(text, ranking.ExpandAliases);
         var lexical = index.Search(
-            shape, options.EffectiveLexicalCandidates, query.AllowedFileItemIds);
+            shape, options.EffectiveLexicalCandidates, query.AllowedSourceIds, query.AllowedSourceKinds);
 
         // PER DOMAIN. The repository stays lexical while Help is hybrid, because
         // that is what the two of them measured — and skipping the vector path
@@ -148,7 +148,8 @@ public sealed class RagRetriever : IRagRetriever
             (true, { OwnerVectors: { } ownerVectors }, true) =>
                 await ownerVectors.SearchAsync(
                     index, query.OwnerUserId ?? Guid.Empty, text,
-                    options.EffectiveVectorCandidates, query.AllowedFileItemIds, cancellationToken),
+                    options.EffectiveVectorCandidates, query.AllowedSourceIds, query.AllowedSourceKinds,
+                    cancellationToken),
 
             (true, { } services, false) =>
                 await services.Vectors.SearchAsync(
@@ -444,9 +445,10 @@ public sealed class RagRetriever : IRagRetriever
                 // chunk that reached a private result fails there rather than
                 // being relabelled with the caller's id on the way past.
                 OwnerUserId: chunk.OwnerUserId,
-                // Provenance, copied from the chunk like the owner: which file
-                // and where in it. Null for every system domain.
-                FileItemId: chunk.FileItemId,
+                // Provenance, copied from the chunk like the owner: which
+                // source and where in it. Null for every system domain.
+                DocumentSourceKind: chunk.DocumentSourceKind,
+                DocumentSourceId: chunk.DocumentSourceId,
                 Page: chunk.Page,
                 LocatorKind: chunk.LocatorKind,
                 LocatorIndex: chunk.LocatorIndex,

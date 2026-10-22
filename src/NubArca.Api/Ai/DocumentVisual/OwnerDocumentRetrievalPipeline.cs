@@ -1,3 +1,4 @@
+using NubArca.Api.Domain.Ai;
 using NubArca.Api.Rag;
 using NubArca.Api.Rag.Domains;
 
@@ -45,6 +46,7 @@ public sealed record OwnerDocumentRetrievalResult(
 public sealed class OwnerDocumentRetrievalPipeline
 {
     private static readonly RagDomainDefinition Domain = RagDomainRegistry.UserDocuments;
+    private static readonly IReadOnlyCollection<string> FileKind = new[] { DocumentSourceKinds.File };
 
     private readonly IRagRetriever _knowledge;
     private readonly IOwnerDocumentVisualRetriever? _visual;
@@ -63,19 +65,29 @@ public sealed class OwnerDocumentRetrievalPipeline
         int maxCharacters,
         bool useVisual = true,
         CancellationToken cancellationToken = default,
-        IReadOnlyCollection<Guid>? allowedSourceIds = null)
+        IReadOnlyCollection<Guid>? allowedSourceIds = null,
+        IReadOnlyCollection<string>? allowedSourceKinds = null)
     {
-        // `allowedSourceIds` is a SERVER-SIDE narrowing (see
-        // RagQuery.AllowedFileItemIds): it is applied to the already-eligible
-        // corpus and can only remove candidates. Null means the whole library.
+        // `allowedSourceIds` / `allowedSourceKinds` are a SERVER-SIDE narrowing
+        // (see RagQuery.AllowedSourceIds): applied to the already-eligible
+        // corpus, they can only remove candidates. Null means every source of
+        // every registered kind.
         var global = await _knowledge.RetrieveAsync(
             new RagQuery(Domain.DomainKey, question, ownerUserId, maxEvidence, maxCharacters)
             {
-                AllowedFileItemIds = allowedSourceIds,
+                AllowedSourceIds = allowedSourceIds,
+                AllowedSourceKinds = allowedSourceKinds,
             },
             cancellationToken);
 
-        if (!useVisual || _visual is null)
+        // VISUAL IS FILE-ONLY, by construction: the renderer needs a file's
+        // bytes, and the visual index is keyed by FileItem. Another kind is
+        // answered by the text signals alone, and a question narrowed to kinds
+        // that exclude `file` has no visual pass to run.
+        var filesAllowed = allowedSourceKinds is null
+            || allowedSourceKinds.Contains(DocumentSourceKinds.File, StringComparer.Ordinal);
+
+        if (!useVisual || _visual is null || !filesAllowed)
         {
             return OwnerDocumentRetrievalResult.From(global, DocumentVisualModes.Unavailable);
         }
@@ -99,9 +111,12 @@ public sealed class OwnerDocumentRetrievalPipeline
             {
                 // Intersected with the caller's own narrowing, so the visual
                 // pass can never reach a file the global pass was not allowed.
-                AllowedFileItemIds = allowedSourceIds is null
+                // The kind is pinned to `file`: these are FileItem ids, and an
+                // id of any other kind must not be able to match one.
+                AllowedSourceIds = allowedSourceIds is null
                     ? visual.CandidateFileIds
                     : visual.CandidateFileIds.Where(allowedSourceIds.Contains).ToList(),
+                AllowedSourceKinds = FileKind,
             },
             cancellationToken);
 
