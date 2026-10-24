@@ -1319,8 +1319,7 @@ builder.Services.Configure<AiOptions>(
 // The Assistant substrate. Disabled by default; the registration is
 // unconditional so the status endpoint can answer "not enabled" without the
 // container failing to build a service.
-builder.Services.Configure<NubArca.Api.Assistant.AssistantOptions>(
-    builder.Configuration.GetSection(NubArca.Api.Assistant.AssistantOptions.SectionName));
+NubArca.Api.Assistant.AssistantOptions.Register(builder.Services, builder.Configuration);
 builder.Services.AddSingleton<NubArca.Api.Assistant.AssistantModelResolver>();
 builder.Services.AddHttpClient<NubArca.Api.Assistant.IAssistantTextModel,
     NubArca.Api.Assistant.OpenAiCompatibleTextModel>();

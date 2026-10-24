@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using NubArca.Api.Data;
+using NubArca.Api.Domain;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -11,8 +12,9 @@ namespace NubArca.Api.Tests.Integration;
 
 // RemoveSystemRagIndex drops the system RAG tables (product help and the
 // repository) and their raw-SQL pgvector mirror, and must leave the
-// owner-private document tables alone. Real PostgreSQL, because the mirror is
-// PostgreSQL SQL outside the EF model.
+// owner-private document tables alone; it also closes leftover AI tags jobs.
+// Real PostgreSQL, because the mirror is PostgreSQL SQL outside the EF model.
+// In the CI merge gate (scripts/assert-concurrency-gate.py), so a skip fails.
 [Trait("Category", "External")]
 [Collection("RemoveSystemRagIndexMigration")]
 public sealed class RemoveSystemRagIndexMigrationTests : IAsyncLifetime
@@ -99,6 +101,57 @@ public sealed class RemoveSystemRagIndexMigrationTests : IAsyncLifetime
 
         await migrator.MigrateAsync(MigrationUnderTest);
         foreach (var table in SystemTables) Assert.False(await TableExistsAsync(table), table);
+    }
+
+    [SkippableFact]
+    public async Task Closes_Leftover_Tag_Jobs_And_Leaves_Every_Other_Job_Alone()
+    {
+        Skip.IfNot(Available, "Docker is not available for the PostgreSQL integration container.");
+
+        await using var ctx = CreateContext();
+        var migrator = ctx.GetInfrastructure().GetRequiredService<IMigrator>();
+        await migrator.MigrateAsync(PreviousMigration);
+
+        // background_jobs is the same shape on both sides of the migration.
+        var queuedTag = NewJob("ai.tags.generate.backfill", "queued");
+        var runningTag = NewJob("ai.tags.generate.backfill", "running");
+        runningTag.LockOwner = "worker-1";
+        var failedTag = NewJob("ai.tags.generate.backfill", "failed");
+        var otherQueued = NewJob("ai.faces.cluster.backfill", "queued");
+        var otherRunning = NewJob("ai.documents.index", "running");
+        otherRunning.LockOwner = "worker-1";
+        ctx.BackgroundJobs.AddRange(queuedTag, runningTag, failedTag, otherQueued, otherRunning);
+        await ctx.SaveChangesAsync();
+
+        await migrator.MigrateAsync(MigrationUnderTest);
+
+        Assert.Equal(("cancelled", (string?)null), await JobStateAsync(queuedTag.Id));
+        Assert.Equal(("cancelled", (string?)null), await JobStateAsync(runningTag.Id));
+        Assert.Equal(("failed", (string?)null), await JobStateAsync(failedTag.Id));
+        Assert.Equal(("queued", (string?)null), await JobStateAsync(otherQueued.Id));
+        Assert.Equal(("running", "worker-1"), await JobStateAsync(otherRunning.Id));
+    }
+
+    private static BackgroundJob NewJob(string type, string status) => new()
+    {
+        Id = Guid.NewGuid(),
+        Type = type,
+        Status = status,
+        CreatedAt = DateTime.UtcNow,
+        AvailableAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow,
+    };
+
+    private async Task<(string Status, string? LockOwner)> JobStateAsync(Guid id)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT \"Status\", \"LockOwner\" FROM background_jobs WHERE \"Id\" = @id";
+        command.Parameters.Add(new NpgsqlParameter("id", id));
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        return (reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1));
     }
 
     private AppDbContext CreateContext()

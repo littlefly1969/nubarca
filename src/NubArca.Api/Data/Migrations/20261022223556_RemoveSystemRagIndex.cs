@@ -19,6 +19,20 @@ namespace NubArca.Api.Data.Migrations
                 migrationBuilder.Sql("DROP TABLE IF EXISTS rag_chunk_embedding_vectors_384;");
             }
 
+            // The AI tags skeleton job is gone too. A queued or running one would
+            // otherwise be failed permanently as UnknownJobType by the next
+            // worker; it never did any work, so it is closed as cancelled.
+            // Finished jobs and jobs of every other type are left alone.
+            migrationBuilder.Sql(@"
+                UPDATE background_jobs
+                SET ""Status"" = 'cancelled',
+                    ""CompletedAt"" = CURRENT_TIMESTAMP,
+                    ""LockOwner"" = NULL,
+                    ""LeaseUntil"" = NULL,
+                    ""UpdatedAt"" = CURRENT_TIMESTAMP
+                WHERE ""Type"" = 'ai.tags.generate.backfill'
+                  AND ""Status"" IN ('queued', 'running');");
+
             migrationBuilder.DropTable(
                 name: "rag_chunk_embeddings");
 

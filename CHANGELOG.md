@@ -22,19 +22,21 @@ originating repository and is deliberately not reproduced here.
   `Rag__SemanticEnabled` / `Rag__TextEmbeddingProfileKey` are removed; they were
   never inherited by `user-documents`, so nothing that worked stops working.
   The document assistant's bounds moved from `Assistant:Help:*` to
-  `Assistant:Bounds:*`.
+  `Assistant:Bounds:*`; a bound still set under the old name keeps applying
+  (the new name wins), so an upgrade never loosens a configured limit.
 - **The late-interaction visual reranker is gone** (the ColVision seam,
   `MaxSim`, the `LateInteractionEnabled` / `LateProfileKey` settings and the
   multi-vector ceilings). It was measured and never promoted; dense visual
   retrieval is unchanged.
 - **The AI tags/captions skeletons are gone**: `Ai__TagsEnabled`, the
-  `ai-tags-generate-backfill` job and the tagging/captioning backend seams. A
-  queued job of that type fails as `UnknownJobType`.
+  `ai-tags-generate-backfill` job and the tagging/captioning backend seams. The
+  migration closes any queued or running job of that type as cancelled.
 - **The documents status endpoint moved** from `/api/assistant/documents/status`
   to `/api/documents/status`, with the same `document-search.access` check.
 - **Migration `RemoveSystemRagIndex` drops** `rag_sources`,
   `rag_domain_sources`, `rag_chunks`, `rag_chunk_embeddings` and the
-  `rag_chunk_embedding_vectors_384` mirror. It deletes only the system index,
+  `rag_chunk_embedding_vectors_384` mirror, and cancels leftover AI tags jobs.
+  Its Up/Down runs on PostgreSQL in the CI merge gate. It deletes only the system index,
   which held product documentation and repository code, never user data. It is
   not an automatic migration: it runs through the manual, backed-up path.
 

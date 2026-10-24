@@ -2451,8 +2451,7 @@ public static class CliEntryPoint
         // The Assistant/RAG substrate, outside the Postgres block for the same
         // reason the web host keeps it there: the domain registry needs no
         // database.
-        services.Configure<NubArca.Api.Assistant.AssistantOptions>(
-            configuration.GetSection(NubArca.Api.Assistant.AssistantOptions.SectionName));
+        NubArca.Api.Assistant.AssistantOptions.Register(services, configuration);
         services.AddSingleton<NubArca.Api.Assistant.AssistantModelResolver>();
         services.Configure<NubArca.Api.Rag.RagOptions>(
             configuration.GetSection(NubArca.Api.Rag.RagOptions.SectionName));

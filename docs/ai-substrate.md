@@ -159,8 +159,9 @@ similarity, or UI.
   `ai.documents.embeddings.backfill`, `ai.faces.detect.backfill`,
   `ai.faces.embeddings.backfill`, `ai.faces.cluster.backfill`. (The
   `ai.tags.generate.backfill` skeleton, `Ai:TagsEnabled` and the
-  tagging/captioning backend interfaces were removed in 0.4.6; a queued job of
-  that type now fails permanently as `UnknownJobType`.) They share one flag-only `AiBackfillJobPayload`
+  tagging/captioning backend interfaces were removed in 0.4.6; the
+  `RemoveSystemRagIndex` migration closes a queued or running job of that type
+  as cancelled.) They share one flag-only `AiBackfillJobPayload`
   (optional profile **key**, never a GUID) and a versioned `AiBackfillCheckpoint`
   (defined for Phase 1; 0C handlers do not continue).
 

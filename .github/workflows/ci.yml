@@ -235,13 +235,14 @@ jobs:
       # television) and against the end of the party (never on after it), and an
       # owner's direct print (one key, one sheet; a loan's last sheet taken once).
       # Navigation also needs the real provider's collation, grouping and seeks.
+      # RemoveSystemRagIndex drops tables, so its Up/Down runs here too.
       - name: Run concurrency and media navigation tests
         run: >-
           dotnet test tests/NubArca.Api.Tests/NubArca.Api.Tests.csproj
           --configuration Release
           --no-restore
           --no-build
-          --filter "FullyQualifiedName~AlbumShareConcurrencyPostgresTests|FullyQualifiedName~AlbumVersionConcurrencyPostgresTests|FullyQualifiedName~PartyGuestbookGameRacePostgresTests|FullyQualifiedName~PartyGuestbookEndLiveRacePostgresTests|FullyQualifiedName~OwnerPhotoPrintRacePostgresTests|FullyQualifiedName~MediaNavigationPostgresTests|FullyQualifiedName~MediaNavigationPerformanceTests"
+          --filter "FullyQualifiedName~AlbumShareConcurrencyPostgresTests|FullyQualifiedName~AlbumVersionConcurrencyPostgresTests|FullyQualifiedName~PartyGuestbookGameRacePostgresTests|FullyQualifiedName~PartyGuestbookEndLiveRacePostgresTests|FullyQualifiedName~OwnerPhotoPrintRacePostgresTests|FullyQualifiedName~MediaNavigationPostgresTests|FullyQualifiedName~MediaNavigationPerformanceTests|FullyQualifiedName~RemoveSystemRagIndexMigrationTests"
           --logger "console;verbosity=normal"
           --logger trx
           --results-directory "$GITHUB_WORKSPACE/TestResults/backend-concurrency"

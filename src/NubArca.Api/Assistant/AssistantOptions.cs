@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
 namespace NubArca.Api.Assistant;
 
 // Operator configuration for the Assistant substrate.
@@ -40,6 +43,29 @@ public sealed class AssistantOptions
         = new(StringComparer.OrdinalIgnoreCase);
 
     public AssistantBoundsOptions Bounds { get; set; } = new();
+
+    /// Binds the section, and carries over any bound still written under the
+    /// pre-0.4.6 `Assistant:Help:*` name. Those keys bounded the document
+    /// assistant too, so dropping them on upgrade would silently LOOSEN an
+    /// installation's limits to the defaults. A key set under `Bounds` wins.
+    public static IServiceCollection Register(IServiceCollection services, IConfiguration configuration)
+    {
+        var section = configuration.GetSection(SectionName);
+        services.Configure<AssistantOptions>(section);
+        services.PostConfigure<AssistantOptions>(options => ApplyLegacyBounds(section, options));
+        return services;
+    }
+
+    internal static void ApplyLegacyBounds(IConfiguration section, AssistantOptions options)
+    {
+        var current = section.GetSection(nameof(Bounds));
+        var legacy = section.GetSection("Help").GetChildren()
+            .Where(c => c.Value is not null && current[c.Key] is null)
+            .ToDictionary(c => c.Key, c => c.Value);
+        if (legacy.Count == 0) return;
+
+        new ConfigurationBuilder().AddInMemoryCollection(legacy).Build().Bind(options.Bounds);
+    }
 }
 
 /// One named model endpoint.
