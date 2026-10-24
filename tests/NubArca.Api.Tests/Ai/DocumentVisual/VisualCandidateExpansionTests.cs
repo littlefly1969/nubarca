@@ -77,7 +77,7 @@ public sealed class VisualCandidateExpansionTests : IAsyncLifetime
             // that the target does not make the global top three, so the bound
             // has to be small enough for "did not make the cut" to be a real
             // outcome rather than a hypothetical one.
-            ["Assistant:Help:MaxEvidenceChunks"] = "3",
+            ["Assistant:Bounds:MaxEvidenceChunks"] = "3",
             ["Ai:Enabled"] = "true",
             ["Ai:DocumentVisual:Enabled"] = visual ? "true" : "false",
         };

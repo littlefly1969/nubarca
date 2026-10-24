@@ -3,14 +3,9 @@ using Xunit;
 
 namespace NubArca.Api.Tests.Assistant;
 
-// The capability policy, and the distinction the whole slice rests on:
-//
-//   ELIGIBLE BY TRUST  is not  USED BY A FEATURE.
-//
-// A LocalTrusted model is eligible for private context. Help does not give it
-// any, because Help's operation policy is public product knowledge. Both halves
-// are asserted, because a future change that collapsed them would look like a
-// simplification and would be a data leak.
+// The capability policy: what a model is ELIGIBLE for, by trust. A
+// LocalTrusted model is eligible for private context; an External one never
+// is. Eligibility is not use — a feature still decides what it hands over.
 public sealed class AssistantCapabilityPolicyTests
 {
     [Fact]
@@ -79,25 +74,5 @@ public sealed class AssistantCapabilityPolicyTests
         Assert.Equal(external, local.Intersect(external));
         Assert.Equal(external, external.Intersect(local));
         Assert.Equal(AssistantCapabilities.None, AssistantCapabilities.None.Intersect(local));
-    }
-
-    [Theory]
-    [InlineData(AssistantModelTrust.External)]
-    [InlineData(AssistantModelTrust.LocalTrusted)]
-    public void Help_Uses_Public_Product_Context_Only_Whatever_The_Model_Allows(
-        AssistantModelTrust trust)
-    {
-        // THE POINT OF THE SLICE. Configuring a trusted local endpoint makes
-        // Help local. It does not make Help able to see anything new.
-        var profile = AssistantTextModelContractTests.ExternalProfile() with { Trust = trust };
-        var effective = HelpOperationPolicy.Effective(profile);
-
-        Assert.True(effective.CanReceivePublicContext);
-        Assert.False(effective.CanReceivePrivateContext);
-        Assert.False(effective.CanUsePrivateRag);
-        Assert.False(effective.CanUseReadTools);
-        Assert.False(effective.CanProposeActions);
-        Assert.False(effective.CanUseWriteTools);
-        Assert.False(effective.CanExecuteWithoutConfirmation);
     }
 }

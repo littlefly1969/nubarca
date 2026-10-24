@@ -97,15 +97,11 @@ public sealed class DeterministicAiBackendTests
     [Fact]
     public async Task Non_Embedding_Capabilities_Return_Stable_Placeholders()
     {
-        var profile = EmbeddingProfile(AiCapabilities.Captioning);
+        var profile = EmbeddingProfile(AiCapabilities.FaceDetection);
 
-        var caption = await _backend.CaptionImageAsync(new byte[] { 1 }, profile);
         var extraction = await _backend.ExtractTextAsync(new byte[] { 1 }, "text/plain", profile);
-        var tags = await _backend.TagImageAsync(new byte[] { 1 }, profile);
 
-        Assert.False(string.IsNullOrWhiteSpace(caption.Caption));
         Assert.Equal("deterministic", extraction.Source);
-        Assert.Empty(tags.Tags);
 
         // Face Substrate v0: the deterministic backend now emits STABLE, non-
         // semantic faces (with landmarks) so the face persistence/embedding

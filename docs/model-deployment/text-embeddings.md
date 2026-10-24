@@ -9,7 +9,7 @@
 The text-embedding catalog is code, not database:
 `src/NubArca.Api/Ai/TextEmbeddings/RagTextEmbeddingModels.cs`. Each entry states
 how its checkpoint must be fed (prefixes, pooling, dimensions, EOS, maximum
-tokens). `rag seed-profiles` turns every entry into an `AiModel` and an
+tokens). `documents seed-profiles` turns every entry into an `AiModel` and an
 `AiProfile` with `IsDefault=false`. A profile does nothing until a domain names
 it.
 
@@ -217,17 +217,12 @@ Then, on the server:
 2. Seed and validate:
 
    ```bash
-   $DC exec api dotnet NubArca.Api.dll rag seed-profiles
-   $DC exec api dotnet NubArca.Api.dll rag validate-model --profile rag-text-qwen3-embedding-0.6b-768-v1
+   $DC exec api dotnet NubArca.Api.dll documents seed-profiles
+   $DC exec api dotnet NubArca.Api.dll documents validate-model --profile rag-text-qwen3-embedding-0.6b-768-v1
    ```
 
-`rag validate-model` also checks for a system pgvector table of the profile's
-dimension, and only a 384-d table exists. For 768-d and 1024-d profiles it
-prints `vector_table=FAILED`. That is expected for the owner-private
-`user-documents` domain, which uses exact in-process cosine and no pgvector
-table. It does mean that **system domains (`product-help`) must stay on a 384-d
-profile** (E5 or Granite 97M) until a migration adds a table for another
-dimension.
+Any catalogued dimension works: the owner-private `user-documents` domain uses
+exact in-process cosine and no pgvector table.
 
 The Granite repos also ship their own `onnx/model.onnx`, and they ship OpenVINO
 IR. Prefer the script's export: its graph contract and parity are verified
@@ -294,7 +289,7 @@ runtime (OpenVINO EP, FP32):
 - Passages per second at batch size 1 on representative chunks.
 - Query latency, p50 and p95.
 - Resident memory of the API process with the model warm.
-- Retrieval quality on the private and Product Help golden sets (Recall@5,
+- Retrieval quality on the private golden set (Recall@5,
   MRR), lexical-only versus hybrid.
 - The calibrated `MinimumVectorScore` for the chosen profile.
 

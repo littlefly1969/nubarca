@@ -60,7 +60,6 @@ public class AiOptions
     public bool FaceDetectionEnabled { get; set; } = false;
     public bool FaceEmbeddingsEnabled { get; set; } = false;
     public bool FaceClusteringEnabled { get; set; } = false;
-    public bool TagsEnabled { get; set; } = false;
 
     // Future-ready nested provider config. Present and bindable now, activated
     // later (Phase 0C / Phase 2). Empty by default.

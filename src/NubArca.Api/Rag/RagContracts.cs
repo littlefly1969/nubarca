@@ -11,8 +11,6 @@ namespace NubArca.Api.Rag;
 /// widen its reach by passing a different argument.
 public sealed record RagDomainKey(string Value)
 {
-    public static RagDomainKey ProductHelp { get; } = new(RagDomains.ProductHelp);
-    public static RagDomainKey NubArcaRepository { get; } = new(RagDomains.NubArcaRepository);
     public static RagDomainKey UserDocuments { get; } = new(RagDomains.UserDocuments);
 
     public override string ToString() => Value;
@@ -21,13 +19,12 @@ public sealed record RagDomainKey(string Value)
 /// One retrieval request.
 ///
 /// The DOMAIN is part of the query and is chosen by the calling feature, never
-/// by the browser: `/api/help/ai/chat` has no field for it, and the Help service
-/// passes `product-help` as a constant.
+/// by the browser: no endpoint has a field for it, and each caller passes
+/// `user-documents` as a constant.
 ///
-/// `OwnerUserId` is present and unused. Every system domain ignores it, and a
-/// future owner-scoped domain will REQUIRE it — the field exists now so the
-/// authorization question is asked at the contract rather than bolted onto a
-/// retriever that already shipped without it.
+/// `OwnerUserId` is REQUIRED by every owner-scoped domain: retrieval refuses a
+/// query without it before it reads anything, so the authorization question is
+/// asked at the contract.
 public sealed record RagQuery(
     RagDomainKey Domain,
     string Text,
@@ -35,13 +32,6 @@ public sealed record RagQuery(
     int MaxEvidence,
     int MaxCharacters)
 {
-    /// System-domain shorthand. There is no owner to pass, and spelling `null`
-    /// at every call site would only make the interesting case less visible.
-    public RagQuery(RagDomainKey domain, string text, int maxEvidence, int maxCharacters)
-        : this(domain, text, null, maxEvidence, maxCharacters)
-    {
-    }
-
     /// A SERVER-ONLY NARROWING of an owner-scoped question to specific sources.
     ///
     /// It exists for one caller: the visual candidate expansion, which finds
@@ -85,7 +75,7 @@ public sealed record RagQuery(
 
 /// Which retrieval paths actually produced a result.
 ///
-/// Reported rather than hidden. "Help got worse this week" and "the embedding
+/// Reported rather than hidden. "Search got worse this week" and "the embedding
 /// model stopped loading after the last deploy" are the same event seen from
 /// two ends, and only one of them is diagnosable — so a degraded run says it is
 /// degraded, and says why.
@@ -108,8 +98,8 @@ public static class RagRetrievalModes
 /// should be able to name a section rather than only a file.
 ///
 /// The trailing fields are DIAGNOSTIC provenance: which revision this came
-/// from, and how each retrieval path ranked it. They exist so `rag query` can
-/// explain a ranking to a person, and they are not part of any HTTP response.
+/// from, and how each retrieval path ranked it. They exist so `documents query`
+/// can explain a ranking to a person, and they are not part of any HTTP response.
 public sealed record RagEvidence(
     string Id,
     RagDomainKey Domain,
@@ -195,21 +185,6 @@ public sealed record RagRetrievalResult(
             RagRetrievalModes.Lexical, null, null, reason);
 }
 
-/// What a domain's index currently holds. Aggregate counts and a revision —
-/// never a chunk, never a vector, never a path outside the repository-relative
-/// source key.
-public sealed record RagDomainStatus(
-    RagDomainKey Domain,
-    bool IsAvailable,
-    string? Revision,
-    long Sources,
-    long Chunks,
-    string? EmbeddingProfileKey,
-    long Embeddings,
-    long Vectors,
-    bool SemanticAvailable,
-    string? Reason);
-
 /// Retrieval over a NAMED domain.
 ///
 /// The MODEL does not retrieve. It is handed a bounded set of evidence that this
@@ -218,17 +193,8 @@ public sealed record RagDomainStatus(
 /// reviewable set rather than whatever a model decides to look up.
 ///
 /// One query names ONE domain. There is deliberately no "search everything":
-/// cross-domain retrieval would mean a Product Help answer could be grounded on
-/// repository evidence by accident, and the domain policy would have nothing
-/// left to govern.
+/// the domain policy governs one domain at a time.
 public interface IRagRetriever
 {
     Task<RagRetrievalResult> RetrieveAsync(RagQuery query, CancellationToken cancellationToken = default);
-
-    /// `ownerUserId` is required for an owner-scoped domain and ignored by every
-    /// system one. Optional in the signature so the system callers stay honest
-    /// about having no owner, rather than passing `Guid.Empty` and making the
-    /// interesting case invisible.
-    Task<RagDomainStatus> GetStatusAsync(
-        RagDomainKey domain, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 }

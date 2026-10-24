@@ -157,7 +157,6 @@ public static class AiServiceRegistration
         services.AddScoped<IJobHandler, AiFacesEmbeddingsBackfillJobHandler>();
         services.AddScoped<IJobHandler, AiFacesClusterBackfillJobHandler>();
         services.AddScoped<IJobHandler, AiFacesClusterOwnerJobHandler>();
-        services.AddScoped<IJobHandler, AiTagsGenerateBackfillJobHandler>();
 
         // VSEM-01: canonical video temporal substrate. The service graph and the
         // options VALIDATOR live here so the web host, the CLI/worker host and

@@ -10,10 +10,8 @@ using NubArca.Api.Domain;
 using NubArca.Api.Domain.Ai;
 using NubArca.Api.Rag;
 using NubArca.Api.Rag.Domains;
-using NubArca.Api.Rag.Evaluation;
-using NubArca.Api.Rag.ProductHelp;
+using NubArca.Api.Tests.Rag;
 using NubArca.Api.Rag.Retrieval;
-using NubArca.Api.Rag.Storage;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -102,8 +100,7 @@ public sealed class PrivateDocumentGoldenEvaluationTests : IDisposable
         };
 
     private static RagGoldenCase Case(string query, params string[] expected)
-        => new(RagDomains.UserDocuments, RagLanguages.Italian, query, expected,
-            Array.Empty<string>(), Conceptual: false);
+        => new(query, expected);
 
     // ---- measurement --------------------------------------------------------
 
@@ -213,8 +210,8 @@ public sealed class PrivateDocumentGoldenEvaluationTests : IDisposable
 
     private Task<RagEvaluationReport> EvaluateAsync(
         IReadOnlyList<RagGoldenCase> cases, bool semantic, Guid? owner = null)
-        => new RagEvaluator(Build(semantic))
-            .EvaluateAsync(RagDomains.UserDocuments, cases, ownerUserId: owner ?? _owner);
+        => new RagGoldenEvaluator(Build(semantic))
+            .EvaluateAsync(RagDomains.UserDocuments, cases, owner ?? _owner);
 
     private IRagRetriever Build(bool semantic)
     {
@@ -243,16 +240,8 @@ public sealed class PrivateDocumentGoldenEvaluationTests : IDisposable
         return new RagRetriever(
             RagDomainRegistry.Instance,
             new RagDatabaseServices(
-                new DatabaseRagCorpusSource(_db),
-                new RagVectorRetriever(
-                    embeddings, new RagVectorIndexService(_db, serializer, TimeProvider.System),
-                    options),
-                embeddings,
-                new RagVectorIndexService(_db, serializer, TimeProvider.System),
                 corpus,
                 new OwnerDocumentVectorRetriever(_db, corpus, embeddings, serializer)),
-            new BundledProductHelpCorpusSource(ProductHelpCorpus.Empty),
-            new RagLexicalIndexCache(),
             options,
             semanticResolver,
             NullLogger<RagRetriever>.Instance);

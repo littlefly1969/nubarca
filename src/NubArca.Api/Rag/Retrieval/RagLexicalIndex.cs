@@ -15,9 +15,8 @@ public sealed record RagLexicalHit(
 
 /// Field-weighted BM25 (BM25F) over one domain's corpus.
 ///
-/// This is Slice 1's Product Help retriever, generalized: the scoring is
-/// unchanged and the domain-specific judgement moved out into
-/// RagRankingProfile. Semantic retrieval is added BESIDE it, never instead of
+/// The field weights and gates are the domain's RagRankingProfile; the scoring
+/// here has no opinion. Semantic retrieval is added BESIDE it, never instead of
 /// it — an exact identifier, a configuration key or a file name is a permanent
 /// use case that vectors are worse at, and deleting the lexical path once
 /// embeddings work would be trading a capability for a smaller diff.
@@ -171,31 +170,22 @@ public sealed class RagLexicalIndex
 
         foreach (var term in shape.Literal)
         {
-            var (contribution, hit, high) = TermScore(doc, term, 1.0);
+            var (contribution, hit, high) = TermScore(doc, term);
             score += contribution;
             if (!hit) continue;
             matchedAny++;
             matchedLiteral++;
             highField |= high;
         }
-        foreach (var term in shape.Expanded)
-        {
-            var (contribution, hit, high) = TermScore(doc, term, _profile.ExpandedTermWeight);
-            score += contribution;
-            if (!hit) continue;
-            matchedAny++;
-            highField |= high;
-        }
         if (score <= 0) return (0, 0, 0, false);
 
-        score *= _profile.Boost(doc.Chunk, shape);
         return (score, matchedAny, matchedLiteral, highField);
     }
 
     /// BM25F: weighted term frequencies are summed ACROSS fields first, then
     /// saturated once. Saturating per field and adding would let a term repeated
     /// in a title beat a term present in every field, which is backwards.
-    private (double Score, bool Hit, bool HighField) TermScore(Indexed doc, string term, double weight)
+    private (double Score, bool Hit, bool HighField) TermScore(Indexed doc, string term)
     {
         if (!_idf.TryGetValue(term, out var idf)) return (0, false, false);
 
@@ -213,7 +203,7 @@ public sealed class RagLexicalIndex
                  + _profile.BodyWeight * body / normalization;
 
         var saturated = tf * (RagRankingProfile.K1 + 1) / (tf + RagRankingProfile.K1);
-        return (idf * saturated * weight, true, feature + section + title > 0);
+        return (idf * saturated, true, feature + section + title > 0);
     }
 
     private static Dictionary<string, double> BuildIdf(IReadOnlyList<Indexed> documents)

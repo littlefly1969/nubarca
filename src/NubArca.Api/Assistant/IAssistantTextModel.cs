@@ -32,7 +32,7 @@ public sealed record AssistantCompletion(bool Ok, string? Text, string? Reason)
 /// There is deliberately no optional `tools = null` parameter "for later"
 /// either. ABSENCE is the contract, and an optional parameter is presence with a
 /// default. When tool calling arrives it belongs behind its own interface, so a
-/// text-only external Help cannot acquire tools because a shared type grew a
+/// text-only feature cannot acquire tools because a shared type grew a
 /// property.
 ///
 /// Vendor neutrality is the other half: NubArca depends on this interface and on

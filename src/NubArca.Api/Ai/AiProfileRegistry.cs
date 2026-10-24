@@ -464,7 +464,5 @@ public sealed class AiProfileRegistry : IAiProfileRegistry
         new("det-face-embedding-v1", AiCapabilities.FaceEmbedding, AiModalities.Face, DeterministicDimension),
         new("det-document-extraction-v1", AiCapabilities.DocumentExtraction, AiModalities.Document, null),
         new("det-face-detection-v1", AiCapabilities.FaceDetection, AiModalities.Image, null),
-        new("det-tagging-v1", AiCapabilities.Tagging, AiModalities.Image, null),
-        new("det-captioning-v1", AiCapabilities.Captioning, AiModalities.Image, null),
     };
 }

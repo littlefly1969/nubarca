@@ -186,8 +186,6 @@ public static class AdminJobCommands
         // Clustering is whole-library by design — no per-run limit.
         AddAi(list, "ai-faces-cluster-backfill", JobTypes.AiFacesClusterBackfill,
             AiCapabilities.FaceEmbedding, c => c.FaceClusteringEnabled, hasLimit: false);
-        AddAi(list, "ai-tags-generate-backfill", JobTypes.AiTagsGenerateBackfill,
-            AiCapabilities.Tagging, c => c.TagsEnabled, hasLimit: true);
 
         return list;
     }
@@ -371,7 +369,6 @@ public sealed record AdminJobAvailabilityContext(
     bool FaceDetectionEnabled,
     bool FaceEmbeddingsEnabled,
     bool FaceClusteringEnabled,
-    bool TagsEnabled,
     bool VideoHlsEnabled,
     bool VideoProbeEnabled,
     bool FfmpegPosterEnabled);

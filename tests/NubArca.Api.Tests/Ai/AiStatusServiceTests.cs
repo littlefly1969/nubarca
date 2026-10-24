@@ -67,7 +67,7 @@ public sealed class AiStatusServiceTests : IDisposable
 
         Assert.True(status.Enabled);
         Assert.Equal(1, status.ModelCount);
-        Assert.True(status.ProfileCount >= 7);
+        Assert.True(status.ProfileCount >= 5);
 
         var image = status.Capabilities.Single(c => c.Capability == AiCapabilities.ImageEmbedding);
         Assert.True(image.Available);

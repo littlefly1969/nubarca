@@ -94,7 +94,7 @@ public sealed class OwnerDocumentIsolationTests : IDisposable
             await _corpus.LoadAsync(_ownerA),
             RagRankingProfiles.For(RagDomainKey.UserDocuments));
 
-        var shape = RagQueryShape.For("pulizia del filtro della caldaia ogni sei mesi", false);
+        var shape = RagQueryShape.For("pulizia del filtro della caldaia ogni sei mesi");
         var hits = index.Search(shape, 20);
 
         Assert.NotEmpty(hits);

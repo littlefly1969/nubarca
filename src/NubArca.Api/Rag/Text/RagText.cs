@@ -9,10 +9,8 @@ namespace NubArca.Api.Rag.Text;
 /// another retrieves nothing, and the failure looks like a ranking problem
 /// rather than a tokenizer problem — so there is exactly one of them, here.
 ///
-/// It is domain-general on purpose. Product Help and the repository domain
-/// index different material and rank it differently, and they must still agree
-/// on what a word is: `face_previews` has to become the same two tokens whether
-/// it was typed into a question or read out of a migration.
+/// `face_previews` has to become the same two tokens whether it was typed into
+/// a question or read out of a document.
 public static class RagText
 {
     /// Stopwords for BOTH interface languages, in one set.
@@ -46,21 +44,6 @@ public static class RagText
         "here", "what", "which", "who", "whom", "when", "where", "why", "how",
         "not", "no", "yes", "so", "than", "then", "too", "very", "just", "also",
         "into", "about", "over", "any", "all", "some", "more", "most", "other",
-    };
-
-    /// Words that make a question a HOW-TO question, in either language.
-    ///
-    /// Detected on the raw token stream, BEFORE stopwords are removed, because
-    /// most of them are stopwords: `come`, `how` and `faccio` carry no topical
-    /// meaning and are the strongest available signal about what kind of answer
-    /// the person wants.
-    private static readonly HashSet<string> HowToMarkers = new(StringComparer.Ordinal)
-    {
-        "come", "faccio", "fare", "posso", "usare", "utilizzare", "usa", "uso",
-        "attivare", "abilitare", "configurare", "impostare", "aggiungere",
-        "creare", "assegnare", "gestire", "trovare",
-        "how", "use", "using", "enable", "enabling", "configure", "setup",
-        "set", "add", "create", "assign", "manage", "find", "start",
     };
 
     /// Lowercase, fold diacritics, drop everything that is not a letter or a
@@ -168,9 +151,6 @@ public static class RagText
             current.Clear();
         }
     }
-
-    public static bool LooksLikeHowTo(string? text)
-        => Tokenize(text).Any(HowToMarkers.Contains);
 
     /// The folded form of a text, for callers that must LOCATE a token inside
     /// the original rather than tokenize it.

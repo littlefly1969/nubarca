@@ -43,6 +43,11 @@ REQUIRED = {
     "One_Key_Sent_Six_Times_At_Once_Is_One_Sheet",
     "The_Last_Sheet_Of_A_Loan_Is_Taken_Once",
     "One_Key_Racing_For_The_Last_Sheet_Spends_It_Once",
+    # RemoveSystemRagIndex drops the system RAG tables: Up, Down and the
+    # leftover tag jobs must actually run against PostgreSQL.
+    "Drops_The_System_Index_And_Keeps_The_Document_Tables",
+    "Rolls_Back_To_Empty_Tables_And_Forward_Again",
+    "Closes_Leftover_Tag_Jobs_And_Leaves_Every_Other_Job_Alone",
 }
 
 NS = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}

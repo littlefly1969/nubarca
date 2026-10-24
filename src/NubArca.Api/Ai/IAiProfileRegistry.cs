@@ -48,9 +48,9 @@ public interface IAiProfileRegistry
     // Idempotently seed the RAG text-embedding models + profiles (capability
     // "text-embedding"): the deterministic dev/test one and the local ONNX one.
     // NEITHER is made default — which profile embeds text is stated explicitly
-    // by `Rag:TextEmbeddingProfileKey`, so a second model appearing in the
-    // catalogue can never silently become the active one. Explicit-only
-    // (CLI `rag seed-profiles`); never auto-run on startup.
+    // by `Rag:Domains:user-documents:TextEmbeddingProfileKey`, so a second model
+    // appearing in the catalogue can never silently become the active one.
+    // Explicit-only (CLI `documents seed-profiles`); never auto-run on startup.
     Task<AiSeedResult> SeedRagTextEmbeddingProfilesAsync(CancellationToken cancellationToken = default);
 
     // Idempotently seed the DOCUMENT VISUAL model + profile (capability

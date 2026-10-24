@@ -5,7 +5,6 @@ using Microsoft.Extensions.Options;
 using NubArca.Api.Ai;
 using NubArca.Api.Ai.Documents;
 using NubArca.Api.Assistant;
-using NubArca.Api.Help;
 using NubArca.Api.Rag;
 using NubArca.Api.Rag.Domains;
 
@@ -156,7 +155,6 @@ public sealed class DocumentPipelineComposeWiringTests
                         ?? new AssistantOptions();
         return new AssistantModelResolver(
                 Options.Create(assistant),
-                Options.Create(new ExternalHelpOptions()),
                 NullLogger<AssistantModelResolver>.Instance)
             .PrivateKnowledgeModel;
     }

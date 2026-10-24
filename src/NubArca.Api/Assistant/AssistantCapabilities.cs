@@ -54,9 +54,9 @@ public static class AssistantCapabilityPolicy
 {
     public static AssistantCapabilities ForTrust(AssistantModelTrust trust) => trust switch
     {
-        // Public product knowledge and what the user typed. Nothing else may
-        // cross the boundary, and no capability that could fetch more is
-        // eligible in the first place.
+        // Public knowledge and what the user typed. Nothing else may cross the
+        // boundary, and no capability that could fetch more is eligible in the
+        // first place.
         AssistantModelTrust.External => new AssistantCapabilities(
             CanReceivePublicContext: true,
             CanReceivePrivateContext: false,
@@ -68,7 +68,7 @@ public static class AssistantCapabilityPolicy
 
         // The operator asserts control of this endpoint, so private context and
         // read tools become ELIGIBLE — for features designed and reviewed for
-        // them, of which there are currently none.
+        // them, such as the document assistant's private retrieval.
         AssistantModelTrust.LocalTrusted => new AssistantCapabilities(
             CanReceivePublicContext: true,
             CanReceivePrivateContext: true,
@@ -90,25 +90,4 @@ public static class AssistantCapabilityPolicy
 
     public static AssistantCapabilities For(AssistantModelProfile? profile)
         => profile is null ? AssistantCapabilities.None : ForTrust(profile.Trust);
-}
-
-/// What the HELP operation is willing to use, whatever its model is eligible for.
-///
-/// Public product knowledge, and nothing else. This is the half of the
-/// intersection that makes "we configured a local model" and "the assistant can
-/// now see my photos" different statements: a LocalTrusted Help still sends
-/// only `product-help` evidence, because the operation says so.
-public static class HelpOperationPolicy
-{
-    public static AssistantCapabilities Operation { get; } = new(
-        CanReceivePublicContext: true,
-        CanReceivePrivateContext: false,
-        CanUsePrivateRag: false,
-        CanUseReadTools: false,
-        CanProposeActions: false,
-        CanUseWriteTools: false,
-        CanExecuteWithoutConfirmation: false);
-
-    public static AssistantCapabilities Effective(AssistantModelProfile? profile)
-        => AssistantCapabilityPolicy.For(profile).Intersect(Operation);
 }

@@ -78,7 +78,6 @@ public static class JobScheduling
         // foreground imports — but it is a single owner rather than every one,
         // so it does not sit behind a whole-installation walk.
         JobTypes.AiFacesClusterOwner => Compute,
-        JobTypes.AiTagsGenerateBackfill => Compute,
         // Video segmentation decodes whole files: the heaviest AI backfill, and
         // the one that must yield most readily.
         JobTypes.AiVideosSegmentsBackfill => Compute,

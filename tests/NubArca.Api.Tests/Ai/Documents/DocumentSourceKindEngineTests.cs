@@ -170,7 +170,7 @@ public sealed class DocumentSourceKindEngineTests : IAsyncLifetime
             Assert.Equal(_ownerA, c.OwnerUserId);
         });
         var index = new RagLexicalIndex(corpus, RagRankingProfiles.For(RagDomainKey.UserDocuments));
-        var lexical = index.Search(RagQueryShape.For(Question, expandAliases: false), 10);
+        var lexical = index.Search(RagQueryShape.For(Question), 10);
         Assert.Contains(lexical, h => h.Chunk.DocumentSourceKind == FakeArchiveKind.KindName);
 
         // VECTOR: the same kinds as the lexical corpus.

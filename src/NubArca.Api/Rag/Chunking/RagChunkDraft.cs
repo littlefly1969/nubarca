@@ -2,10 +2,9 @@ namespace NubArca.Api.Rag.Chunking;
 
 /// One chunk, before it has an identity in the database.
 ///
-/// `Symbols` is what this region DECLARES — a heading trail for prose, type and
-/// method names for code. It is indexed in the high-weight field, which is how
-/// "where is ExternalHelpService" reaches the file that declares it rather than
-/// the five files that mention it.
+/// `Symbols` is what this region DECLARES — its heading trail. It is indexed in
+/// the high-weight field, so a question naming a section reaches that section
+/// rather than every passage that mentions it.
 public sealed record RagChunkDraft(
     int Ordinal,
     string Heading,

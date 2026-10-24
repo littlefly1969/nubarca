@@ -288,13 +288,13 @@ public sealed class OwnerDocumentIndexerTests : IDisposable
     [Fact]
     public async Task UserDocuments_DoesNotEmbed_WithoutBeingExplicitlyEnabled()
     {
-        // The owner-private asymmetry, end to end. Semantic is on
-        // installation-wide and this domain still does not embed, because
-        // nobody said so about people's own documents.
+        // A profile exists and the job asks for embeddings, and this domain
+        // still does not embed, because nobody turned semantic search on for
+        // people's own documents.
         SeedEmbeddingProfile();
         await AddFileAsync("boiler-manual.md", Manual);
 
-        var outcome = await Indexer(globalSemantic: true).IndexOwnerAsync(_owner, embed: true);
+        var outcome = await Indexer().IndexOwnerAsync(_owner, embed: true);
 
         Assert.Equal(0, outcome.EmbeddingsCreated);
         Assert.Equal(RagFailureReasons.EmbeddingDisabled, outcome.EmbeddingReason);
@@ -1071,12 +1071,10 @@ public sealed class OwnerDocumentIndexerTests : IDisposable
 
     // ---- fixture ------------------------------------------------------------
 
-    private OwnerDocumentIndexer Indexer(string? semantic = null, bool globalSemantic = false)
+    private OwnerDocumentIndexer Indexer(string? semantic = null)
     {
         var options = Options.Create(new RagOptions
         {
-            SemanticEnabled = globalSemantic || semantic is not null,
-            TextEmbeddingProfileKey = semantic ?? "rag-text-deterministic-v1",
             Domains = semantic is null
                 ? new Dictionary<string, RagDomainSemanticOptions>(StringComparer.OrdinalIgnoreCase)
                 : new(StringComparer.OrdinalIgnoreCase)

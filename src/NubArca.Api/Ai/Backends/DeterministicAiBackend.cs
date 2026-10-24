@@ -16,7 +16,7 @@ namespace NubArca.Api.Ai.Backends;
 // real results.
 // ============================================================================
 public sealed class DeterministicAiBackend
-    : IImageEmbedder, ITextEmbedder, ITextExtractor, IFaceDetector, IFaceEmbedder, IImageCaptioner, IAiTagger
+    : IImageEmbedder, ITextEmbedder, ITextExtractor, IFaceDetector, IFaceEmbedder
 {
     // Fallback dimension when a profile does not specify one (embeddings only).
     private const int DefaultDimension = 32;
@@ -29,8 +29,6 @@ public sealed class DeterministicAiBackend
         AiCapabilities.DocumentExtraction,
         AiCapabilities.FaceDetection,
         AiCapabilities.FaceEmbedding,
-        AiCapabilities.Tagging,
-        AiCapabilities.Captioning,
     };
 
     public string Provider => AiProviders.Deterministic;
@@ -115,18 +113,6 @@ public sealed class DeterministicAiBackend
 
         return faces;
     }
-
-    public Task<AiCaptionResult> CaptionImageAsync(
-        ReadOnlyMemory<byte> imageBytes, AiProfile profile, CancellationToken cancellationToken = default)
-    {
-        var token = ShortToken(imageBytes.Span, AiCapabilities.Captioning);
-        return Task.FromResult(new AiCaptionResult($"[deterministic caption {token}]"));
-    }
-
-    public Task<AiTaggingResult> TagImageAsync(
-        ReadOnlyMemory<byte> imageBytes, AiProfile profile, CancellationToken cancellationToken = default)
-        // No semantic tags from a deterministic backend.
-        => Task.FromResult(new AiTaggingResult(Array.Empty<AiTag>()));
 
     private static AiEmbeddingResult Embed(ReadOnlySpan<byte> input, string capabilitySalt, AiProfile profile)
     {

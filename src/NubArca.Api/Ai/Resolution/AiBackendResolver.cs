@@ -70,10 +70,6 @@ public sealed class AiBackendResolver : IAiBackendResolver
                 (await ResolveForCapabilityAsync<IFaceDetector>(capability, cancellationToken)).Resolution,
             AiCapabilities.FaceEmbedding =>
                 (await ResolveForCapabilityAsync<IFaceEmbedder>(capability, cancellationToken)).Resolution,
-            AiCapabilities.Tagging =>
-                (await ResolveForCapabilityAsync<IAiTagger>(capability, cancellationToken)).Resolution,
-            AiCapabilities.Captioning =>
-                (await ResolveForCapabilityAsync<IImageCaptioner>(capability, cancellationToken)).Resolution,
             _ => _options.Value.Enabled
                 ? AiResolution.Unavailable(capability, AiUnavailableReasons.CapabilityUnsupported)
                 : AiResolution.Unavailable(capability, AiUnavailableReasons.Disabled),

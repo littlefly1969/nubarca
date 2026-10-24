@@ -21,7 +21,7 @@ public sealed record RagFusedCandidate(
 /// min-max normalizing each result set — makes the top score 1.0 whether the
 /// best hit was excellent or merely the least bad. RRF needs no calibration,
 /// is stable when one path returns nothing, and can be explained to a person
-/// looking at `rag query` output.
+/// looking at `documents query` output.
 ///
 /// `k = 60` is the constant from the original TREC work and the value every
 /// implementation that has not measured its own uses. It damps the difference

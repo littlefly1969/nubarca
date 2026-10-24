@@ -23,7 +23,6 @@ public sealed class AiJobSkeletonTests
         JobTypes.AiFacesDetectBackfill,
         JobTypes.AiFacesEmbeddingsBackfill,
         JobTypes.AiFacesClusterBackfill,
-        JobTypes.AiTagsGenerateBackfill,
     };
 
     private static SqliteWebApplicationFactory NewFactory(params (string Key, string Value)[] settings)

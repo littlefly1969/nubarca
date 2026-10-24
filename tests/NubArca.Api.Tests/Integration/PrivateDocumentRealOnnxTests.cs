@@ -11,9 +11,7 @@ using NubArca.Api.Domain;
 using NubArca.Api.Domain.Ai;
 using NubArca.Api.Rag;
 using NubArca.Api.Rag.Domains;
-using NubArca.Api.Rag.ProductHelp;
 using NubArca.Api.Rag.Retrieval;
-using NubArca.Api.Rag.Storage;
 using NubArca.Api.Storage;
 using Xunit;
 using Xunit.Abstractions;
@@ -275,19 +273,12 @@ public sealed class PrivateDocumentRealOnnxTests : IDisposable
         var embeddings = Embeddings(modelDir);
         var serializer = new AiVectorSerializer();
         var corpus = new OwnerDocumentCorpusSource(_db);
-        var vectorIndex = new RagVectorIndexService(_db, serializer, TimeProvider.System);
 
         return new RagRetriever(
             RagDomainRegistry.Instance,
             new RagDatabaseServices(
-                new DatabaseRagCorpusSource(_db),
-                new RagVectorRetriever(embeddings, vectorIndex, options),
-                embeddings,
-                vectorIndex,
                 corpus,
                 new OwnerDocumentVectorRetriever(_db, corpus, embeddings, serializer)),
-            new BundledProductHelpCorpusSource(ProductHelpCorpus.Empty),
-            new RagLexicalIndexCache(),
             options,
             new RagSemanticProfileResolver(RagDomainRegistry.Instance, options),
             NullLogger<RagRetriever>.Instance);

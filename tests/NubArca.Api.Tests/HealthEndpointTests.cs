@@ -45,7 +45,7 @@ public class HealthEndpointTests : IClassFixture<WebApplicationFactory<Program>>
         // something a running process can say and a crashed one cannot.
         var client = _factory.CreateClient();
 
-        var response = await client.GetAsync("/api/assistant/documents/status");
+        var response = await client.GetAsync("/api/documents/status");
 
         // Unauthenticated, so the answer is a refusal rather than a status — the
         // point is that the SERVER answered at all.

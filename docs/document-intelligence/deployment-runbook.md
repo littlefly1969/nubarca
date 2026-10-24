@@ -39,7 +39,7 @@ did not, so a value in `.env` never reached a container.
 | `Rag__Domains__user-documents__SemanticEnabled` | `Rag__Domains__user_documents__SemanticEnabled` | yes | yes | `false` |
 | `Rag__Domains__user-documents__TextEmbeddingProfileKey` | `Rag__Domains__user_documents__TextEmbeddingProfileKey` | yes | yes | empty |
 | `Ai__Onnx__OpenVino__RagTextDevice` | same | yes | yes | `CPU` |
-| `Ai__DocumentVisual__*` (Enabled, RenderOfficeEnabled, socket, late interaction) | same | yes | yes | off/empty (already forwarded) |
+| `Ai__DocumentVisual__*` (Enabled, RenderOfficeEnabled, socket) | same | yes | yes | off/empty (already forwarded) |
 | `Assistant__PrivateKnowledgeModel` | same | yes | **no** | empty |
 | `Assistant__Models__documents-local__*` | `Assistant__Models__documents_local__*` | yes | **no** | empty; Protocol `OpenAiCompatible` |
 
@@ -157,13 +157,12 @@ Install procedure:
    `IsDefault=false`:
 
    ```bash
-   $DC exec -T api dotnet NubArca.Api.dll rag seed-profiles
-   $DC exec -T api dotnet NubArca.Api.dll rag validate-model --profile <profile key>
+   $DC exec -T api dotnet NubArca.Api.dll documents seed-profiles
+   $DC exec -T api dotnet NubArca.Api.dll documents validate-model --profile <profile key>
    ```
 
-   For 768-d and 1024-d profiles, `vector_table=FAILED` is expected. The
-   owner-private domain uses exact in-process cosine and no pgvector table.
-   Product Help must stay on a 384-d profile.
+   Any catalogued dimension works: the owner-private domain uses exact
+   in-process cosine and no pgvector table.
 5. **Replacing the files of a model that is already loaded needs
    `$DC up -d --no-build --no-deps api worker`.** ONNX sessions are cached for
    the life of the process and are never reloaded.
@@ -250,8 +249,6 @@ Assistant__Models__documents_local__Model=<model id>
 ```
 
 An External profile is refused for this use when the configuration is read.
-`Assistant__Enabled=true` also enables Help, if `Assistant__HelpModel` names a
-complete profile.
 
 ## 6. Health checks
 
@@ -260,8 +257,7 @@ no names, no ids, no paths.
 
 ```bash
 $DC exec -T api dotnet NubArca.Api.dll ai status
-$DC exec -T api dotnet NubArca.Api.dll rag domains
-$DC exec -T api dotnet NubArca.Api.dll rag validate-model --domain user-documents
+$DC exec -T api dotnet NubArca.Api.dll documents validate-model
 $DC exec -T api dotnet NubArca.Api.dll documents progress                    # installation aggregate
 $DC exec -T api dotnet NubArca.Api.dll documents progress --owner <id>
 $DC exec -T api dotnet NubArca.Api.dll documents status --owner <id>
@@ -270,7 +266,7 @@ $DC exec -T api dotnet NubArca.Api.dll jobs list
 docker stats --no-stream nubarca-api nubarca-worker
 ```
 
-For a signed-in owner, `GET /api/assistant/documents/status` and
+For a signed-in owner, `GET /api/documents/status` and
 `GET /api/documents/indexing/status` show the same state, scoped to that owner.
 The Documenti page uses them.
 
@@ -413,7 +409,7 @@ Nothing has been measured there yet.
 | Component | Process | Resident (estimate) | Basis |
 |---|---|---|---|
 | .NET runtime + app | api, worker | ~0.4 GB each | estimate |
-| SigLIP2 so400m text tower (photo search; document-visual queries) | api | ~2.8–3 GB | 2.8 GB of external data ([`rag-platform.md`](../rag-platform.md), Phase 0) |
+| SigLIP2 so400m text tower (photo search; document-visual queries) | api | ~2.8–3 GB | 2.8 GB of external data (Phase 0 measurement) |
 | SigLIP2 so400m image tower (photo indexing; document-visual pages) | worker | ~1.7 GB | ~400M params, FP32 |
 | Face detector + recognizer (existing) | api, worker | ~0.3–0.6 GB each | estimate |
 | e5-small | api **and** worker | ~0.5 GB each | [`text-embeddings.md`](../model-deployment/text-embeddings.md) |

@@ -131,13 +131,13 @@ public sealed class RrfFusionTests
 
     private static RagIndexedChunk Chunk(string id) => new(
         Id: id,
-        Domain: RagDomainKey.NubArcaRepository,
+        Domain: RagDomainKey.UserDocuments,
         SourceKey: id,
         Path: id,
         Title: id,
         Section: string.Empty,
         Text: $"body of {id}",
-        SourceKind: RagSourceKinds.SourceCode,
+        SourceKind: RagSourceKinds.Documentation,
         Language: RagLanguages.Unknown,
         Revision: "r",
         Feature: string.Empty,

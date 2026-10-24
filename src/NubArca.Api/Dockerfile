@@ -33,29 +33,6 @@ COPY mobile/assets/fonts/ mobile/assets/fonts/
 
 RUN dotnet publish src/NubArca.Api/NubArca.Api.csproj -c Release -o /app/publish /p:UseAppHost=false
 
-# ---- the product-help RAG domain, built from THIS source revision -------------
-#
-# The optional Help assistant is shown a bounded set of PUBLIC product
-# documentation and nothing else. Building the corpus here, rather than fetching
-# anything at runtime, is what makes that set finite and reviewable: no GitHub
-# token, no network dependency, no rate limit, and documentation that matches the
-# exact revision the operator is running.
-#
-# The corpus is stamped with GIT_SHA and the running application refuses one whose
-# revision disagrees with its own build, so Help cannot describe a feature the
-# installed release does not have.
-#
-# Membership is decided by ProductHelpSources.Manifest, which names each approved
-# document and who it is for. Only public product material is copied in at all —
-# the builder would ignore anything else, and not copying it means it was never
-# in the layer either. A manifest entry with no file is reported on stderr, so a
-# rename that silently stops shipping knowledge is visible in the build log.
-ARG GIT_SHA=unknown
-COPY README.md ARCHITECTURE.md ./
-COPY docs/ docs/
-RUN dotnet /app/publish/NubArca.Api.dll help-knowledge build \
-        --source /src --out /app/publish/help-corpus.json --revision "$GIT_SHA"
-
 # ---- MailArchive: the read-only PST engine (tools/nubarca-pst-importer) ------
 #
 # A small Rust binary the mail.import job runs as a child process; it only

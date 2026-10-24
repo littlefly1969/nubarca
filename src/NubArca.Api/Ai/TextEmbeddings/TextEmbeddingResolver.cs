@@ -44,10 +44,8 @@ public sealed class TextEmbeddingResolver
     /// The profile THIS DOMAIN embeds with, or a sanitized reason it has none.
     ///
     /// The domain is required rather than defaulted. There is no
-    /// installation-wide "the embedding profile" any more — Product Help and the
-    /// repository measured differently enough that one answer for both was
-    /// actively wrong — and a parameterless overload would quietly reintroduce
-    /// one for whichever caller forgot.
+    /// installation-wide "the embedding profile", and a parameterless overload
+    /// would quietly introduce one for whichever caller forgot.
     public async Task<TextEmbeddingResolution> ResolveAsync(
         RagDomainKey domain, CancellationToken cancellationToken = default)
     {

@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NubArca.Api.Assistant;
-using NubArca.Api.Help;
 using Xunit;
 
 namespace NubArca.Api.Tests.Assistant;
@@ -139,7 +138,7 @@ public sealed class AssistantTrustConfigurationTests
     {
         // Case and surrounding whitespace are accidents with no second meaning —
         // an environment variable with a trailing space should not silently turn
-        // Help off. A value that could mean something ELSE is what fails closed.
+        // the assistant off. A value that could mean something ELSE is what fails closed.
         var resolution = AssistantModelResolver.Validate("p", Model(trust: trust));
         Assert.True(resolution.IsUsable);
         Assert.Equal(AssistantModelTrust.External, resolution.Profile!.Trust);
@@ -181,32 +180,44 @@ public sealed class AssistantTrustConfigurationTests
 
     // ---- selection -----------------------------------------------------------
 
-    private static AssistantModelResolver Resolver(
-        AssistantOptions assistant, ExternalHelpOptions? legacy = null)
-        => new(
-            Options.Create(assistant),
-            Options.Create(legacy ?? new ExternalHelpOptions()),
-            NullLogger<AssistantModelResolver>.Instance);
+    private static AssistantModelResolver Resolver(AssistantOptions assistant)
+        => new(Options.Create(assistant), NullLogger<AssistantModelResolver>.Instance);
 
     [Fact]
-    public void Help_Uses_The_Named_Profile_And_Nothing_Else()
+    public void The_Private_Model_Uses_The_Named_Profile_And_Nothing_Else()
     {
         var resolver = Resolver(new AssistantOptions
         {
             Enabled = true,
-            HelpModel = "help-default",
+            PrivateKnowledgeModel = "documents-local",
             Models =
             {
-                ["help-default"] = Model(baseUrl: "https://chosen.example"),
+                ["documents-local"] = Model(
+                    trust: nameof(AssistantModelTrust.LocalTrusted),
+                    baseUrl: "http://chosen.internal"),
                 ["other"] = Model(
                     trust: nameof(AssistantModelTrust.LocalTrusted),
                     baseUrl: "http://other.internal"),
             },
         });
 
-        Assert.True(resolver.HelpModel.IsUsable);
-        Assert.Equal("help-default", resolver.HelpModel.Profile!.Key);
-        Assert.Equal(AssistantModelTrust.External, resolver.HelpModel.Profile.Trust);
+        Assert.True(resolver.PrivateKnowledgeModel.IsUsable);
+        Assert.Equal("documents-local", resolver.PrivateKnowledgeModel.Profile!.Key);
+        Assert.Equal("http://chosen.internal", resolver.PrivateKnowledgeModel.Profile.BaseUrl);
+    }
+
+    [Fact]
+    public void An_External_Private_Model_Is_Refused()
+    {
+        var resolver = Resolver(new AssistantOptions
+        {
+            Enabled = true,
+            PrivateKnowledgeModel = "provider",
+            Models = { ["provider"] = Model() },
+        });
+
+        Assert.False(resolver.PrivateKnowledgeModel.IsUsable);
+        Assert.Equal(AssistantFailureReasons.PrivateModelNotLocal, resolver.PrivateKnowledgeModel.Reason);
     }
 
     [Fact]
@@ -215,99 +226,29 @@ public sealed class AssistantTrustConfigurationTests
         var resolver = Resolver(new AssistantOptions
         {
             Enabled = false,
-            HelpModel = "help-default",
-            Models = { ["help-default"] = Model() },
+            PrivateKnowledgeModel = "documents-local",
+            Models = { ["documents-local"] = Model(trust: nameof(AssistantModelTrust.LocalTrusted)) },
         });
 
-        Assert.False(resolver.HelpModel.IsUsable);
-        Assert.Equal(AssistantFailureReasons.Disabled, resolver.HelpModel.Reason);
+        Assert.False(resolver.PrivateKnowledgeModel.IsUsable);
+        Assert.Equal(AssistantFailureReasons.Disabled, resolver.PrivateKnowledgeModel.Reason);
     }
 
     [Fact]
-    public void A_HelpModel_Naming_A_Missing_Profile_Resolves_To_Nothing()
+    public void A_Private_Model_Naming_A_Missing_Profile_Resolves_To_Nothing()
         => Assert.False(Resolver(new AssistantOptions
         {
             Enabled = true,
-            HelpModel = "typo",
-            Models = { ["help-default"] = Model() },
-        }).HelpModel.IsUsable);
-
-    // ---- legacy compatibility -------------------------------------------------
-
-    [Fact]
-    public void A_Legacy_ExternalHelp_Configuration_Still_Works()
-    {
-        var resolver = Resolver(new AssistantOptions(), new ExternalHelpOptions
-        {
-            Enabled = true,
-            BaseUrl = "https://legacy.example",
-            ApiKey = "legacy-key",
-            Model = "legacy-model",
-            ProviderLabel = "Legacy Provider",
-            CorpusPath = "legacy-corpus.json",
-        });
-
-        Assert.True(resolver.HelpModel.IsUsable);
-        Assert.Equal("Legacy Provider", resolver.HelpModel.Profile!.Label);
-        // Bounds and corpus location come across too, so an upgrade does not
-        // silently start looking for the corpus somewhere else.
-        Assert.Equal("legacy-corpus.json", resolver.HelpBounds.CorpusPath);
-    }
-
-    [Fact]
-    public void A_Legacy_Configuration_Can_Never_Declare_Itself_LocalTrusted()
-    {
-        // Including — especially — when it points somewhere that looks local. A
-        // configuration shape that predates the trust axis cannot assert one,
-        // and an upgrade must not quietly turn an external installation into a
-        // trusted-local one.
-        var resolver = Resolver(new AssistantOptions(), new ExternalHelpOptions
-        {
-            Enabled = true,
-            BaseUrl = "https://localhost:8443",
-            ApiKey = "k",
-            Model = "m",
-        });
-
-        Assert.True(resolver.HelpModel.IsUsable);
-        Assert.Equal(AssistantModelTrust.External, resolver.HelpModel.Profile!.Trust);
-        Assert.Equal(AssistantModelResolver.LegacyExternalHelpKey, resolver.HelpModel.Profile.Key);
-    }
-
-    [Fact]
-    public void The_New_Configuration_Wins_Over_A_Legacy_One()
-    {
-        // An operator who has started migrating never gets a silent mix of the
-        // two, and in particular never keeps talking to the old provider
-        // because a stale variable is still set somewhere.
-        var resolver = Resolver(
-            new AssistantOptions
-            {
-                Enabled = true,
-                HelpModel = "new",
-                Models = { ["new"] = Model(baseUrl: "https://new.example") },
-                Help = { CorpusPath = "new-corpus.json" },
-            },
-            new ExternalHelpOptions
-            {
-                Enabled = true,
-                BaseUrl = "https://legacy.example",
-                ApiKey = "legacy-key",
-                Model = "legacy-model",
-                CorpusPath = "legacy-corpus.json",
-            });
-
-        Assert.Equal("new", resolver.HelpModel.Profile!.Key);
-        Assert.Equal("https://new.example", resolver.HelpModel.Profile.BaseUrl);
-        Assert.Equal("new-corpus.json", resolver.HelpBounds.CorpusPath);
-    }
+            PrivateKnowledgeModel = "typo",
+            Models = { ["documents-local"] = Model(trust: nameof(AssistantModelTrust.LocalTrusted)) },
+        }).PrivateKnowledgeModel.IsUsable);
 
     [Fact]
     public void Nothing_Configured_At_All_Is_Disabled_Rather_Than_Broken()
     {
         var resolver = Resolver(new AssistantOptions());
-        Assert.False(resolver.HelpModel.IsUsable);
-        Assert.Equal(AssistantFailureReasons.Disabled, resolver.HelpModel.Reason);
+        Assert.False(resolver.PrivateKnowledgeModel.IsUsable);
+        Assert.Equal(AssistantFailureReasons.Disabled, resolver.PrivateKnowledgeModel.Reason);
     }
 
     // ---- bounds ---------------------------------------------------------------
@@ -315,7 +256,7 @@ public sealed class AssistantTrustConfigurationTests
     [Fact]
     public void Configured_Bounds_Can_Tighten_And_Cannot_Become_Unbounded()
     {
-        var bounds = new AssistantHelpOptions
+        var bounds = new AssistantBoundsOptions
         {
             MaxQuestionCharacters = int.MaxValue,
             MaxHistoryTurns = -5,
@@ -330,7 +271,7 @@ public sealed class AssistantTrustConfigurationTests
         Assert.Equal(20, bounds.EffectiveEvidenceChunks);
         Assert.Equal(60000, bounds.EffectiveEvidenceCharacters);
 
-        var tighter = new AssistantHelpOptions { MaxQuestionCharacters = 100, MaxEvidenceChunks = 2 };
+        var tighter = new AssistantBoundsOptions { MaxQuestionCharacters = 100, MaxEvidenceChunks = 2 };
         Assert.Equal(100, tighter.EffectiveQuestionCharacters);
         Assert.Equal(2, tighter.EffectiveEvidenceChunks);
     }

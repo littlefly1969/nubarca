@@ -266,6 +266,11 @@
       "automated": false,
       "previousApplicationCompatible": false,
       "reason": "Retires the Aesthetics Lab and DELETES what it stored. Before dropping its six tables (aesthetic_lab_derivatives, aesthetic_metrics, aesthetic_text_results, aesthetic_upload_sessions, aesthetic_analysis_runs, aesthetic_lab_items) it releases the one blob reference each lab item and each lab derivative owned, with the same rule BlobService uses (decrement while positive, PurgeEligibleAt set on the transition to zero): a blob a FileItem still references keeps that reference, and bytes only the lab used become purge-eligible for the BlobJanitor. It also deletes queued or finished background jobs of type ai.aesthetics.human-aesexpert.analyze and role_permissions rows naming laboratory.aesthetics. The lab's images, analysis runs, metrics, texts and upload sessions are gone and cannot be recovered from the schema: Down() recreates empty tables and does not restore blob references, so only the pre-migration backup brings the data back. The previous application reads and writes these tables on every Aesthetics Lab and TV Beauty Lab request and would fail there, so an image-only rollback is not safe and the release takes the manual, backed-up path rather than the guided updater."
+    },
+    "20261022223556_RemoveSystemRagIndex": {
+      "automated": false,
+      "previousApplicationCompatible": false,
+      "reason": "Retires the installation-wide RAG index that served the removed Help assistant and the NubArca source-code domain. It drops rag_chunk_embedding_vectors_384 (the raw-SQL pgvector mirror, when present), rag_chunk_embeddings, rag_domain_sources, rag_chunks and rag_sources. Their content was system knowledge rebuilt from the repository by `rag index`, never user data: no file, blob, document, document chunk or document embedding is touched, and owner-private document search keeps its own tables. Down() recreates the four tables empty and does not recreate the pgvector mirror. The previous application queries these tables from its Help status and retrieval paths and would fail there, so an image-only rollback is not safe and the migration takes the manual, backed-up path."
     }
   }
 }

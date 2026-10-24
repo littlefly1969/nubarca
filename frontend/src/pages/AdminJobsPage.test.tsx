@@ -93,7 +93,7 @@ function catalog() {
       },
       {
         // Feature switched off server-side → shown disabled, run blocked.
-        key: 'ai-tags-generate-backfill', category: 'ai', jobType: 'ai.tags.generate.backfill',
+        key: 'ai-faces-cluster-backfill', category: 'ai', jobType: 'ai.faces.cluster.backfill',
         available: false, disabledReason: 'feature-disabled',
         params: [p('dryRun', 'bool', { defaultBool: true })],
       },
@@ -236,8 +236,8 @@ describe('AdminJobsPage — commands console', () => {
   it('marks a switched-off command as disabled and blocks running it', async () => {
     installFetchMock({ ...CATALOG, 'GET /api/admin/jobs': () => page([]) });
     renderPage();
-    await screen.findByText('Genera tag AI');
-    const c = card('Genera tag AI');
+    await screen.findByText('Ricalcola gruppi di persone');
+    const c = card('Ricalcola gruppi di persone');
 
     expect(within(c).getByText('disattivato')).toBeInTheDocument();
     expect(within(c).getByText(/funzione è disattivata/)).toBeInTheDocument();

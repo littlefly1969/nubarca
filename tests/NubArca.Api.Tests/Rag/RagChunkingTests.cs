@@ -1,4 +1,3 @@
-using NubArca.Api.Rag;
 using NubArca.Api.Rag.Chunking;
 using Xunit;
 
@@ -75,71 +74,12 @@ public sealed class RagChunkingTests
             $"chunk of {d.Text.Length} characters exceeds the hard bound"));
     }
 
-    // ---- source code ---------------------------------------------------------
-
-    [Fact]
-    public void Code_Chunks_Start_At_Declarations_And_Name_Their_Symbols()
-    {
-        var drafts = RagChunkers.Chunk(CSharpFixture, RagCodeLanguages.CSharp);
-
-        Assert.True(drafts.Count > 1, "a multi-member file must not become one chunk");
-        var symbols = drafts.SelectMany(d => d.Symbols).ToList();
-        Assert.Contains("ExampleService", symbols);
-        Assert.Contains("Describe", symbols);
-        Assert.Contains("Rebuild", symbols);
-
-        // The heading is a citation: a type, a member and a line range.
-        Assert.All(drafts, d => Assert.Matches(@"L\d+–L\d+", d.Heading));
-    }
-
-    [Fact]
-    public void A_Declaration_Keeps_The_Comment_Written_Above_It()
-    {
-        var drafts = RagChunkers.Chunk(CSharpFixture, RagCodeLanguages.CSharp);
-
-        // In this codebase the comment above a member is frequently the best
-        // description of what it is for. Indexing the explanation away from the
-        // thing it explains would mean a question phrased the way the comment is
-        // written retrieves a chunk that does not contain the code.
-        var rebuild = Assert.Single(drafts, d => d.Text.Contains(
-            "public void Rebuild(", StringComparison.Ordinal));
-        Assert.Contains("Rebuilds the cached view", rebuild.Text, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Whole_File_Chunks_Are_Never_Produced()
-    {
-        var long_ = string.Join("\n", Enumerable.Range(0, 400).Select(i =>
-            $"    public string Property{i} {{ get; set; }} = \"a value long enough to matter {i}\";"));
-        var file = "namespace NubArca.Api.Tests.Fixtures;\n\npublic sealed class Big\n{\n" + long_ + "\n}\n";
-
-        var drafts = RagChunkers.Chunk(file, RagCodeLanguages.CSharp);
-
-        Assert.True(drafts.Count > 3);
-        Assert.All(drafts, d => Assert.True(
-            d.Text.Length <= RagChunkSizes.MaximumCharacters + 400,
-            $"chunk of {d.Text.Length} characters is effectively the whole file"));
-    }
-
-    [Theory]
-    [InlineData(RagCodeLanguages.TypeScript, "export function facesTabs(): string[] {\n  return [];\n}", "facesTabs")]
-    [InlineData(RagCodeLanguages.Sql, "CREATE TABLE IF NOT EXISTS face_previews (id uuid);", "face_previews")]
-    [InlineData(RagCodeLanguages.Shell, "deploy_release() {\n  echo hi\n}", "deploy_release")]
-    [InlineData(RagCodeLanguages.Yaml, "services:\n  api:\n    image: nubarca", "services")]
-    public void Each_Language_Recognises_Its_Own_Declarations(
-        string language, string source, string expectedSymbol)
-    {
-        var padding = string.Join("\n", Enumerable.Repeat("# padding line that adds body", 10));
-        var drafts = RagChunkers.Chunk($"{source}\n{padding}", language);
-
-        Assert.Contains(expectedSymbol, drafts.SelectMany(d => d.Symbols));
-    }
-
     [Fact]
     public void Chunking_Is_Deterministic()
     {
-        var first = RagChunkers.Chunk(CSharpFixture, RagCodeLanguages.CSharp);
-        var second = RagChunkers.Chunk(CSharpFixture, RagCodeLanguages.CSharp);
+        const string document = "# Caldaia\n\nPulire il filtro ogni sei mesi.\n\n## Garanzia\n\nDue anni.";
+        var first = MarkdownRagChunker.Chunk(document);
+        var second = MarkdownRagChunker.Chunk(document);
 
         Assert.Equal(
             first.Select(d => (d.Ordinal, d.Heading, d.Text)),
@@ -149,46 +89,7 @@ public sealed class RagChunkingTests
     [Fact]
     public void Empty_Input_Produces_No_Chunks()
     {
-        Assert.Empty(RagChunkers.Chunk(string.Empty, RagCodeLanguages.CSharp));
-        Assert.Empty(RagChunkers.Chunk("   \n\n  ", RagCodeLanguages.Markdown));
+        Assert.Empty(MarkdownRagChunker.Chunk(string.Empty));
+        Assert.Empty(MarkdownRagChunker.Chunk("   \n\n  "));
     }
-
-    private const string CSharpFixture = """
-        namespace NubArca.Api.Tests.Fixtures;
-
-        using System;
-
-        /// A service that exists so the chunker has something with structure to
-        /// divide: a type declaration, several members, and comments above them
-        /// that belong with the code they describe rather than with whatever
-        /// happened to precede it in the file.
-        public sealed class ExampleService
-        {
-            private readonly string _name;
-
-            public ExampleService(string name)
-            {
-                _name = name;
-                // Enough body that this region clears the minimum chunk size and
-                // the next declaration actually opens a new chunk.
-                Console.WriteLine($"constructed {_name} with a deliberately long line of body text");
-            }
-
-            /// Describes the service in a sentence, which is the sort of thing a
-            /// person asks about by paraphrasing rather than by identifier.
-            public string Describe()
-            {
-                return $"{_name} is an example service used by the chunking tests, "
-                    + "with a body long enough to be a chunk of its own rather than a fragment.";
-            }
-
-            /// Rebuilds the cached view of the service, which is the operation an
-            /// operator asks about when the cache looks stale after a deploy.
-            public void Rebuild(int generation)
-            {
-                Console.WriteLine($"rebuilding {_name} at generation {generation}");
-                Console.WriteLine("this second line exists so the region has enough body to stand alone");
-            }
-        }
-        """;
 }

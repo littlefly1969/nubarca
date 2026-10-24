@@ -29,15 +29,12 @@ public static class AiCapabilities
     // configured. The model is shared; the identity is not.
     public const string DocumentVisualEmbedding = "document-visual-embedding";
 
-    // Generic LOCAL text embedding for the RAG substrate. Deliberately not
-    // named for any consumer: `product-help` and `nubarca-repository` share one
-    // capability, and a future owner-private domain will share it too.
+    // Generic LOCAL text embedding for document retrieval. Deliberately not
+    // named for any consumer.
     public const string TextEmbedding = "text-embedding";
     public const string FaceDetection = "face-detection";
     public const string FaceEmbedding = "face-embedding";
     public const string FaceClustering = "face-clustering";
-    public const string Tagging = "tagging";
-    public const string Captioning = "captioning";
 }
 
 // Coarse input modality a model/profile operates on.
@@ -79,7 +76,7 @@ public static class AiDistanceMetrics
 /// registering an IOwnerDocumentSource — WHICH kinds exist is the DI
 /// registration, never a list here.
 ///
-/// Not to be confused with `RagSourceKinds` (documentation/code), which is a
+/// Not to be confused with `RagSourceKinds` (documentation), which is a
 /// ranking hint about CONTENT, not about where a person's document lives.
 public static class DocumentSourceKinds
 {

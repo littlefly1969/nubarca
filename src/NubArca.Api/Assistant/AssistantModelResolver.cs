@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Options;
-using NubArca.Api.Help;
 
 namespace NubArca.Api.Assistant;
 
@@ -22,54 +21,26 @@ namespace NubArca.Api.Assistant;
 /// changes the trust classification, in either direction.
 public sealed class AssistantModelResolver
 {
-    /// The profile key a legacy `ExternalHelp__*` configuration is adapted into.
-    /// Never operator-chosen, so it cannot collide with a configured name.
-    public const string LegacyExternalHelpKey = "legacy-external-help";
-
-    private readonly AssistantModelResolution _helpModel;
     private readonly AssistantModelResolution _privateKnowledgeModel;
-    private readonly AssistantHelpOptions _helpBounds;
+    private readonly AssistantBoundsOptions _bounds;
 
     public AssistantModelResolver(
         IOptions<AssistantOptions> assistant,
-        IOptions<ExternalHelpOptions> legacy,
         ILogger<AssistantModelResolver> log)
     {
         var options = assistant.Value;
-        // The new configuration WINS when it is present at all, so an operator
-        // who has started migrating never gets a silent mix of the two.
-        if (IsConfigured(options))
-        {
-            _helpBounds = options.Help;
-            _helpModel = ResolveHelpModel(options);
-        }
-        else
-        {
-            _helpBounds = LegacyBounds(legacy.Value);
-            _helpModel = ResolveLegacy(legacy.Value);
-        }
-
-        // The private model is resolved from the NEW configuration only. The
-        // legacy `ExternalHelp__*` shape predates the trust axis and is always
-        // adapted as External, so there is nothing in it that could ever satisfy
-        // the LocalTrusted requirement — and pretending to look would suggest it
-        // might.
-        _privateKnowledgeModel = IsConfigured(options)
-            ? ResolvePrivateKnowledgeModel(options)
-            : AssistantModelResolution.Unusable(AssistantFailureReasons.NotConfigured);
+        _bounds = options.Bounds;
+        _privateKnowledgeModel = ResolvePrivateKnowledgeModel(options);
 
         // Safe operational facts only: which profile, which classification.
         // Never the URL, never the key, never the model id.
-        if (_helpModel.Profile is { } profile)
+        if (_privateKnowledgeModel.Profile is { } profile)
         {
             log.LogInformation(
-                "assistant: help model profile={Profile} protocol={Protocol} trust={Trust}",
+                "assistant: private knowledge model profile={Profile} protocol={Protocol} trust={Trust}",
                 profile.Key, profile.Protocol, profile.Trust);
         }
     }
-
-    /// The model the Help feature uses, or why it has none.
-    public AssistantModelResolution HelpModel => _helpModel;
 
     /// The model that may read the caller's OWN DOCUMENTS, or why there is none.
     ///
@@ -78,27 +49,8 @@ public sealed class AssistantModelResolver
     /// check — and, more importantly, without any of them being able to skip it.
     public AssistantModelResolution PrivateKnowledgeModel => _privateKnowledgeModel;
 
-    /// Bounds and corpus location for the Help feature.
-    public AssistantHelpOptions HelpBounds => _helpBounds;
-
-    private static bool IsConfigured(AssistantOptions options)
-        => options.Enabled
-           || options.Models.Count > 0
-           || !string.IsNullOrWhiteSpace(options.HelpModel);
-
-    private static AssistantModelResolution ResolveHelpModel(AssistantOptions options)
-    {
-        if (!options.Enabled) return AssistantModelResolution.Unusable(AssistantFailureReasons.Disabled);
-        if (string.IsNullOrWhiteSpace(options.HelpModel))
-        {
-            return AssistantModelResolution.Unusable(AssistantFailureReasons.NotConfigured);
-        }
-        if (!options.Models.TryGetValue(options.HelpModel, out var model) || model is null)
-        {
-            return AssistantModelResolution.Unusable(AssistantFailureReasons.NotConfigured);
-        }
-        return Validate(options.HelpModel, model);
-    }
+    /// Bounds on what a question to the Assistant may carry.
+    public AssistantBoundsOptions Bounds => _bounds;
 
     /// The private-knowledge model: a named profile that must ALSO be
     /// LocalTrusted.
@@ -112,8 +64,8 @@ public sealed class AssistantModelResolver
     ///
     /// Refused at CONFIGURATION time rather than at request time, so an
     /// installation that pointed this at a provider has a feature that is off
-    /// rather than a feature that leaks. There is no fallback to Help's model
-    /// and no fallback to anything else: unusable means no private answers.
+    /// rather than a feature that leaks. There is no fallback of any kind:
+    /// unusable means no private answers.
     private static AssistantModelResolution ResolvePrivateKnowledgeModel(AssistantOptions options)
     {
         if (!options.Enabled) return AssistantModelResolution.Unusable(AssistantFailureReasons.Disabled);
@@ -230,43 +182,5 @@ public sealed class AssistantModelResolver
     {
         AssistantModelTrust.External => "External AI",
         _ => "Local AI",
-    };
-
-    // ---- legacy ExternalHelp compatibility ---------------------------------
-    //
-    // An installation configured before named profiles existed keeps working,
-    // adapted into exactly ONE profile. It is always External: a configuration
-    // shape that predates the trust axis cannot assert a trust classification,
-    // and the safe reading of "an operator pointed this at a provider" is that
-    // the provider is a provider. This is a deprecation path, not the
-    // configuration model to write documentation around.
-
-    private static AssistantModelResolution ResolveLegacy(ExternalHelpOptions legacy)
-    {
-        if (!legacy.Enabled)
-        {
-            return AssistantModelResolution.Unusable(AssistantFailureReasons.Disabled);
-        }
-        return Validate(LegacyExternalHelpKey, new AssistantModelOptions
-        {
-            Protocol = nameof(AssistantModelProtocol.OpenAiCompatible),
-            Trust = nameof(AssistantModelTrust.External),
-            BaseUrl = legacy.BaseUrl,
-            ApiKey = legacy.ApiKey,
-            Model = legacy.Model,
-            Label = legacy.ProviderLabel,
-            TimeoutSeconds = legacy.TimeoutSeconds,
-            MaxOutputTokens = legacy.MaxOutputTokens,
-        });
-    }
-
-    private static AssistantHelpOptions LegacyBounds(ExternalHelpOptions legacy) => new()
-    {
-        MaxQuestionCharacters = legacy.MaxQuestionCharacters,
-        MaxHistoryTurns = legacy.MaxHistoryTurns,
-        MaxHistoryCharacters = legacy.MaxHistoryCharacters,
-        MaxEvidenceChunks = legacy.MaxContextExcerpts,
-        MaxEvidenceCharacters = legacy.MaxContextCharacters,
-        CorpusPath = legacy.CorpusPath,
     };
 }

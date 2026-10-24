@@ -64,7 +64,7 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
         { "/api/mail/archives", Permissions.MailAccess },
         { "/api/mail/file-origins/00000000-0000-0000-0000-000000000000", Permissions.MailAccess },
         // Documents: their own key, separate from semantic search on media.
-        { "/api/assistant/documents/status", Permissions.DocumentSearchAccess },
+        { "/api/documents/status", Permissions.DocumentSearchAccess },
         { "/api/documents/indexing/status", Permissions.DocumentSearchAccess },
         { "/api/tv-devices", Permissions.TvManage },
         { "/api/tv-personal/pin", Permissions.TvManage },
@@ -150,7 +150,7 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
             "/api/albums/00000000-0000-0000-0000-000000000000/party-challenges",
             "/api/albums/00000000-0000-0000-0000-000000000000/party-print-settings",
             "/api/parties",
-            "/api/mail/status", "/api/assistant/documents/status",
+            "/api/mail/status", "/api/documents/status",
         })
         {
             var response = await client.GetAsync(route);

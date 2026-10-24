@@ -12,9 +12,7 @@ using NubArca.Api.Domain;
 using NubArca.Api.Domain.Ai;
 using NubArca.Api.Rag;
 using NubArca.Api.Rag.Domains;
-using NubArca.Api.Rag.ProductHelp;
 using NubArca.Api.Rag.Retrieval;
-using NubArca.Api.Rag.Storage;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -25,9 +23,8 @@ namespace NubArca.Api.Tests.Ai.DocumentVisual;
 // The isolation tests prove nothing of anybody else's comes back, which a corpus
 // returning nothing satisfies perfectly. This is the other half: a synthetic
 // library of one person's documents, thirteen questions of the shapes section 66
-// of the specification names, and the same pipeline the Assistant runs, three
-// times — text only, dense-visual-expanded, and (when a profile is promoted)
-// late-interaction-expanded.
+// of the specification names, and the same pipeline the Assistant runs, twice —
+// text only and dense-visual-expanded.
 //
 // WHAT THIS MEASURES AND WHAT IT DOES NOT. The embedding providers here are
 // DETERMINISTIC — they hash their input into a vector — so this is not a
@@ -207,17 +204,8 @@ public sealed class DocumentVisualGoldenEvaluationTests : IDisposable
         var retriever = new RagRetriever(
             RagDomainRegistry.Instance,
             new RagDatabaseServices(
-                new DatabaseRagCorpusSource(_harness.Db),
-                new RagVectorRetriever(
-                    embeddings,
-                    new RagVectorIndexService(_harness.Db, serializer, TimeProvider.System),
-                    ragOptions),
-                embeddings,
-                new RagVectorIndexService(_harness.Db, serializer, TimeProvider.System),
                 corpus,
                 new OwnerDocumentVectorRetriever(_harness.Db, corpus, embeddings, serializer)),
-            new BundledProductHelpCorpusSource(ProductHelpCorpus.Empty),
-            new RagLexicalIndexCache(),
             ragOptions,
             semantic,
             NullLogger<RagRetriever>.Instance);
@@ -236,12 +224,6 @@ public sealed class DocumentVisualGoldenEvaluationTests : IDisposable
             new DocumentVisualVectorIndexService(_harness.Db, serializer),
             serializer,
             visualOptions,
-            new VisualLateInteractionReranker(
-                _harness.Db,
-                new AiProfileRegistry(_harness.Db, TimeProvider.System),
-                serializer,
-                visualOptions,
-                NullLogger<VisualLateInteractionReranker>.Instance),
             NullLogger<OwnerDocumentVisualRetriever>.Instance);
 
         return new OwnerDocumentRetrievalPipeline(retriever, visual);

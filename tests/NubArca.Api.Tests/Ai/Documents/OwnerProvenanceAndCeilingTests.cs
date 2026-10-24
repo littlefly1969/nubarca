@@ -12,9 +12,7 @@ using NubArca.Api.Domain.Ai;
 using NubArca.Api.MediaLibrary;
 using NubArca.Api.Rag;
 using NubArca.Api.Rag.Domains;
-using NubArca.Api.Rag.ProductHelp;
 using NubArca.Api.Rag.Retrieval;
-using NubArca.Api.Rag.Storage;
 using Xunit;
 
 namespace NubArca.Api.Tests.Ai.Documents;
@@ -92,28 +90,6 @@ public sealed class OwnerProvenanceAndCeilingTests : IDisposable
         var corpus = await new OwnerDocumentCorpusSource(_db).LoadAsync(_owner);
 
         Assert.Empty(corpus.Chunks);
-    }
-
-    [Fact]
-    public async Task Evidence_Owner_Comes_From_The_Chunk_Not_From_The_Query()
-    {
-        // THE REGRESSION TEST FOR THE CIRCULAR STAMP.
-        //
-        // A SYSTEM domain — whose chunks carry no owner — queried with an owner
-        // on the request. The old BuildEvidence copied `query.OwnerUserId` onto
-        // every piece of evidence, so this evidence came back stamped with a
-        // person who has nothing to do with it, and the Assistant's gate would
-        // have accepted a system chunk into a private answer. Reading the owner
-        // off the chunk makes it null, which is what the gate refuses.
-        var retriever = ProductHelpRetriever();
-
-        var result = await retriever.RetrieveAsync(new RagQuery(
-            new RagDomainKey(RagDomains.ProductHelp),
-            "Come si usa la ricerca semantica delle foto?",
-            _owner, 5, 8000));
-
-        Assert.NotEmpty(result.Evidence);
-        Assert.All(result.Evidence, e => Assert.Null(e.OwnerUserId));
     }
 
     [Fact]
@@ -265,8 +241,6 @@ public sealed class OwnerProvenanceAndCeilingTests : IDisposable
         var options = Options.Create(new RagOptions
         {
             MaxIndexedChunks = ceiling,
-            SemanticEnabled = semantic,
-            TextEmbeddingProfileKey = EmbeddingProfileKey,
             Domains = semantic
                 ? new(StringComparer.OrdinalIgnoreCase)
                 {
@@ -286,30 +260,16 @@ public sealed class OwnerProvenanceAndCeilingTests : IDisposable
             resolver);
         var serializer = new AiVectorSerializer();
         var corpus = new OwnerDocumentCorpusSource(_db);
-        var vectorIndex = new RagVectorIndexService(_db, serializer, TimeProvider.System);
 
         return new RagRetriever(
             RagDomainRegistry.Instance,
             new RagDatabaseServices(
-                new DatabaseRagCorpusSource(_db),
-                new RagVectorRetriever(embeddings, vectorIndex, options),
-                embeddings,
-                vectorIndex,
                 corpus,
                 new OwnerDocumentVectorRetriever(_db, corpus, embeddings, serializer)),
-            new BundledProductHelpCorpusSource(ProductHelpCorpus.Empty),
-            new RagLexicalIndexCache(),
             options,
             resolver,
             NullLogger<RagRetriever>.Instance);
     }
-
-    /// The real Product Help corpus this release ships, so the system-domain
-    /// provenance test runs against chunks a corpus source actually produced
-    /// rather than ones a test wrote by hand.
-    private static RagRetriever ProductHelpRetriever()
-        => Tests.Rag.RagTestHarness.ForProductHelp(
-            Tests.Rag.RagTestHarness.ShippedProductHelp(RagRetriever.RunningRevision));
 
     /// Counts what it is asked to embed. The deterministic provider underneath
     /// keeps the vectors real, so a call that DOES happen still produces a

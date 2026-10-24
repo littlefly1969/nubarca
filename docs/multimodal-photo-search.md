@@ -59,7 +59,7 @@ Expected layout:
 The same export serves **visual document retrieval**: nothing extra is fetched
 and no second copy is installed, because the document profile points at the same
 catalog entry through its `ConfigHash`. See
-[rag-platform.md](rag-platform.md#visual-document-retrieval).
+[document-intelligence/](document-intelligence/) for visual document retrieval.
 
 Measured on a CPU-only host from this exact export: page embedding 4.5–5.6 s
 warm and 9.1 s cold, query embedding 0.57 s warm and 79 s cold. The cold numbers

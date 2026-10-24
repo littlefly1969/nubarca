@@ -69,8 +69,6 @@ public static class CliEntryPoint
             "jobs",
             "ai",
             "plates",
-            "help-knowledge",
-            "rag",
             // The owner-private document verbs. Without this entry `documents`
             // was dispatched by RunAsync but never recognised as a CLI
             // invocation, so the container started the web host instead.
@@ -104,32 +102,9 @@ public static class CliEntryPoint
 
         switch ((verb, sub))
         {
-            // Builds the PUBLIC Help knowledge corpus from a source checkout.
-            // Runs at image-build time, where the checkout and the release SHA
-            // are both present; the running application then refuses a corpus
-            // whose revision disagrees with its own build. Needs no services and
-            // no database, so it is dispatched directly.
-            case ("help-knowledge", "build"):
-                return await BuildHelpKnowledge(rest, stdout, stderr);
-
-            // RAG substrate diagnostics: domains and their code-defined policy,
-            // index state, indexing from a checkout, retrieval with its ranking
-            // explained, and the golden evaluation. `rag query` never calls a
-            // generative model — it answers "did retrieval find the right
-            // thing", which is a different question from "was the answer good"
-            // and is fixed in a different place.
-            case ("rag", _) when sub.Length > 0:
-                return await DispatchAsync(
-                    serviceProviderFactory,
-                    sp => RagCliCommands.RunAsync(sub, rest, sp, stdout, stderr),
-                    stderr);
-
-            // The OWNER-PRIVATE document corpus, deliberately its own verb.
-            // `rag` operates on installation-wide knowledge that belongs to
-            // nobody; these commands operate on one named person's documents and
-            // require `--owner` on every one of them. Making that a different
-            // command rather than a flag on the same one means which corpus is
-            // being touched is visible in the command that was typed.
+            // The OWNER-PRIVATE document corpus. The commands that read or
+            // index one person's documents require `--owner`, so which corpus
+            // is being touched is visible in the command that was typed.
             case ("documents", _) when sub.Length > 0:
                 return await DispatchAsync(
                     serviceProviderFactory,
@@ -1522,7 +1497,7 @@ public static class CliEntryPoint
 
         if (args.Length == 0)
         {
-            stderr.WriteLine("jobs enqueue: missing job name. One of: metadata-backfill, metadata-video-backfill, media-derivatives-backfill, media-gallery-derivatives-regenerate, media-posters-regenerate, media-video-hls-generate, media-video-hls-backfill, storage-reconcile, ai-photos-embeddings-backfill, ai-documents-extract-backfill, ai-documents-embeddings-backfill, ai-faces-detect-backfill, ai-faces-embeddings-backfill, ai-faces-cluster-backfill, ai-tags-generate-backfill.");
+            stderr.WriteLine("jobs enqueue: missing job name. One of: metadata-backfill, metadata-video-backfill, media-derivatives-backfill, media-gallery-derivatives-regenerate, media-posters-regenerate, media-video-hls-generate, media-video-hls-backfill, storage-reconcile, ai-photos-embeddings-backfill, ai-documents-extract-backfill, ai-documents-embeddings-backfill, ai-faces-detect-backfill, ai-faces-embeddings-backfill, ai-faces-cluster-backfill.");
             return 64;
         }
 
@@ -1555,7 +1530,6 @@ public static class CliEntryPoint
             ["ai-faces-detect-backfill"] = JobTypes.AiFacesDetectBackfill,
             ["ai-faces-embeddings-backfill"] = JobTypes.AiFacesEmbeddingsBackfill,
             ["ai-faces-cluster-backfill"] = JobTypes.AiFacesClusterBackfill,
-            ["ai-tags-generate-backfill"] = JobTypes.AiTagsGenerateBackfill,
         };
 
         try
@@ -1717,7 +1691,7 @@ public static class CliEntryPoint
                     return 0;
                 }
                 default:
-                    stderr.WriteLine($"jobs enqueue: unknown job '{jobName}'. One of: metadata-backfill, metadata-video-backfill, media-derivatives-backfill, media-posters-regenerate, media-video-hls-generate, media-video-hls-backfill, storage-reconcile, ai-photos-embeddings-backfill, ai-documents-extract-backfill, ai-documents-embeddings-backfill, ai-faces-detect-backfill, ai-faces-embeddings-backfill, ai-faces-cluster-backfill, ai-tags-generate-backfill.");
+                    stderr.WriteLine($"jobs enqueue: unknown job '{jobName}'. One of: metadata-backfill, metadata-video-backfill, media-derivatives-backfill, media-posters-regenerate, media-video-hls-generate, media-video-hls-backfill, storage-reconcile, ai-photos-embeddings-backfill, ai-documents-extract-backfill, ai-documents-embeddings-backfill, ai-faces-detect-backfill, ai-faces-embeddings-backfill, ai-faces-cluster-backfill.");
                     return 64;
             }
         }
@@ -2453,9 +2427,9 @@ public static class CliEntryPoint
                     NubArca.Api.Ai.Video.Faces.VideoFaceAnalysisOptions.SectionName));
             services.AddAiSubstrate();
 
-            // RAG persistence + indexing. The CLI is where indexing happens, so
-            // this host needs the same graph the web host has — a divergence
-            // here would mean `rag index` and `rag query` disagreed about what
+            // Document retrieval + indexing. The worker runs the indexing job,
+            // so this host needs the same graph the web host has — a divergence
+            // here would mean `documents index` and the API disagreed about what
             // the index contains.
             services.AddRagDatabase();
 
@@ -2475,12 +2449,9 @@ public static class CliEntryPoint
         }
 
         // The Assistant/RAG substrate, outside the Postgres block for the same
-        // reason the web host keeps it there: the domain registry and the
-        // bundled Product Help corpus need no database.
-        services.Configure<NubArca.Api.Assistant.AssistantOptions>(
-            configuration.GetSection(NubArca.Api.Assistant.AssistantOptions.SectionName));
-        services.Configure<NubArca.Api.Help.ExternalHelpOptions>(
-            configuration.GetSection(NubArca.Api.Help.ExternalHelpOptions.SectionName));
+        // reason the web host keeps it there: the domain registry needs no
+        // database.
+        NubArca.Api.Assistant.AssistantOptions.Register(services, configuration);
         services.AddSingleton<NubArca.Api.Assistant.AssistantModelResolver>();
         services.Configure<NubArca.Api.Rag.RagOptions>(
             configuration.GetSection(NubArca.Api.Rag.RagOptions.SectionName));
@@ -4901,28 +4872,15 @@ public static class CliEntryPoint
         stdout.WriteLine("  dotnet NubArca.Api.dll ai face <models|seed-profiles|detect-test|embed-test|compare|benchmark|sample-pairs>");
         stdout.WriteLine("  dotnet NubArca.Api.dll plates models validate     [alpr|face-redaction]");
         stdout.WriteLine("  dotnet NubArca.Api.dll plates benchmark <alpr|face-redaction> --image <path> [--runs N]");
-        stdout.WriteLine("  dotnet NubArca.Api.dll rag domains");
-        stdout.WriteLine("  dotnet NubArca.Api.dll rag status --domain <key>");
-        stdout.WriteLine("  dotnet NubArca.Api.dll rag index --domain <key> [--source <dir>] [--revision <sha>] [--embed]");
-        stdout.WriteLine("  dotnet NubArca.Api.dll rag coverage --domain <key>");
-        stdout.WriteLine("  dotnet NubArca.Api.dll rag query --domain <key> \"<question>\"");
-        stdout.WriteLine("  dotnet NubArca.Api.dll rag evaluate --domain <key>");
-        stdout.WriteLine("  dotnet NubArca.Api.dll rag seed-profiles");
-        stdout.WriteLine("  dotnet NubArca.Api.dll rag validate-model [--profile <key>] [--domain <key>]");
         stdout.WriteLine("  dotnet NubArca.Api.dll documents status --owner <user-id>");
         stdout.WriteLine("  dotnet NubArca.Api.dll documents index  --owner <user-id> [--limit N] [--embed]");
+        stdout.WriteLine("  dotnet NubArca.Api.dll documents seed-profiles");
+        stdout.WriteLine("  dotnet NubArca.Api.dll documents validate-model [--profile <key>]");
         stdout.WriteLine("  dotnet NubArca.Api.dll documents visual-seed-profiles");
         stdout.WriteLine("  dotnet NubArca.Api.dll documents visual-index  --owner <user-id> [--limit N]");
         stdout.WriteLine("  dotnet NubArca.Api.dll documents visual-status --owner <user-id>");
         stdout.WriteLine(
             "  dotnet NubArca.Api.dll documents visual-evaluate --owner <user-id> --queries <file>");
-        stdout.WriteLine();
-        stdout.WriteLine("rag");
-        stdout.WriteLine("  Diagnostics for the local retrieval substrate. `rag query` shows what");
-        stdout.WriteLine("  retrieval found and how each path ranked it; it never calls a");
-        stdout.WriteLine("  generative model. `rag domains` prints each domain's privacy class");
-        stdout.WriteLine("  and whether its evidence may reach an External model — that policy");
-        stdout.WriteLine("  is defined in code, not in the database.");
         stdout.WriteLine();
         stdout.WriteLine("documents");
         stdout.WriteLine("  The OWNER-PRIVATE document corpus. Every subcommand requires");
@@ -5084,7 +5042,6 @@ public static class CliEntryPoint
         stdout.WriteLine("    ai-faces-detect-backfill           [--profile <key>] [--dry-run]");
         stdout.WriteLine("    ai-faces-embeddings-backfill       [--profile <key>] [--dry-run]");
         stdout.WriteLine("    ai-faces-cluster-backfill          [--profile <key>] [--dry-run]");
-        stdout.WriteLine("    ai-tags-generate-backfill          [--profile <key>] [--dry-run]");
         stdout.WriteLine("  Payloads carry operation flags only — never paths, keys, or metadata.");
         stdout.WriteLine("  AI backfills are Phase 0C skeletons: they no-op (no inference) until");
         stdout.WriteLine("  later phases. They never mark blobs skipped/failed for a disabled");
@@ -5194,68 +5151,4 @@ public static class CliEntryPoint
         stdout.WriteLine("  64 usage error (missing/invalid arguments)");
         stdout.WriteLine("  78 configuration error (ConnectionStrings:Postgres not set)");
     }
-    // help-knowledge build --source <dir> --out <file> --revision <sha>
-    //
-    // The corpus is the `product-help` RAG domain, built from an explicit
-    // MANIFEST of public product documentation (see ProductHelpSources).
-    // Nothing operator-specific, nothing secret and nothing untracked can enter
-    // it, because entry requires being named — and a document nobody classified
-    // is out even when it is public.
-    private static Task<int> BuildHelpKnowledge(string[] args, TextWriter stdout, TextWriter stderr)
-    {
-        var source = ArgValue(args, "--source") ?? ".";
-        var output = ArgValue(args, "--out") ?? "help-corpus.json";
-        var revision = ArgValue(args, "--revision")
-            ?? Environment.GetEnvironmentVariable("NUBARCA_GIT_SHA")
-            ?? string.Empty;
-
-        if (string.IsNullOrWhiteSpace(revision))
-        {
-            stderr.WriteLine("help-knowledge build: --revision (or NUBARCA_GIT_SHA) is required.");
-            stderr.WriteLine("A corpus with no revision cannot be checked against the running build.");
-            return Task.FromResult(2);
-        }
-        if (!Directory.Exists(source))
-        {
-            stderr.WriteLine("help-knowledge build: source directory not found.");
-            return Task.FromResult(2);
-        }
-
-        var corpus = NubArca.Api.Rag.ProductHelp.ProductHelpCorpusBuilder.Build(source, revision);
-        if (corpus.Documents.Count == 0)
-        {
-            stderr.WriteLine("help-knowledge build: no approved product-help documents were found.");
-            return Task.FromResult(1);
-        }
-
-        var json = System.Text.Json.JsonSerializer.Serialize(corpus);
-        var directory = Path.GetDirectoryName(Path.GetFullPath(output));
-        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-        File.WriteAllText(output, json);
-
-        stdout.WriteLine($"domain={corpus.Domain}");
-        stdout.WriteLine($"revision={revision}");
-        stdout.WriteLine($"documents={corpus.Documents.Count}");
-        stdout.WriteLine($"sources={corpus.Documents.Select(d => d.Path).Distinct().Count()}");
-        // A manifest entry with no file is a rename nobody noticed: the build
-        // still succeeds, and it says which knowledge silently stopped shipping.
-        foreach (var missing in NubArca.Api.Rag.ProductHelp.ProductHelpSources.Manifest
-                     .Select(s => s.Path)
-                     .Where(p => !corpus.Documents.Any(d => d.Path == p)))
-        {
-            stderr.WriteLine($"help-knowledge build: approved source not found: {missing}");
-        }
-        stdout.WriteLine($"out={output}");
-        return Task.FromResult(0);
-    }
-
-    private static string? ArgValue(string[] args, string name)
-    {
-        for (var i = 0; i < args.Length - 1; i++)
-        {
-            if (string.Equals(args[i], name, StringComparison.Ordinal)) return args[i + 1];
-        }
-        return null;
-    }
-
 }

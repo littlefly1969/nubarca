@@ -251,7 +251,8 @@ public sealed class CliHostRegistrationTests : IDisposable
         // as a stand-in for "optional dependency". Wherever it ran AFTER
         // `AddRagDatabase` — which is both the web host and the CLI — that
         // registration won and the container recursed forever, so `rag query`
-        // hung with no output and no exception.
+        // hung with no output and no exception. (`rag query` is gone; the
+        // registration it exposed is not.)
         //
         // Nothing caught it: the unit tests construct RagRetriever directly, and
         // the endpoint test host registers its own graph LAST, which put the
@@ -261,32 +262,18 @@ public sealed class CliHostRegistrationTests : IDisposable
         using var scope = sp.CreateScope();
 
         Assert.NotNull(scope.ServiceProvider.GetService<NubArca.Api.Rag.IRagRetriever>());
-        Assert.NotNull(scope.ServiceProvider.GetService<NubArca.Api.Rag.Indexing.IRagIndexer>());
         Assert.NotNull(scope.ServiceProvider.GetService<NubArca.Api.Rag.Domains.IRagDomainRegistry>());
-        Assert.NotNull(scope.ServiceProvider.GetService<NubArca.Api.Rag.Storage.RagVectorIndexService>());
+        Assert.NotNull(scope.ServiceProvider.GetService<NubArca.Api.Rag.Retrieval.RagDatabaseServices>());
         Assert.NotNull(scope.ServiceProvider.GetService<NubArca.Api.Ai.TextEmbeddings.TextEmbeddingResolver>());
-
-        // One provider per domain, and exactly the two domains that exist.
-        var providers = scope.ServiceProvider
-            .GetServices<NubArca.Api.Rag.Sources.IRagSourceProvider>()
-            .Select(p => p.Domain)
-            .OrderBy(d => d, StringComparer.Ordinal)
-            .ToList();
-        Assert.Equal(
-            new[]
-            {
-                NubArca.Api.Rag.Domains.RagDomains.NubArcaRepository,
-                NubArca.Api.Rag.Domains.RagDomains.ProductHelp,
-            },
-            providers);
+        Assert.NotNull(scope.ServiceProvider.GetService<NubArca.Api.Ai.Documents.OwnerDocumentSearchService>());
     }
 
     [Fact]
     public void The_Rag_Retriever_Still_Resolves_Without_A_Database()
     {
-        // An installation with no connection string answers Product Help from
-        // the corpus bundled in its image. The retriever must therefore build
-        // with its database half ABSENT rather than fail to resolve.
+        // An installation with no connection string has no owner corpus to
+        // read. The retriever must still build with its database half ABSENT —
+        // and fail closed per query — rather than fail to resolve.
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();

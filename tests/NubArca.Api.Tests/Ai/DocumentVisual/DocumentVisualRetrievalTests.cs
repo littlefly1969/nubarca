@@ -252,26 +252,4 @@ public sealed class DocumentVisualRetrievalTests : IDisposable
             properties.OrderBy(n => n, StringComparer.Ordinal).ToArray());
         Assert.Equal(1, hit.Rank);
     }
-
-    [Fact]
-    public async Task Without_A_Promoted_Late_Profile_The_Dense_Order_Stands()
-    {
-        // The shipped state of this release: a seam and a harness, no production
-        // late-interaction model. It must be indistinguishable from "no late
-        // interaction exists" as far as results are concerned.
-        var a = Answerable(_harness.OwnerA, "a.pdf");
-        var b = Answerable(_harness.OwnerA, "b.pdf");
-        _harness.SeedVisualIndex(a, new[] { DocumentVisualHarness.Vector(7) });
-        _harness.SeedVisualIndex(b, new[] { DocumentVisualHarness.Vector(7, 0.5f) });
-
-        var result = await SearchAsync(_harness.OwnerA, options: new DocumentVisualOptions
-        {
-            Enabled = true,
-            LateInteractionEnabled = true,
-            LateProfileKey = "",
-        });
-
-        Assert.Equal(DocumentVisualModes.DenseExact, result.Mode);
-        Assert.Equal(new[] { a.Id, b.Id }, result.CandidateFileIds);
-    }
 }

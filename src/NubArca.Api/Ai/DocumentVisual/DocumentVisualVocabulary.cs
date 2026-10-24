@@ -32,7 +32,9 @@ public static class DocumentVisualEmbeddingLayouts
     /// Exactly one vector. Cosine against the query vector.
     public const string Dense = "dense";
 
-    /// A sequence of vectors. MaxSim against the query's own sequence.
+    /// A sequence of vectors. Nothing in this build writes or reads one: the
+    /// late-interaction reranker was removed, and the value stays only because
+    /// the table's check constraint still names it.
     public const string LateInteraction = "late-interaction";
 
     public static bool IsKnown(string? layout)
