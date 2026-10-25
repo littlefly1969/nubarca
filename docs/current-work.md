@@ -343,6 +343,14 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   walking the owner's mail by date. Messages without a text row are
   backfilled per owner by `mail.texts.backfill` from their stored documents;
   never fill them by re-importing the PST. See `docs/mailarchive/operations.md`.
+- **The Mail view is the only page that turns off `.app-main` scrolling.**
+  `MailWorkspace` adds `app-main--mail` while it is mounted, so the workspace
+  fills the shell and folders, list and reader each scroll on their own; the
+  Documents and Imports tabs never mount it and keep the scrolling page. Do not
+  give a pane `height: 100vh` or let the HTML frame size the workspace: every
+  box down to the panes has a zero minimum on purpose. The layout preference
+  (`nubarca.mail.layout.v1`) is a local preference resolved against the
+  workspace's measured size, never part of the URL.
 - **Mail and documents are gated per role, separately from media search.**
   `mail.access` covers every `/api/mail` route and the `mail.import` /
   `mail.texts.backfill` jobs (a revoked owner's run ends `cancelled`, never

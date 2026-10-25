@@ -228,7 +228,7 @@ describe('structured search', () => {
 
     const form = screen.getByRole('search', { name: 'Ricerca nella posta' });
     await userEvent.type(within(form).getByLabelText('Cerca nella posta'), 'fattura');
-    await userEvent.click(within(form).getByRole('button', { name: 'Ricerca avanzata' }));
+    await userEvent.click(within(form).getByRole('button', { name: 'Filtri' }));
     await userEvent.type(within(form).getByLabelText('Da (mittente)'), 'ada@example.test');
     await userEvent.type(within(form).getByLabelText('A (destinatari)'), 'bob');
     await userEvent.type(within(form).getByLabelText('Oggetto'), 'relazione');

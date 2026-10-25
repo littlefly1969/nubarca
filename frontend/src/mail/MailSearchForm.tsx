@@ -1,5 +1,6 @@
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { useI18n } from '../i18n';
+import { Icon } from '../components/icons/Icon';
 import { EMPTY_FILTERS, hasSearchCriteria, type MailFilters } from './mailQuery';
 import type { MailArchive, MailFolder } from './types';
 
@@ -15,17 +16,21 @@ interface MailSearchFormProps {
   onArchiveDraftChange?: (archiveId: string | null) => void;
 }
 
+// The advanced criteria in force (the free text is in plain sight already).
+export function countAdvancedFilters(f: MailFilters): number {
+  return [f.from, f.to, f.subject, f.since, f.until, f.hasAttachments].filter(Boolean).length;
+}
+
 // Structured search: free text plus sender, recipients, subject, a date range,
 // scope and "only with attachments". Editing is local; submitting writes the
 // filters to the address bar (through `onSubmit`), which is what runs the
 // search, so every search is linkable and Back returns to the previous one.
 export function MailSearchForm({ filters, onSubmit, archives, folders, onArchiveDraftChange }: MailSearchFormProps) {
-  const { t } = useI18n();
+  const { t, tn } = useI18n();
   const uid = useId();
   const [draft, setDraft] = useState<MailFilters>(filters);
-  const advancedSet = Boolean(
-    filters.from || filters.to || filters.subject || filters.since || filters.until || filters.hasAttachments,
-  );
+  const activeFilters = countAdvancedFilters(filters);
+  const advancedSet = activeFilters > 0;
   const [advancedOpen, setAdvancedOpen] = useState(advancedSet);
 
   // A Back/Forward navigation changes the filters under the form.
@@ -70,12 +75,20 @@ export function MailSearchForm({ filters, onSubmit, archives, folders, onArchive
         <button type="submit" className="row-action-primary mail-search-submit">{t('common.search')}</button>
         <button
           type="button"
-          className="files-action"
+          className={advancedSet ? 'files-action mail-filters-toggle is-active' : 'files-action mail-filters-toggle'}
           aria-expanded={advancedOpen}
           aria-controls={`${uid}-advanced`}
           onClick={() => setAdvancedOpen((v) => !v)}
+          data-testid="mail-filters-toggle"
         >
-          {t('mail.search.advanced')}
+          <Icon name="filter" />
+          <span>{t('mail.search.advanced')}</span>
+          {advancedSet && (
+            <span className="mail-filters-badge" data-testid="mail-filters-badge">
+              <span aria-hidden="true">{activeFilters}</span>
+              <span className="visually-hidden">, {tn(activeFilters, 'mail.search.filtersActive')}</span>
+            </span>
+          )}
         </button>
         {hasSearchCriteria(filters) && (
           <button type="button" className="files-action" onClick={clear}>{t('mail.search.clear')}</button>
