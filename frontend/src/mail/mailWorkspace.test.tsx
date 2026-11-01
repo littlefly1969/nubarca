@@ -93,7 +93,7 @@ describe('layout preferences', () => {
   });
 
   it('clamps sizes to their limits and lays a wide list out as a table', () => {
-    const bottom = resolveMailLayout({ ...DEFAULT_MAIL_LAYOUT, mode: 'bottom', listRatio: 0.85 }, { width: 1200, height: 600 });
+    const bottom = resolveMailLayout({ ...DEFAULT_MAIL_LAYOUT, mode: 'bottom', listRatio: 0.85 }, { width: 1200, height: 660, bodyHeight: 600 });
     expect(bottom.mode).toBe('bottom');
     expect(bottom.listHeight).toBe(600 - 8 - 180);
     expect(bottom.table).toBe(true);
@@ -318,5 +318,81 @@ describe('the application scroll viewport', () => {
     render(<AuthedWrapper><Shell path="/mail?view=documents" /></AuthedWrapper>);
     await screen.findAllByTestId('mail-doc-card');
     expect(screen.getByTestId('app-main')).not.toHaveClass('app-main--mail');
+  });
+});
+
+describe('layout stability', () => {
+  it('judges "below" on the workspace, so the toolbar hiding cannot flip the layout', () => {
+    const prefs = { ...DEFAULT_MAIL_LAYOUT, mode: 'bottom' as const };
+    // Around the threshold, with the toolbar shown (body 72px shorter) and
+    // hidden (body = whole workspace), the layout chosen is the same.
+    for (const height of [370, 383, 384, 385, 400]) {
+      const withToolbar = resolveMailLayout(prefs, { width: 1200, height, bodyHeight: height - 72 });
+      const withoutToolbar = resolveMailLayout(prefs, { width: 1200, height, bodyHeight: height });
+      expect(withoutToolbar.mode).toBe(withToolbar.mode);
+    }
+    expect(resolveMailLayout(prefs, { width: 1200, height: 383, bodyHeight: 383 }).mode).toBe('right');
+    expect(resolveMailLayout(prefs, { width: 1200, height: 384, bodyHeight: 328 }).mode).toBe('bottom');
+    // The panes' own height still sizes the list.
+    expect(resolveMailLayout(prefs, { width: 1200, height: 700, bodyHeight: 500 }).listHeightMax).toBe(500 - 8 - 180);
+  });
+});
+
+describe('folder overlay from the keyboard', () => {
+  // A workspace too narrow to dock the folders beside two panes.
+  function narrowWorkspace() {
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(650);
+    const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
+    return () => { width.mockRestore(); height.mockRestore(); };
+  }
+
+  it('opens as a modal: focus inside, background inert, Escape closes it and returns focus', async () => {
+    const restore = narrowWorkspace();
+    try {
+      installFetchMock(handlers());
+      renderMail('/mail?archive=arc-1');
+      await screen.findAllByTestId('mail-message-row');
+      const toggle = screen.getByTestId('mail-folders-toggle');
+      expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+      toggle.focus();
+      await userEvent.keyboard('{Enter}');
+      const pane = screen.getByTestId('mail-folders-pane');
+      expect(pane).toBeVisible();
+      expect(pane).toHaveAttribute('role', 'dialog');
+      expect(pane).toHaveAttribute('aria-modal', 'true');
+      await waitFor(() => expect(screen.getByTestId('mail-archive-select')).toHaveFocus());
+      expect(screen.getByTestId('mail-toolbar')).toHaveAttribute('inert');
+      expect(screen.getByTestId('mail-panes')).toHaveAttribute('inert');
+      // Tab and Shift+Tab stay inside the panel.
+      await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+      expect(pane).toContainElement(document.activeElement as HTMLElement);
+      for (let i = 0; i < 8; i += 1) {
+        await userEvent.tab();
+        expect(pane).toContainElement(document.activeElement as HTMLElement);
+      }
+      screen.getByTestId('mail-archive-select').focus();
+
+      await userEvent.keyboard('{Escape}');
+      expect(screen.getByTestId('mail-folders-pane')).not.toBeVisible();
+      expect(screen.getByTestId('mail-toolbar')).not.toHaveAttribute('inert');
+      await waitFor(() => expect(toggle).toHaveFocus());
+
+      // Escape works wherever focus is, not only inside the panel.
+      await userEvent.keyboard('{Enter}');
+      await waitFor(() => expect(screen.getByTestId('mail-archive-select')).toHaveFocus());
+      (document.activeElement as HTMLElement).blur();
+      await userEvent.keyboard('{Escape}');
+      expect(screen.getByTestId('mail-folders-pane')).not.toBeVisible();
+      await waitFor(() => expect(toggle).toHaveFocus());
+
+      // Picking a folder closes it too.
+      await userEvent.keyboard('{Enter}');
+      await userEvent.click(within(await screen.findByRole('navigation', { name: 'Cartelle' })).getByRole('button', { name: /^Posta inviata/ }));
+      await waitFor(() => expect(screen.getByTestId('mail-folders-pane')).not.toBeVisible());
+      expect(currentLocation()).toBe('/mail?archive=arc-1&folder=f-sent');
+    } finally {
+      restore();
+    }
   });
 });

@@ -26,6 +26,8 @@ interface MailWorkspaceProps {
   scopeKey: string;
 }
 
+const FOCUSABLE = 'select, button, input, a[href], [tabindex]:not([tabindex="-1"])';
+
 const MODE_LABELS: Record<MailLayoutMode, MessageKey> = {
   right: 'mail.layout.right',
   bottom: 'mail.layout.bottom',
@@ -51,11 +53,13 @@ export function MailWorkspace({ folders, search, renderList, reader, readerKey, 
   const ids = { folders: `${uid}-folders`, list: `${uid}-list`, reader: `${uid}-reader` };
   const controls = useMailLayout();
   const { prefs } = controls;
+  const rootRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const foldersRef = useRef<HTMLElement>(null);
   const listRef = useRef<HTMLElement>(null);
   const readerRef = useRef<HTMLElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
-  const size = useElementSize(bodyRef);
+  const size = useWorkspaceSize(rootRef, bodyRef);
   const layout = resolveMailLayout(prefs, size);
   const { mode } = layout;
   const [resizing, setResizing] = useState(false);
@@ -77,8 +81,46 @@ export function MailWorkspace({ folders, search, renderList, reader, readerKey, 
 
   function closeOverlay() {
     setOverlayOpen(false);
-    toggleRef.current?.focus({ preventScroll: true });
   }
+
+  // The overlay is modal: while it is open the rest of the workspace is inert
+  // (the scrim already blocks the pointer; this blocks the keyboard too), focus
+  // starts inside it, Escape closes it wherever focus is, and closing hands
+  // focus back to the toggle that opened it.
+  const overlayWasOpen = useRef(false);
+  useEffect(() => {
+    if (!foldersOverlay) {
+      if (overlayWasOpen.current) toggleRef.current?.focus({ preventScroll: true });
+      overlayWasOpen.current = false;
+      return;
+    }
+    overlayWasOpen.current = true;
+    const focusables = () => Array.from(foldersRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])
+      .filter((el) => !el.hasAttribute('disabled'));
+    (focusables()[0] ?? foldersRef.current)?.focus({ preventScroll: true });
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setOverlayOpen(false);
+        return;
+      }
+      // Tab cycles inside the panel: the page around the workspace (its tabs,
+      // the NubArca navigation) is not inert, so it is kept out here.
+      if (e.key !== 'Tab') return;
+      const items = focusables();
+      if (items.length === 0) { e.preventDefault(); return; }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      const inside = active instanceof HTMLElement && foldersRef.current?.contains(active);
+      if (!inside || (e.shiftKey && active === first) || (!e.shiftKey && active === last)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus({ preventScroll: true });
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [foldersOverlay]);
 
   // "Solo elenco" shows the list OR the message. A hidden box keeps no scroll
   // offset, so the list's is kept here and put back when it returns.
@@ -97,7 +139,7 @@ export function MailWorkspace({ folders, search, renderList, reader, readerKey, 
   const presentation: MailListPresentation = layout.table ? 'table' : 'compact';
   const listNode = useMemo(() => renderList(presentation), [renderList, presentation]);
 
-  const usableHeight = (size?.height ?? 0) - SPLITTER_PX;
+  const usableHeight = (size?.bodyHeight ?? 0) - SPLITTER_PX;
   const paneStyle = mode === 'right'
     ? { width: layout.listWidth }
     : mode === 'bottom' ? { height: layout.listHeight } : undefined;
@@ -111,8 +153,8 @@ export function MailWorkspace({ folders, search, renderList, reader, readerKey, 
   ].filter(Boolean).join(' ');
 
   return (
-    <div className={className} data-testid="mail-browser" data-layout={mode}>
-      <div className="mail-toolbar">
+    <div ref={rootRef} className={className} data-testid="mail-browser" data-layout={mode}>
+      <div className="mail-toolbar" inert={foldersOverlay} data-testid="mail-toolbar">
         <button
           ref={toggleRef}
           type="button"
@@ -137,12 +179,15 @@ export function MailWorkspace({ folders, search, renderList, reader, readerKey, 
       <div className="mail-workspace-body" ref={bodyRef}>
         {foldersOverlay && <div className="mail-folders-scrim" aria-hidden="true" onClick={closeOverlay} />}
         <aside
+          ref={foldersRef}
           id={ids.folders}
           className={foldersOverlay ? 'mail-folders-pane is-overlay' : 'mail-folders-pane'}
           aria-label={t('mail.sidebar.label')}
+          role={foldersOverlay ? 'dialog' : undefined}
+          aria-modal={foldersOverlay ? true : undefined}
+          tabIndex={foldersOverlay ? -1 : undefined}
           hidden={!foldersVisible}
           style={layout.foldersDocked ? { width: layout.folderWidth } : undefined}
-          onKeyDown={(e) => { if (foldersOverlay && e.key === 'Escape') { e.stopPropagation(); closeOverlay(); } }}
           data-testid="mail-folders-pane"
         >
           {folders}
@@ -162,7 +207,7 @@ export function MailWorkspace({ folders, search, renderList, reader, readerKey, 
           />
         )}
 
-        <div className="mail-panes">
+        <div className="mail-panes" inert={foldersOverlay} data-testid="mail-panes">
           <section
             id={ids.list}
             ref={listRef}
@@ -275,25 +320,34 @@ function LayoutGlyph({ mode }: { mode: MailLayoutMode }) {
   );
 }
 
-// The workspace's own box, kept current as the window, the NubArca navigation
-// or the toolbar above it change. Null until measured (and where it cannot be:
-// jsdom), which the layout reads as "plenty of room".
-function useElementSize(ref: RefObject<HTMLElement | null>): WorkspaceSize | null {
+// The workspace's own box (which layouts fit) and the panes' row under its
+// toolbar (what they share), kept current as the window, the NubArca
+// navigation or the toolbar change. Null until measured (and where it cannot
+// be: jsdom), which the layout reads as "plenty of room".
+function useWorkspaceSize(
+  rootRef: RefObject<HTMLElement | null>,
+  bodyRef: RefObject<HTMLElement | null>,
+): WorkspaceSize | null {
   const [size, setSize] = useState<WorkspaceSize | null>(null);
   useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
+    const root = rootRef.current;
+    const body = bodyRef.current;
+    if (!root || !body) return;
     const measure = () => {
-      const width = Math.round(el.clientWidth);
-      const height = Math.round(el.clientHeight);
-      setSize((prev) => (prev && prev.width === width && prev.height === height ? prev : { width, height }));
+      const width = Math.round(root.clientWidth);
+      const height = Math.round(root.clientHeight);
+      const bodyHeight = Math.round(body.clientHeight);
+      setSize((prev) => (prev && prev.width === width && prev.height === height && prev.bodyHeight === bodyHeight
+        ? prev
+        : { width, height, bodyHeight }));
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(measure);
-    ro.observe(el);
+    ro.observe(root);
+    ro.observe(body);
     return () => ro.disconnect();
-  }, [ref]);
+  }, [rootRef, bodyRef]);
   return size;
 }
 

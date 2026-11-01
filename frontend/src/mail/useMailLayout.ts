@@ -45,6 +45,12 @@ export const RATIO_MAX = 0.85;
 export const COMPACT_WIDTH = 600;
 // A list at least this wide reads better as a table than as stacked lines.
 export const TABLE_MIN_WIDTH = 640;
+// The room a one-row toolbar takes above the panes. Whether "below" fits is
+// judged on the WHOLE workspace minus this, never on the panes' measured
+// height: the toolbar hides while a message is read in "list only", so the
+// panes' height depends on the layout chosen and judging by it could flip the
+// layout back and forth on every measure.
+export const TOOLBAR_ALLOWANCE = 56;
 // What a workspace that has not been measured yet (or cannot be: jsdom) is
 // assumed to be. Large enough that nothing falls back.
 const UNMEASURED = { width: 1280, height: 720 };
@@ -106,8 +112,12 @@ function writeMailLayout(prefs: MailLayoutPrefs): void {
 }
 
 export interface WorkspaceSize {
+  // The workspace's own box: what decides which layouts fit.
   width: number;
   height: number;
+  // The panes' row under the toolbar: what the list and reader share in
+  // "below". Absent, the toolbar allowance is assumed.
+  bodyHeight?: number;
 }
 
 export interface ResolvedMailLayout {
@@ -133,12 +143,14 @@ export interface ResolvedMailLayout {
 
 // The arrangement to draw for these preferences in a workspace of this size.
 export function resolveMailLayout(prefs: MailLayoutPrefs, size: WorkspaceSize | null): ResolvedMailLayout {
-  const { width: w, height: h } = size && size.width > 0 && size.height > 0 ? size : UNMEASURED;
+  const measured = size && size.width > 0 && size.height > 0 ? size : null;
+  const { width: w, height: h } = measured ?? UNMEASURED;
+  const body = measured?.bodyHeight && measured.bodyHeight > 0 ? measured.bodyHeight : h - TOOLBAR_ALLOWANCE;
   const splitPair = LIST_MIN + SPLITTER_PX + READER_MIN;
   const compact = w < COMPACT_WIDTH;
   const available = {
     right: !compact && w >= splitPair,
-    bottom: !compact && h >= LIST_MIN_HEIGHT + SPLITTER_PX + READER_MIN_HEIGHT,
+    bottom: !compact && h - TOOLBAR_ALLOWANCE >= LIST_MIN_HEIGHT + SPLITTER_PX + READER_MIN_HEIGHT,
     list: true,
   };
   let mode: MailLayoutMode = prefs.mode;
@@ -158,7 +170,7 @@ export function resolveMailLayout(prefs: MailLayoutPrefs, size: WorkspaceSize | 
   const listMax = Math.min(LIST_MAX, mainWidth - SPLITTER_PX - READER_MIN);
   const listWidth = clamp(prefs.listWidth, LIST_MIN, listMax);
 
-  const usableHeight = h - SPLITTER_PX;
+  const usableHeight = body - SPLITTER_PX;
   const listHeightMax = usableHeight - READER_MIN_HEIGHT;
   const listHeight = clamp(Math.round(prefs.listRatio * usableHeight), LIST_MIN_HEIGHT, listHeightMax);
 

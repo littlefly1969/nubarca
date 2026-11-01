@@ -23,8 +23,11 @@ originating repository and is deliberately not reproduced here.
   default), clamped so no pane drops below its minimum, re-clamped when the
   window or the NubArca navigation changes width.
 - **Responsive by the workspace's own width**: folders become an overlay when
-  there is no room for them, "below" or "list only" take over when two panes do
-  not fit, and a phone gets the list full screen and a dedicated reading view.
+  there is no room for them (a modal panel: focus inside, Escape closes it from
+  anywhere), "below" or "list only" take over when two panes do not fit, and a
+  phone gets the list full screen and a dedicated reading view. Whether a
+  layout fits is judged on the workspace's own box, so a layout that hides the
+  toolbar can never flip itself back.
 - **List**: compact rows in a narrow column, a table with columns when the list
   is wide; clear selected/hover/focus states, readable dates, explicit
   placeholders for a missing sender, subject or date, a count of the loaded
