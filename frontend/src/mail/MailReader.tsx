@@ -5,9 +5,10 @@ import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
 import { Modal } from '../components/Overlay';
 import { formatSize } from '../components/format';
+import { Icon } from '../components/icons/Icon';
 import { MailBody } from './MailBody';
 import { deleteMailMessage, getMailMessage } from './mailApi';
-import { formatAddress, formatAddressList } from './mailFormat';
+import { formatAddress, formatAddressList, senderLabel } from './mailFormat';
 import type { MailAttachmentView, MailMessageDetail } from './types';
 
 type LoadState =
@@ -71,9 +72,11 @@ export function MailReader({ messageId, onClose, onDeleted, onLoaded }: MailRead
   }, [messageId, invalidateAuth]);
 
   // Focus moves to the message as it opens, so a keyboard or screen-reader user
-  // lands on what they asked for instead of staying in the list.
+  // lands on what they asked for instead of staying in the list. Without
+  // scrolling: the reader pane is already at its top, and letting the browser
+  // "reveal" the heading could move `.app-main` or the list instead.
   useEffect(() => {
-    if (state.kind === 'ready') headingRef.current?.focus();
+    if (state.kind === 'ready') headingRef.current?.focus({ preventScroll: true });
   }, [state.kind, messageId]);
 
   async function confirmDelete() {
@@ -143,22 +146,46 @@ export function MailReader({ messageId, onClose, onDeleted, onLoaded }: MailRead
 
       <header className="mail-reader-head">
         <h2 id="mail-reader-subject" ref={headingRef} tabIndex={-1} className="mail-reader-subject">{subject}</h2>
-        <dl className="mail-headers">
-          <dt>{t('mail.field.from')}</dt>
-          <dd>{formatAddress(m.from) || t('mail.unknownSender')}</dd>
-          {m.to.length > 0 && (<><dt>{t('mail.field.to')}</dt><dd>{formatAddressList(m.to)}</dd></>)}
-          {m.cc.length > 0 && (<><dt>{t('mail.field.cc')}</dt><dd>{formatAddressList(m.cc)}</dd></>)}
-          {m.bcc.length > 0 && (<><dt>{t('mail.field.bcc')}</dt><dd>{formatAddressList(m.bcc)}</dd></>)}
-          {when && (<><dt>{t('mail.field.date')}</dt><dd>{fmt(when)}</dd></>)}
-          {m.receivedAt && m.receivedAt !== when && (
-            <><dt>{t('mail.field.received')}</dt><dd>{fmt(m.receivedAt)}</dd></>
-          )}
-          <dt>{t('mail.field.archive')}</dt>
-          <dd>
+        <div className="mail-reader-summary">
+          <span className="mail-reader-avatar" aria-hidden="true">{initial(m.from?.name || m.from?.address)}</span>
+          <div className="mail-reader-people">
+            <p className="mail-reader-from">
+              <strong>{m.from?.name?.trim() || m.from?.address?.trim() || t('mail.unknownSender')}</strong>
+              {m.from?.name?.trim() && m.from?.address?.trim() && m.from.name.trim() !== m.from.address.trim() && (
+                <span className="muted"> &lt;{m.from.address.trim()}&gt;</span>
+              )}
+            </p>
+            {m.to.length > 0 && (
+              <p className="mail-reader-to muted">
+                {t('mail.field.to')}: {m.to.map(senderLabel).filter(Boolean).join(', ')}
+                {m.cc.length > 0 && <> · {t('mail.field.cc')}: {m.cc.map(senderLabel).filter(Boolean).join(', ')}</>}
+              </p>
+            )}
+          </div>
+          {when && <time className="mail-reader-date muted" dateTime={when}>{fmt(when)}</time>}
+        </div>
+        <details className="mail-reader-details" data-testid="mail-reader-details">
+          <summary>{t('mail.reader.details')}</summary>
+          <dl className="mail-headers">
+            <dt>{t('mail.field.from')}</dt>
+            <dd>{formatAddress(m.from) || t('mail.unknownSender')}</dd>
+            {m.to.length > 0 && (<><dt>{t('mail.field.to')}</dt><dd>{formatAddressList(m.to)}</dd></>)}
+            {m.cc.length > 0 && (<><dt>{t('mail.field.cc')}</dt><dd>{formatAddressList(m.cc)}</dd></>)}
+            {m.bcc.length > 0 && (<><dt>{t('mail.field.bcc')}</dt><dd>{formatAddressList(m.bcc)}</dd></>)}
+            {when && (<><dt>{t('mail.field.date')}</dt><dd>{fmt(when)}</dd></>)}
+            {m.receivedAt && m.receivedAt !== when && (
+              <><dt>{t('mail.field.received')}</dt><dd>{fmt(m.receivedAt)}</dd></>
+            )}
+          </dl>
+        </details>
+        <p className="mail-reader-place muted">
+          <Icon name="archive" />
+          <span>
+            <span className="visually-hidden">{t('mail.field.archive')}: </span>
             {m.archiveName}
-            {m.folderPath.length > 0 && <span className="muted"> · {m.folderPath.join(' / ')}</span>}
-          </dd>
-        </dl>
+            {m.folderPath.length > 0 && <> · {m.folderPath.join(' / ')}</>}
+          </span>
+        </p>
       </header>
 
       {visibleAttachments.length > 0 && (
@@ -224,11 +251,18 @@ export function MailReader({ messageId, onClose, onDeleted, onLoaded }: MailRead
   );
 }
 
+// The sender's first letter, for the avatar beside the headers.
+function initial(name: string | null | undefined): string {
+  const first = name?.trim().replace(/^["'<(]+/, '').charAt(0) ?? '';
+  return first ? first.toLocaleUpperCase() : '?';
+}
+
 function AttachmentRow({ attachment: a }: { attachment: MailAttachmentView }) {
   const { t } = useI18n();
   const renamed = a.currentFileName && a.currentFileName !== a.name ? a.currentFileName : null;
   return (
     <li className={`mail-attachment is-${a.state}`} data-testid="mail-attachment" data-state={a.state}>
+      <span className="mail-attachment-icon" aria-hidden="true"><Icon name={a.state === 'available' ? 'document' : 'attachment'} /></span>
       <div className="mail-attachment-main">
         <span className="mail-attachment-name">{a.name}</span>
         <span className="muted mail-attachment-meta">

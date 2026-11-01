@@ -4,6 +4,42 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.7 — 2026-10-25
+
+### Mail becomes a real mail application
+
+- **The Mail view fills the page and every pane scrolls on its own.** Folders,
+  list and reader are independent scroll boxes inside a workspace sized to the
+  room the NubArca shell leaves; a long list, open filters or a very long HTML
+  message no longer turn the page into a long document. Documents and Imports
+  keep their ordinary scrolling page.
+- **Three layouts**, picked from the mail toolbar: reading pane on the right
+  (the default), reading pane below, and list only (the message opens on its
+  own and closing it returns to the same row, scroll position and filters).
+  The choice and the panel sizes are remembered in the browser
+  (`nubarca.mail.layout.v1`), never in the URL.
+- **Draggable dividers** between folders, list and reader: mouse, touch or
+  keyboard (arrows, Shift for big steps, Home/End, Enter or double click for the
+  default), clamped so no pane drops below its minimum, re-clamped when the
+  window or the NubArca navigation changes width.
+- **Responsive by the workspace's own width**: folders become an overlay when
+  there is no room for them (a modal panel: focus inside, Escape closes it from
+  anywhere), "below" or "list only" take over when two panes do not fit, and a
+  phone gets the list full screen and a dedicated reading view. Whether a
+  layout fits is judged on the workspace's own box, so a layout that hides the
+  toolbar can never flip itself back.
+- **List**: compact rows in a narrow column, a table with columns when the list
+  is wide; clear selected/hover/focus states, readable dates, explicit
+  placeholders for a missing sender, subject or date, a count of the loaded
+  messages, Up/Down/Home/End between rows. Paging stays 50 at a time.
+- **Search**: a "Filtri" button that shows how many criteria are in force; the
+  panel has a height ceiling so it never pushes the reader off screen.
+- **Reader**: compact header (sender, recipients, date) with the rest under
+  "Dettagli", attachments as cards, a sticky action bar, each new message
+  starting at its top while the list keeps its place. The HTML body keeps the
+  same sandbox, CSP and sanitisation; its frame now re-measures when its pane
+  is resized.
+
 ## 0.4.6 — 2026-10-22
 
 ### Help assistant and system RAG removed
