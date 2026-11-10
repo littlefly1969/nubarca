@@ -341,6 +341,8 @@ export interface OwnerPhotoPrintRequest {
   caption?: string;
   /** The NubArca wordmark in a framed sheet's band. */
   brand?: boolean;
+  /** With `brand`: this album's own logo signs the band in place of the NubArca wordmark. */
+  logoAlbumId?: string;
   /**
    * `popOut` only: the person the owner touched, normalized to the upright
    * photograph. Absent: every subject breaks out. The server lifts it again.

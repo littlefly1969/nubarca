@@ -277,6 +277,127 @@ public sealed class PartyPrintComposerTests
     private static bool IsElectricBlue(Rgba32 p) => p.R < 70 && p.G is > 70 and < 140 && p.B > 215;
     private static bool IsCyan(Rgba32 p) => p.R < 60 && p.G > 180 && p.B > 215;
 
+    // --- An album's own logo, or none --------------------------------------------
+
+    /// <summary>A flat magenta logo with a transparent margin: a colour no fixture photograph carries.</summary>
+    private static byte[] MagentaLogo(int width, int height)
+    {
+        using var image = new Image<Rgba32>(width, height, new Rgba32(0, 0, 0, 0));
+        image.Mutate(x => x.Fill(new Rgba32(0xFF, 0x00, 0xFF),
+            new RectangleF(width * 0.1f, height * 0.1f, width * 0.8f, height * 0.8f)));
+        using var ms = new MemoryStream();
+        image.SaveAsPng(ms);
+        return ms.ToArray();
+    }
+
+    private static bool IsMagenta(Rgba32 p) => p.R > 200 && p.G < 70 && p.B > 200;
+
+    [Fact]
+    public void A_Wide_Album_Logo_On_The_Photo_Keeps_Its_Shape_At_The_Symbols_Height()
+    {
+        var composer = new PartyPrintComposer();
+        var (w, h) = Sheet(portrait: true);
+        var nubarca = composer.LayoutOverlayText(
+            OnThePhoto(Fixture(0), PartyPrintOverlayText.White, PartyPrintOverlayLogo.Light), w, h);
+        var custom = composer.LayoutOverlayText(
+            OnThePhoto(Fixture(0), PartyPrintOverlayText.White, PartyPrintOverlayLogo.Light)
+                with { Logo = PrintLogo.Of(MagentaLogo(600, 200)) }, w, h);
+
+        Assert.Equal(nubarca.Symbol.Height, custom.Symbol.Height, 1);
+        Assert.Equal(3.0, custom.Symbol.Width / custom.Symbol.Height, 2);
+        // The name starts after the logo, wherever it ends.
+        Assert.True(custom.Title.Box.Left > custom.Symbol.Right);
+    }
+
+    [Fact]
+    public void A_Very_Long_Album_Logo_Is_Narrowed_Never_Pushing_The_Name_Off_Its_Line()
+    {
+        var composer = new PartyPrintComposer();
+        var (w, h) = Sheet(portrait: true);
+        var layout = composer.LayoutOverlayText(
+            OnThePhoto(Fixture(0), PartyPrintOverlayText.White, PartyPrintOverlayLogo.Light)
+                with { Logo = PrintLogo.Of(MagentaLogo(2000, 100)) }, w, h);
+        Assert.True(layout.Symbol.Width <= (PartyPrintComposer.OverlayCustomLogoMaxWidthFraction * w) + 1);
+        Assert.Equal(20.0, layout.Symbol.Width / layout.Symbol.Height, 1);
+    }
+
+    [Fact]
+    public void No_Logo_On_The_Photo_Gives_The_Name_The_Whole_Line()
+    {
+        var composer = new PartyPrintComposer();
+        var (w, h) = Sheet(portrait: true);
+        var layout = composer.LayoutOverlayText(
+            OnThePhoto(Fixture(0), PartyPrintOverlayText.White, PartyPrintOverlayLogo.Light)
+                with { Logo = PrintLogo.None }, w, h);
+        var margin = (float)Math.Round(PartyPrintGeometry.OverlayMarginFraction * Math.Min(w, h));
+        Assert.Equal(0f, layout.Symbol.Width);
+        Assert.InRange(layout.Title.Origin.X, margin - 0.5f, margin + 0.5f);
+    }
+
+    [Fact]
+    public async Task The_Album_Logo_Is_Drawn_On_The_Photo_In_Its_Own_Colours_And_The_Symbol_Is_Not()
+    {
+        var composer = new PartyPrintComposer();
+        var composition = OnThePhoto(Fixture(0), PartyPrintOverlayText.White, PartyPrintOverlayLogo.Light)
+            with { Logo = PrintLogo.Of(MagentaLogo(300, 300)) };
+        using var sheet = Image.Load<Rgba32>(await composer.RenderAsync(composition, default));
+        var box = SymbolBox(composition, sheet);
+        Assert.True(Any(sheet, box, IsMagenta));
+        Assert.False(Any(sheet, box, IsElectricBlue));
+    }
+
+    [Theory]
+    [InlineData(PartyPrintTheme.Pure)]
+    [InlineData(PartyPrintTheme.Midnight)]
+    public async Task The_Album_Logo_Signs_A_Party_Band_In_Place_Of_The_Wordmark(PartyPrintTheme theme)
+    {
+        var composer = new PartyPrintComposer();
+        var plain = new PartyPrintComposition(PartyPrintProducts.Photo, theme,
+            [new PartyPrintPhoto(Fixture(0), 0, 0, 1, 1)], "Giulia & Matteo", "Una notte da ricordare", 27);
+        using var custom = Image.Load<Rgba32>(await composer.RenderAsync(
+            plain with { Logo = PrintLogo.Of(MagentaLogo(400, 400)) }, default));
+        using var nubarca = Image.Load<Rgba32>(await composer.RenderAsync(plain, default));
+        using var none = Image.Load<Rgba32>(await composer.RenderAsync(plain with { Logo = PrintLogo.None }, default));
+
+        // The signature row is the foot of the sheet, bottom-left.
+        var row = new RectangleF(0, custom.Height * 0.85f, custom.Width * 0.5f, custom.Height * 0.15f);
+        Assert.True(Any(custom, row, IsMagenta));
+        Assert.False(Any(nubarca, row, IsMagenta));
+        Assert.False(Any(none, row, IsMagenta));
+        // No logo leaves the wordmark's place — the signature row's left quarter
+        // — as bare paper, where the NubArca sheet has its wordmark.
+        var (fx, fy, fw, fh) = PrintLayouts.PhotoFooter(PrintPapers.Photo10x15, none.Height > none.Width);
+        var signature = new RectangleF(
+            (float)(fx * none.Width), (float)((fy + (fh * 0.62)) * none.Height),
+            (float)(fw * none.Width * 0.3), (float)(fh * 0.38 * none.Height));
+        var paper = none[2, none.Height - 2];
+        Assert.False(Any(none, signature, p => Distance(p, paper) > 40));
+        Assert.True(Any(nubarca, signature, p => Distance(p, paper) > 40));
+    }
+
+    [Fact]
+    public async Task An_Owners_Band_Takes_The_Album_Logo_Only_With_The_Mark_Asked_For()
+    {
+        var composer = new PartyPrintComposer();
+        var plain = new PartyPrintComposition(PartyPrintProducts.Photo, PartyPrintTheme.Pure,
+            [new PartyPrintPhoto(Fixture(0), 0, 0, 1, 1)], string.Empty, null,
+            Words: new PrintSheetWords("Estate", null, "01/07/2019", Brand: true),
+            Logo: PrintLogo.Of(MagentaLogo(400, 200)));
+        using var signed = Image.Load<Rgba32>(await composer.RenderAsync(plain, default));
+        using var unsigned = Image.Load<Rgba32>(await composer.RenderAsync(
+            plain with { Words = plain.Words! with { Brand = false } }, default));
+        var row = new RectangleF(0, signed.Height * 0.85f, signed.Width * 0.5f, signed.Height * 0.15f);
+        Assert.True(Any(signed, row, IsMagenta));
+        Assert.False(Any(unsigned, row, IsMagenta));
+    }
+
+    [Fact]
+    public void A_Logos_Shape_Is_Read_From_Its_Header_And_Junk_Has_None()
+    {
+        Assert.Equal(2.0, PartyPrintComposer.LogoAspect(MagentaLogo(400, 200))!.Value, 3);
+        Assert.Null(PartyPrintComposer.LogoAspect([0x00, 0x01, 0x02]));
+    }
+
     private const string LongLine = "Grazie a tutti di essere venuti, è stata una notte che ricorderemo";
 
     private static (int W, int H) Sheet(bool portrait) => portrait

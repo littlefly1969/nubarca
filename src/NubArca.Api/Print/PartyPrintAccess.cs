@@ -41,8 +41,29 @@ public sealed record PartyPrintAccess(
     /// null on their own printer. Every accepted sheet takes one of its
     /// ceiling, atomically with the job.
     /// </summary>
-    Guid? PrinterShareId = null)
+    Guid? PrinterShareId = null,
+    /// <summary>
+    /// The album's own logo, when it has one the owner may still use (checked
+    /// by <c>PartyMediaReference</c> on every resolve): a guest may choose it
+    /// instead of the NubArca mark. Never sent to the browser as an id.
+    /// </summary>
+    Guid? LogoFileItemId = null,
+    /// <summary>Whether a guest may print with no logo at all (the album's setting, off by default).</summary>
+    bool LogoOptional = false)
 {
+    /// <summary>
+    /// The logo a guest's choice means here, or null when this party does not
+    /// offer it: "custom" needs the album's own logo, "none" the host's
+    /// permission, and anything unreadable is the NubArca mark — the sheet
+    /// every party printed before the choice existed.
+    /// </summary>
+    public PrintLogoKind? Logo(string? choice) => choice?.ToLowerInvariant() switch
+    {
+        "custom" => LogoFileItemId is null ? null : PrintLogoKind.Custom,
+        "none" => LogoOptional ? PrintLogoKind.None : null,
+        _ => PrintLogoKind.NubArca,
+    };
+
     private static readonly PartyPrintProductState Off = new(false, 0);
 
     /// <summary>

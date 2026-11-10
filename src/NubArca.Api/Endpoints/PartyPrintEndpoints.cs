@@ -96,7 +96,12 @@ public static class PartyPrintEndpoints
                 access.FooterText,
                 offered,
                 photos,
-                access.Paper));
+                access.Paper,
+                // The logos this party offers. The album's own is a URL of a
+                // derived image under this same token, never a file id.
+                new PartyPrintLogosDto(
+                    access.LogoFileItemId is null ? null : $"/api/party/{enc}/print/logo",
+                    access.LogoOptional)));
         }).WithName("GetPartyPrintManifest").RequireRateLimiting(PartyPublicRateLimitPolicy);
 
         // Compose it for real.
@@ -140,7 +145,8 @@ public static class PartyPrintEndpoints
                     body.Orientation,
                     body.OverlayText,
                     body.OverlayLogo,
-                    body.PaperSize),
+                    body.PaperSize,
+                    body.Logo),
                 key,
                 participantId,
                 cancellationToken);
@@ -297,7 +303,16 @@ public sealed record PartyPrintManifestDto(
     IReadOnlyList<PartyPrintFormatDto> Formats,
     IReadOnlyList<PartyPrintPhotoDto> Photos,
     /// <summary>The paper the printer has in: every offered product is a sheet of it.</summary>
-    string PaperSize);
+    string PaperSize,
+    /// <summary>Which logos a guest may sign the sheet with. The NubArca mark is always one.</summary>
+    PartyPrintLogosDto? Logos = null);
+
+/// <summary>
+/// The logos a party's sheet may carry besides the NubArca mark: the album's
+/// own (a derived preview URL, or null when it has none) and whether the host
+/// lets a guest print with no logo at all.
+/// </summary>
+public sealed record PartyPrintLogosDto(string? CustomUrl, bool NoneAllowed);
 
 public sealed record PartyPrintFormatDto(
     string Type, bool Enabled, int Remaining, int RequiredPhotos,
@@ -327,7 +342,9 @@ public sealed record PartyPrintPhotoDto(Guid Id, string ThumbnailUrl, string Pre
 public sealed record PartyPrintSubmitBody(
     string? Product, string? Theme, List<PartyPrintSlotBody>? Slots,
     string? Orientation = null, string? OverlayText = null, string? OverlayLogo = null,
-    string? PaperSize = null);
+    string? PaperSize = null,
+    /// <summary>"nubarca" (absent), "custom" or "none" — among those the manifest offers.</summary>
+    string? Logo = null);
 
 /// <summary>
 /// One photograph on the sheet as the studio sends it: a <paramref name="Placement"/>

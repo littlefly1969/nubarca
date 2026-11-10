@@ -109,6 +109,59 @@ public sealed class PartyPrintCapabilityMatrixTests : IDisposable
     }
 
     [Fact]
+    public async Task The_Manifest_Offers_The_Albums_Own_Logo_As_A_Derived_Preview_And_No_Logo_Only_When_Allowed()
+    {
+        var party = await SeedPartyAsync();
+        var anon = _factory.CreateClient();
+        async Task<JsonElement> Logos() => (await anon.GetFromJsonAsync<JsonElement>(
+            $"/api/party/{party.PrintToken}/print")).GetProperty("logos");
+
+        // An album with no logo of its own: the NubArca mark, and it is mandatory.
+        var plain = await Logos();
+        Assert.Equal(JsonValueKind.Null, plain.GetProperty("customUrl").ValueKind);
+        Assert.False(plain.GetProperty("noneAllowed").GetBoolean());
+        Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync($"/api/party/{party.PrintToken}/print/logo")).StatusCode);
+
+        // The party inherits its album's logo and its guests' option.
+        async Task Album(Action<NubArca.Api.Domain.Album> change)
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var album = await db.Albums.SingleAsync(a => a.Id == party.AlbumId);
+            change(album);
+            await db.SaveChangesAsync();
+        }
+        await Album(a => { a.PrintLogoFileItemId = party.PhotoId; a.PrintLogoOptional = true; });
+        var logos = await Logos();
+        var url = logos.GetProperty("customUrl").GetString();
+        Assert.Equal($"/api/party/{party.PrintToken}/print/logo", url);
+        Assert.True(logos.GetProperty("noneAllowed").GetBoolean());
+        // Never the file's id.
+        Assert.DoesNotContain(party.PhotoId.ToString(), logos.GetRawText(), StringComparison.OrdinalIgnoreCase);
+
+        var preview = await anon.GetAsync(url);
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        Assert.Equal("image/png", preview.Content.Headers.ContentType?.MediaType);
+        using (var image = Image.Load<Rgba32>(await preview.Content.ReadAsByteArrayAsync()))
+        {
+            Assert.Null(image.Metadata.ExifProfile);
+            Assert.True(Math.Max(image.Width, image.Height) <= NubArca.Api.Print.AlbumPrintLogoService.PreviewMaxSide);
+        }
+        // The VIEW token is not a print token.
+        Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync($"/api/party/{party.ViewToken}/print/logo")).StatusCode);
+
+        // A logo sent to Trash stops being offered on the next request.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var file = await db.FileItems.SingleAsync(f => f.Id == party.PhotoId);
+            file.DeletedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync(url)).StatusCode);
+    }
+
+    [Fact]
     public async Task A_Print_Token_Is_Published_Only_When_Printing_Would_Work()
     {
         var configured = await SeedPartyAsync(enablePrinting: true);

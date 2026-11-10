@@ -53,6 +53,21 @@ public class Album
     // TV and party wall gets. There is no manual order any more.
     public bool SortOldestFirst { get; set; }
 
+    // The album's own logo for printed sheets — a party's main album gives it
+    // to the party. A reference to one of the owner's ordinary image files,
+    // exactly like CoverFileItemId and for the same reasons NOT a foreign key:
+    // it is validated on write (PartyMediaReference) and again every time a
+    // sheet or a preview uses it, so a logo sent to Trash or into the Private
+    // Vault simply stops being offered. Null: the album has no logo of its own,
+    // and a print may carry the NubArca mark or nothing.
+    public Guid? PrintLogoFileItemId { get; set; }
+
+    // Whether a party's GUESTS may print a sheet with no logo at all. Off by
+    // default: a party sheet has always carried a mark, and stays so unless
+    // the owner says otherwise. The owner's own print and a share's are not
+    // bound by it — they could always leave the mark out.
+    public bool PrintLogoOptional { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

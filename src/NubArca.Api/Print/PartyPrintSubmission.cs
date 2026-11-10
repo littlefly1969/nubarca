@@ -21,7 +21,13 @@ public sealed record PartyPrintSubmitRequest(
     /// 20x15 because the operator changed rolls in between. Absent (a page from
     /// before papers) means 10x15, the only paper there was.
     /// </summary>
-    string? PaperSize = null);
+    string? PaperSize = null,
+    /// <summary>
+    /// "nubarca", "custom" (the album's own logo) or "none". Absent or
+    /// unreadable is the NubArca mark, as every sheet before the choice; a
+    /// choice this party does not offer is refused, never quietly swapped.
+    /// </summary>
+    string? Logo = null);
 
 /// <summary>
 /// One photograph of the sheet and how it is framed. A current studio sends

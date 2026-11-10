@@ -145,3 +145,31 @@ export async function bulkRemoveAlbumItems(
     signal,
   });
 }
+
+/**
+ * An album's own logo for printed sheets (owner only). A party inherits its
+ * main album's. `optional` lets a party's guests print with no logo at all.
+ */
+export interface AlbumPrintLogo {
+  fileItemId: string | null;
+  /** A derived preview, or null when there is no logo or it can no longer be used (Trash, Private Vault). */
+  previewUrl: string | null;
+  optional: boolean;
+}
+
+export async function getAlbumPrintLogo(albumId: string, signal?: AbortSignal): Promise<AlbumPrintLogo> {
+  return api<AlbumPrintLogo>(`/api/albums/${encodeURIComponent(albumId)}/print-logo`, { signal });
+}
+
+/** Refused 400 `invalid_media` for a file that is not one of the owner's images. */
+export async function setAlbumPrintLogo(
+  albumId: string,
+  body: { fileItemId: string | null; optional: boolean },
+  signal?: AbortSignal,
+): Promise<AlbumPrintLogo> {
+  return api<AlbumPrintLogo>(`/api/albums/${encodeURIComponent(albumId)}/print-logo`, {
+    method: 'PUT',
+    json: body,
+    signal,
+  });
+}

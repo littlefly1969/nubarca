@@ -758,7 +758,7 @@ public static class AlbumShareLinkEndpoints
         return resolved.Access;
     }
 
-    private static string? Device(HttpContext httpContext, string token) =>
+    internal static string? Device(HttpContext httpContext, string token) =>
         httpContext.Request.Cookies.TryGetValue(DeviceCookieName(token), out var value)
             ? value
             : null;

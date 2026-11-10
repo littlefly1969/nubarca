@@ -323,6 +323,52 @@ describe('OwnerPrintPage', () => {
     expect(await screen.findByTestId('owner-print-sent')).toHaveTextContent('Inviata alla stampa');
   });
 
+  it('signs Cornice with the album\'s own logo when it has one, and sends the album it comes from', async () => {
+    const user = userEvent.setup();
+    const logoUrl = `/api/albums/${ALBUM}/print-logo/image?v=logo1`;
+    const mock = mount(`/print?album=${ALBUM}&files=f2`, {
+      extra: {
+        [`GET /api/albums/${ALBUM}/print-logo`]: () => jsonResponse({ fileItemId: 'logo1', previewUrl: logoUrl, optional: false }),
+      },
+    });
+    await user.click(await screen.findByTestId('party-print-format-photo'));
+    await user.click(next());
+    await user.click(next());
+    await user.click(screen.getByRole('radio', { name: 'Cornice' }));
+
+    // The album's logo is the default, in place of the NubArca checkbox.
+    expect(await screen.findByTestId('owner-print-logo-custom')).toBeChecked();
+    expect(screen.queryByTestId('owner-print-brand')).toBeNull();
+    expect(screen.getByTestId('print-sheet-logo')).toHaveAttribute('src', logoUrl);
+
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    expect(lastPost(mock.calls)).toMatchObject({ style: 'framed', brand: true, logoAlbumId: ALBUM });
+    expect(lastPost(mock.calls)).not.toHaveProperty('customLogo');
+  });
+
+  it('prints the NubArca mark or none instead of the album\'s logo when asked', async () => {
+    const user = userEvent.setup();
+    const mock = mount(`/print?album=${ALBUM}&files=f2`, {
+      extra: {
+        [`GET /api/albums/${ALBUM}/print-logo`]: () => jsonResponse(
+          { fileItemId: 'logo1', previewUrl: '/logo.png', optional: false }),
+      },
+    });
+    await user.click(await screen.findByTestId('party-print-format-photo'));
+    await user.click(next());
+    await user.click(next());
+    await user.click(screen.getByRole('radio', { name: 'Cornice' }));
+    await user.click(await screen.findByTestId('owner-print-logo-none'));
+    expect(screen.queryByTestId('print-sheet-logo')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    const body = lastPost(mock.calls);
+    expect(body).not.toHaveProperty('brand');
+    expect(body).not.toHaveProperty('logoAlbumId');
+  });
+
   it('sends four photographs in the order they were chosen, framed, with no orientation of their own', async () => {
     const user = userEvent.setup();
     const mock = mount(`/print?album=${ALBUM}&files=f3,f1,f4,f2`);

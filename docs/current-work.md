@@ -96,6 +96,14 @@ is built is described by `ARCHITECTURE.md`.
   name's baseline), not in a corner. The number's measured width
   is reserved, so the host's line never meets it. The preview cuts the name as
   the renderer does and keeps room for `#9999`
+- Print logo: an album may name one of the owner's images as its logo for
+  prints (`Album.PrintLogoFileItemId`, judged by `PartyMediaReference` on write
+  and on every use); a party inherits its main album's. Every print chooses
+  the NubArca mark, that logo (the default when there is one) or none, and
+  the logo takes the mark's place on the photo and in a band, unrecoloured. At
+  a party "none" needs `Album.PrintLogoOptional` (default off); owner and share
+  prints could always omit the mark. Public surfaces get only a derived PNG
+  preview under their own token (`…/print/logo`), never the file id
 - Media tools: FFmpeg 9.0.2 built from pinned sources (`scripts/media-tools`,
   its own image, copied into the API image by digest), replacing Ubuntu's 6.1.
 - HEIC photos: recognised by signature and decoded by FFmpeg through

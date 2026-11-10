@@ -36,6 +36,28 @@ public enum PartyPrintOverlayText { White, Black, Red }
 /// <summary>The NubArca symbol on an "On the photo" print, independent of the words.</summary>
 public enum PartyPrintOverlayLogo { Light, Dark }
 
+/// <summary>Which logo signs a sheet.</summary>
+public enum PrintLogoKind
+{
+    /// <summary>The NubArca mark: the symbol on the photograph, the wordmark in a band.</summary>
+    NubArca,
+    /// <summary>The album's own logo, in the same place, printed exactly as it was given.</summary>
+    Custom,
+    /// <summary>No logo at all.</summary>
+    None,
+}
+
+/// <summary>
+/// The logo a sheet carries: the NubArca mark, the album's own image (its
+/// original's bytes, read inside the server like a photograph's), or none.
+/// </summary>
+public sealed record PrintLogo(PrintLogoKind Kind, byte[]? Image = null)
+{
+    public static readonly PrintLogo NubArca = new(PrintLogoKind.NubArca);
+    public static readonly PrintLogo None = new(PrintLogoKind.None);
+    public static PrintLogo Of(byte[] image) => new(PrintLogoKind.Custom, image);
+}
+
 /// <summary>The two independent choices an "On the photo" print carries.</summary>
 public sealed record PartyPrintOverlay(PartyPrintOverlayText Text, PartyPrintOverlayLogo Logo)
 {
@@ -102,13 +124,22 @@ public sealed record PartyPrintComposition(
     /// a single photograph is laid out as <see cref="PrintLayouts.PopOut"/> and
     /// the subject breaks out over its frame's top edge. Owned by the caller.
     /// </summary>
-    Image<L8>? PopOutMask = null);
+    Image<L8>? PopOutMask = null,
+    /// <summary>
+    /// Which logo signs the sheet. Null is the NubArca mark, so every
+    /// composition from before the choice is drawn exactly as it was. On a
+    /// framed band it is drawn only where <see cref="PrintSheetWords.Brand"/>
+    /// asks for a mark at all.
+    /// </summary>
+    PrintLogo? Logo = null);
 
 /// <summary>
 /// The words in a framed sheet's band: a title line (a party's name, or an
 /// owner's own line), a smaller line under it (the host's), a mark at the right
-/// of the signature row (a guest's number, or an owner's date), and whether the
-/// NubArca wordmark signs the left of that row. Any of them may be absent.
+/// of the signature row (a guest's number, or an owner's date), and whether a
+/// logo — the composition's <see cref="PartyPrintComposition.Logo"/>, the
+/// NubArca wordmark unless it says otherwise — signs the left of that row.
+/// Any of them may be absent.
 /// </summary>
 public sealed record PrintSheetWords(string? Title, string? Line, string? Mark, bool Brand);
 
@@ -457,7 +488,11 @@ public sealed class PartyPrintComposer
         DrawOverlayText(sheet, layout, ink, support);
         // After the words: the name's halo reaches toward its neighbour, and
         // the brand mark is laid over it exactly as shipped, never veiled.
-        DrawSymbol(sheet, overlay.Logo, new Point((int)layout.Symbol.X, (int)layout.Symbol.Y), (int)layout.Symbol.Width);
+        var logo = composition.Logo ?? PrintLogo.NubArca;
+        if (logo.Kind == PrintLogoKind.NubArca)
+            DrawSymbol(sheet, overlay.Logo, new Point((int)layout.Symbol.X, (int)layout.Symbol.Y), (int)layout.Symbol.Width);
+        else if (logo is { Kind: PrintLogoKind.Custom, Image: { } custom })
+            DrawCustomLogo(sheet, custom, layout.Symbol);
         return sheet;
     }
 
@@ -524,8 +559,60 @@ public sealed class PartyPrintComposer
     }
 
     /// <summary>
+    /// The album's own logo, in its own colours and proportions — never
+    /// refilled, never stretched — scaled once, with a sharp filter, into
+    /// <paramref name="box"/>, which the layout already shaped to it.
+    /// </summary>
+    private static void DrawCustomLogo(Image<Rgba32> sheet, byte[] bytes, RectangleF box)
+    {
+        if (box.Width < 1 || box.Height < 1) return;
+        using var logo = LoadOriented(bytes);
+        PrintColourSpace.ToSrgb(logo, logo.Metadata);
+        logo.Mutate(x => x.Resize(new ResizeOptions
+        {
+            Size = new Size(Math.Max(1, (int)Math.Round(box.Width)), Math.Max(1, (int)Math.Round(box.Height))),
+            Sampler = KnownResamplers.Lanczos3,
+        }));
+        sheet.Mutate(x => x.DrawImage(logo, new Point((int)Math.Round(box.X), (int)Math.Round(box.Y)), 1f));
+    }
+
+    /// <summary>
+    /// A custom logo's display shape (width / height, upright), or null when
+    /// its bytes do not say. Read from the header, without decoding it.
+    /// </summary>
+    internal static double? LogoAspect(byte[] bytes)
+    {
+        try
+        {
+            var info = Image.Identify(bytes);
+            var (width, height) = (info.Width, info.Height);
+            // Orientations 5–8 turn the picture a quarter: its sides swap.
+            if (info.Metadata.ExifProfile?.TryGetValue(
+                    SixLabors.ImageSharp.Metadata.Profiles.Exif.ExifTag.Orientation, out var orientation) == true
+                && orientation.Value is >= 5 and <= 8)
+            {
+                (width, height) = (height, width);
+            }
+            return width > 0 && height > 0 ? (double)width / height : null;
+        }
+        catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// How wide a custom logo on the photograph may be, as a share of the
+    /// sheet's width: a long lockup is scaled down until it fits, so it never
+    /// pushes the party's name off its line.
+    /// </summary>
+    internal const double OverlayCustomLogoMaxWidthFraction = 0.30;
+
+    /// <summary>
     /// Where the words go and how big they are — measured, so nothing meets —
-    /// and the square the symbol stands in, just before the name.
+    /// and the box the logo stands in, just before the name: the NubArca
+    /// symbol's square, a custom logo's own shape at the same height (smaller
+    /// if it is very wide), or nothing at all when the sheet carries no logo.
     /// </summary>
     internal sealed record OverlayTextLayout(
         OverlayWord Title, OverlayWord? Footer, OverlayWord? Number, RectangleF Symbol);
@@ -593,9 +680,26 @@ public sealed class PartyPrintComposer
         // number leaves when it shares the bottom line.
         var lineTop = Math.Min(footer?.Box.Top ?? bottom, number?.Box.Top ?? bottom);
         var nameBottom = footer is null ? bottom : lineTop - (lineSize * 0.45f);
-        // The symbol takes the head of the name's line; the name starts after it.
+        // The logo takes the head of the name's line; the name starts after it.
+        // The NubArca symbol is a square; a custom logo keeps its own shape at
+        // the symbol's height, narrowed (and so lowered) if it is very wide;
+        // no logo leaves the line to the name.
         var symbolSize = (float)Math.Round(PartyPrintGeometry.OverlaySymbolFraction * shortEdge);
-        var nameLeft = margin + symbolSize + (float)Math.Round(PartyPrintGeometry.OverlaySymbolGapFraction * shortEdge);
+        var logo = composition.Logo ?? PrintLogo.NubArca;
+        var (logoWidth, logoHeight) = (symbolSize, symbolSize);
+        if (logo.Kind == PrintLogoKind.None
+            || (logo.Kind == PrintLogoKind.Custom && (logo.Image is null || LogoAspect(logo.Image) is null)))
+        {
+            (logoWidth, logoHeight) = (0f, 0f);
+        }
+        else if (logo is { Kind: PrintLogoKind.Custom, Image: { } image } && LogoAspect(image) is double aspect)
+        {
+            logoWidth = Math.Min(symbolSize * (float)aspect, (float)(OverlayCustomLogoMaxWidthFraction * w));
+            logoHeight = logoWidth / (float)aspect;
+        }
+        var nameLeft = logoWidth > 0
+            ? margin + logoWidth + (float)Math.Round(PartyPrintGeometry.OverlaySymbolGapFraction * shortEdge)
+            : margin;
         var nameAvailable = w - margin - nameLeft - (footer is null ? reserved : 0f);
         var titleSize = (float)(PartyPrintGeometry.OverlayTitleFraction * shortEdge);
         var (name, titleFont) = FitLine(
@@ -611,7 +715,7 @@ public sealed class PartyPrintComposer
         // the shipped files), so centring the square centres the boat.
         var caps = TextMeasurer.MeasureBounds("H", title.Options());
         var capsMiddle = (caps.Top + caps.Bottom) / 2f;
-        var symbol = new RectangleF(margin, capsMiddle - (symbolSize / 2f), symbolSize, symbolSize);
+        var symbol = new RectangleF(margin, capsMiddle - (logoHeight / 2f), logoWidth, logoHeight);
         return new OverlayTextLayout(title, footer, number, symbol);
     }
 
@@ -826,13 +930,15 @@ public sealed class PartyPrintComposer
     {
         // A party's band holds only what may ever appear on its paper: the
         // party's name, the line the HOST configured, the guest's number and the
-        // wordmark. A guest writes nothing. An owner's band is the owner's own
-        // line, the date and — only if asked — the mark.
+        // logo the guest chose among those the host allows. A guest writes
+        // nothing. An owner's band is the owner's own line, the date and — only
+        // if asked — the mark.
+        var logo = composition.Logo ?? PrintLogo.NubArca;
         var words = composition.Words ?? new PrintSheetWords(
             composition.PartyName,
             composition.FooterText,
             composition.PublicSequence > 0 ? $"#{composition.PublicSequence}" : null,
-            Brand: true);
+            Brand: logo.Kind != PrintLogoKind.None);
 
         // The things that share this strip of paper are given a DIVIDED area
         // rather than each being placed at its own fraction, which is how the
@@ -875,7 +981,13 @@ public sealed class PartyPrintComposer
         // happen to be near each other.
         var markRow = new Rectangle(
             area.X, area.Y + (int)sizes.TextBand, area.Width, (int)sizes.MarkBand);
-        if (words.Brand) DrawWordmark(sheet, palette, markRow, sizes.WordmarkWidthFraction);
+        if (words.Brand)
+        {
+            if (logo is { Kind: PrintLogoKind.Custom, Image: { } custom })
+                DrawBandLogo(sheet, custom, markRow, sizes.WordmarkWidthFraction);
+            else if (logo.Kind == PrintLogoKind.NubArca)
+                DrawWordmark(sheet, palette, markRow, sizes.WordmarkWidthFraction);
+        }
         DrawMark(sheet, palette, markRow, words.Mark, sizes.NumberSize);
     }
 
@@ -958,6 +1070,23 @@ public sealed class PartyPrintComposer
         // Bottom-left, on the same baseline the number sits on at the right.
         var y0 = area.Y + area.Height - targetHeight;
         sheet.Mutate(x => x.DrawImage(wordmark, new Point(area.X, Math.Max(area.Y, y0)), 1f));
+    }
+
+    /// <summary>
+    /// The album's own logo where the wordmark would stand: fitted to the
+    /// same room on both axes, proportions kept, bottom-left on the row's
+    /// baseline. A logo that cannot be read leaves the place empty rather
+    /// than failing a sheet that is otherwise right.
+    /// </summary>
+    private static void DrawBandLogo(Image<Rgba32> sheet, byte[] bytes, Rectangle area, double widthFraction)
+    {
+        if (LogoAspect(bytes) is not double aspect) return;
+        var maxWidth = Math.Max(BrandMinWordmarkWidth, area.Width * widthFraction);
+        var maxHeight = Math.Max(24, area.Height * WordmarkRowShare);
+        var width = Math.Min(maxWidth, maxHeight * aspect);
+        var height = width / aspect;
+        var y0 = area.Y + area.Height - height;
+        DrawCustomLogo(sheet, bytes, new RectangleF(area.X, (float)Math.Max(area.Y, y0), (float)width, (float)height));
     }
 
     /// <summary>

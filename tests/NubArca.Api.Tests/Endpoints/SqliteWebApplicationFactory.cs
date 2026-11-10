@@ -349,6 +349,9 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
                 NubArca.Api.Albums.Sharing.IAlbumSharePrintService,
                 NubArca.Api.Albums.Sharing.AlbumSharePrintService>();
             services.AddScoped<
+                NubArca.Api.Print.IAlbumPrintLogoService,
+                NubArca.Api.Print.AlbumPrintLogoService>();
+            services.AddScoped<
                 NubArca.Api.Albums.Sharing.IAlbumShareAuth,
                 NubArca.Api.Albums.Sharing.AlbumShareAuth>();
             // The dispatcher and its drain, exactly as Program.cs registers

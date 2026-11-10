@@ -1010,4 +1010,138 @@ public sealed class OwnerPhotoPrintTests : IDisposable
                 if (image[px, py] is { R: < 235 } or { G: < 235 } or { B: < 235 }) count++;
         return count;
     }
+
+    // --- an album's own logo --------------------------------------------------
+
+    /// <summary>A magenta logo on a transparent ground, uploaded as the owner's own PNG.</summary>
+    private async Task<Guid> LogoAsync(HttpClient client, int width = 400, int height = 200)
+    {
+        using var image = new Image<Rgba32>(width, height, new Rgba32(0, 0, 0, 0));
+        for (var y = height / 10; y < height * 9 / 10; y++)
+            for (var x = width / 10; x < width * 9 / 10; x++)
+                image[x, y] = new Rgba32(0xFF, 0x00, 0xFF);
+        using var png = new MemoryStream();
+        image.SaveAsPng(png);
+        var form = new MultipartFormDataContent();
+        var part = new ByteArrayContent(png.ToArray());
+        part.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+        form.Add(part, "file", $"logo{Guid.NewGuid():N}.png");
+        var uploaded = await client.PostAsync("/api/files", form);
+        uploaded.EnsureSuccessStatusCode();
+        var id = (await uploaded.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var file = await db.FileItems.SingleAsync(f => f.Id == id);
+        var meta = await db.BlobMetadata.SingleOrDefaultAsync(m => m.BlobObjectId == file.BlobObjectId);
+        if (meta is null)
+        {
+            meta = new BlobMetadata { Id = Guid.NewGuid(), BlobObjectId = file.BlobObjectId };
+            db.BlobMetadata.Add(meta);
+        }
+        meta.MediaCategory = MediaCategories.Image;
+        meta.DetectedContentType = "image/png";
+        await db.SaveChangesAsync();
+        return id;
+    }
+
+    private static async Task<Guid> AlbumAsync(HttpClient client)
+    {
+        var created = await client.PostAsJsonAsync("/api/albums", new { name = $"Album {Guid.NewGuid():N}" });
+        created.EnsureSuccessStatusCode();
+        return (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+    }
+
+    private static int Magenta(Image<Rgb24> image, int x, int y, int w, int h)
+    {
+        var count = 0;
+        for (var py = Math.Max(0, y); py < Math.Min(image.Height, y + h); py++)
+            for (var px = Math.Max(0, x); px < Math.Min(image.Width, x + w); px++)
+                if (image[px, py] is { R: > 200, G: < 70, B: > 200 }) count++;
+        return count;
+    }
+
+    [Fact]
+    public async Task An_Albums_Logo_Is_The_Owners_To_Set_With_One_Of_Their_Own_Images()
+    {
+        var people = await PeopleAsync();
+        var album = await AlbumAsync(people.Owner);
+        var logo = await LogoAsync(people.Owner);
+        var strangers = await LogoAsync(people.Stranger);
+
+        var empty = await (await people.Owner.GetAsync($"/api/albums/{album}/print-logo")).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(JsonValueKind.Null, empty.GetProperty("fileItemId").ValueKind);
+        Assert.False(empty.GetProperty("optional").GetBoolean());
+
+        // Somebody else's image is not the owner's to print.
+        var foreign = await people.Owner.PutAsJsonAsync($"/api/albums/{album}/print-logo", new { fileItemId = strangers, optional = false });
+        Assert.Equal(HttpStatusCode.BadRequest, foreign.StatusCode);
+        Assert.Equal("invalid_media", await Error(foreign));
+        // And the album is nobody else's to configure.
+        Assert.Equal(HttpStatusCode.NotFound, (await people.Stranger.PutAsJsonAsync(
+            $"/api/albums/{album}/print-logo", new { fileItemId = strangers, optional = true })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await people.Stranger.GetAsync($"/api/albums/{album}/print-logo")).StatusCode);
+
+        var set = await people.Owner.PutAsJsonAsync($"/api/albums/{album}/print-logo", new { fileItemId = logo, optional = true });
+        Assert.Equal(HttpStatusCode.OK, set.StatusCode);
+        var settings = await set.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(logo, settings.GetProperty("fileItemId").GetGuid());
+        Assert.True(settings.GetProperty("optional").GetBoolean());
+        var previewUrl = settings.GetProperty("previewUrl").GetString()!;
+
+        // The preview is a small derived PNG, never the original.
+        var preview = await people.Owner.GetAsync(previewUrl);
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        Assert.Equal("image/png", preview.Content.Headers.ContentType?.MediaType);
+        using var image = Image.Load<Rgba32>(await preview.Content.ReadAsByteArrayAsync());
+        Assert.True(image.Width <= AlbumPrintLogoService.PreviewMaxSide && image.Height <= AlbumPrintLogoService.PreviewMaxSide);
+        Assert.Equal(0, image[0, 0].A);
+        Assert.Null(image.Metadata.ExifProfile);
+        Assert.Equal(HttpStatusCode.NotFound, (await people.Stranger.GetAsync(previewUrl)).StatusCode);
+
+        // Removed, it is gone; the guests' option is its own.
+        var cleared = await people.Owner.PutAsJsonAsync($"/api/albums/{album}/print-logo", new { fileItemId = (Guid?)null, optional = true });
+        var after = await cleared.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(JsonValueKind.Null, after.GetProperty("fileItemId").ValueKind);
+        Assert.True(after.GetProperty("optional").GetBoolean());
+        Assert.Equal(HttpStatusCode.NotFound, (await people.Owner.GetAsync(previewUrl)).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_Framed_Print_Is_Signed_With_The_Albums_Logo_Only_When_Asked_And_Only_Where_There_Is_One()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var photo = await PhotoAsync(people.Owner, 200, 300, color: Blue);
+        var album = await AlbumAsync(people.Owner);
+        object Signed(bool brand, Guid? logoAlbum) => new
+        {
+            printStationId = printer.StationId, printerDeviceId = printer.DeviceId, expectedPaperSize = "10x15",
+            layout = "photo", style = "framed", orientation = "portrait", brand, includeDate = false,
+            logoAlbumId = logoAlbum,
+            photos = new[] { new { fileItemId = photo, placement = new { centerX = 0.5, centerY = 0.5, zoom = 1.0 } } },
+        };
+
+        // An album with no logo of its own has none to print.
+        var none = await Submit(people.Owner, Signed(true, album));
+        Assert.Equal(HttpStatusCode.BadRequest, none.StatusCode);
+        // Another owner's album, logo or not, is not this owner's to name.
+        var strangersAlbum = await AlbumAsync(people.Stranger);
+        await people.Stranger.PutAsJsonAsync($"/api/albums/{strangersAlbum}/print-logo",
+            new { fileItemId = await LogoAsync(people.Stranger), optional = false });
+        Assert.Equal(HttpStatusCode.BadRequest, (await Submit(people.Owner, Signed(true, strangersAlbum))).StatusCode);
+
+        (await people.Owner.PutAsJsonAsync($"/api/albums/{album}/print-logo",
+            new { fileItemId = await LogoAsync(people.Owner), optional = false })).EnsureSuccessStatusCode();
+        // A logo is a choice of WHICH mark: never without the mark.
+        Assert.Equal(HttpStatusCode.BadRequest, (await Submit(people.Owner, Signed(false, album))).StatusCode);
+
+        Assert.Equal(HttpStatusCode.Accepted, (await Submit(people.Owner, Signed(true, album))).StatusCode);
+        var job = await Db(db => db.PrintJobs.OrderByDescending(j => j.CreatedAt).FirstAsync());
+        Assert.Equal("custom", JsonDocument.Parse(job.RenderSpecificationJson).RootElement.GetProperty("logo").GetString());
+
+        using var sheet = await PrintedSheetAsync(printer);
+        var band = PrintLayouts.PhotoFooter("10x15", portrait: true);
+        var (bandTop, bandHeight) = ((int)(band.Y * 1800), (int)(band.Height * 1800));
+        Assert.True(Magenta(sheet, (int)(band.X * 1200), bandTop + bandHeight / 2, 400, bandHeight / 2) > 50, "the album's logo");
+    }
 }

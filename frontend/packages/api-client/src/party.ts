@@ -849,6 +849,16 @@ export type PartyPrintTheme = 'pure' | 'midnight' | 'event' | 'overlay';
 export type PartyPrintOverlayText = 'white' | 'black' | 'red';
 /** Its NubArca symbol, chosen independently of the words. */
 export type PartyPrintOverlayLogo = 'light' | 'dark';
+/** Which logo signs the sheet: the NubArca mark, the album's own logo, or none. */
+export type PartyPrintLogo = 'nubarca' | 'custom' | 'none';
+
+/** The logos a party offers besides the NubArca mark, which is always one. */
+export interface PartyPrintLogos {
+  /** A derived preview of the album's own logo, or null when it has none. */
+  customUrl: string | null;
+  /** Whether the host lets a guest print with no logo at all. */
+  noneAllowed: boolean;
+}
 /** Absent means the sheet follows the photograph, which is the default. */
 export type PartyPrintOrientation = 'portrait' | 'landscape';
 
@@ -893,6 +903,8 @@ export interface PartyPrintManifest {
   photos: PartyPrintPhoto[];
   /** The paper in the printer. Absent from a server before papers: 10x15. */
   paperSize?: PartyPrintPaperSize;
+  /** Absent from a server before the choice: the NubArca mark only. */
+  logos?: PartyPrintLogos | null;
 }
 
 /** A crop, normalised to the auto-oriented source so the server reads it the same. */
@@ -957,6 +969,8 @@ export function submitPartyPrint(
     /** Only with theme 'overlay'. */
     overlayText?: PartyPrintOverlayText;
     overlayLogo?: PartyPrintOverlayLogo;
+    /** Absent: the NubArca mark. 'custom' and 'none' only where the manifest offers them. */
+    logo?: PartyPrintLogo;
     /** The paper the sheet was composed for; refused as paper_changed if the printer's is not. */
     paperSize?: PartyPrintPaperSize;
   },

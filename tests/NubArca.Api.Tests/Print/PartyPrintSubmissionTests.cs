@@ -164,6 +164,67 @@ public sealed class PartyPrintSubmissionTests : IDisposable
             .SingleAsync(p => p.PartyAlbumId == albumId);
     }
 
+    // --- which logo signs the sheet ----------------------------------------------
+
+    [Fact]
+    public async Task No_Choice_Is_The_NubArca_Mark_As_Every_Sheet_Before_It()
+    {
+        var (access, _) = await SeedAsync();
+        var result = await SubmitAsync(access, Request(PartyPrintProducts.Photo, _photos[0]), "logo-default");
+        Assert.True(result.Ok, result.Refusal.ToString());
+        var (_, _, _, spec) = await JobAsync(result.Accepted!.JobId);
+        Assert.Equal("nubarca", spec.GetProperty("logo").GetString());
+    }
+
+    [Fact]
+    public async Task The_Album_Logo_Is_Refused_Where_The_Album_Has_None_And_Nothing_Is_Spent()
+    {
+        var (access, albumId) = await SeedAsync(photoMax: 3);
+        var result = await SubmitAsync(access, Request(PartyPrintProducts.Photo, _photos[0]) with { Logo = "custom" }, "logo-c1");
+        Assert.Equal(PartyPrintRefusal.Invalid, result.Refusal);
+        Assert.Equal(0, (await ProfileAsync(albumId)).PhotoAcceptedCount);
+    }
+
+    [Fact]
+    public async Task No_Logo_Is_Refused_Unless_The_Host_Allows_It()
+    {
+        var (access, albumId) = await SeedAsync(photoMax: 3);
+        var refused = await SubmitAsync(access, Request(PartyPrintProducts.Photo, _photos[0]) with { Logo = "none" }, "logo-n1");
+        Assert.Equal(PartyPrintRefusal.Invalid, refused.Refusal);
+        Assert.Equal(0, (await ProfileAsync(albumId)).PhotoAcceptedCount);
+
+        var allowed = await SubmitAsync(access with { LogoOptional = true },
+            Request(PartyPrintProducts.Photo, _photos[0]) with { Logo = "none" }, "logo-n2");
+        Assert.True(allowed.Ok, allowed.Refusal.ToString());
+        var (_, _, _, spec) = await JobAsync(allowed.Accepted!.JobId);
+        Assert.Equal("none", spec.GetProperty("logo").GetString());
+    }
+
+    [Theory]
+    [InlineData("pure")]
+    [InlineData("overlay")]
+    public async Task The_Album_Logo_Prints_When_The_Album_Has_One(string theme)
+    {
+        var (access, _) = await SeedAsync();
+        var result = await SubmitAsync(access with { LogoFileItemId = _photos[8] },
+            Request(PartyPrintProducts.Photo, _photos[0]) with { Theme = theme, Logo = "custom" }, $"logo-ok-{theme}");
+        Assert.True(result.Ok, result.Refusal.ToString());
+        var (_, _, _, spec) = await JobAsync(result.Accepted!.JobId);
+        Assert.Equal("custom", spec.GetProperty("logo").GetString());
+    }
+
+    [Fact]
+    public async Task An_Unreadable_Album_Logo_Is_Refused_And_Gives_Back_What_It_Took()
+    {
+        var (access, albumId) = await SeedAsync(photoMax: 3);
+        using var scope = _factory.Services.CreateScope();
+        var result = await Service(scope, new BrokenSources()).SubmitAsync(
+            access with { LogoFileItemId = _photos[8] },
+            Request(PartyPrintProducts.Photo, _photos[0]) with { Logo = "custom" }, "logo-broken", null, default);
+        Assert.Equal(PartyPrintRefusal.Invalid, result.Refusal);
+        Assert.Equal(0, (await ProfileAsync(albumId)).PhotoAcceptedCount);
+    }
+
     // --- framing by placement --------------------------------------------------
 
     /// <summary>Gives a seeded photograph a known display shape.</summary>

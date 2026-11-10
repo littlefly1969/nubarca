@@ -1025,6 +1025,9 @@ if (!string.IsNullOrWhiteSpace(connectionString))
         NubArca.Api.Albums.Sharing.IAlbumSharePrintService,
         NubArca.Api.Albums.Sharing.AlbumSharePrintService>();
     builder.Services.AddScoped<
+        NubArca.Api.Print.IAlbumPrintLogoService,
+        NubArca.Api.Print.AlbumPrintLogoService>();
+    builder.Services.AddScoped<
         NubArca.Api.Albums.Sharing.IAlbumShareAuth,
         NubArca.Api.Albums.Sharing.AlbumShareAuth>();
     // The code dispatcher is OWNED work, not fire-and-forget: a bounded channel
@@ -1752,6 +1755,7 @@ app.MapPartyGameEndpoints();
 app.MapPartyDisplayEndpoints();
 app.MapPartyPrintEndpoints();
 app.MapPartyPrintOwnerEndpoints();
+app.MapAlbumPrintLogoEndpoints();
 
 // PARTY CREW: the host's collaborator panel, the pairing surface, and the
 // collaborator's own view of the party. See Endpoints/PartyCrewEndpoints.cs for
