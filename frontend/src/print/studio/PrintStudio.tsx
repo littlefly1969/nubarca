@@ -61,6 +61,8 @@ export interface StudioBand {
   /** Two 10x15: each half's own mark, in the order of its photographs (each its own date). */
   marks?: readonly (string | null)[];
   brand: boolean;
+  /** With `brand`: the album's own logo, drawn where the wordmark would stand. Absent: the wordmark. */
+  logoUrl?: string | null;
 }
 
 export interface StudioSlot { itemId: string; placement: PhotoPlacement }
@@ -254,7 +256,16 @@ function SheetBand({ band, dark, strip = false }: {
           puts them. A guest's queue number is never previewed: it does not
           exist until the print is accepted. */}
       <span className="party-print-sheet-sign">
-        {band.brand && (
+        {band.brand && band.logoUrl && (
+          <img
+            className="party-print-sheet-mark party-print-sheet-logo"
+            data-testid="print-sheet-logo"
+            src={band.logoUrl}
+            alt=""
+            style={{ maxWidth: pct(strip ? STRIP_WORDMARK_WIDTH_FRACTION : FOOTER_WORDMARK_WIDTH_FRACTION) }}
+          />
+        )}
+        {band.brand && !band.logoUrl && (
           <img
             className={strip ? 'party-print-sheet-mark party-print-sheet-mark-strip' : 'party-print-sheet-mark'}
             src={dark ? WORDMARK_DARK : WORDMARK_LIGHT}

@@ -82,13 +82,23 @@ export interface AlbumSharePrinter {
   cutsStrips: boolean;
   /** Every cut sheet the printer makes itself. */
   cutFormats?: PrintCutFormat[] | null;
+  /** The album has its own logo a visitor may sign the band with (see albumSharePrintLogoUrl). */
+  customLogo?: boolean;
+}
+
+/** A derived preview of the album's own logo, under the share's print grant. */
+export function albumSharePrintLogoUrl(token: string): string {
+  return `/api/album-share/${encodeURIComponent(token)}/print/logo`;
 }
 
 /**
  * A visitor's print: the owner's print request WITHOUT its authority. No
  * owner, no station, no printer — the server takes them from the share.
  */
-export type AlbumSharePrintRequest = Omit<OwnerPhotoPrintRequest, 'printStationId' | 'printerDeviceId'>;
+export type AlbumSharePrintRequest = Omit<OwnerPhotoPrintRequest, 'printStationId' | 'printerDeviceId' | 'logoAlbumId'> & {
+  /** With `brand`: the shared album's own logo in place of the NubArca wordmark. */
+  customLogo?: boolean;
+};
 
 export interface AlbumSharePrintAccepted {
   shortCode: string;

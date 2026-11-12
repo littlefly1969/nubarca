@@ -9,6 +9,7 @@ import { usePermissions } from '../../auth/usePermissions';
 import { PERMISSIONS } from '../../auth/permissions';
 import { useI18n } from '../../i18n';
 import { PartyPrintSettings } from '../../albums/PartyPrintSettings';
+import { AlbumPrintLogoSettings } from '../../albums/AlbumPrintLogoSettings';
 import { mainMediaSource } from '../partyModel';
 import { absoluteGuestUrl } from './PartyShareCard';
 import { usePartyApi } from './partyApi';
@@ -139,6 +140,9 @@ export function PartyScreensSection({
           testId="party-print"
         >
           <PartyPrintSettings albumId={albumId} />
+          {/* The party's logo is its main album's: the same control, the same
+              setting. The host's — it is a file of their library. */}
+          {api.isOwner && <AlbumPrintLogoSettings albumId={albumId} />}
           {/* The host's own sheet for the tables, on the printer chosen
               above. An owner's: a collaborator runs the evening's printing,
               not the host's photographs on paper. */}

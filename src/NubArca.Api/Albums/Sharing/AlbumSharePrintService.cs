@@ -50,7 +50,9 @@ public sealed record AlbumSharePrintSubmitRequest(
     bool Brand = false,
     bool IncludeDate = false,
     string? DateLocale = null,
-    string? TimeZone = null);
+    string? TimeZone = null,
+    /// <summary>With <see cref="Brand"/>: the album's own logo instead of the NubArca mark.</summary>
+    bool CustomLogo = false);
 
 /// <summary>
 /// The owner's printer as a visitor's studio sees it: whether it can print now,
@@ -58,7 +60,12 @@ public sealed record AlbumSharePrintSubmitRequest(
 /// sheets it makes. No name, no id.
 /// </summary>
 public sealed record AlbumSharePrintDto(bool Available, string Paper, bool CutsStrips,
-    IReadOnlyList<string>? CutFormats = null);
+    IReadOnlyList<string>? CutFormats = null,
+    /// <summary>
+    /// The album has a logo of its own a visitor may sign the band with; its
+    /// preview is a derived image under this share's token (…/print/logo).
+    /// </summary>
+    bool CustomLogo = false);
 
 /// <summary>An accepted print, as a visitor sees it: its short code and its place in the queue.</summary>
 public sealed record AlbumSharePrintAccepted(string ShortCode, string State, int QueueAhead);
@@ -96,9 +103,14 @@ public sealed class AlbumSharePrintService : IAlbumSharePrintService
     {
         if (!access.CanPrint) return null;
         var printer = await ResolvePrinterAsync(access.OwnerUserId, cancellationToken);
+        var hasLogo = await _db.Albums.AsNoTracking()
+            .Where(a => a.Id == access.AlbumId && a.OwnerUserId == access.OwnerUserId)
+            .Select(a => a.PrintLogoFileItemId)
+            .FirstOrDefaultAsync(cancellationToken) is Guid logo
+            && await PartyMediaReference.IsEligibleAsync(_db, access.OwnerUserId, logo, cancellationToken);
         return printer is null
-            ? new AlbumSharePrintDto(false, PrintPapers.Photo10x15, false)
-            : new AlbumSharePrintDto(printer.Online, printer.Paper, printer.CutsStrips, printer.CutFormats);
+            ? new AlbumSharePrintDto(false, PrintPapers.Photo10x15, false, CustomLogo: hasLogo)
+            : new AlbumSharePrintDto(printer.Online, printer.Paper, printer.CutsStrips, printer.CutFormats, hasLogo);
     }
 
     public async Task<OwnerPhotoPrintDate?> ResolveDateAsync(
@@ -158,7 +170,9 @@ public sealed class AlbumSharePrintService : IAlbumSharePrintService
                 Style: request.Style,
                 Photos: photos,
                 Caption: request.Caption,
-                Brand: request.Brand),
+                Brand: request.Brand,
+                // The album's logo is THIS album's: a visitor names no album.
+                LogoAlbumId: request.CustomLogo ? access.AlbumId : null),
             idempotencyKey, cancellationToken, new OwnerPrintOrigin(access.AlbumId));
     }
 

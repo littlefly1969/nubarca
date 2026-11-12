@@ -593,6 +593,14 @@
   object-fit: contain;
   pointer-events: none;
 }
+/* A custom logo keeps its own shape at the symbol's height, and is held to the
+   renderer's share of the sheet's width (it is narrowed, and so lowered). */
+.party-print-overlay-symbol.is-custom {
+  width: auto;
+  max-width: 30cqw;
+  height: auto;
+  max-height: var(--symbol-size);
+}
 .party-print-overlay-text {
   display: flex;
   flex-direction: column;
@@ -664,6 +672,16 @@
    than it prints. */
 .party-print-sheet-mark-strip {
   min-width: 0;
+}
+
+/* The album's own logo where the wordmark stands: its own proportions, as
+   wide as the wordmark may be and no taller than the signature row. */
+.party-print-sheet-logo {
+  width: auto;
+  min-width: 0;
+  height: auto;
+  max-height: 7cqw;
+  object-fit: contain;
 }
 
 /* An owner's date at the right of the signature row, where a guest's number

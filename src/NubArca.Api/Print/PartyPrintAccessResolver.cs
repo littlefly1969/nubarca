@@ -115,15 +115,24 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
             Math.Max(0, profile.GridMaxPrints - profile.GridAcceptedCount),
             profile.GridPrintsPerGuest);
 
-        var partyName = await _db.Albums.AsNoTracking()
+        var album = await _db.Albums.AsNoTracking()
             .Where(a => a.Id == link.AlbumId)
-            .Select(a => a.Name)
-            .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
+            .Select(a => new { a.Name, a.PrintLogoFileItemId, a.PrintLogoOptional })
+            .FirstOrDefaultAsync(cancellationToken);
+        var partyName = album?.Name ?? string.Empty;
+        // The album's logo, while it is still a file the owner may show: one
+        // sent to Trash or into the Private Vault stops being offered here, on
+        // the next request, without anybody rewriting the album.
+        var logo = album?.PrintLogoFileItemId is Guid logoId
+            && await PartyMediaReference.IsEligibleAsync(_db, link.OwnerUserId, logoId, cancellationToken)
+            ? logoId
+            : (Guid?)null;
 
         var access = new PartyPrintAccess(
             link.Id, link.AlbumId, link.OwnerUserId, use.StationId, device.Id,
             partyName, profile.FooterText, photo, strip, stripCutByPrinter,
-            PrintCalibration.Of(device), grid, paper, use.ShareId);
+            PrintCalibration.Of(device), grid, paper, use.ShareId,
+            logo, album?.PrintLogoOptional == true);
 
         // Nothing left to offer is the same as printing being closed: the guest
         // hub must not show a card that leads only to exhausted products, or to

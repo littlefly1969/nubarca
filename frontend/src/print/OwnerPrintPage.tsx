@@ -4,7 +4,9 @@ import {
   ApiError,
   PERMISSIONS,
   getAlbum,
+  getAlbumPrintLogo,
   getAlbumShare,
+  albumSharePrintLogoUrl,
   getAlbumShareItems,
   getAlbumSharePrintDate,
   getAlbumSharePrinter,
@@ -169,7 +171,15 @@ interface PrintSource {
   submit(target: PrintTarget, request: PrintRequest, key: string): Promise<{ shortCode: string; queueAhead: number }>;
   /** Photographs to start from, by id. */
   preselected: string[];
+  /**
+   * A preview of the album's own logo when it has one — a framed band may be
+   * signed with it instead of the NubArca wordmark — or null.
+   */
+  loadCustomLogo(signal: AbortSignal): Promise<string | null>;
 }
+
+/** Which logo signs a framed band: none, the NubArca wordmark, or the album's own logo. */
+type LogoChoice = 'none' | 'nubarca' | 'custom';
 
 export function OwnerPrintPage() {
   const { t, tn } = useI18n();
@@ -207,8 +217,13 @@ export function OwnerPrintPage() {
         };
       },
       resolveDate: (fileItemId, timeZone, signal) => getOwnerPhotoPrintDate(fileItemId, timeZone, signal),
-      submit: (target, request, key) => submitOwnerPhotoPrint({
+      // Only an album has a logo of its own; the library's selection has none.
+      loadCustomLogo: async (signal) => (albumId
+        ? (await getAlbumPrintLogo(albumId, signal)).previewUrl
+        : null),
+      submit: (target, { customLogo, ...request }, key) => submitOwnerPhotoPrint({
         ...request, printStationId: target.stationId, printerDeviceId: target.deviceId,
+        ...(customLogo && albumId ? { logoAlbumId: albumId } : {}),
       }, key),
     };
   }, [albumId, files]);
@@ -276,6 +291,9 @@ export function SharePrintPage() {
       };
     },
     resolveDate: (fileItemId, timeZone, signal) => getAlbumSharePrintDate(token, fileItemId, timeZone, signal),
+    loadCustomLogo: async (signal) => ((await getAlbumSharePrinter(token, signal)).customLogo
+      ? albumSharePrintLogoUrl(token)
+      : null),
     submit: (_target, request, key) => submitAlbumSharePrint(token, request, key),
   }), [token]);
   return <PrintPage source={source} back={<Link to=".." relative="path">{t('sharePrint.backToAlbum')}</Link>} />;
@@ -339,7 +357,22 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
   // --- the owner's choices ------------------------------------------------------
   const [style, setStyle] = useState<PrintStyleChoice>('fullBleed');
   const [caption, setCaption] = useState('');
-  const [brand, setBrand] = useState(false);
+  // The album's own logo, when it has one: it is then what a framed band
+  // starts signed with. Null: the default — the album's logo, else no mark.
+  const [customLogoUrl, setCustomLogoUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    from.loadCustomLogo(controller.signal)
+      .then(setCustomLogoUrl)
+      .catch(() => { if (!controller.signal.aborted) setCustomLogoUrl(null); });
+    return () => controller.abort();
+  }, [from]);
+  const [chosenLogo, setChosenLogo] = useState<LogoChoice | null>(null);
+  const logo: LogoChoice = chosenLogo === 'custom' && !customLogoUrl
+    ? 'none'
+    : chosenLogo ?? (customLogoUrl ? 'custom' : 'none');
+  const brand = logo !== 'none';
+  const setBrand = (on: boolean) => setChosenLogo(on ? 'nubarca' : 'none');
   const [includeDate, setIncludeDate] = useState(false);
   const [chosen, setChosen] = useState<{ ids: string[]; layout: PrintLayout | null }>({ ids: [], layout: null });
   const onChosenChange = useCallback(
@@ -354,7 +387,7 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
   const resetChoices = useCallback(() => {
     setStyle('fullBleed');
     setCaption('');
-    setBrand(false);
+    setChosenLogo(null);
     setIncludeDate(false);
   }, []);
 
@@ -477,6 +510,7 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
         ...(composition.orientation ? { orientation: composition.orientation } : {}),
         ...(framed && line ? { caption: line } : {}),
         ...(framed && brand ? { brand: true } : {}),
+        ...(framed && logo === 'custom' ? { customLogo: true } : {}),
         includeDate,
         ...(includeDate ? { dateLocale: lang, timeZone: browserTimeZone() } : {}),
       }, composition.key);
@@ -646,13 +680,14 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
         paperColor={(layout) => (framedFor(layout) ? FRAMED_PAPER : FULL_BLEED_PAPER)}
         band={{
           title: caption.replace(/\s+/g, ' ').trim() || null, line: null, mark: dateText, brand,
+          logoUrl: logo === 'custom' ? customLogoUrl : null,
           marks: chosen.layout === 'photo2' ? dateTexts : undefined,
         }}
         fullBleedWords={dateText ? (sheet) => {
           const text = dateTexts[sheet.index] ?? null;
           return text ? <PrintedDate text={text} sheet={sheet} /> : null;
         } : undefined}
-        compositionKey={JSON.stringify([target?.key, style, caption, brand, includeDate, lang, subjectPoint])}
+        compositionKey={JSON.stringify([target?.key, style, caption, logo, includeDate, lang, subjectPoint])}
         submitError={error ? t(error) : null}
         submitting={submitting}
         canSubmit={target !== null && target.unavailable === null && !captionInvalid
@@ -726,15 +761,43 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
                     {t(captionInvalid ? 'ownerPrint.captionInvalid' : 'ownerPrint.captionHelp', { max: CAPTION_MAX_LENGTH })}
                   </span>
                 </label>
-                <label className="party-print-theme">
-                  <input
-                    type="checkbox"
-                    checked={brand}
-                    onChange={(event) => setBrand(event.target.checked)}
-                    data-testid="owner-print-brand"
-                  />
-                  <span>{t('ownerPrint.brand')}</span>
-                </label>
+                {customLogoUrl ? (
+                  // The album has a logo of its own: which mark signs the band.
+                  <fieldset className="party-print-choice" data-testid="owner-print-logo">
+                    <legend>{t('ownerPrint.logo')}</legend>
+                    <div className="party-print-choice-grid">
+                      {(['custom', 'nubarca', 'none'] as const).map((option) => (
+                        <label key={option} className="party-print-option">
+                          <input
+                            type="radio"
+                            className="party-print-option-input"
+                            name="owner-print-logo"
+                            value={option}
+                            checked={logo === option}
+                            onChange={() => setChosenLogo(option)}
+                            data-testid={`owner-print-logo-${option}`}
+                          />
+                          {option === 'custom' && (
+                            <span className="party-print-swatch party-print-swatch-mark" aria-hidden="true">
+                              <img src={customLogoUrl} alt="" />
+                            </span>
+                          )}
+                          <span>{t(`ownerPrint.logo.${option}`)}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : (
+                  <label className="party-print-theme">
+                    <input
+                      type="checkbox"
+                      checked={brand}
+                      onChange={(event) => setBrand(event.target.checked)}
+                      data-testid="owner-print-brand"
+                    />
+                    <span>{t('ownerPrint.brand')}</span>
+                  </label>
+                )}
               </div>
             )}
             <label className="party-print-theme">

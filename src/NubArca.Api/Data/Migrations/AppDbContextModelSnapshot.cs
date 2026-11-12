@@ -2025,6 +2025,14 @@ namespace NubArca.Api.Data.Migrations
                     b.Property<Guid>("OwnerUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("PrintLogoFileItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("PrintLogoOptional")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("ShowOnTv")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
