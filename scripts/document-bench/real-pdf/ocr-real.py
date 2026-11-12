@@ -320,7 +320,7 @@ def process_document(folder):
                 if identity != last:
                     print(f"PDF {folder.name}: Paddle {identity}", flush=True)
                     last = identity
-                if time.time() - state["at"] > 300:
+                if time.time() - state["at"] > float(os.environ.get("OCR_PAGE_TIMEOUT_SECONDS", "300")):
                     timed_out = True
                     os.killpg(worker.pid, signal.SIGKILL)
                     break
@@ -362,7 +362,7 @@ def report(root):
                "pages": sum(d["pages"] for d in manifest["documents"]), "engines": {},
                "note": "Nessuna misura di accuratezza: trascrizioni di riferimento non disponibili.",
                "render": "200 dpi; limite 20 megapixel con dpi effettivi registrati per pagina",
-               "max_tokens_per_region": 4096, "timeout_seconds_per_page": 300,
+               "max_tokens_per_region": 4096, "timeout_seconds_per_page": float(os.environ.get("OCR_PAGE_TIMEOUT_SECONDS", "300")),
                "models": {"ocr": OCR_REV, "layout": LAYOUT_REV}}
     rows = []
     for engine in ("tesseract", "paddle"):
