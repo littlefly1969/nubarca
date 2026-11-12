@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { readStoredItem } from '../storage/brandedStorageKey';
 
 // The mail workspace's panel arrangement: which of the three layouts the owner
@@ -204,12 +204,18 @@ export interface MailLayoutControls {
 export function useMailLayout(): MailLayoutControls {
   const [prefs, setPrefs] = useState<MailLayoutPrefs>(readMailLayout);
 
+  // Written back after a change has rendered, never inside the state updater:
+  // an updater must stay pure (React may call it twice in Strict Mode). The
+  // preference read at mount is not written back, only a change to it.
+  const stored = useRef(prefs);
+  useEffect(() => {
+    if (stored.current === prefs) return;
+    stored.current = prefs;
+    writeMailLayout(prefs);
+  }, [prefs]);
+
   const update = useCallback((change: (p: MailLayoutPrefs) => MailLayoutPrefs) => {
-    setPrefs((prev) => {
-      const next = change(prev);
-      writeMailLayout(next);
-      return next;
-    });
+    setPrefs(change);
   }, []);
 
   const setMode = useCallback((mode: MailLayoutMode) => update((p) => ({ ...p, mode })), [update]);
