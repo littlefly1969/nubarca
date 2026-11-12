@@ -54,14 +54,16 @@ public sealed record PartyPrintAccess(
     /// <summary>
     /// The logo a guest's choice means here, or null when this party does not
     /// offer it: "custom" needs the album's own logo, "none" the host's
-    /// permission, and anything unreadable is the NubArca mark — the sheet
-    /// every party printed before the choice existed.
+    /// permission. No choice at all is the NubArca mark — the sheet every
+    /// party printed before the choice existed — and so is "nubarca"; any
+    /// other word is refused, never quietly read as the mark.
     /// </summary>
     public PrintLogoKind? Logo(string? choice) => choice?.ToLowerInvariant() switch
     {
+        null or "nubarca" => PrintLogoKind.NubArca,
         "custom" => LogoFileItemId is null ? null : PrintLogoKind.Custom,
         "none" => LogoOptional ? PrintLogoKind.None : null,
-        _ => PrintLogoKind.NubArca,
+        _ => null,
     };
 
     private static readonly PartyPrintProductState Off = new(false, 0);

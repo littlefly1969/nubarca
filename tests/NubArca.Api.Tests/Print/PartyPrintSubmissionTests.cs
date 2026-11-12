@@ -185,6 +185,33 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         Assert.Equal(0, (await ProfileAsync(albumId)).PhotoAcceptedCount);
     }
 
+    [Theory]
+    [InlineData("custmo")]
+    [InlineData("")]
+    [InlineData("album")]
+    public async Task An_Unknown_Logo_Choice_Is_Refused_Not_Read_As_NubArca(string choice)
+    {
+        // Even where every logo is on offer, a word that names none of them is
+        // a malformed request: printing the NubArca mark instead would print
+        // a sheet the guest did not ask for.
+        var (access, albumId) = await SeedAsync(photoMax: 3);
+        var result = await SubmitAsync(access with { LogoFileItemId = _photos[8], LogoOptional = true },
+            Request(PartyPrintProducts.Photo, _photos[0]) with { Logo = choice }, $"logo-bad-{choice}");
+        Assert.Equal(PartyPrintRefusal.Invalid, result.Refusal);
+        Assert.Equal(0, (await ProfileAsync(albumId)).PhotoAcceptedCount);
+    }
+
+    [Fact]
+    public async Task The_NubArca_Mark_Is_Accepted_When_Named()
+    {
+        var (access, _) = await SeedAsync(photoMax: 3);
+        var result = await SubmitAsync(access with { LogoFileItemId = _photos[8] },
+            Request(PartyPrintProducts.Photo, _photos[0]) with { Logo = "NubArca" }, "logo-named");
+        Assert.True(result.Ok, result.Refusal.ToString());
+        var (_, _, _, spec) = await JobAsync(result.Accepted!.JobId);
+        Assert.Equal("nubarca", spec.GetProperty("logo").GetString());
+    }
+
     [Fact]
     public async Task No_Logo_Is_Refused_Unless_The_Host_Allows_It()
     {
