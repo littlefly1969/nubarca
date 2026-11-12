@@ -141,6 +141,9 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
             return Refuse(OwnerPhotoPrintErrors.InvalidCaption);
         if (style == PrintLayouts.FullBleed && (caption is not null || request.Brand))
             return Refuse(OwnerPhotoPrintErrors.InvalidRequest);
+        // An album's own logo is a choice of WHICH mark: only with a mark.
+        if (request.LogoAlbumId is not null && !request.Brand)
+            return Refuse(OwnerPhotoPrintErrors.InvalidRequest);
 
         TimeZoneInfo? zone = null;
         if (request.IncludeDate)
@@ -162,7 +165,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 request.IncludeDate ? zone!.Id : null)
             : SheetFingerprint(layout, style, fileIds, placements, stationId, deviceId, paper, portrait,
                 caption, request.Brand, request.IncludeDate, request.IncludeDate ? request.DateLocale : null,
-                request.IncludeDate ? zone!.Id : null, subjectPoint);
+                request.IncludeDate ? zone!.Id : null, subjectPoint, request.LogoAlbumId);
         if (await RepeatAsync(ownerUserId, keyHash, fingerprint, cancellationToken) is { } repeat) return repeat;
 
         // 3. The photographs: the caller's own, in their library, and photographs
@@ -185,6 +188,22 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         var photographs = await _db.FileItems.AsNoTracking().Where(f => fileIds.Contains(f.Id))
             .Where(LibraryPhotoRule.IsPhoto(_db)).CountAsync(cancellationToken);
         if (photographs != fileIds.Count) return Refuse(OwnerPhotoPrintErrors.NotImage);
+
+        // The album's own logo, when asked for: the owner's album, with a logo
+        // the owner may still use. Read with the photographs, below.
+        Guid? logoFileId = null;
+        if (request.LogoAlbumId is Guid logoAlbumId)
+        {
+            logoFileId = await _db.Albums.AsNoTracking()
+                .Where(a => a.Id == logoAlbumId && a.OwnerUserId == ownerUserId)
+                .Select(a => a.PrintLogoFileItemId)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (logoFileId is not Guid chosenLogo
+                || !await Party.PartyMediaReference.IsEligibleAsync(_db, ownerUserId, chosenLogo, cancellationToken))
+            {
+                return Refuse(OwnerPhotoPrintErrors.InvalidRequest);
+            }
+        }
 
         // 4. The printer, by the one rule every print path asks.
         var use = await _printers.ForUserAsync(ownerUserId, stationId, deviceId, cancellationToken);
@@ -283,6 +302,24 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
 
         try
         {
+            // The album's logo, read and released before the photographs are
+            // opened, so its decode slot is never held while theirs are asked for.
+            PrintLogo? logo = null;
+            if (logoFileId is Guid logoId)
+            {
+                byte[]? logoBytes;
+                await using (var logoSource = await _sources.OpenAsync(ownerUserId, [logoId], cancellationToken))
+                {
+                    logoBytes = logoSource?.Photos[0];
+                }
+                if (logoBytes is null || PartyPrintComposer.LogoAspect(logoBytes) is null)
+                {
+                    await ReturnUnlessAcceptedAsync();
+                    return Refuse(OwnerPhotoPrintErrors.InvalidRequest);
+                }
+                logo = PrintLogo.Of(logoBytes);
+            }
+
             // 10. The originals, read inside the server.
             // Held until the sheet is drawn: a HEIC frame keeps its decode slot.
             await using var sources = await _sources.OpenAsync(ownerUserId, fileIds, cancellationToken);
@@ -321,7 +358,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 artifact = joined
                     ? PrintArtifactParts.Pack(await RenderHalvesAsync(layout, style,
                         [.. sources.Photos.Select(bytes => bytes!)], placements, photoPortrait,
-                        caption, request.Brand, dateTexts, PrintCalibration.Of(device), cancellationToken))
+                        caption, request.Brand, dateTexts, PrintCalibration.Of(device), cancellationToken, logo))
                     : style == PrintLayouts.FullBleed
                     ? await _renderer.RenderOwnerPhotoAsync(new OwnerPhotoComposition(
                         sources.Photos[0]!, paper, portrait, placements[0], dateText, PrintCalibration.Of(device)),
@@ -337,7 +374,8 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                         Calibration: PrintCalibration.Of(device),
                         Paper: paper,
                         Words: new PrintSheetWords(caption, null, dateText, request.Brand),
-                        PopOutMask: subject?.Mask),
+                        PopOutMask: subject?.Mask,
+                        Logo: logo),
                         cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -390,6 +428,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                         subject = subjectPoint is { } sp ? new { x = sp.X, y = sp.Y } : null,
                         caption,
                         brand = request.Brand,
+                        logo = !request.Brand ? "none" : logo is null ? "nubarca" : "custom",
                         includeDate = request.IncludeDate,
                         resolvedDate = date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                         // Two 10x15: each photograph's own date, in order.
@@ -500,7 +539,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
     private async Task<IReadOnlyList<byte[]>> RenderHalvesAsync(
         string layout, string style, IReadOnlyList<byte[]> photos, IReadOnlyList<PhotoPlacement> placements,
         bool photoPortrait, string? caption, bool brand, IReadOnlyList<string> dateTexts,
-        PrintCalibration calibration, CancellationToken cancellationToken)
+        PrintCalibration calibration, CancellationToken cancellationToken, PrintLogo? logo = null)
     {
         var halves = new List<byte[]>(PrintLayouts.HalvesPerSheet);
         var perHalf = layout == PrintLayouts.Photo2 ? 1 : photos.Count / PrintLayouts.HalvesPerSheet;
@@ -525,7 +564,8 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 Orientation: photoPortrait ? PartyPrintOrientation.Portrait : PartyPrintOrientation.Landscape,
                 Calibration: calibration,
                 Paper: PrintPapers.Photo10x15,
-                Words: new PrintSheetWords(caption, null, date, brand)),
+                Words: new PrintSheetWords(caption, null, date, brand),
+                Logo: logo),
                 cancellationToken));
         }
         return halves;
@@ -560,7 +600,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
     internal static string SheetFingerprint(
         string layout, string style, IReadOnlyList<Guid> fileIds, IReadOnlyList<PhotoPlacement> placements,
         Guid stationId, Guid deviceId, string paper, bool portrait, string? caption, bool brand,
-        bool includeDate, string? dateLocale, string? zone, SubjectPoint? subject = null)
+        bool includeDate, string? dateLocale, string? zone, SubjectPoint? subject = null, Guid? logoAlbumId = null)
     {
         static string N(double v) => Math.Round(v, 6).ToString("R", CultureInfo.InvariantCulture);
         var photos = fileIds.Select((id, i) =>
@@ -572,6 +612,8 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         // The touched subject changes which subject breaks out. Appended only
         // when there is one, so every other composition keeps its digest.
         if (subject is { } point) canonical += $"|subject:{N(point.X)}:{N(point.Y)}";
+        // Likewise an album's own logo in place of the NubArca mark.
+        if (logoAlbumId is Guid album) canonical += $"|logo:{album:N}";
         return Hash(canonical);
     }
 

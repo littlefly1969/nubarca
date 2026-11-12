@@ -13,8 +13,10 @@ import { usePermissions } from '../auth/usePermissions';
 import { PERMISSIONS } from '../auth/permissions';
 import { useI18n } from '../i18n';
 import { AlbumPartyBridge } from './AlbumPartyBridge';
+import { AlbumPrintLogoSettings } from './AlbumPrintLogoSettings';
 
-// The album's own settings: rename, description, Show-on-TV, delete.
+// The album's own settings: rename, description, Show-on-TV, the logo its
+// printed sheets may carry, delete.
 //
 // Party used to live here in full — guest access, upload switches, moderation
 // links, slideshow numbers, the game and its deck, printing — because there was
@@ -155,6 +157,10 @@ export function AlbumSettingsPanel({
           {/* Party's own destination owns the rest. This is a bridge: which
               party this album belongs to, and the way in. */}
           {canParty && <AlbumPartyBridge albumId={albumId} partyMode={party?.partyMode ?? false} />}
+        </fieldset>
+
+        <fieldset className="ws-filter-section">
+          <AlbumPrintLogoSettings albumId={albumId} />
         </fieldset>
 
         <fieldset className="ws-filter-section">

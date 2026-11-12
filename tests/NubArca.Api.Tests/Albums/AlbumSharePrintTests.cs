@@ -129,6 +129,36 @@ public sealed class AlbumSharePrintTests : IDisposable
     }
 
     [Fact]
+    public async Task A_verified_visitor_may_sign_the_band_with_the_shared_albums_own_logo()
+    {
+        var shared = await SharedAlbumAsync(secondFactor: true, allowPrint: true);
+        var visitor = await VerifiedVisitorAsync(shared.Token);
+        var framed = new { style = "framed", brand = true, customLogo = true, orientation = "portrait" };
+
+        // No logo of its own: nothing to offer, and asking for it is refused.
+        var bare = await visitor.GetFromJsonAsync<JsonElement>($"/api/album-share/{shared.Token}/print");
+        Assert.False(bare.GetProperty("customLogo").GetBoolean());
+        Assert.Equal(HttpStatusCode.BadRequest, (await SubmitAsync(visitor, shared.Token, PrintBody(shared.Photo, framed))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await visitor.GetAsync($"/api/album-share/{shared.Token}/print/logo")).StatusCode);
+
+        var logo = await PhotoAsync(shared.Owner);
+        (await shared.Owner.PutAsJsonAsync($"/api/albums/{shared.Album}/print-logo", new { fileItemId = logo, optional = false }))
+            .EnsureSuccessStatusCode();
+        var offered = await visitor.GetAsync($"/api/album-share/{shared.Token}/print");
+        Assert.True((await offered.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("customLogo").GetBoolean());
+        Assert.DoesNotContain(logo.ToString(), await offered.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        var preview = await visitor.GetAsync($"/api/album-share/{shared.Token}/print/logo");
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        Assert.Equal("image/png", preview.Content.Headers.ContentType?.MediaType);
+        // Only a visitor allowed to print sees it.
+        Assert.Equal(HttpStatusCode.NotFound, (await _factory.CreateClient().GetAsync($"/api/album-share/{shared.Token}/print/logo")).StatusCode);
+
+        Assert.Equal(HttpStatusCode.Accepted, (await SubmitAsync(visitor, shared.Token, PrintBody(shared.Photo, framed))).StatusCode);
+        var spec = JsonDocument.Parse((await Db(db => db.PrintJobs.SingleAsync())).RenderSpecificationJson).RootElement;
+        Assert.Equal("custom", spec.GetProperty("logo").GetString());
+    }
+
+    [Fact]
     public async Task A_retry_after_a_lost_response_gets_its_job_even_when_the_chosen_printer_changed()
     {
         var shared = await SharedAlbumAsync(secondFactor: true, allowPrint: true);

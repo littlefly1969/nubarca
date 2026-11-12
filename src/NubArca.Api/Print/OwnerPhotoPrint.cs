@@ -49,7 +49,13 @@ public sealed record OwnerPhotoPrintSubmitRequest(
     /// upright photograph. Absent: every subject breaks out. The server lifts
     /// it again from this point — a mask is never taken from the browser.
     /// </summary>
-    OwnerPrintSubjectRequest? Subject = null);
+    OwnerPrintSubjectRequest? Subject = null,
+    /// <summary>
+    /// With <see cref="Brand"/>: the owner's album whose own logo signs the
+    /// band in place of the NubArca wordmark. Refused without Brand, for an
+    /// album that is not the owner's, or one with no usable logo.
+    /// </summary>
+    Guid? LogoAlbumId = null);
 
 /// <summary>A touched point, normalized to the upright photograph: (0,0) top-left, (1,1) bottom-right.</summary>
 public sealed record OwnerPrintSubjectRequest(double X, double Y)

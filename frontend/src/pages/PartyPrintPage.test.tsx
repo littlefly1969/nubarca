@@ -502,7 +502,7 @@ describe('PartyPrintPage (public print studio)', () => {
 
     // The other looks carry none of the overlay's own choices.
     expect(screen.queryByRole('group', { name: 'Colore del testo' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: 'Logo' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Simbolo NubArca' })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('radio', { name: 'Sulla foto' }));
     const sheet = screen.getByTestId('party-print-sheet');
@@ -520,7 +520,7 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(within(sheet).queryByText(/#\d/)).not.toBeInTheDocument();
 
     const text = screen.getByRole('group', { name: 'Colore del testo' });
-    const logo = screen.getByRole('group', { name: 'Logo' });
+    const logo = screen.getByRole('group', { name: 'Simbolo NubArca' });
     expect(within(text).getAllByRole('radio').map((r) => r.getAttribute('value')))
       .toEqual(['white', 'black', 'red']);
     expect(within(logo).getAllByRole('radio').map((r) => r.getAttribute('value')))
@@ -553,6 +553,78 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(lastPost(mock.calls)).toMatchObject({
       theme: 'overlay', overlayText: 'black', overlayLogo: 'dark',
     });
+  });
+
+  // --- Which logo signs the sheet ----------------------------------------------
+
+  const LOGO_URL = `/api/party/${TOKEN}/print/logo`;
+
+  it('offers no logo choice when the party has only the NubArca mark, and sends none', async () => {
+    const user = setup();
+    const mock = mount(manifest({ logos: { customUrl: null, noneAllowed: false } }), {
+      [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
+    });
+    render(wrapper());
+    await compose(user, 'photo');
+    expect(screen.queryByTestId('party-print-logo')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('print-sheet-logo')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    expect(lastPost(mock.calls)).not.toHaveProperty('logo');
+  });
+
+  it('starts from the party logo, and offers NubArca and no logo when the host allows it', async () => {
+    const user = setup();
+    const mock = mount(manifest({ logos: { customUrl: LOGO_URL, noneAllowed: true } }), {
+      [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
+    });
+    render(wrapper());
+    await compose(user, 'photo');
+
+    const group = screen.getByTestId('party-print-logo');
+    expect(within(group).getAllByRole('radio').map((r) => r.getAttribute('value')))
+      .toEqual(['nubarca', 'custom', 'none']);
+    expect(within(group).getByRole('radio', { name: 'Logo della festa' })).toBeChecked();
+    // The band carries the album's logo where the wordmark would be.
+    expect(screen.getByTestId('print-sheet-logo')).toHaveAttribute('src', LOGO_URL);
+
+    await user.click(within(group).getByRole('radio', { name: 'Nessun logo' }));
+    expect(screen.queryByTestId('print-sheet-logo')).not.toBeInTheDocument();
+    expect(within(screen.getByTestId('party-print-sheet')).queryByAltText('NubArca')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    expect(lastPost(mock.calls)).toMatchObject({ logo: 'none' });
+  });
+
+  it('never offers "no logo" unless the host allows it', async () => {
+    const user = setup();
+    mount(manifest({ logos: { customUrl: LOGO_URL, noneAllowed: false } }));
+    render(wrapper());
+    await compose(user, 'photo');
+    const group = screen.getByTestId('party-print-logo');
+    expect(within(group).getAllByRole('radio').map((r) => r.getAttribute('value')))
+      .toEqual(['nubarca', 'custom']);
+  });
+
+  it('puts the party logo before the name on the photo, without the symbol\'s colour choice', async () => {
+    const user = setup();
+    const mock = mount(manifest({ logos: { customUrl: LOGO_URL, noneAllowed: false } }), {
+      [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
+    });
+    render(wrapper());
+    await compose(user, 'photo');
+    await user.click(screen.getByRole('radio', { name: 'Sulla foto' }));
+
+    expect(screen.getByTestId('party-print-overlay-logo')).toHaveAttribute('src', LOGO_URL);
+    expect(screen.queryByTestId('party-print-overlay-symbol')).not.toBeInTheDocument();
+    // Light and dark are the NubArca symbol's treatments: not offered for another logo.
+    expect(screen.queryByRole('group', { name: 'Simbolo NubArca' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    expect(lastPost(mock.calls)).toMatchObject({ theme: 'overlay', logo: 'custom' });
+    expect(lastPost(mock.calls)).not.toHaveProperty('overlayLogo');
   });
 
   // --- The title on the photo: the preview is the renderer's layout ----------
@@ -677,7 +749,7 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(within(text).getByRole('radio', { name: 'Nero' })).toBeChecked();
     expect(screen.getByTestId('party-print-sheet')).toHaveAttribute('data-overlay-text', 'black');
     await user.tab();
-    expect(within(screen.getByRole('group', { name: 'Logo' })).getByRole('radio', { name: 'Chiaro' }))
+    expect(within(screen.getByRole('group', { name: 'Simbolo NubArca' })).getByRole('radio', { name: 'Chiaro' }))
       .toHaveFocus();
   });
 
@@ -712,7 +784,7 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(screen.queryByRole('radio', { name: 'Sulla foto' })).not.toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Chiaro' })).toBeChecked();
     expect(screen.queryByRole('group', { name: 'Colore del testo' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: 'Logo' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Simbolo NubArca' })).not.toBeInTheDocument();
   });
 
   it('shows the brand\'s own light and dark marks, in their colours, for the symbol', async () => {
@@ -726,7 +798,7 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(symbol).toHaveAttribute('src', '/brand/nubarca-mark-flat-on-dark-256.png');
     // No flat fill of any colour over an outline.
     expect(symbol.style.backgroundColor).toBe('');
-    const logo = screen.getByRole('group', { name: 'Logo' });
+    const logo = screen.getByRole('group', { name: 'Simbolo NubArca' });
     // Each choice shows the mark it will print.
     const swatch = (name: string) => within(logo).getByRole('radio', { name })
       .closest('label')?.querySelector('img');

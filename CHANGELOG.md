@@ -4,6 +4,28 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.7 — 2026-11-10
+
+### A custom logo on printed sheets
+
+- **An album can have its own logo for prints** (album settings, and the
+  party's "Schermi e stampa" for its main album): an image uploaded into the
+  owner's library, referenced like a party cover and re-checked on every use,
+  so a logo sent to Trash or into the Private Vault simply stops being offered.
+  A party inherits its main album's logo. Migration `AddAlbumPrintLogo` adds
+  the nullable `albums.PrintLogoFileItemId` and `albums.PrintLogoOptional`
+  (default false); automated and compatible with the previous application.
+- **Whoever prints chooses the logo**: the NubArca mark, the album's logo
+  (preselected when there is one) or none. The album's logo takes the mark's
+  place — before the name on "Sulla foto", where the wordmark stands in a
+  band — in its own colours and proportions.
+- **At a party a logo stays mandatory** unless the owner switches on "Alla
+  festa si può stampare senza logo". The owner's own print and a share's print
+  could always leave the mark out, and still can.
+- Previews are small derived PNGs (`/api/albums/{id}/print-logo/image`,
+  `/api/party/{printToken}/print/logo`, `/api/album-share/{token}/print/logo`):
+  never the original, never the file's id on a public surface.
+
 ## 0.4.6 — 2026-10-22
 
 ### Help assistant and system RAG removed

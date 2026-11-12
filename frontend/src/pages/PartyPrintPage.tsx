@@ -12,6 +12,8 @@ import {
   type PartyPrintTheme,
   type PartyPrintOverlayText,
   type PartyPrintOverlayLogo,
+  type PartyPrintLogo,
+  type PartyPrintLogos,
 } from '@nubarca/api-client';
 import type { PrintLayout } from '@nubarca/contracts';
 import { useI18n, type MessageKey } from '../i18n';
@@ -109,6 +111,23 @@ const STATE_LABEL: Record<PartyPrintState, MessageKey> = {
 const SETTLED: readonly PartyPrintState[] = ['completed', 'failed', 'unknown'] as const;
 const STATUS_POLL_MS = 4_000;
 
+/**
+ * The logos this party offers, in the order they are shown: the NubArca mark
+ * always, the album's own when it has one, none only when the host allows it.
+ */
+function logoOptions(logos: PartyPrintLogos | null | undefined): PartyPrintLogo[] {
+  return [
+    'nubarca',
+    ...(logos?.customUrl ? ['custom' as const] : []),
+    ...(logos?.noneAllowed ? ['none' as const] : []),
+  ];
+}
+
+/** The album's own logo, when the party has one, is what a sheet starts with. */
+function defaultLogo(logos: PartyPrintLogos | null | undefined): PartyPrintLogo {
+  return logos?.customUrl ? 'custom' : 'nubarca';
+}
+
 type Phase =
   | { kind: 'loading' }
   | { kind: 'ready'; manifest: PartyPrintManifest }
@@ -202,12 +221,15 @@ function OverlayWords({ partyName, footerText, orientation, symbol }: {
 }
 
 /** The party's title on a full-bleed photograph: its support, its words, its symbol. */
-function OverlayBlock({ sheet, partyName, footerText, overlayText, overlayLogo }: {
+function OverlayBlock({ sheet, partyName, footerText, overlayText, overlayLogo, logo, customLogoUrl }: {
   sheet: FullBleedSheet;
   partyName: string;
   footerText: string | null;
   overlayText: PartyPrintOverlayText;
   overlayLogo: PartyPrintOverlayLogo;
+  /** Which logo stands before the name: the NubArca symbol, the album's own, or none. */
+  logo: PartyPrintLogo;
+  customLogoUrl: string | null;
 }) {
   const { width: w, height: h } = sheet;
   const short = Math.min(w, h);
@@ -247,7 +269,15 @@ function OverlayBlock({ sheet, partyName, footerText, overlayText, overlayLogo }
           partyName={partyName}
           footerText={footerText}
           orientation={sheet.portrait ? 'portrait' : 'landscape'}
-          symbol={(
+          symbol={logo === 'none' ? null : logo === 'custom' && customLogoUrl ? (
+            <img
+              className="party-print-overlay-symbol is-custom"
+              data-testid="party-print-overlay-logo"
+              src={customLogoUrl}
+              alt=""
+              aria-hidden="true"
+            />
+          ) : (
             <img
               className="party-print-overlay-symbol"
               data-testid="party-print-overlay-symbol"
@@ -270,12 +300,16 @@ export function PartyPrintPage() {
   const [look, setLook] = useState<Look>('pure');
   const [overlayText, setOverlayText] = useState<PartyPrintOverlayText>('white');
   const [overlayLogo, setOverlayLogo] = useState<PartyPrintOverlayLogo>('light');
+  // Null: the party's default (its own logo when it has one). Read through
+  // `logo` below, which also drops a choice the party no longer offers.
+  const [chosenLogo, setChosenLogo] = useState<PartyPrintLogo | null>(null);
   // Another format, or a print sent: the next sheet starts from the defaults.
   // Going back without changing the format keeps every choice.
   const resetLook = useCallback(() => {
     setLook('pure');
     setOverlayText('white');
     setOverlayLogo('light');
+    setChosenLogo(null);
   }, []);
   // The theme the server is sent: the overlay exists only for a single photograph.
   const themeFor = useCallback((layout: PrintLayout): PartyPrintTheme => (look === 'overlay'
@@ -341,6 +375,11 @@ export function PartyPrintPage() {
   }, [token, sent]);
 
   const manifest = phase.kind === 'ready' ? phase.manifest : null;
+  const logos = logoOptions(manifest?.logos);
+  const logo: PartyPrintLogo = chosenLogo !== null && logos.includes(chosenLogo)
+    ? chosenLogo
+    : defaultLogo(manifest?.logos);
+  const customLogoUrl = manifest?.logos?.customUrl ?? null;
 
   const photoById = useMemo(() => new Map(
     (manifest?.photos ?? []).map((photo) => [photo.id, photo] as const),
@@ -438,7 +477,10 @@ export function PartyPrintPage() {
           // Omitted when the guest left the default: the server follows the
           // photograph, which is what it did before this choice existed.
           ...(composition.orientation ? { orientation: composition.orientation } : {}),
-          ...(theme === 'overlay' ? { overlayText, overlayLogo } : {}),
+          ...(theme === 'overlay' ? { overlayText, ...(logo === 'nubarca' ? { overlayLogo } : {}) } : {}),
+          // Omitted for the NubArca mark, the sheet every party printed before
+          // the choice — so a server from before it reads the same request.
+          ...(logo !== 'nubarca' ? { logo } : {}),
           // The paper this sheet was composed for: if the printer's is no
           // longer it, nothing is printed and the studio starts again.
           paperSize: paper,
@@ -558,7 +600,11 @@ export function PartyPrintPage() {
         sheetTheme={themeFor}
         bandDark={(layout) => DARK_THEMES.includes(themeFor(layout))}
         paperColor={(layout) => PRINT_BAND[themeFor(layout)]}
-        band={{ title: phase.manifest.partyName, line: phase.manifest.footerText, mark: null, brand: true }}
+        band={{
+          title: phase.manifest.partyName, line: phase.manifest.footerText, mark: null,
+          brand: logo !== 'none',
+          logoUrl: logo === 'custom' ? customLogoUrl : null,
+        }}
         fullBleedWords={(sheet) => (
           <OverlayBlock
             sheet={sheet}
@@ -566,10 +612,12 @@ export function PartyPrintPage() {
             footerText={phase.manifest.footerText}
             overlayText={overlayText}
             overlayLogo={overlayLogo}
+            logo={logo}
+            customLogoUrl={customLogoUrl}
           />
         )}
-        sheetData={{ 'data-overlay-text': overlayText, 'data-overlay-logo': overlayLogo }}
-        compositionKey={JSON.stringify([look, overlayText, overlayLogo])}
+        sheetData={{ 'data-overlay-text': overlayText, 'data-overlay-logo': overlayLogo, 'data-logo': logo }}
+        compositionKey={JSON.stringify([look, overlayText, overlayLogo, logo])}
         submitError={submitError ? t(submitError) : null}
         submitting={submitting}
         resetSignal={resetSignal}
@@ -592,6 +640,33 @@ export function PartyPrintPage() {
                 </label>
               ))}
             </fieldset>
+            {/* Which logo signs the sheet — shown only when there is a choice:
+                the album's own logo, or the host letting guests print none. */}
+            {logos.length > 1 && (
+              <fieldset className="party-print-choice" data-testid="party-print-logo">
+                <legend>{t('partyPrint.logo')}</legend>
+                <div className="party-print-choice-grid">
+                  {logos.map((option) => (
+                    <label key={option} className="party-print-option">
+                      <input
+                        type="radio"
+                        className="party-print-option-input"
+                        name="party-print-logo"
+                        value={option}
+                        checked={logo === option}
+                        onChange={() => setChosenLogo(option)}
+                      />
+                      {option !== 'none' && (
+                        <span className="party-print-swatch party-print-swatch-mark" aria-hidden="true">
+                          <img src={option === 'custom' ? customLogoUrl! : OVERLAY_LOGO.dark.swatch} alt="" />
+                        </span>
+                      )}
+                      <span>{t(`partyPrint.logo.${option}`)}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            )}
             {/* Only for "On the photo": two independent choices, each a group
                 of option cards over real radio inputs, sized for a thumb. */}
             {layout === 'photo' && look === 'overlay' && (
@@ -619,6 +694,8 @@ export function PartyPrintPage() {
                     ))}
                   </div>
                 </fieldset>
+                {/* The NubArca symbol's two treatments: only when it is the logo. */}
+                {logo === 'nubarca' && (
                 <fieldset className="party-print-choice">
                   <legend>{t('partyPrint.overlayLogo')}</legend>
                   <div className="party-print-choice-grid">
@@ -640,6 +717,7 @@ export function PartyPrintPage() {
                     ))}
                   </div>
                 </fieldset>
+                )}
               </div>
             )}
           </>

@@ -140,6 +140,11 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         // stored metadata, before anything is reserved. A photograph whose shape
         // is not known yet may be framed as it always could, at zoom 1 and in.
         var theme = ThemeFor(productId, request.Theme);
+        // The logo: one this party offers, or the request is refused before
+        // anything is reserved — a sheet is never signed with something the
+        // guest did not choose.
+        if (access.Logo(request.Logo) is not PrintLogoKind logoKind)
+            return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
         var orientation = productId == PartyPrintProducts.Photo
             ? ParseOrientation(request.Orientation)
             : PartyPrintOrientation.FollowPhoto;
@@ -275,6 +280,29 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         {
             // 5. Compose. Reading the originals is a server-side act: their
             // bytes never travel to the browser.
+            //
+            // The album's logo first, read and released before the photographs
+            // are opened, so its decode slot is never held while theirs are
+            // asked for. A logo that went away since the studio was opened is a
+            // choice that no longer exists: refused, never printed as another.
+            var logo = PrintLogo.NubArca;
+            if (logoKind == PrintLogoKind.None) logo = PrintLogo.None;
+            else if (logoKind == PrintLogoKind.Custom)
+            {
+                byte[]? logoBytes = null;
+                if (access.LogoFileItemId is Guid logoId)
+                {
+                    await using var logoSource = await _sources.OpenAsync(access.OwnerUserId, [logoId], cancellationToken);
+                    logoBytes = logoSource?.Photos[0];
+                }
+                if (logoBytes is null || PartyPrintComposer.LogoAspect(logoBytes) is null)
+                {
+                    await ReleaseUnlessAcceptedAsync();
+                    return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
+                }
+                logo = PrintLogo.Of(logoBytes);
+            }
+
             // Held until the sheet is drawn: HEIC frames keep their decode slots.
             await using var sources = await _sources.OpenAsync(
                 access.OwnerUserId, request.Slots.Select(s => s.ItemId).ToList(), cancellationToken);
@@ -308,7 +336,8 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 orientation,
                 access.Calibration,
                 overlay,
-                paper), cancellationToken);
+                paper,
+                Logo: logo), cancellationToken);
             // What was actually printed, read off the sheet itself rather than
             // re-derived: a photograph that followed its own shape says so here.
             var drawn = SixLabors.ImageSharp.Image.Identify(artifact);
@@ -363,6 +392,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                         theme = theme.ToString().ToLowerInvariant(),
                         overlayText = overlay?.Text.ToString().ToLowerInvariant(),
                         overlayLogo = overlay?.Logo.ToString().ToLowerInvariant(),
+                        logo = logoKind.ToString().ToLowerInvariant(),
                     }),
                     ArtifactStorageKey = stored.StorageKey,
                     ArtifactContentType = "image/jpeg",
