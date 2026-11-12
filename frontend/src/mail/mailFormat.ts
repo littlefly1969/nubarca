@@ -20,3 +20,14 @@ export function senderLabel(a: MailAddress | null | undefined): string {
   if (!a) return '';
   return a.name?.trim() || a.address?.trim() || '';
 }
+
+// How much of a date a list row needs: the time for today, day and month for
+// this year, the short date for anything older. The full date is the row's
+// tooltip.
+export function listDateStyle(iso: string, now: Date): Intl.DateTimeFormatOptions {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return { dateStyle: 'short' };
+  if (d.toDateString() === now.toDateString()) return { timeStyle: 'short' };
+  if (d.getFullYear() === now.getFullYear()) return { day: 'numeric', month: 'short' };
+  return { dateStyle: 'short' };
+}

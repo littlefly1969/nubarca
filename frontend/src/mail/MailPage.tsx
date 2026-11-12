@@ -13,6 +13,7 @@ import { MailImportPanel } from './MailImportPanel';
 import { MailMessageListView } from './MailMessageListView';
 import { MailReader } from './MailReader';
 import { MailSearchForm } from './MailSearchForm';
+import { focusInPane, MailWorkspace, type MailListPresentation } from './MailWorkspace';
 import { useArchiveFolders } from './useArchiveFolders';
 import { useMailMessages } from './useMailMessages';
 import type { MailArchive, MailMessageDetail } from './types';
@@ -105,7 +106,7 @@ export function MailPage() {
     lastOpened.current = null;
     const row = Array.from(document.querySelectorAll<HTMLElement>('[data-message-id]'))
       .find((el) => el.dataset.messageId === id);
-    row?.focus();
+    if (row) focusInPane(row);
   }, [messageId]);
 
   const closeReader = useCallback(() => {
@@ -134,7 +135,7 @@ export function MailPage() {
   ) : null;
 
   return (
-    <section className="ws-page-outer mail-page" data-testid="mail-page">
+    <section className={view === 'mail' ? 'ws-page-outer mail-page is-workspace' : 'ws-page-outer mail-page'} data-testid="mail-page">
       <header className="ws-page-header">
         <h1>{t('mail.title')}</h1>
         <p className="muted">{t('mail.intro')}</p>
@@ -221,51 +222,57 @@ interface MailBrowserProps {
   onSearch: (next: MailFilters) => void;
 }
 
-// Outlook-like three panes on a wide screen; on a phone, stacked navigation:
-// folders and list, then the message alone with a way back.
+// The mail application: archive and folders, the search toolbar, the list and
+// the reader, arranged by MailWorkspace in the layout the owner picked.
 function MailBrowser({ archives, archiveId, filters, list, messageId, reader, hrefFor, onNavigate, onSearch }: MailBrowserProps) {
   const { t } = useI18n();
   const folderLoads = useArchiveFolders([archiveId]);
   const folderLoad = folderLoads[archiveId];
   const scoped = useMemo(() => ({ ...filters, archiveId }), [filters, archiveId]);
+  const searching = hasSearchCriteria(filters);
+
+  const renderList = useCallback((presentation: MailListPresentation) => (
+    <MailMessageListView
+      list={list}
+      selectedId={messageId}
+      hrefFor={hrefFor}
+      searching={searching}
+      presentation={presentation}
+    />
+  ), [list, messageId, hrefFor, searching]);
+
+  const folders = (
+    <>
+      <label className="mail-field">
+        <span>{t('mail.sidebar.archive')}</span>
+        <select
+          value={archiveId}
+          onChange={(e) => onNavigate({ ...filters, archiveId: e.target.value, folderId: null })}
+          data-testid="mail-archive-select"
+        >
+          {archives.map((a) => <option key={a.id} value={a.id}>{a.displayName}</option>)}
+        </select>
+      </label>
+      {(!folderLoad || folderLoad.kind === 'loading') && <p className="muted" role="status">{t('common.loading')}</p>}
+      {folderLoad?.kind === 'error' && <p className="inline-error" role="alert">{t('mail.folders.error')}</p>}
+      {folderLoad?.kind === 'ready' && (
+        <MailFolderTree
+          folders={folderLoad.folders}
+          selectedId={filters.folderId}
+          onSelect={(folderId) => onNavigate({ ...scoped, folderId })}
+        />
+      )}
+    </>
+  );
 
   return (
-    <div className={messageId ? 'mail-browser has-reader' : 'mail-browser'} data-testid="mail-browser">
-      <aside className="mail-sidebar" aria-label={t('mail.sidebar.label')}>
-        <label className="mail-field">
-          <span>{t('mail.sidebar.archive')}</span>
-          <select
-            value={archiveId}
-            onChange={(e) => onNavigate({ ...filters, archiveId: e.target.value, folderId: null })}
-            data-testid="mail-archive-select"
-          >
-            {archives.map((a) => <option key={a.id} value={a.id}>{a.displayName}</option>)}
-          </select>
-        </label>
-        {(!folderLoad || folderLoad.kind === 'loading') && <p className="muted" role="status">{t('common.loading')}</p>}
-        {folderLoad?.kind === 'error' && <p className="inline-error" role="alert">{t('mail.folders.error')}</p>}
-        {folderLoad?.kind === 'ready' && (
-          <MailFolderTree
-            folders={folderLoad.folders}
-            selectedId={filters.folderId}
-            onSelect={(folderId) => onNavigate({ ...scoped, folderId })}
-          />
-        )}
-      </aside>
-
-      <section className="mail-list-pane" aria-label={t('mail.list.paneLabel')}>
-        <MailSearchForm filters={scoped} onSubmit={onSearch} />
-        <MailMessageListView
-          list={list}
-          selectedId={messageId}
-          hrefFor={hrefFor}
-          searching={hasSearchCriteria(filters)}
-        />
-      </section>
-
-      <section className="mail-reader-pane" aria-label={t('mail.reader.paneLabel')}>
-        {reader ?? <p className="muted mail-reader-placeholder">{t('mail.reader.placeholder')}</p>}
-      </section>
-    </div>
+    <MailWorkspace
+      folders={folders}
+      search={<MailSearchForm filters={scoped} onSubmit={onSearch} />}
+      renderList={renderList}
+      reader={reader ?? null}
+      readerKey={messageId}
+      scopeKey={`${archiveId}/${filters.folderId ?? ''}`}
+    />
   );
 }

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n';
 import type { MailMessageDetail } from './types';
 
@@ -66,7 +66,10 @@ function MailHtmlFrame({ html, title }: { html: string; title: string }) {
 
   const measure = useCallback(() => {
     const doc = frameRef.current?.contentDocument;
-    const h = doc?.documentElement?.scrollHeight ?? 0;
+    // The body's own height, not the document's: a document is never shorter
+    // than the frame showing it, so measuring it could grow the frame but
+    // never let it shrink again after a wider pane reflowed the text.
+    const h = doc?.body?.scrollHeight ?? doc?.documentElement?.scrollHeight ?? 0;
     if (h > 0) setHeight(Math.min(Math.max(h + 4, MIN_FRAME_PX), MAX_FRAME_PX));
   }, []);
 
@@ -81,6 +84,21 @@ function MailHtmlFrame({ html, title }: { html: string; title: string }) {
         img.addEventListener('error', measure, { once: true });
       }
     });
+  }, [measure]);
+
+  // The message reflows when its pane is resized (a divider dragged, the
+  // layout switched, the window narrowed): its height follows.
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || typeof ResizeObserver === 'undefined') return;
+    let width = frame.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (frame.clientWidth === width) return;
+      width = frame.clientWidth;
+      measure();
+    });
+    ro.observe(frame);
+    return () => ro.disconnect();
   }, [measure]);
 
   return (
