@@ -20,7 +20,7 @@ HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("ocr_real", HERE / "ocr-real.py")
 base = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(base)
-IMAGE = "nubarca-ppstructure:ocr3.7.0-paddle3.3.1-cpu-v1"
+IMAGE = "nubarca-ppstructure:ocr3.7.0-paddle3.2.2-cpu-v2"
 NAMES = ("PP-DocLayout-S", "PP-OCRv5_mobile_det", "latin_PP-OCRv5_mobile_rec",
          "PP-LCNet_x1_0_doc_ori", "PP-LCNet_x1_0_textline_ori", "PP-LCNet_x1_0_table_cls",
          "SLANet_plus", "RT-DETR-L_wired_table_cell_det", "RT-DETR-L_wireless_table_cell_det")
@@ -270,7 +270,7 @@ def host(args):
     base.space(root)
     build = root / "ppstructure-build"
     build.mkdir(exist_ok=True)
-    (build / "Dockerfile").write_text('FROM nubarca-paddle-full:ocr3.7.0-pdx3.7.2\nUSER root\nRUN python -m pip install --no-cache-dir "paddlepaddle==3.3.1" "paddlex[ocr]==3.7.2" "paddleocr[doc-parser]==3.7.0" && python -m pip check\nUSER bench\n')
+    (build / "Dockerfile").write_text('FROM nubarca-paddle-full:ocr3.7.0-pdx3.7.2\nUSER root\nRUN python -m pip install --no-cache-dir "paddlepaddle==3.2.2" "paddlex[ocr]==3.7.2" "paddleocr[doc-parser]==3.7.0" && python -m pip check\nUSER bench\n')
     base.run(["docker", "build", "-t", IMAGE, str(build)], env=dict(os.environ, DOCKER_BUILDKIT="0"))
     models = root / "models" / "ppstructure-cpu-v1"
     models.mkdir(exist_ok=True)
