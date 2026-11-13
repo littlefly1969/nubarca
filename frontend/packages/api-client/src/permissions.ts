@@ -21,6 +21,7 @@ export const PERMISSIONS = {
   mailAccess: 'mail.access',
   laboratoryAccess: 'laboratory.access',
   laboratoryPlates: 'laboratory.plates',
+  laboratoryLithophanes: 'laboratory.lithophanes',
   cloudFunctionsAccess: 'cloud-functions.access',
   privateVaultAccess: 'private-vault.access',
   // The Party PRODUCT, and the four capabilities under it. A feature key means

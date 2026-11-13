@@ -3420,6 +3420,86 @@ namespace NubArca.Api.Data.Migrations
                     b.ToTable("folders", (string)null);
                 });
 
+            modelBuilder.Entity("NubArca.Api.Domain.LithophaneProject", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ArtifactStorageKey")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("EngineVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("FileItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("JobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PixelMapStorageKey")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SettingsJson")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("character varying(4096)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArtifactStorageKey");
+
+                    b.HasIndex("FileItemId");
+
+                    b.HasIndex("PixelMapStorageKey");
+
+                    b.HasIndex("OwnerUserId", "RequestId")
+                        .IsUnique();
+
+                    b.HasIndex("OwnerUserId", "CreatedAt", "Id");
+
+                    b.ToTable("lithophane_projects", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.LithophaneStrip", b =>
+                {
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("FirstRow")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("EndRow")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.HasKey("ProjectId", "FirstRow");
+
+                    b.HasIndex("StorageKey");
+
+                    b.ToTable("lithophane_strips", (string)null);
+                });
+
             modelBuilder.Entity("NubArca.Api.Domain.Mail.MailArchive", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8721,6 +8801,29 @@ namespace NubArca.Api.Data.Migrations
                         .WithMany()
                         .HasForeignKey("PrivateVaultId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.LithophaneProject", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.FileItem", null)
+                        .WithMany()
+                        .HasForeignKey("FileItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("NubArca.Api.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.LithophaneStrip", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.LithophaneProject", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("NubArca.Api.Domain.Mail.MailArchive", b =>

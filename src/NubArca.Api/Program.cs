@@ -37,6 +37,7 @@ using NubArca.Api.MediaLibrary;
 using NubArca.Api.Metadata;
 using NubArca.Api.Organizer;
 using NubArca.Api.PhotoExport;
+using NubArca.Api.Lithophanes;
 using NubArca.Api.Plates;
 using NubArca.Api.Rag;
 using NubArca.Api.Security;
@@ -1202,6 +1203,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // Photo archive export: read-only snapshot/manifest built by a cooperative
     // `photo.export.build` background job; streamed per-file downloads.
     builder.Services.AddScoped<PhotoExportService>();
+    builder.Services.AddNubArcaLithophanes();
 
     // Private Vault (v0): exclusion-first, password-unlocked owner-private area.
     builder.Services.AddScoped<IPrivateVaultService, PrivateVaultService>();
@@ -1788,6 +1790,7 @@ app.MapMailArchiveEndpoints();
 
 
 app.MapPhotoExportEndpoints();
+app.MapLithophaneEndpoints();
 
 // Album CRUD/membership/TV-visibility endpoints live in
 // Endpoints/AlbumEndpoints.cs — extracted as part of the modular-monolith

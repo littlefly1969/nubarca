@@ -1,0 +1,31 @@
+.lithophane-page { max-width: 1120px; margin-inline: auto; padding: 1rem; }
+.lithophane-page h3, .lithophane-page h4 { margin-block: .5rem 1rem; }
+.lithophane-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .8fr); gap: 1.5rem; margin-block: 1.5rem; }
+.lithophane-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+.lithophane-page label { display: flex; flex-direction: column; gap: .35rem; font-size: .9rem; }
+.lithophane-page input { min-width: 0; min-height: 44px; width: 100%; padding: .4rem .6rem; border: 1px solid var(--border-color, #636775); border-radius: .5rem; color: inherit; background: var(--surface-color, transparent); }
+.lithophane-page fieldset { min-width: 0; border: 1px solid var(--border-color, #636775); border-radius: .75rem; padding: 1rem; }
+.lithophane-actions, .lithophane-photo-heading { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; margin-block: .8rem; }
+.lithophane-page .btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+.lithophane-sphere { margin: 0; padding: 1rem; border-radius: 1rem; background: #171b25; color: #f2f2f4; }
+.lithophane-sphere canvas { display: block; width: 100%; max-width: 360px; height: auto; margin-inline: auto; }
+.lithophane-sphere figcaption, .lithophane-print-hint { font-size: .85rem; line-height: 1.5; opacity: .8; margin-top: .7rem; }
+.lithophane-page .lithophane-check { flex-direction: row; align-items: center; }
+.lithophane-check input { width: 22px; min-height: 44px; }
+.lithophane-photos { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: .6rem; }
+.lithophane-photos button { display: flex; flex-direction: column; width: 100%; padding: .4rem; background: transparent; color: inherit; border: 2px solid transparent; border-radius: .7rem; cursor: pointer; text-align: left; }
+.lithophane-photos button[aria-pressed="true"] { border-color: var(--accent-color, #7ba8ff); }
+.lithophane-photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: .4rem; }
+.lithophane-photos span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-top: .4rem; }
+.lithophane-search { display: flex; align-items: end; gap: .7rem; }
+.lithophane-search label { flex: 1; min-width: 0; }
+.lithophane-history { margin-top: 2rem; }
+.lithophane-history > ul { list-style: none; padding: 0; }
+.lithophane-history li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .8rem; padding-block: 1rem; border-bottom: 1px solid var(--border-color, #636775); }
+.lithophane-history li > div { min-width: 0; overflow-wrap: anywhere; }
+.lithophane-history p { margin-block: .3rem; font-size: .9rem; }
+.lithophane-history progress { max-width: 100%; }
+.lithophane-notice { padding: .8rem; border: 1px solid var(--border-color, #636775); border-radius: .6rem; }
+.lithophane-preview-placeholder { padding: 2rem; opacity: .7; }
+@media (max-width: 740px) { .lithophane-editor { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 380px) { .lithophane-fields { grid-template-columns: minmax(0, 1fr); } }

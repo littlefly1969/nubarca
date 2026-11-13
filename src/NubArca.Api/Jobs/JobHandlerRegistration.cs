@@ -31,6 +31,7 @@ public static class JobHandlerRegistration
         services.AddScoped<IJobHandler, PhotoOrganizerJobHandler>();
         services.AddScoped<IJobHandler, ExactMediaDuplicateCleanupJobHandler>();
         services.AddScoped<IJobHandler, PhotoExportBuildJobHandler>();
+        services.AddScoped<IJobHandler, LithophaneGenerateJobHandler>();
         services.AddScoped<IJobHandler, PlateAnalysisJobHandler>();
         services.AddScoped<IJobHandler, MailImportJobHandler>();
         services.AddScoped<IJobHandler, MailTextsBackfillJobHandler>();

@@ -26,6 +26,7 @@ using NubArca.Api.MediaLibrary;
 using NubArca.Api.Metadata;
 using NubArca.Api.Organizer;
 using NubArca.Api.PhotoExport;
+using NubArca.Api.Lithophanes;
 using NubArca.Api.Plates;
 using NubArca.Api.Rag;
 using NubArca.Api.ShareLinks;
@@ -461,6 +462,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<ExactMediaDuplicateCleanupService>();
             // Photo archive export service.
             services.AddScoped<PhotoExportService>();
+            services.AddNubArcaLithophanes();
             // Private Vault (v0).
             services.AddScoped<NubArca.Api.Vault.IPrivateVaultService,
                 NubArca.Api.Vault.PrivateVaultService>();

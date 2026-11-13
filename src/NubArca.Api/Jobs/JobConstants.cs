@@ -48,6 +48,7 @@ public static class JobTypes
     // exportable photos. The payload carries only the PhotoExportSession id.
     // Sliceable + checkpointed; Normal band (yields to foreground import).
     public const string PhotoExportBuild = "photo.export.build";
+    public const string LithophaneGenerate = "lithophane.generate";
 
     // AI substrate (Phase 0C): skeleton backfill jobs. They are real, registered,
     // enqueueable handlers in the Compute band, but in Phase 0C they NO-OP — no

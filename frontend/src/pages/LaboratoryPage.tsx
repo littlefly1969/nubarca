@@ -5,7 +5,7 @@ import { useI18n } from '../i18n';
 import type { MessageKey } from '../i18n';
 
 // The Laboratory (Laboratorio): one primary-navigation destination for the
-// owner-private experimental surfaces. Today that is Plates alone; the shell
+// owner-private experimental surfaces. The shell
 // stays so a section can be added or retired without moving the nav entry.
 //
 // The tabs are ROUTES, not component state. A tab that lived in useState would
@@ -34,6 +34,7 @@ interface LabSection {
 
 export const LAB_SECTIONS: readonly LabSection[] = [
   { to: '/lab/plates', labelKey: 'lab.plates', permission: PERMISSIONS.laboratoryPlates },
+  { to: '/lab/lithophanes', labelKey: 'lab.lithophanes', permission: PERMISSIONS.laboratoryLithophanes },
 ] as const;
 
 /** Where a bare /lab lands when the user holds every section. */

@@ -44,6 +44,7 @@ public static class Permissions
     // PermissionPolicies.LaboratoryPlates.
     public const string LaboratoryAccess = "laboratory.access";
     public const string LaboratoryPlates = "laboratory.plates";
+    public const string LaboratoryLithophanes = "laboratory.lithophanes";
 
 
     // The Cloud Functions hub and the tools reached from it: bulk staging

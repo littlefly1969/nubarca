@@ -549,7 +549,8 @@ public sealed class PrintStationService
                     var owned = await _db.BlobObjects.AsNoTracking()
                             .AnyAsync(x => x.StorageKey == key || x.Sha256 == sha, cancellationToken)
                         || await _db.PrintJobs.AsNoTracking()
-                            .AnyAsync(x => x.ArtifactStorageKey == key, cancellationToken);
+                            .AnyAsync(x => x.ArtifactStorageKey == key, cancellationToken)
+                        || await NubArca.Api.Lithophanes.LithophaneArtifacts.OwnsAsync(_db, key, cancellationToken);
                     if (!owned) await _artifacts.DeleteAsync(key, cancellationToken);
                     await transaction.CommitAsync(cancellationToken);
                 });

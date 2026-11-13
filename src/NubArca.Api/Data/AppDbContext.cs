@@ -81,6 +81,9 @@ public class AppDbContext : DbContext
     public DbSet<PhotoOrganizerRun> PhotoOrganizerRuns => Set<PhotoOrganizerRun>();
     public DbSet<PhotoOrganizerMove> PhotoOrganizerMoves => Set<PhotoOrganizerMove>();
     public DbSet<MediaDuplicateCleanupRun> MediaDuplicateCleanupRuns => Set<MediaDuplicateCleanupRun>();
+    public DbSet<LithophaneProject> LithophaneProjects => Set<LithophaneProject>();
+    public DbSet<LithophaneStrip> LithophaneStrips => Set<LithophaneStrip>();
+
     public DbSet<PhotoExportSession> PhotoExportSessions => Set<PhotoExportSession>();
     public DbSet<PhotoExportEntry> PhotoExportEntries => Set<PhotoExportEntry>();
     public DbSet<PrivateVault> PrivateVaults => Set<PrivateVault>();
