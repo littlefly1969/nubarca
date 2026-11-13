@@ -20,15 +20,15 @@ public static class LithophaneEndpoints
             catch (LithophaneException ex) { return Results.Json(new { error = ex.Code }, statusCode: ex.StatusCode); }
         });
 
-        group.MapGet("", async (Guid? cursor, HttpContext http, LithophaneService service, CancellationToken ct) =>
+        group.MapGet("", async (Guid? cursor, HttpContext http, [FromServices] LithophaneService service, CancellationToken ct) =>
             Results.Ok(await service.ListAsync(Owner(http), cursor, ct))).WithName("ListLithophanes");
 
         group.MapPost("/statuses", async ([FromBody] LithophaneStatusRequest request, HttpContext http,
-            LithophaneService service, CancellationToken ct) =>
+            [FromServices] LithophaneService service, CancellationToken ct) =>
             Results.Ok(await service.GetStatusesAsync(Owner(http), request.Ids, ct))).WithName("GetLithophaneStatuses");
 
         group.MapPost("", async ([FromBody] LithophaneCreateRequest request, HttpContext http,
-            LithophaneService service, IAuditLogger audit, CancellationToken ct) =>
+            [FromServices] LithophaneService service, [FromServices] IAuditLogger audit, CancellationToken ct) =>
         {
             var result = await service.CreateAsync(Owner(http), request, ct);
             await AuditAsync(audit, http, AuditActions.LithophaneCreate, result.Id, ct);
@@ -36,24 +36,24 @@ public static class LithophaneEndpoints
         }).WithName("CreateLithophane").RequireRateLimiting("export-create");
 
         group.MapPost("/preview", async ([FromBody] LithophanePreviewRequest request, HttpContext http,
-            LithophaneService service, CancellationToken ct) =>
+            [FromServices] LithophaneService service, CancellationToken ct) =>
             Results.Ok(await service.PreviewAsync(Owner(http), request, ct)))
             .WithName("PreviewLithophane").RequireRateLimiting("export-create");
 
-        group.MapGet("/{id:guid}", async (Guid id, HttpContext http, LithophaneService service, CancellationToken ct) =>
+        group.MapGet("/{id:guid}", async (Guid id, HttpContext http, [FromServices] LithophaneService service, CancellationToken ct) =>
         {
             var result = await service.GetAsync(Owner(http), id, ct);
             return result is null ? Results.NotFound() : Results.Ok(result);
         }).WithName("GetLithophane");
 
-        group.MapGet("/{id:guid}/preview", async (Guid id, HttpContext http, LithophaneService service, CancellationToken ct) =>
+        group.MapGet("/{id:guid}/preview", async (Guid id, HttpContext http, [FromServices] LithophaneService service, CancellationToken ct) =>
         {
             var result = await service.SavedPreviewAsync(Owner(http), id, ct);
             return result is null ? Results.NotFound() : Results.Ok(result);
         }).WithName("GetLithophanePreview");
 
-        group.MapGet("/{id:guid}/download", async (Guid id, HttpContext http, LithophaneService service,
-            IAuditLogger audit, CancellationToken ct) =>
+        group.MapGet("/{id:guid}/download", async (Guid id, HttpContext http, [FromServices] LithophaneService service,
+            [FromServices] IAuditLogger audit, CancellationToken ct) =>
         {
             var stream = await service.OpenDownloadAsync(Owner(http), id, ct);
             if (stream is null) return Results.NotFound();
@@ -62,16 +62,16 @@ public static class LithophaneEndpoints
             return Results.File(stream, "model/stl", $"nubarca-lithophane-{id:N}.stl", enableRangeProcessing: true);
         }).WithName("DownloadLithophane");
 
-        group.MapPost("/{id:guid}/cancel", async (Guid id, HttpContext http, LithophaneService service,
-            IAuditLogger audit, CancellationToken ct) =>
+        group.MapPost("/{id:guid}/cancel", async (Guid id, HttpContext http, [FromServices] LithophaneService service,
+            [FromServices] IAuditLogger audit, CancellationToken ct) =>
         {
             if (!await service.CancelAsync(Owner(http), id, ct)) return Results.NotFound();
             await AuditAsync(audit, http, AuditActions.LithophaneCancel, id, ct);
             return Results.NoContent();
         }).WithName("CancelLithophane");
 
-        group.MapDelete("/{id:guid}", async (Guid id, HttpContext http, LithophaneService service,
-            IAuditLogger audit, CancellationToken ct) =>
+        group.MapDelete("/{id:guid}", async (Guid id, HttpContext http, [FromServices] LithophaneService service,
+            [FromServices] IAuditLogger audit, CancellationToken ct) =>
         {
             if (!await service.DeleteAsync(Owner(http), id, ct)) return Results.NotFound();
             await AuditAsync(audit, http, AuditActions.LithophaneDelete, id, ct);
