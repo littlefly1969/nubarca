@@ -59,6 +59,26 @@ describe('Laboratory lithophanes', () => {
     expect(screen.getByRole('button', { name: 'Genera STL' })).toBeEnabled();
   });
 
+  it('says when the zoom is below what changes the photo and offers the minimum', async () => {
+    installFetchMock({
+      'GET /api/media': () => jsonResponse(media),
+      'GET /api/lithophanes': () => jsonResponse({ items: [], nextCursor: null }),
+      'POST /api/lithophanes/preview': () => jsonResponse({ ...preview, minimumZoom: 0.6234 }),
+    });
+    mount(); await choose();
+    fireEvent.click(screen.getByRole('button', { name: 'Aggiorna anteprima' }));
+    await screen.findByRole('img', { name: 'Sfera di prova' });
+    expect(screen.queryByText(/lo zoom non cambia più nulla/)).not.toBeInTheDocument(); // default zoom 1
+    fireEvent.change(screen.getByLabelText('Ingrandimento'), { target: { value: '0.3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Aggiorna anteprima' }));
+    expect(await screen.findByText(/Sotto 0,63 lo zoom non cambia più nulla/)).toBeInTheDocument();
+    // The fix lands on the field's 0.05 step, which the browser would otherwise refuse.
+    fireEvent.click(screen.getByRole('button', { name: 'Usa 0,65' }));
+    expect((screen.getByLabelText('Ingrandimento') as HTMLInputElement).value).toBe('0.65');
+    expect((screen.getByLabelText('Ingrandimento') as HTMLInputElement).validity.valid).toBe(true);
+    expect(screen.queryByText(/lo zoom non cambia più nulla/)).not.toBeInTheDocument();
+  });
+
   it('preserves the idempotency key after a lost creation response', async () => {
     let attempt = 0;
     const mock = installFetchMock({

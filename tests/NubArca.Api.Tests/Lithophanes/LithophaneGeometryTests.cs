@@ -127,6 +127,32 @@ public sealed class LithophaneGeometryTests
         Assert.InRange(corrected[g.Columns / 2, g.TopRows].PackedValue, (byte)127, (byte)129);
     }
 
+    // Same table as lithophaneModel.test.ts: the browser form must accept and
+    // reject exactly what the server does, including next to the budget.
+    [Theory]
+    [InlineData(80, 20, 0.8, 0.3, 1266720)]
+    [InlineData(95, 20, 0.8, 0.3, 1804752)]
+    [InlineData(96, 20, 0.8, 0.3, 1850688)]
+    [InlineData(100, 30, 1.2, 0.3, 1932512)]
+    [InlineData(120, 40, 0.8, 0.35, 2052000)]
+    [InlineData(120, 40, 0.8, 0.4, 1567040)]
+    [InlineData(150, 20, 0.8, 0.45, 2058272)]
+    [InlineData(150, 20, 0.8, 0.5, 1668992)]
+    [InlineData(200, 130, 2, 0.6, 1676800)]
+    [InlineData(200, 4, 0.4, 0.65, 1819840)]
+    [InlineData(40, 4, 0.4, 0.15, 1310400)]
+    [InlineData(60, 39, 0.6, 0.2, 1359360)]
+    public void Triangle_Count_Matches_The_Browser_Form(double diameter, double opening, double minWall, double step, int triangles)
+    {
+        var s = new LithophaneSettings
+        {
+            DiameterMm = diameter, OpeningMm = opening, MinThicknessMm = minWall,
+            MaxThicknessMm = minWall + 2, ResolutionMm = step,
+        };
+        Assert.Equal(triangles, new LithophaneGrid(s).TriangleCount);
+        Assert.Equal(triangles <= LithophaneSettings.MaxTriangles, s.IsValid());
+    }
+
     [Fact]
     public void Bounds_Reject_NonFinite_Impossible_And_Excessively_Detailed_Models()
     {

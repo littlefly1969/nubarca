@@ -11,6 +11,7 @@ using NubArca.Api.Files;
 using NubArca.Api.Jobs;
 using NubArca.Api.Jobs.Handlers;
 using NubArca.Api.Lithophanes;
+using NubArca.Api.Print;
 using NubArca.Api.Storage;
 using NubArca.Api.Tests.Endpoints;
 using SixLabors.ImageSharp;
@@ -85,6 +86,8 @@ public sealed class LithophaneEndpointTests
         var previewResponse = await c.PostAsJsonAsync($"{Root}/preview", new LithophanePreviewRequest(file, Fast));
         previewResponse.EnsureSuccessStatusCode();
         var preview = (await previewResponse.Content.ReadFromJsonAsync<LithophanePreview>())!;
+        // 64×40 photo in a 160°×110° area: below contain the map no longer changes.
+        Assert.Equal(PhotoPlacementGeometry.ContainZoom(64d / 40, 160d / 110), preview.MinimumZoom!.Value, 9);
         var project = await Create(c, file);
         await Advance(f, project.Id, 1); // one preprocessing unit, then continuation
         using (var scope = f.Services.CreateScope())
@@ -110,6 +113,15 @@ public sealed class LithophaneEndpointTests
         var ready = await Finish(f, c, project.Id);
         Assert.Equal("ready", ready.Status); Assert.True(ready.DownloadReady);
         Assert.Equal(ready.TotalRows, ready.CompletedRows);
+        using (var scope = f.Services.CreateScope())
+        {
+            // The committed STL releases its assembly checkpoints and their bytes.
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.Empty(await db.LithophaneStrips.ToListAsync());
+            var service = scope.ServiceProvider.GetRequiredService<StorageReconciliationService>();
+            var audit = await service.RunAsync(new() { DryRun = true, DeleteOrphans = false, MinimumOrphanAge = TimeSpan.Zero });
+            Assert.Equal(0, audit.OrphanPhysicalObjects);
+        }
         var download = await c.GetAsync($"{Root}/{project.Id}/download");
         Assert.Equal(HttpStatusCode.OK, download.StatusCode);
         Assert.Equal("model/stl", download.Content.Headers.ContentType!.MediaType);
@@ -121,6 +133,7 @@ public sealed class LithophaneEndpointTests
         Assert.Equal(expected.ToArray(), actual);
         var saved = (await c.GetFromJsonAsync<LithophanePreview>($"{Root}/{project.Id}/preview"))!;
         Assert.Equal(preview.ImageBase64, saved.ImageBase64);
+        Assert.Null(saved.MinimumZoom);
         var raw = await c.GetStringAsync($"{Root}/{project.Id}");
         foreach (var forbidden in new[] { "storageKey", "blobObjectId", "sha256", "payloadJson", "checkpointJson", "/storage/", "lockOwner" })
             Assert.DoesNotContain(forbidden, raw, StringComparison.OrdinalIgnoreCase);
@@ -221,15 +234,23 @@ public sealed class LithophaneEndpointTests
     public async Task A_Deleted_Source_Cancels_Before_Preprocessing_And_A_Source_Purge_Is_Not_Pinned()
     {
         using var f = Factory(); var (_, c) = await f.CreateAuthenticatedClientAsync();
-        var file = await Upload(c); var project = await Create(c, file);
+        var file = await Upload(c); var key = Guid.NewGuid(); var project = await Create(c, file, key);
         (await c.DeleteAsync($"/api/files/{file}")).EnsureSuccessStatusCode();
         Assert.Equal("cancelled", (await Finish(f, c, project.Id)).Status);
         var rejected = await c.PostAsJsonAsync(Root, new LithophaneCreateRequest(file, Guid.NewGuid(), Fast));
         Assert.Equal(HttpStatusCode.NotFound, rejected.StatusCode);
         (await c.DeleteAsync($"/api/trash/files/{file}")).EnsureSuccessStatusCode();
-        using var scope = f.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        Assert.Null((await db.LithophaneProjects.SingleAsync()).FileItemId);
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.Null((await db.LithophaneProjects.SingleAsync()).FileItemId);
+        }
+        // A retried request (lost response) stays idempotent after the purge,
+        // and the purged source still distinguishes a different request.
+        Assert.Equal(project.Id, (await Create(c, file, key)).Id);
+        var other = await Upload(c, "other.png");
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await c.PostAsJsonAsync(Root, new LithophaneCreateRequest(other, key, Fast))).StatusCode);
     }
 
     [Fact]

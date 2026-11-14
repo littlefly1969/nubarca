@@ -19,6 +19,7 @@ namespace NubArca.Api.Data.Migrations
                     OwnerUserId = table.Column<Guid>(type: "uuid", nullable: false),
                     RequestId = table.Column<Guid>(type: "uuid", nullable: false),
                     FileItemId = table.Column<Guid>(type: "uuid", nullable: true),
+                    SourceFileItemId = table.Column<Guid>(type: "uuid", nullable: false),
                     JobId = table.Column<Guid>(type: "uuid", nullable: false),
                     Name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     SettingsJson = table.Column<string>(type: "character varying(4096)", maxLength: 4096, nullable: false),

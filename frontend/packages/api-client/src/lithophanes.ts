@@ -38,6 +38,8 @@ export interface LithophanePreview {
   bottomAngle: number;
   triangleCount: number;
   sizeBytes: number;
+  /** Fresh previews only: the lowest zoom that still changes this photo's map. */
+  minimumZoom?: number | null;
 }
 
 const base = '/api/lithophanes';

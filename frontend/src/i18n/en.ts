@@ -33,6 +33,8 @@ const en: Partial<Record<MessageKey, string>> = {
   "lithophane.invalid": "Check the values: maximum thickness must exceed minimum, opening must be within 65% of diameter, and detail must stay within 2 million triangles. Increase surface sampling to reduce file size.",
   "lithophane.tooDetailed": "At this diameter the surface is too fine: it would exceed 2 million triangles. Use a surface sampling of at least {mm} mm.",
   "lithophane.useResolution": "Use {mm} mm",
+  "lithophane.zoomBelowMinimum": "Below {zoom} the zoom changes nothing more: the whole photo is already on the sphere.",
+  "lithophane.useZoom": "Use {zoom}",
   "lithophane.preview": "Update preview",
   "lithophane.generate": "Generate STL",
   "lithophane.reset": "Reset settings",

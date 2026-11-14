@@ -3461,6 +3461,9 @@ namespace NubArca.Api.Data.Migrations
                         .HasMaxLength(4096)
                         .HasColumnType("character varying(4096)");
 
+                    b.Property<Guid>("SourceFileItemId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ArtifactStorageKey");

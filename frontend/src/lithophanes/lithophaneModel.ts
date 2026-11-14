@@ -20,8 +20,8 @@ function withinBounds(s: LithophaneSettings): boolean {
     && between(s.contrast, 0.25, 3) && between(s.gamma, 0.3, 3);
 }
 
-/** Same triangle count as the server's LithophaneGrid. */
-function triangleCount(s: LithophaneSettings): number {
+/** Same triangle count as the server's LithophaneGrid (parity-tested on both sides). */
+export function lithophaneTriangleCount(s: LithophaneSettings): number {
   const radius = s.diameterMm / 2;
   const columns = 4 * Math.ceil(Math.PI * s.diameterMm / s.resolutionMm / 4);
   const top = Math.ceil(Math.PI * radius / 2 / s.resolutionMm);
@@ -32,7 +32,7 @@ function triangleCount(s: LithophaneSettings): number {
 }
 
 export function validLithophaneSettings(s: LithophaneSettings): boolean {
-  return withinBounds(s) && triangleCount(s) <= MAX_TRIANGLES;
+  return withinBounds(s) && lithophaneTriangleCount(s) <= MAX_TRIANGLES;
 }
 
 /**
@@ -41,10 +41,10 @@ export function validLithophaneSettings(s: LithophaneSettings): boolean {
  * form's 0.05 mm increments that fits. Null when that is not the problem.
  */
 export function suggestedLithophaneResolution(s: LithophaneSettings): number | null {
-  if (!withinBounds(s) || triangleCount(s) <= MAX_TRIANGLES) return null;
+  if (!withinBounds(s) || lithophaneTriangleCount(s) <= MAX_TRIANGLES) return null;
   for (let hundredths = Math.max(15, Math.ceil(s.resolutionMm * 20) * 5); hundredths <= 100; hundredths += 5) {
     const resolutionMm = hundredths / 100;
-    if (triangleCount({ ...s, resolutionMm }) <= MAX_TRIANGLES) return resolutionMm;
+    if (lithophaneTriangleCount({ ...s, resolutionMm }) <= MAX_TRIANGLES) return resolutionMm;
   }
   return null;
 }
