@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   ApiError, cancelLithophane, createLithophane, deleteLithophane, getLithophanePreview,
   getLithophaneStatuses, listLithophanes, lithophaneDownloadUrl, previewLithophane,
-  type LithophanePreview, type LithophaneSettings, type LithophaneSummary, type MediaItem,
+  type LithophanePreview, type LithophaneQueueEntry, type LithophaneSettings, type LithophaneSummary,
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
-import { LithophanePhotoPicker } from '../lithophanes/LithophanePhotoPicker';
+import { LithophaneQueue, useLithophaneQueue } from '../lithophanes/LithophaneQueue';
 import { LithophaneSphere } from '../lithophanes/LithophaneSphere';
 import {
   activeLithophane, DEFAULT_LITHOPHANE_SETTINGS, suggestedLithophaneResolution, validLithophaneSettings,
@@ -18,6 +18,7 @@ const FIELDS: { key: keyof LithophaneSettings; min: number; max: number; step: n
   { key: 'openingMm', min: 4, max: 130, step: 1, label: 'lithophane.opening' },
   { key: 'minThicknessMm', min: 0.4, max: 2, step: 0.1, label: 'lithophane.minThickness' },
   { key: 'maxThicknessMm', min: 0.5, max: 5, step: 0.1, label: 'lithophane.maxThickness' },
+  { key: 'backgroundThicknessMm', min: 0.4, max: 2, step: 0.1, label: 'lithophane.backgroundThickness' },
   { key: 'resolutionMm', min: 0.15, max: 1, step: 0.05, label: 'lithophane.resolution' },
   { key: 'pictureWidthDegrees', min: 40, max: 300, step: 5, label: 'lithophane.pictureWidth' },
   { key: 'pictureHeightDegrees', min: 30, max: 140, step: 5, label: 'lithophane.pictureHeight' },
@@ -33,7 +34,6 @@ export function LithophanesPage() {
   const { t, formatNumber } = useI18n();
   const { invalidateAuth } = useAuth();
   const [photo, setPhoto] = useState<{ id: string; name: string } | null>(null);
-  const [picking, setPicking] = useState(true);
   const [settings, setSettings] = useState<LithophaneSettings>({ ...DEFAULT_LITHOPHANE_SETTINGS });
   const [preview, setPreview] = useState<LithophanePreview | null>(null);
   const [items, setItems] = useState<LithophaneSummary[]>([]);
@@ -101,9 +101,10 @@ export function LithophanesPage() {
     return () => { ctrl.abort(); clearTimeout(timer); };
   }, [activeIds, onError]);
 
-  const choose = (p: MediaItem) => {
+  const queue = useLithophaneQueue(onError);
+  const choose = (p: LithophaneQueueEntry) => {
     action.current?.abort(); setBusy(false);
-    setPhoto({ id: p.id, name: p.displayName || p.name }); setPicking(false); setPreview(null); setNotice(null);
+    setPhoto({ id: p.fileItemId, name: p.name }); setPreview(null); setNotice(null);
   };
   const perform = async (work: (signal: AbortSignal) => Promise<void>) => {
     action.current?.abort();
@@ -121,6 +122,8 @@ export function LithophanesPage() {
       const created = await createLithophane(photo.id, settings, requestId, signal);
       if (signal.aborted) return;
       setItems((old) => [created, ...old.filter((x) => x.id !== created.id)]);
+      // The server ended this photo's wait when it accepted the generation.
+      queue.forget(photo.id);
       setNotice(t('lithophane.created'));
       request.current = null;
     });
@@ -130,16 +133,14 @@ export function LithophanesPage() {
     <h3>{t('lab.lithophanes')}</h3>
     <p>{t('lithophane.intro')}</p>
     {notice && <p role="status" className="lithophane-notice">{notice}</p>}
-    {picking && <LithophanePhotoPicker selected={photo?.id ?? null} onSelect={choose} onError={onError} />}
+    <LithophaneQueue queue={queue} selected={photo?.id ?? null} disabled={busy} onSelect={choose} />
     {photo && <div className="lithophane-editor">
       <form onSubmit={generate}>
-        <div className="lithophane-photo-heading"><h4>{photo.name}</h4>
-          <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setPicking((v) => !v)}>{t('lithophane.changePhoto')}</button>
-        </div>
+        <div className="lithophane-photo-heading"><h4>{photo.name}</h4></div>
         <fieldset disabled={busy}>
           <legend>{t('lithophane.parameters')}</legend>
           <div className="lithophane-fields">{FIELDS.map((field) => <label key={field.key}>{t(field.label)}
-            <input type="number" min={field.min} max={field.max} step={field.step} value={settings[field.key]}
+            <input type="number" min={field.min} max={field.max} step={field.step} value={settings[field.key] ?? ''}
               onChange={(e) => {
                 setSettings((old) => ({ ...old, [field.key]: Number(e.target.value) })); setPreview(null);
               }} required />
@@ -194,8 +195,9 @@ export function LithophanesPage() {
             onClick={() => void perform(async (signal) => {
               const result = await getLithophanePreview(item.id, signal);
               if (signal.aborted) return;
-              setSettings(item.settings); setPhoto({ id: item.fileItemId ?? '', name: item.name });
-              setPicking(false); setPreview(result);
+              // Projects saved before the background wall existed used the photo's thinnest wall there.
+              setSettings({ ...item.settings, backgroundThicknessMm: item.settings.backgroundThicknessMm ?? item.settings.minThicknessMm });
+              setPhoto({ id: item.fileItemId ?? '', name: item.name }); setPreview(result);
             })}>{t('lithophane.view')}</button>}
           {(item.status === 'queued' || item.status === 'running') && <button type="button" className="btn btn-secondary" disabled={busy}
             onClick={() => void perform(async (signal) => {

@@ -6,6 +6,8 @@ public static class AuditActions
     public const string LithophaneDownload = "lithophane.download";
     public const string LithophaneCancel = "lithophane.cancel";
     public const string LithophaneDelete = "lithophane.delete";
+    public const string LithophaneQueueAdd = "lithophane.queue_add";
+    public const string LithophaneQueueRemove = "lithophane.queue_remove";
     public const string LoginSuccess = "auth.login.success";
     public const string LoginFailure = "auth.login.failure";
     public const string Logout = "auth.logout";

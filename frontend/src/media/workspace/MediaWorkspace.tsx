@@ -38,7 +38,7 @@ export interface MediaPhotoDestination {
   // whether this destination may be offered at all (photos only, and the
   // Laboratory permissions the server requires); the page supplies only what
   // happens when it is chosen.
-  id: 'plates';
+  id: 'plates' | 'lithophanes';
   // Returns an optional already-localized notice to surface on success.
   run(ids: string[]): Promise<string | void> | string | void;
 }
@@ -476,7 +476,7 @@ export function MediaWorkspace({
 
   // What the dock offers: the capability matrix combined with this user's
   // effective permissions, then narrowed to the photo-only destinations this
-  // PAGE actually supplies a runner for (an album workspace supplies none).
+  // PAGE actually supplies a runner for.
   // Nothing else in this component decides whether an action is available.
   const actionModel = useMemo(() => {
     const model = buildMediaSelectionActions({ capabilities, permissions: perms.all });
