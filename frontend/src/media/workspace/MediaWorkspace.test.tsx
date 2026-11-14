@@ -11,6 +11,7 @@ import {
 } from '../../test-utils';
 import { AppScrollProvider } from '../../components/appScroll';
 import { MediaWorkspace } from './MediaWorkspace';
+import { useLibraryPhotoDestinations } from './useLibraryPhotoDestinations';
 import { emptyIdentity, type MediaWorkspaceIdentity, type MediaWorkspaceSource } from './mediaWorkspaceQuery';
 
 const LIBRARY: MediaWorkspaceSource = { kind: 'library' };
@@ -404,6 +405,30 @@ describe('MediaWorkspace', () => {
     await userEvent.click(screen.getByTestId('media-sel-add-to'));
     expect(screen.getByTestId('media-sel-album')).toBeInTheDocument();
     expect(screen.queryByTestId('media-sel-plates')).not.toBeInTheDocument();
+  });
+
+  it('sends album photos to Lithophanes, where they wait, and says how many arrived', async () => {
+    const album: MediaWorkspaceSource = { kind: 'album', albumId: 'album-1' };
+    const mock = installFetchMock({
+      'GET /api/albums/album-1/media': () => jsonResponse(page([imageItem, secondImage])),
+      'GET /api/albums/album-1/media/navigation': () => jsonResponse({ buckets: [] }),
+      'POST /api/lithophanes/queue': () => jsonResponse({ added: ['i1'], skipped: [{ itemId: 'i2', reason: 'not_a_photo' }] }),
+    });
+    function AlbumWall() {
+      return <MediaWorkspace source={album} identity={emptyIdentity(album)} onIdentityChange={vi.fn()}
+        searchPlaceholder="Cerca" photoDestinations={useLibraryPhotoDestinations()} />;
+    }
+    render(<MemoryRouter><AuthedWrapper isAdmin><AlbumWall /></AuthedWrapper></MemoryRouter>);
+    await screen.findByText('photo.jpg');
+    await enterSelection();
+    const controls = screen.getAllByTestId('media-select-control');
+    await userEvent.click(controls[0]);
+    await userEvent.click(controls[1]);
+    await userEvent.click(await screen.findByTestId('media-sel-add-to'));
+    await userEvent.click(screen.getByTestId('media-sel-lithophanes'));
+    expect((await screen.findAllByText('Aggiunta 1 foto a Litofanie. 1 ignorate.')).length).toBeGreaterThan(0);
+    const sent = mock.calls.find((c) => c.method === 'POST' && c.url === '/api/lithophanes/queue')!;
+    expect(JSON.parse(sent.body!)).toEqual({ fileItemIds: ['i1', 'i2'] });
   });
 
   it('files the whole selection through the common picker, then clears it', async () => {

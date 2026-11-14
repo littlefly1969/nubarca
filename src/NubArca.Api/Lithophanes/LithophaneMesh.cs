@@ -20,7 +20,7 @@ public static class LithophaneMesh
         writer.Write((uint)grid.TriangleCount);
     }
 
-    public static void WriteStrip(Stream destination, LithophaneSettings settings, Image<L8> map,
+    public static void WriteStrip(Stream destination, LithophaneSettings settings, Image<La16> map,
         int firstRow, int endRow, CancellationToken cancellationToken = default)
     {
         var grid = new LithophaneGrid(settings);
@@ -78,7 +78,7 @@ public static class LithophaneMesh
                 var direction = row == 0 ? Vector3.UnitZ
                     : new Vector3((float)(sin * longitudeSin[col]), (float)(-sin * longitudeCos[col]), (float)cos);
                 outside[col] = direction * (float)grid.Radius;
-                inside[col] = direction * (float)(grid.Radius - settings.Thickness(map[col, row].PackedValue));
+                inside[col] = direction * (float)(grid.Radius - settings.Thickness(map[col, row]));
                 if (row == grid.Rows)
                     inside[col] = new Vector3((float)(settings.OpeningMm / 2 * longitudeSin[col]),
                         (float)(-settings.OpeningMm / 2 * longitudeCos[col]), outside[col].Z);

@@ -20,6 +20,7 @@ import { AlbumUploadButton } from '../albums/AlbumUploadButton';
 import { AlbumCoverViewerAction, type AlbumCoverState } from '../albums/AlbumCoverViewerAction';
 import { MediaWorkspace } from '../media/workspace/MediaWorkspace';
 import { WorkspaceMenu } from '../media/workspace/WorkspaceMenu';
+import { useLibraryPhotoDestinations } from '../media/workspace/useLibraryPhotoDestinations';
 import { Icon } from '../components/icons/Icon';
 import {
   filtersToUrlParams,
@@ -75,6 +76,9 @@ export function AlbumDetailPage() {
   const abortRef = useRef<AbortController | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [orderBusy, setOrderBusy] = useState(false);
+  // The same "Add to → Plates / Lithophanes" as the library: an album is where
+  // the owner usually finds the photos worth sending.
+  const photoDestinations = useLibraryPhotoDestinations();
 
   const source = useMemo<MediaWorkspaceSource>(
     () => ({ kind: 'album', albumId: albumId ?? '' }),
@@ -225,6 +229,7 @@ export function AlbumDetailPage() {
           searchPlaceholder={t('mediaWs.searchAlbum')}
           showPhotoPresentation
           refreshToken={uploadedToken}
+          photoDestinations={photoDestinations}
           renderViewerTrailingActions={(fileItemId) => (
             <AlbumCoverViewerAction
               albumId={album.id}

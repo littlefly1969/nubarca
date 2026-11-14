@@ -3,7 +3,7 @@ import type { LithophaneSettings } from '@nubarca/api-client';
 export const DEFAULT_LITHOPHANE_SETTINGS: LithophaneSettings = {
   diameterMm: 80, minThicknessMm: 0.8, maxThicknessMm: 2.8, openingMm: 20,
   resolutionMm: 0.3, pictureWidthDegrees: 160, pictureHeightDegrees: 110,
-  centerX: 0.5, centerY: 0.5, zoom: 1, brightness: 0, contrast: 1, gamma: 1,
+  centerX: 0.5, centerY: 0.5, zoom: 1, brightness: 0, contrast: 1, gamma: 1, backgroundThicknessMm: 0.8,
 };
 
 const MAX_TRIANGLES = 2_000_000;
@@ -13,6 +13,7 @@ const MAX_TRIANGLES = 2_000_000;
 function withinBounds(s: LithophaneSettings): boolean {
   const between = (v: number, min: number, max: number) => Number.isFinite(v) && v >= min && v <= max;
   return between(s.diameterMm, 40, 200) && between(s.minThicknessMm, 0.4, 2)
+    && (s.backgroundThicknessMm == null || between(s.backgroundThicknessMm, 0.4, 2))
     && between(s.maxThicknessMm, s.minThicknessMm + 0.1, 5) && between(s.openingMm, 4, s.diameterMm * 0.65)
     && between(s.resolutionMm, 0.15, 1) && between(s.pictureWidthDegrees, 40, 300)
     && between(s.pictureHeightDegrees, 30, 140) && between(s.centerX, 0, 1) && between(s.centerY, 0, 1)

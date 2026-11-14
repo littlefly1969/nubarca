@@ -4,6 +4,25 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.10 — 2026-11-14
+
+- **Photos reach Lithophanes the way they reach Plates.** Select photos in the
+  Library, a list or an album and choose *Add to → Lithophanes*. They wait in
+  Laboratory → Lithophanes, in the order sent, until a generation uses them or
+  the owner removes them; the page's own search grid is gone. The waiting list
+  is owner-private, holds references only (no bytes are copied), shows small
+  thumbnails, and a trashed photo drops out of it. Albums now offer *Add to →
+  Plates* as well.
+- **Independent background wall.** A new *Background thickness* (0.4–2 mm,
+  default 0.8) sets the sphere's wall outside the photograph, while minimum and
+  maximum thickness stay for the photo alone; a white photo pixel still uses
+  the minimum. Only the inner surface moves, the outside stays a perfect
+  sphere, and the photo's edge blends into the background over about 2 mm so
+  the wall never steps. The preview shows the actual wall. Projects saved
+  before keep their exact geometry.
+- Additive migration `AddLithophaneQueue` (new table only).
+  See [Lithophanes](docs/lithophanes.md).
+
 ## 0.4.9 — 2026-11-13
 
 - Laboratory now includes owner-private spherical lithophanes: choose an existing

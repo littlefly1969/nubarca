@@ -8,7 +8,9 @@ is built is described by `ARCHITECTURE.md`.
 ## Baseline
 
 - Laboratory lithophanes (`/lab/lithophanes`): one owner photograph to a spherical
-  STL; `lithophane.generate` uses the shared cooperative job engine. Persisted
+  STL; `lithophane.generate` uses the shared cooperative job engine. Photos
+  arrive through *Add to → Lithophanes* (library, lists, albums) onto an
+  owner-private waiting list; the sphere has an independent background wall. Persisted
   grayscale maps and strips own derived bytes recognised by reconciliation,
   BlobJanitor and print-artifact cleanup. Access requires `laboratory.access`
   plus `laboratory.lithophanes`, rechecked by workers. See [lithophanes.md](lithophanes.md).
