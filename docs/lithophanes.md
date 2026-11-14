@@ -57,11 +57,15 @@ HEIC), first-frame-only decoding, EXIF orientation and a bounded working image.
 Limits: 40–200 mm diameter; 0.4–2 mm minimum wall; maximum wall up to 5 mm and at
 least 0.1 mm above minimum; 4 mm to 65% of diameter LED opening; 0.15–1 mm surface
 sampling; at most 2,000,000 triangles (~100 MB binary STL); 64 MiB/64 MP source;
-100 retained projects per owner; 20 history records per keyset page. The opening
+100 retained projects per owner; 20 history records per keyset page. At the default
+0.3 mm step the triangle budget is reached just under 100 mm; above that the form
+explains it and offers the finest step that fits (for example 0.5 mm at 150 mm). The opening
 is the clear internal diameter of the flat bottom rim. The sphere is truncated
 at that opening, so its height is less than its full spherical diameter.
 
-The photo uses NubArca's existing centre/zoom framing policy. White maps to the
+The photo uses NubArca's existing centre/zoom framing policy. Below the zoom
+at which the whole photo already fits the area, the map no longer changes; a
+fresh preview reports that minimum and the form offers it. White maps to the
 minimum wall, black to the maximum. Outside the selected angular photo area,
 at the north pole and at the opening, the wall is uniformly thin. Brightness,
 contrast and gamma are applied before thickness conversion. Transparency is
@@ -72,7 +76,12 @@ A project's photograph and settings are fixed at creation. Repeating a request
 id with identical inputs returns the original project; different inputs with
 that id return 409. After a successful submission the web page starts a new
 request id for a deliberate second generation. A lost response keeps its id.
-Generated maps, strips and STLs are retained until the project is deleted.
+Generated maps and STLs are retained until the project is deleted. Strips are
+only assembly checkpoints: once the STL is committed their ownership is
+released and their bytes removed (shared content stays protected), so a
+finished project keeps about one STL plus a small map. The project also stores
+the photograph its request named, so a retried request stays idempotent even
+after that photograph has been purged.
 Source purge uses SET NULL and does not erase a completed lithophane. A source
 that is unavailable before preprocessing cancels the work. Workers recheck
 current permissions on each slice; revocation cancels rather than fails it.

@@ -6,6 +6,7 @@ using NubArca.Api.Domain;
 using NubArca.Api.Files;
 using NubArca.Api.Jobs;
 using NubArca.Api.PhotoExport;
+using NubArca.Api.Print;
 using NubArca.Api.Storage;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats;
@@ -57,7 +58,7 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
                 .SingleOrDefaultAsync(x => x.OwnerUserId == owner && x.RequestId == request.RequestId, ct);
             if (existing is not null)
             {
-                if (existing.FileItemId != request.FileItemId || existing.SettingsJson != json)
+                if (existing.SourceFileItemId != request.FileItemId || existing.SettingsJson != json)
                     throw new LithophaneException("request_conflict", 409);
                 return existing.Id;
             }
@@ -69,7 +70,7 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
             var project = new LithophaneProject
             {
                 Id = Guid.NewGuid(), OwnerUserId = owner, RequestId = request.RequestId,
-                FileItemId = source.Id, Name = source.Name, SettingsJson = json, CreatedAt = clock.GetUtcNow().UtcDateTime,
+                FileItemId = source.Id, SourceFileItemId = source.Id, Name = source.Name, SettingsJson = json, CreatedAt = clock.GetUtcNow().UtcDateTime,
             };
             var job = await jobs.EnqueueAsync(JobTypes.LithophaneGenerate, new LithophaneJobPayload(project.Id), cancellationToken: ct);
             project.JobId = job.Id;
@@ -135,7 +136,9 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
             if (ready) status = "ready";
             else if (status == JobStatuses.Succeeded) status = JobStatuses.Failed;
             var s = Settings(p); var grid = new LithophaneGrid(s);
-            return new LithophaneSummary(p.Id, p.Name, p.FileItemId, s, status, rowsById.GetValueOrDefault(p.Id),
+            // A ready project has released its strips: every row is done.
+            var completed = p.ArtifactStorageKey is not null ? grid.Rows : rowsById.GetValueOrDefault(p.Id);
+            return new LithophaneSummary(p.Id, p.Name, p.FileItemId, s, status, completed,
                 grid.Rows, grid.TriangleCount, grid.StlBytes, p.CreatedAt, ready);
         }).ToList();
     }
@@ -195,8 +198,15 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
     public async Task<LithophanePreview> PreviewAsync(Guid owner, LithophanePreviewRequest request, CancellationToken ct)
     {
         Validate(request.Settings);
-        using var map = await ReadMapAsync(owner, request.FileItemId, request.Settings, ct);
-        return await PreviewOfAsync(map, request.Settings, ct);
+        var (map, photoAspect) = await ReadMapAsync(owner, request.FileItemId, request.Settings, ct);
+        using (map)
+        {
+            // Below this the photo is whole on the sphere already: a smaller zoom
+            // changes the number, not the map. The form shows it after a preview.
+            var minimumZoom = PhotoPlacementGeometry.ContainZoom(photoAspect,
+                request.Settings.PictureWidthDegrees / request.Settings.PictureHeightDegrees);
+            return await PreviewOfAsync(map, request.Settings, ct) with { MinimumZoom = minimumZoom };
+        }
     }
 
     public async Task<LithophanePreview?> SavedPreviewAsync(Guid owner, Guid id, CancellationToken ct)
@@ -220,7 +230,7 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
             grid.TopRows, grid.BottomAngle, grid.TriangleCount, grid.StlBytes);
     }
 
-    private async Task<Image<L8>> ReadMapAsync(Guid owner, Guid fileId, LithophaneSettings s, CancellationToken ct)
+    private async Task<(Image<L8> Map, double PhotoAspect)> ReadMapAsync(Guid owner, Guid fileId, LithophaneSettings s, CancellationToken ct)
     {
         var source = await Sources(owner).SingleOrDefaultAsync(x => x.Id == fileId, ct);
         if (source is null) throw new LithophaneException("source_unavailable", 404);
@@ -238,7 +248,7 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
                 MaxFrames = 1, TargetSize = new Size(2048, 2048),
             }, lease.Content, ct);
             image.Mutate(x => x.AutoOrient());
-            return LithophaneImage.CreateMap(image, s, ct);
+            return (LithophaneImage.CreateMap(image, s, ct), (double)image.Width / image.Height);
         }
         catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException)
         {
@@ -251,6 +261,25 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
         finally { gate.Semaphore.Release(); }
     }
 
+    // Strips are only the checkpoints of assembly. Once the STL is committed
+    // they would double the project's storage, so their ownership is released
+    // and their bytes removed unless shared content still owns them. A failed
+    // physical delete is left to ordinary storage reconciliation.
+    private async Task ReleaseStripsAsync(Guid projectId, CancellationToken ct)
+    {
+        var keys = await db.LithophaneStrips.Where(x => x.ProjectId == projectId).Select(x => x.StorageKey).ToListAsync(ct);
+        if (keys.Count == 0) return;
+        await db.LithophaneStrips.Where(x => x.ProjectId == projectId).ExecuteDeleteAsync(ct);
+        foreach (var key in keys.Distinct())
+        {
+            try { await LithophaneArtifacts.DeleteUnownedAsync(db, artifacts, key, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning("Lithophane strip cleanup deferred ({ExceptionType}).", ex.GetType().Name);
+            }
+        }
+    }
+
     public async Task RunSliceAsync(Guid projectId, JobContext context, CancellationToken ct)
     {
         var p = await db.LithophaneProjects.SingleOrDefaultAsync(x => x.Id == projectId, ct);
@@ -261,14 +290,20 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
         {
             await CancelWorkAsync(); return;
         }
-        if (p.ArtifactStorageKey is not null) return; // retry after publication, before the job's success commit
+        if (p.ArtifactStorageKey is not null)
+        {
+            // Retry after publication, before the job's success commit or the
+            // strip release finished: only the release can still be pending.
+            await ReleaseStripsAsync(p.Id, ct);
+            return;
+        }
         var s = Settings(p); Validate(s);
         var grid = new LithophaneGrid(s);
         var units = 0;
         if (p.PixelMapStorageKey is null)
         {
             Image<L8> map;
-            try { map = await ReadMapAsync(p.OwnerUserId, p.FileItemId ?? Guid.Empty, s, ct); }
+            try { (map, _) = await ReadMapAsync(p.OwnerUserId, p.FileItemId ?? Guid.Empty, s, ct); }
             catch (LithophaneException ex) when (ex.Code == "source_unavailable") { await CancelWorkAsync(); return; }
             using (map)
             {
@@ -355,6 +390,7 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
             p.ArtifactStorageKey = stored.StorageKey;
             await db.SaveChangesAsync(token);
         }, ct);
+        await ReleaseStripsAsync(p.Id, ct);
 
         void Yield(int row)
         {

@@ -8,7 +8,9 @@ import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
 import { LithophanePhotoPicker } from '../lithophanes/LithophanePhotoPicker';
 import { LithophaneSphere } from '../lithophanes/LithophaneSphere';
-import { activeLithophane, DEFAULT_LITHOPHANE_SETTINGS, validLithophaneSettings } from '../lithophanes/lithophaneModel';
+import {
+  activeLithophane, DEFAULT_LITHOPHANE_SETTINGS, suggestedLithophaneResolution, validLithophaneSettings,
+} from '../lithophanes/lithophaneModel';
 import '../lithophanes/lithophanes.css';
 
 const FIELDS: { key: keyof LithophaneSettings; min: number; max: number; step: number; label: MessageKey }[] = [
@@ -28,7 +30,7 @@ const FIELDS: { key: keyof LithophaneSettings; min: number; max: number; step: n
 ];
 
 export function LithophanesPage() {
-  const { t } = useI18n();
+  const { t, formatNumber } = useI18n();
   const { invalidateAuth } = useAuth();
   const [photo, setPhoto] = useState<{ id: string; name: string } | null>(null);
   const [picking, setPicking] = useState(true);
@@ -44,6 +46,14 @@ export function LithophanesPage() {
   const action = useRef<AbortController | null>(null);
   const request = useRef<{ fingerprint: string; id: string } | null>(null);
   const valid = validLithophaneSettings(settings);
+  const suggestedResolution = suggestedLithophaneResolution(settings);
+  // The photo is already whole on the sphere below this zoom: lower values
+  // change the number, not the map. Known only after a fresh preview.
+  const minimumZoom = preview?.minimumZoom != null && settings.zoom < preview.minimumZoom - 0.005
+    ? Math.ceil(preview.minimumZoom * 100) / 100 : null;
+  // The suggested value must sit on the field's 0.05 step grid, or the
+  // browser's own form validation would silently refuse to submit.
+  const zoomFix = minimumZoom === null ? null : Math.round(Math.ceil(minimumZoom / 0.05 - 1e-9) * 5) / 100;
 
   const onError = useCallback((error: unknown) => {
     if (error instanceof Error && error.name === 'AbortError') return;
@@ -135,7 +145,14 @@ export function LithophanesPage() {
               }} required />
           </label>)}</div>
         </fieldset>
-        {!valid && <p role="alert">{t('lithophane.invalid')}</p>}
+        {!valid && (suggestedResolution !== null
+          ? <div role="alert" className="lithophane-too-detailed">
+            <p>{t('lithophane.tooDetailed', { mm: formatNumber(suggestedResolution) })}</p>
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => {
+              setSettings((old) => ({ ...old, resolutionMm: suggestedResolution })); setPreview(null);
+            }}>{t('lithophane.useResolution', { mm: formatNumber(suggestedResolution) })}</button>
+          </div>
+          : <p role="alert">{t('lithophane.invalid')}</p>)}
         <div className="lithophane-actions">
           <button type="button" className="btn btn-secondary" disabled={!valid || busy} onClick={() => void perform(async (signal) => {
             const result = await previewLithophane(photo.id, settings, signal); if (!signal.aborted) setPreview(result);
@@ -148,8 +165,14 @@ export function LithophanesPage() {
         {busy && <p role="status">{t('common.loading')}</p>}
       </form>
       <div>{preview ? <><LithophaneSphere preview={preview} /><p>{t('lithophane.estimate', {
-        triangles: preview.triangleCount.toLocaleString(), mb: (preview.sizeBytes / 1_000_000).toFixed(1),
-      })}</p></> : <p className="lithophane-preview-placeholder">{t('lithophane.previewPrompt')}</p>}</div>
+        triangles: formatNumber(preview.triangleCount),
+        mb: formatNumber(preview.sizeBytes / 1_000_000, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+      })}</p>{minimumZoom !== null && <p className="lithophane-zoom-hint">
+        {t('lithophane.zoomBelowMinimum', { zoom: formatNumber(minimumZoom) })}{' '}
+        <button type="button" className="btn btn-secondary" disabled={busy}
+          onClick={() => setSettings((old) => ({ ...old, zoom: zoomFix! }))}>
+          {t('lithophane.useZoom', { zoom: formatNumber(zoomFix!) })}</button>
+      </p>}</> : <p className="lithophane-preview-placeholder">{t('lithophane.previewPrompt')}</p>}</div>
     </div>}
 
     <section aria-label={t('lithophane.history')} className="lithophane-history">
@@ -158,7 +181,9 @@ export function LithophanesPage() {
       {loadFailed && <button className="btn btn-secondary" onClick={() => setReload((v) => v + 1)}>{t('common.retry')}</button>}
       {!loading && !loadFailed && items.length === 0 && <p>{t('lithophane.empty')}</p>}
       <ul>{items.map((item) => <li key={item.id}>
-        <div><strong>{item.name}</strong><p>{item.settings.diameterMm} mm · {(item.sizeBytes / 1_000_000).toFixed(1)} MB</p>
+        <div><strong>{item.name}</strong><p>{formatNumber(item.settings.diameterMm)} mm · {formatNumber(item.sizeBytes / 1_000_000, {
+          minimumFractionDigits: 1, maximumFractionDigits: 1,
+        })} MB</p>
           <p>{t(`lithophane.status.${item.status}`)}</p>
           {activeLithophane(item.status) && <progress value={item.completedRows} max={item.totalRows}
             aria-label={t('lithophane.progress')} />}

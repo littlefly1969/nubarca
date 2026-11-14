@@ -6,6 +6,9 @@ public sealed class LithophaneProject
     public Guid OwnerUserId { get; set; }
     public Guid RequestId { get; set; }
     public Guid? FileItemId { get; set; }
+    // The photograph the request named. Unlike FileItemId it survives the
+    // source's purge, so a retried request stays idempotent afterwards.
+    public Guid SourceFileItemId { get; set; }
     public Guid JobId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string SettingsJson { get; set; } = "{}";

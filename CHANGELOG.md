@@ -14,6 +14,12 @@ originating repository and is deliberately not reproduced here.
   are untouched; generated artifacts participate in storage ownership/cleanup.
 - Adds the composite Laboratory permission, additive schema and Member grant,
   four-language UI, geometry/topology, workflow, privacy and recovery tests.
+- A sphere too large for the triangle budget at the chosen surface step now says
+  so and offers the finest step that fits, instead of a generic invalid-values notice.
+- After an STL is ready its assembly strips are released, roughly halving a
+  finished project's storage. A retried creation stays idempotent after the
+  source photo is purged. A preview says when the zoom is below the point where
+  it changes the photo, and numbers follow the app's language.
   See [Lithophanes](docs/lithophanes.md).
 
 ## 0.4.8 — 2026-11-12

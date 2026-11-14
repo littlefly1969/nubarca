@@ -9,7 +9,7 @@ public sealed record LithophaneSummary(Guid Id, string Name, Guid? FileItemId, L
     DateTime CreatedAt, bool DownloadReady);
 public sealed record LithophanePage(IReadOnlyList<LithophaneSummary> Items, Guid? NextCursor);
 public sealed record LithophanePreview(string ImageBase64, int Columns, int Rows, int TopRows,
-    double BottomAngle, int TriangleCount, long SizeBytes);
+    double BottomAngle, int TriangleCount, long SizeBytes, double? MinimumZoom = null);
 public sealed class LithophaneException(string code, int statusCode = 400) : Exception(code)
 {
     public string Code { get; } = code;
