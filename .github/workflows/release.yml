@@ -44,6 +44,7 @@ jobs:
       api: ${{ steps.plan.outputs.api }}
       frontend: ${{ steps.plan.outputs.frontend }}
       print_agent: ${{ steps.plan.outputs.print_agent }}
+      tv_ota: ${{ steps.tv.outputs.tv_ota }}
       previous: ${{ steps.plan.outputs.previous }}
       published: ${{ steps.plan.outputs.published }}
     steps:
@@ -125,6 +126,40 @@ jobs:
             echo "| frontend | $frontend |"
             echo "| print-agent | $print_agent |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # The TV OTA follows the release on its own: it is built only when no
+      # published OTA is still this commit's bundle (an ancestor with no TV
+      # build input changed since, scripts/lib/tv-bundle-source.sh). A failed
+      # TV build never holds back the server release.
+      - name: Decide whether the TV OTA needs publishing
+        id: tv
+        run: |
+          set -euo pipefail
+          . scripts/lib/tv-bundle-source.sh
+          repository="ghcr.io/$(python3 deploy/release-manifest.py trust owner)/nubarca-tv-ota"
+          tv_ota=true
+          while read -r source; do
+            if docker manifest inspect "$repository:$source" >/dev/null 2>&1; then
+              echo "The TV OTA of $GITHUB_SHA is already published from $source."
+              tv_ota=false
+              break
+            fi
+          done < <(tv_bundle_candidate_sources "$GITHUB_SHA")
+          echo "tv_ota=$tv_ota" >> "$GITHUB_OUTPUT"
+          echo "| tv-ota | $tv_ota |" >> "$GITHUB_STEP_SUMMARY"
+
+  tv_ota:
+    name: TV OTA bundle
+    needs: plan
+    if: needs.plan.outputs.tv_ota == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/tv-ota-release.yml
+    with:
+      publish: true
+      confirm_git_sha: ${{ github.sha }}
+    secrets: inherit
 
   images:
     name: Application images

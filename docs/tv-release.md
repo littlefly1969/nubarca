@@ -178,9 +178,15 @@ rotation is a native transition and also needs a new APK/runtime.
 
 ## 5. OTA build and publication in GitHub
 
-Merge the reviewed change to protected `main`, wait for required CI, then run
-the manual `TV OTA release` workflow from `main`. Use `publish=true` and enter
-the exact full `main` SHA in `confirm_git_sha`.
+Merge the reviewed change to protected `main`. The Release workflow
+(`release.yml`) then calls `TV OTA release` with `publish=true` for that commit
+on its own, whenever no published OTA is still the commit's bundle. A commit
+that changes nothing the TV is built from (`tv/` and the two TV release
+workflows) reuses the newest published OTA instead
+(`scripts/lib/tv-bundle-source.sh`), and the server importer accepts that older
+bundle only under the same rule. To publish by hand (a re-run, a recovery), run
+the `TV OTA release` workflow from `main` with `publish=true` and the exact
+full `main` SHA in `confirm_git_sha`.
 
 `.github/workflows/tv-ota-release.yml` is the **only ordinary command that may
 sign an OTA**. It installs with Node 22, typechecks and tests before materializing

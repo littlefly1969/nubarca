@@ -13,6 +13,8 @@ usage() {
 }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../scripts/lib/tv-bundle-source.sh
+. "$REPO_ROOT/scripts/lib/tv-bundle-source.sh"
 ENV_FILE=""
 if [[ "${1:-}" == "--env-file" ]]; then
     [[ $# -ge 3 ]] || usage
@@ -66,7 +68,11 @@ source_sha="$(docker image inspect --format '{{ index .Config.Labels "org.openco
 runtime_label="$(docker image inspect --format '{{ index .Config.Labels "io.nubarca.tv.runtime-version" }}' "$IMAGE")"
 expected_runtime="$("$NODE_BIN" -p "require('./tv/release-contract.json').runtimeVersion")"
 [[ "$artifact_label" == "tv-ota" ]] || fail "image is not a NubArca TV OTA bundle"
-[[ "$source_sha" == "$head_sha" ]] || fail "bundle source $source_sha does not match checkout $head_sha"
+# A bundle built from an earlier commit is accepted only when it is still this
+# checkout's bundle: an ancestor with no TV build input changed since.
+tv_bundle_reusable "$source_sha" "$head_sha" || \
+    fail "bundle source $source_sha is not the TV bundle of checkout $head_sha"
+[[ "$source_sha" == "$head_sha" ]] || log "reusing the bundle built from $source_sha: no TV build input changed since"
 [[ "$runtime_label" == "$expected_runtime" ]] || fail "bundle runtime does not match the checkout release contract"
 
 bundle_dir="$(mktemp -d /tmp/nubarca-tv-ota-bundle.XXXXXXXX)"
@@ -88,5 +94,5 @@ export NUBARCA_PUBLIC_ORIGIN="$PUBLIC_ORIGIN"
 export NUBARCA_TV_OTA_CERTIFICATE="$CERTIFICATE"
 export TV_OTA_STORAGE_ROOT="$STORAGE_ROOT"
 unset TV_OTA_PRIVATE_KEY_PATH
-"$NODE_BIN" tv/scripts/ota.mjs import-bundle "$bundle_dir" "$head_sha"
-log "activated signed OTA bundle source=$head_sha runtime=$expected_runtime"
+"$NODE_BIN" tv/scripts/ota.mjs import-bundle "$bundle_dir" "$source_sha"
+log "activated signed OTA bundle source=$source_sha runtime=$expected_runtime"
