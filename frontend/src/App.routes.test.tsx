@@ -62,7 +62,7 @@ describe('App route table (anonymous)', () => {
   // protected, so an anonymous visitor lands on /login rather than seeing an
   // unguarded workspace or a dead route.
   it('protects the whole Laboratory subtree', async () => {
-    for (const path of ['/lab', '/lab/plates']) {
+    for (const path of ['/lab', '/lab/plates', '/lab/lithophanes']) {
       await expectLanded(path);
       cleanup();
     }

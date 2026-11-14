@@ -330,7 +330,8 @@ public sealed class BlobJanitor : BackgroundService
         // Print artifacts share the content-addressed layout but are owned by a
         // plain column, with no BlobObject row of their own.
         return await db.PrintJobs.AsNoTracking()
-            .AnyAsync(j => j.ArtifactStorageKey == storageKey, cancellationToken);
+            .AnyAsync(j => j.ArtifactStorageKey == storageKey, cancellationToken)
+            || await NubArca.Api.Lithophanes.LithophaneArtifacts.OwnsAsync(db, storageKey, cancellationToken);
     }
 
     // Finishes ONE already-decided physical purge, or abandons it because the

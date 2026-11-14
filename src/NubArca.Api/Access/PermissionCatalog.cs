@@ -41,6 +41,8 @@ public static class PermissionCatalog
         new(Permissions.DocumentSearchAccess, PermissionGroups.Features, false),
         new(Permissions.MailAccess, PermissionGroups.Features, false),
         new(Permissions.LaboratoryAccess, PermissionGroups.Features, false),
+        new(Permissions.LaboratoryLithophanes, PermissionGroups.Features, false,
+            Parent: Permissions.LaboratoryAccess),
         new(Permissions.LaboratoryPlates, PermissionGroups.Features, false,
             Parent: Permissions.LaboratoryAccess),
         new(Permissions.CloudFunctionsAccess, PermissionGroups.Features, false),

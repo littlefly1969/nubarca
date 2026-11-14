@@ -48,6 +48,7 @@ function renderLab(entries: string[]) {
               <Route path="/lab" element={<LaboratoryPage />}>
                 <Route index element={<Navigate to={LAB_DEFAULT_ROUTE} replace />} />
                 <Route path="plates" element={<div>plates workspace</div>} />
+                <Route path="lithophanes" element={<div>lithophanes workspace</div>} />
               </Route>
               <Route path="/plates" element={<Navigate to="/lab/plates" replace />} />
             </Routes>
@@ -67,8 +68,14 @@ function renderLab(entries: string[]) {
 
 describe('Laboratory workspace', () => {
   it('offers the Plates section', () => {
-    expect(LAB_SECTIONS.map((s) => s.to)).toEqual(['/lab/plates']);
+    expect(LAB_SECTIONS.map((s) => s.to)).toEqual(['/lab/plates', '/lab/lithophanes']);
     expect(LAB_DEFAULT_ROUTE).toBe('/lab/plates');
+  });
+
+  it('opens the lithophanes section directly and marks its route active', async () => {
+    renderLab(['/lab/lithophanes']);
+    expect(await screen.findByText('lithophanes workspace')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Litofanie' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('shows one common heading and a tab per section', async () => {

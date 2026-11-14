@@ -4,6 +4,24 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.9 — 2026-11-13
+
+- Laboratory now includes owner-private spherical lithophanes: choose an existing
+  photo, adjust sphere dimensions, LED opening, framing and tones, inspect an
+  orientable illuminated preview, and generate/download a binary STL in mm.
+- Generation uses the existing priority-aware worker, immutable strip checkpoints,
+  cancellation, retry/lease recovery and bounded streaming assembly. Originals
+  are untouched; generated artifacts participate in storage ownership/cleanup.
+- Adds the composite Laboratory permission, additive schema and Member grant,
+  four-language UI, geometry/topology, workflow, privacy and recovery tests.
+- A sphere too large for the triangle budget at the chosen surface step now says
+  so and offers the finest step that fits, instead of a generic invalid-values notice.
+- After an STL is ready its assembly strips are released, roughly halving a
+  finished project's storage. A retried creation stays idempotent after the
+  source photo is purged. A preview says when the zoom is below the point where
+  it changes the photo, and numbers follow the app's language.
+  See [Lithophanes](docs/lithophanes.md).
+
 ## 0.4.8 — 2026-11-12
 
 ### Mail becomes a real mail application

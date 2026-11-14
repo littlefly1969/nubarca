@@ -7,6 +7,12 @@ is built is described by `ARCHITECTURE.md`.
 
 ## Baseline
 
+- Laboratory lithophanes (`/lab/lithophanes`): one owner photograph to a spherical
+  STL; `lithophane.generate` uses the shared cooperative job engine. Persisted
+  grayscale maps and strips own derived bytes recognised by reconciliation,
+  BlobJanitor and print-artifact cleanup. Access requires `laboratory.access`
+  plus `laboratory.lithophanes`, rechecked by workers. See [lithophanes.md](lithophanes.md).
+
 - Release: `0.3.0` (server and web)
 - NubArca TV: `1.0.11`, `versionCode` 13, OTA runtime `nubarca-tv-native-12`
 - Backend: ASP.NET Core / .NET 10, EF Core, PostgreSQL 17

@@ -60,7 +60,8 @@ public sealed class StorageReconciliationService
         }
 
         return await _db.PrintJobs.AsNoTracking()
-            .AnyAsync(j => j.ArtifactStorageKey == storageKey, cancellationToken);
+            .AnyAsync(j => j.ArtifactStorageKey == storageKey, cancellationToken)
+            || await NubArca.Api.Lithophanes.LithophaneArtifacts.OwnsAsync(_db, storageKey, cancellationToken);
     }
 
     // Revalidate-and-unlink as ONE indivisible step.
@@ -145,6 +146,7 @@ public sealed class StorageReconciliationService
         // SEPARATE set so pass 2 keeps meaning exactly "blob rows whose bytes
         // are gone" and BlobObjectRows keeps counting blob rows only.
         var ownedWithoutBlobRow = new HashSet<string>(printArtifactKeys, StringComparer.Ordinal);
+        ownedWithoutBlobRow.UnionWith(await NubArca.Api.Lithophanes.LithophaneArtifacts.OwnedKeys(_db).ToListAsync(cancellationToken));
 
         var splitRoots = !ReferenceEquals(_derivedStorage, _storage);
 

@@ -48,6 +48,7 @@ public static class JobScheduling
         JobTypes.MediaExactDuplicateCleanup => Normal,
         // User-initiated export-snapshot build: same band as organize.
         JobTypes.PhotoExportBuild => Normal,
+        JobTypes.LithophaneGenerate => Normal,
         // Video-hls: a user pressed play on an unprepared video — latency
         // matters, but the transcode is heavy, so it must still yield to
         // foreground imports. Normal band (explicit, not just the fallback).

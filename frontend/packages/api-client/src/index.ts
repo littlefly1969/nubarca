@@ -21,6 +21,7 @@ export * from './similar';
 export * from './stagingUpload';
 export * from './photoOrganizer';
 export * from './photoExports';
+export * from './lithophanes';
 export * from './mediaLibrary';
 export * from './mediaDuplicates';
 export * from './privateVault';

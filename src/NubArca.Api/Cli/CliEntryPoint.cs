@@ -31,6 +31,7 @@ using NubArca.Api.Rag;
 using NubArca.Api.MediaLibrary;
 using NubArca.Api.Organizer;
 using NubArca.Api.PhotoExport;
+using NubArca.Api.Lithophanes;
 using NubArca.Api.Metadata;
 using NubArca.Api.Storage;
 using NubArca.Api.Uploads;
@@ -2392,6 +2393,7 @@ public static class CliEntryPoint
             services.AddScoped<PhotoDateTakenOrganizerService>();
             services.AddScoped<ExactMediaDuplicateCleanupService>();
             services.AddScoped<PhotoExportService>();
+            services.AddNubArcaLithophanes();
             // Background-job handlers — the SHARED list (see
             // JobHandlerRegistration), identical to the web host, so the worker
             // can never miss a handler the API enqueues (UnknownJobType). Keep

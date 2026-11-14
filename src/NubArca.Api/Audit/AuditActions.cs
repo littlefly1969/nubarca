@@ -2,6 +2,10 @@ namespace NubArca.Api.Audit;
 
 public static class AuditActions
 {
+    public const string LithophaneCreate = "lithophane.create";
+    public const string LithophaneDownload = "lithophane.download";
+    public const string LithophaneCancel = "lithophane.cancel";
+    public const string LithophaneDelete = "lithophane.delete";
     public const string LoginSuccess = "auth.login.success";
     public const string LoginFailure = "auth.login.failure";
     public const string Logout = "auth.logout";
