@@ -35,6 +35,8 @@ const it = {
   "lithophane.contrast": "Contrasto",
   "lithophane.gamma": "Toni intermedi (gamma)",
   "lithophane.invalid": "Controlla i valori: spessore massimo maggiore del minimo, apertura entro il 65% del diametro e dettaglio entro 2 milioni di triangoli. Per ridurre il file, aumenta il passo della superficie.",
+  "lithophane.tooDetailed": "Con questo diametro la superficie è troppo fine: supererebbe i 2 milioni di triangoli. Usa un passo della superficie di almeno {mm} mm.",
+  "lithophane.useResolution": "Usa {mm} mm",
   "lithophane.preview": "Aggiorna anteprima",
   "lithophane.generate": "Genera STL",
   "lithophane.reset": "Ripristina valori",

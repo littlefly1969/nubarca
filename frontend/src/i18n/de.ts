@@ -41,6 +41,8 @@ const de: Partial<Record<MessageKey, string>> = {
   "lithophane.contrast": "Kontrast",
   "lithophane.gamma": "Mitteltöne (Gamma)",
   "lithophane.invalid": "Werte prüfen: maximale Wandstärke größer als minimale, Öffnung bis 65 % des Durchmessers und höchstens 2 Millionen Dreiecke. Ein größeres Raster verkleinert die Datei.",
+  "lithophane.tooDetailed": "Bei diesem Durchmesser ist die Oberfläche zu fein: Sie würde 2 Millionen Dreiecke überschreiten. Verwende ein Oberflächenraster von mindestens {mm} mm.",
+  "lithophane.useResolution": "{mm} mm verwenden",
   "lithophane.preview": "Vorschau aktualisieren",
   "lithophane.generate": "STL erzeugen",
   "lithophane.reset": "Werte zurücksetzen",

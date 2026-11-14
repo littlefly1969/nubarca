@@ -8,7 +8,9 @@ import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
 import { LithophanePhotoPicker } from '../lithophanes/LithophanePhotoPicker';
 import { LithophaneSphere } from '../lithophanes/LithophaneSphere';
-import { activeLithophane, DEFAULT_LITHOPHANE_SETTINGS, validLithophaneSettings } from '../lithophanes/lithophaneModel';
+import {
+  activeLithophane, DEFAULT_LITHOPHANE_SETTINGS, suggestedLithophaneResolution, validLithophaneSettings,
+} from '../lithophanes/lithophaneModel';
 import '../lithophanes/lithophanes.css';
 
 const FIELDS: { key: keyof LithophaneSettings; min: number; max: number; step: number; label: MessageKey }[] = [
@@ -44,6 +46,7 @@ export function LithophanesPage() {
   const action = useRef<AbortController | null>(null);
   const request = useRef<{ fingerprint: string; id: string } | null>(null);
   const valid = validLithophaneSettings(settings);
+  const suggestedResolution = suggestedLithophaneResolution(settings);
 
   const onError = useCallback((error: unknown) => {
     if (error instanceof Error && error.name === 'AbortError') return;
@@ -135,7 +138,14 @@ export function LithophanesPage() {
               }} required />
           </label>)}</div>
         </fieldset>
-        {!valid && <p role="alert">{t('lithophane.invalid')}</p>}
+        {!valid && (suggestedResolution !== null
+          ? <div role="alert" className="lithophane-too-detailed">
+            <p>{t('lithophane.tooDetailed', { mm: suggestedResolution.toLocaleString() })}</p>
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => {
+              setSettings((old) => ({ ...old, resolutionMm: suggestedResolution })); setPreview(null);
+            }}>{t('lithophane.useResolution', { mm: suggestedResolution.toLocaleString() })}</button>
+          </div>
+          : <p role="alert">{t('lithophane.invalid')}</p>)}
         <div className="lithophane-actions">
           <button type="button" className="btn btn-secondary" disabled={!valid || busy} onClick={() => void perform(async (signal) => {
             const result = await previewLithophane(photo.id, settings, signal); if (!signal.aborted) setPreview(result);

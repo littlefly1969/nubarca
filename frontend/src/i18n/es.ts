@@ -41,6 +41,8 @@ const es: Partial<Record<MessageKey, string>> = {
   "lithophane.contrast": "Contraste",
   "lithophane.gamma": "Tonos medios (gamma)",
   "lithophane.invalid": "Revisa los valores: el espesor máximo debe superar al mínimo, la abertura no debe superar el 65% del diámetro y el detalle debe quedar dentro de 2 millones de triángulos. Aumenta el paso para reducir el archivo.",
+  "lithophane.tooDetailed": "Con este diámetro la superficie es demasiado fina: superaría los 2 millones de triángulos. Usa un paso de superficie de al menos {mm} mm.",
+  "lithophane.useResolution": "Usar {mm} mm",
   "lithophane.preview": "Actualizar vista previa",
   "lithophane.generate": "Generar STL",
   "lithophane.reset": "Restablecer valores",

@@ -43,6 +43,22 @@ describe('Laboratory lithophanes', () => {
     expect(mock.calls.some((c) => /\/content|\/download/.test(c.url))).toBe(false);
   });
 
+  it('explains a too-detailed large sphere and applies the suggested surface step', async () => {
+    installFetchMock({
+      'GET /api/media': () => jsonResponse(media),
+      'GET /api/lithophanes': () => jsonResponse({ items: [], nextCursor: null }),
+    });
+    mount(); await choose();
+    fireEvent.change(screen.getByLabelText('Diametro esterno (mm)'), { target: { value: '120' } });
+    expect(screen.getByRole('button', { name: 'Genera STL' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('troppo fine');
+    fireEvent.click(screen.getByRole('button', { name: /^Usa .* mm$/ }));
+    const step = Number((screen.getByLabelText('Passo della superficie (mm)') as HTMLInputElement).value);
+    expect(step).toBeGreaterThan(0.3);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Genera STL' })).toBeEnabled();
+  });
+
   it('preserves the idempotency key after a lost creation response', async () => {
     let attempt = 0;
     const mock = installFetchMock({

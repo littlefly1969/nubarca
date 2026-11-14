@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeLithophane, DEFAULT_LITHOPHANE_SETTINGS as defaults, latitudeRow, validLithophaneSettings } from './lithophaneModel';
+import { activeLithophane, DEFAULT_LITHOPHANE_SETTINGS as defaults, latitudeRow, suggestedLithophaneResolution, validLithophaneSettings } from './lithophaneModel';
 
 describe('lithophane form feedback', () => {
   it('accepts defaults and rejects non-finite, impossible and over-detailed models', () => {
@@ -7,6 +7,17 @@ describe('lithophane form feedback', () => {
     for (const change of [{ diameterMm: NaN }, { gamma: Infinity }, { openingMm: 79 },
       { maxThicknessMm: 0.4 }, { resolutionMm: 0 }, { diameterMm: 200, resolutionMm: 0.15 }]) {
       expect(validLithophaneSettings({ ...defaults, ...change })).toBe(false);
+    }
+  });
+  it('suggests the finest step that fits when only the detail is too high', () => {
+    expect(suggestedLithophaneResolution(defaults)).toBeNull();
+    expect(suggestedLithophaneResolution({ ...defaults, maxThicknessMm: 0.4 })).toBeNull();
+    for (const diameterMm of [100, 120, 160, 200]) {
+      const big = { ...defaults, diameterMm };
+      expect(validLithophaneSettings(big)).toBe(false);
+      const step = suggestedLithophaneResolution(big)!;
+      expect(validLithophaneSettings({ ...big, resolutionMm: step })).toBe(true);
+      expect(validLithophaneSettings({ ...big, resolutionMm: Math.round((step - 0.05) * 100) / 100 })).toBe(false);
     }
   });
   it('distinguishes active runs from terminal results', () => {

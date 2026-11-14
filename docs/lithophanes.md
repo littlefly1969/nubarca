@@ -57,7 +57,9 @@ HEIC), first-frame-only decoding, EXIF orientation and a bounded working image.
 Limits: 40–200 mm diameter; 0.4–2 mm minimum wall; maximum wall up to 5 mm and at
 least 0.1 mm above minimum; 4 mm to 65% of diameter LED opening; 0.15–1 mm surface
 sampling; at most 2,000,000 triangles (~100 MB binary STL); 64 MiB/64 MP source;
-100 retained projects per owner; 20 history records per keyset page. The opening
+100 retained projects per owner; 20 history records per keyset page. At the default
+0.3 mm step the triangle budget is reached near 95 mm; above that the form
+explains it and offers the finest step that fits (for example 0.5 mm at 150 mm). The opening
 is the clear internal diameter of the flat bottom rim. The sphere is truncated
 at that opening, so its height is less than its full spherical diameter.
 
