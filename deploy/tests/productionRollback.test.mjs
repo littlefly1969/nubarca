@@ -183,7 +183,8 @@ function installation() {
   git(dev, 'init', '-q', '-b', 'main');
   git(dev, 'config', 'user.name', 'NubArca Test');
   git(dev, 'config', 'user.email', 'test@example.invalid');
-  for (const file of ['deploy/update-production.sh', 'deploy/release-manifest.py', 'deploy/release-components.json']) {
+  for (const file of ['deploy/update-production.sh', 'deploy/release-manifest.py', 'deploy/release-components.json',
+    'scripts/lib/tv-bundle-source.sh']) {
     mkdirSync(dirname(join(dev, file)), { recursive: true });
     copyFileSync(resolve(root, file), join(dev, file));
   }

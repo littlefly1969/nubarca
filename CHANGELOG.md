@@ -4,6 +4,22 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.10 — 2026-11-14
+
+### The TV update follows every release on its own
+
+- **A release that changes the TV publishes its OTA by itself.** The Release
+  workflow now calls `TV OTA release` whenever no published OTA is still the
+  bundle of the new commit, so nobody has to run it by hand before
+  **Install** works.
+- **A release that does not change the TV reuses the last OTA.** A TV bundle
+  built from an earlier commit is accepted when nothing the TV is built from
+  (`tv/` and the two TV release workflows) changed since
+  (`scripts/lib/tv-bundle-source.sh`). The updater looks for it, and both TV
+  importers check the same rule before installing it. Before, every release
+  after a TV change waited for a TV build of its own exact commit.
+- A change to the TV importers alone no longer counts as a TV change.
+
 ## 0.4.9 — 2026-11-13
 
 - Laboratory now includes owner-private spherical lithophanes: choose an existing

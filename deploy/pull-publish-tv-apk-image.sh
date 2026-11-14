@@ -7,6 +7,8 @@ log() { printf '[tv-apk-pull] %s\n' "$*"; }
 fail() { printf '[tv-apk-pull] error: %s\n' "$*" >&2; exit 1; }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../scripts/lib/tv-bundle-source.sh
+. "$REPO_ROOT/scripts/lib/tv-bundle-source.sh"
 ENV_FILE=""
 
 if [[ "${1:-}" == "--env-file" ]]; then
@@ -54,7 +56,11 @@ docker pull "$IMAGE" >/dev/null
 artifact_label="$(docker image inspect --format '{{ index .Config.Labels "io.nubarca.artifact" }}' "$IMAGE")"
 source_sha="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE")"
 [[ "$artifact_label" == "tv-apk" ]] || fail "image is not a NubArca TV APK bundle"
-[[ "$source_sha" == "$head_sha" ]] || fail "bundle source $source_sha does not match checkout $head_sha"
+# A bundle built from an earlier commit is accepted only when it is still this
+# checkout's bundle: an ancestor with no TV build input changed since.
+tv_bundle_reusable "$source_sha" "$head_sha" || \
+    fail "bundle source $source_sha is not the TV bundle of checkout $head_sha"
+[[ "$source_sha" == "$head_sha" ]] || log "reusing the bundle built from $source_sha: no TV build input changed since"
 
 bundle_dir="$(mktemp -d /tmp/nubarca-tv-apk-bundle.XXXXXXXX)"
 container=""
