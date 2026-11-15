@@ -76,6 +76,8 @@ done
     [[ "$MODE" == "apply" && "$CONFIRM_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRM_RELEASE" =~ ^[0-9a-f]{64}$ ]] || usage
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../scripts/lib/tv-bundle-source.sh
+. "$REPO_ROOT/scripts/lib/tv-bundle-source.sh"
 cd "$REPO_ROOT"
 [[ -f "$ENV_FILE" ]] || fail "environment file not found"
 for command in git docker python3 curl gzip sha256sum flock cosign; do
@@ -391,8 +393,7 @@ if [[ "$TV_ENABLED" == true ]]; then
         fi
     done
     if [[ -n "$TV_CURRENT_SHA" ]]; then
-        changed_between "$TV_CURRENT_SHA" tv deploy/validate-tv-apk.sh deploy/pull-publish-tv-ota-image.sh \
-            .github/workflows/tv-native-release.yml .github/workflows/tv-ota-release.yml && TV_CHANGED=true
+        changed_between "$TV_CURRENT_SHA" "${TV_BUNDLE_PATHS[@]}" && TV_CHANGED=true
     else
         # A legacy publication has no source marker. Offer TV only when CI has
         # published a bundle for this exact candidate; never guess an older build.
@@ -425,10 +426,18 @@ print(digest)' <<< "$manifest"
 
 TV_REPO="ghcr.io/$GHCR_OWNER/nubarca-tv-apk"
 TV_OTA_REPO="ghcr.io/$GHCR_OWNER/nubarca-tv-ota"
-TV_DIGEST=""; TV_OTA_DIGEST=""
+TV_DIGEST=""; TV_OTA_DIGEST=""; TV_SOURCE=""; TV_OTA_SOURCE=""
 if [[ "$TV_CHANGED" == true ]]; then
-    TV_DIGEST="$(manifest_digest "$TV_REPO:$CANDIDATE_SHA" || true)"
-    TV_OTA_DIGEST="$(manifest_digest "$TV_OTA_REPO:$CANDIDATE_SHA" || true)"
+    # The newest CI bundle that is still this candidate's bundle: built from the
+    # candidate, or from an ancestor with no TV build input changed since
+    # (scripts/lib/tv-bundle-source.sh). The importers re-check the same rule.
+    while read -r tv_source_sha; do
+        [[ -n "$TV_DIGEST" ]] || { TV_DIGEST="$(manifest_digest "$TV_REPO:$tv_source_sha" || true)"; TV_SOURCE="$tv_source_sha"; }
+        [[ -n "$TV_OTA_DIGEST" ]] || { TV_OTA_DIGEST="$(manifest_digest "$TV_OTA_REPO:$tv_source_sha" || true)"; TV_OTA_SOURCE="$tv_source_sha"; }
+        [[ -z "$TV_DIGEST" || -z "$TV_OTA_DIGEST" ]] || break
+    done < <(tv_bundle_candidate_sources "$CANDIDATE_SHA")
+    [[ -n "$TV_DIGEST" ]] || TV_SOURCE=""
+    [[ -n "$TV_OTA_DIGEST" ]] || TV_OTA_SOURCE=""
     [[ -n "$TV_DIGEST" || -n "$TV_OTA_DIGEST" || -n "$NOT_DEPLOYABLE_REASON" ]] || \
         NOT_DEPLOYABLE_REASON="tv-artifact-missing"
 fi
@@ -465,8 +474,8 @@ log "release:   $([[ "$NOT_DEPLOYABLE_REASON" == release-not-published ]] && ech
 log "backend:   changed=$BACKEND_CHANGED source=${API_SOURCE:-none}"
 log "frontend:  changed=$FRONTEND_CHANGED source=${FRONTEND_SOURCE:-none}"
 log "print box: changed=$PRINT_AGENT_CHANGED version=${PRINT_AGENT_VERSION:-none} served=$PRINT_AGENT_MOUNTED"
-log "TV native: changed=$TV_CHANGED artifact=$([[ -n "$TV_DIGEST" ]] && echo ready || echo absent)"
-log "TV OTA:    changed=$TV_CHANGED artifact=$([[ -n "$TV_OTA_DIGEST" ]] && echo ready || echo absent)"
+log "TV native: changed=$TV_CHANGED artifact=$([[ -n "$TV_DIGEST" ]] && echo "ready source=$TV_SOURCE" || echo absent)"
+log "TV OTA:    changed=$TV_CHANGED artifact=$([[ -n "$TV_OTA_DIGEST" ]] && echo "ready source=$TV_OTA_SOURCE" || echo absent)"
 log "migration: $([[ ${#MIGRATION_IDS[@]} -gt 0 ]] && echo "approved (${MIGRATION_IDS[*]})" || \
     { [[ "$NOT_DEPLOYABLE_REASON" == manual-migration ]] && echo "needs the manual path" || echo none; })"
 if [[ ${#MIGRATION_IDS[@]} -gt 0 ]]; then
