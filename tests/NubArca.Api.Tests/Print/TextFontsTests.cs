@@ -21,7 +21,7 @@ public sealed class TextFontsTests
         foreach (var font in TextFonts.All)
         {
             Assert.True(File.Exists(Path.Combine(AppContext.BaseDirectory, "Assets", "fonts", font.File)), font.File);
-            Assert.NotNull(TextFonts.Family(font.Id));
+            Assert.False(string.IsNullOrEmpty(TextFonts.Family(font.Id).Name));
             Assert.Contains($"id: '{font.Id}'", browser);
         }
         Assert.Equal(TextFonts.All.Count, System.Text.RegularExpressions.Regex.Matches(browser, @"\{ id: '").Count);

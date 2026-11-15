@@ -75,7 +75,10 @@
     <Content Include="..\..\mobile\assets\fonts\Exo2-Medium.ttf" Link="Assets\fonts\Exo2-Medium.ttf" CopyToOutputDirectory="PreserveNewest" />
     <!-- The faces an owner may choose for their own words (TextFonts), the same
          files the browser previews with from /fonts/text/. -->
-    <Content Include="..\..\frontend\public\fonts\text\*.ttf" Link="Assets\fonts\text\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\frontend\public\fonts\text\DMSerifDisplay-Regular.ttf" Link="Assets\fonts\text\DMSerifDisplay-Regular.ttf" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\frontend\public\fonts\text\Kalam-Bold.ttf" Link="Assets\fonts\text\Kalam-Bold.ttf" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\frontend\public\fonts\text\CaveatBrush-Regular.ttf" Link="Assets\fonts\text\CaveatBrush-Regular.ttf" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\frontend\public\fonts\text\DancingScript.ttf" Link="Assets\fonts\text\DancingScript.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
