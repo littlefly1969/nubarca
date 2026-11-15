@@ -30,6 +30,7 @@ COPY src/NubArca.Api/ src/NubArca.Api/
 # /app/publish reaches the runtime layer.
 COPY assets/brand/nubarca/runtime/web/ assets/brand/nubarca/runtime/web/
 COPY mobile/assets/fonts/ mobile/assets/fonts/
+COPY frontend/public/fonts/text/ frontend/public/fonts/text/
 
 RUN dotnet publish src/NubArca.Api/NubArca.Api.csproj -c Release -o /app/publish /p:UseAppHost=false
 

@@ -142,6 +142,47 @@ public sealed class LithophaneEndpointTests
     }
 
     [Fact]
+    public async Task Words_Only_Need_No_Photo_And_The_Download_Matches_The_Preview_Map()
+    {
+        using var f = Factory();
+        var (_, c) = await f.CreateAuthenticatedClientAsync();
+        var words = Fast with { Text = "Buon\nNatale", TextFont = "script", TextHeightMm = 6 };
+        // No photograph and no words: nothing to make.
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await c.PostAsJsonAsync(Root, new LithophaneCreateRequest(null, Guid.NewGuid(), Fast))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await c.PostAsJsonAsync($"{Root}/preview", new LithophanePreviewRequest(null, Fast))).StatusCode);
+
+        var previewResponse = await c.PostAsJsonAsync($"{Root}/preview", new LithophanePreviewRequest(null, words));
+        previewResponse.EnsureSuccessStatusCode();
+        var preview = (await previewResponse.Content.ReadFromJsonAsync<LithophanePreview>())!;
+        Assert.Null(preview.MinimumZoom);
+
+        var requestId = Guid.NewGuid();
+        var created = await c.PostAsJsonAsync(Root, new LithophaneCreateRequest(null, requestId, words));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var project = (await created.Content.ReadFromJsonAsync<LithophaneSummary>())!;
+        Assert.Null(project.FileItemId);
+        Assert.Equal("Buon Natale", project.Name);
+        // A retry is idempotent; the same id with a photograph is a different request.
+        var again = await c.PostAsJsonAsync(Root, new LithophaneCreateRequest(null, requestId, words));
+        Assert.Equal(project.Id, (await again.Content.ReadFromJsonAsync<LithophaneSummary>())!.Id);
+        var file = await Upload(c);
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await c.PostAsJsonAsync(Root, new LithophaneCreateRequest(file, requestId, words))).StatusCode);
+
+        var ready = await Finish(f, c, project.Id);
+        Assert.Equal("ready", ready.Status);
+        var actual = await c.GetByteArrayAsync($"{Root}/{project.Id}/download");
+        using var map = LithophaneImage.CreateMap(null, words);
+        using var expected = new MemoryStream(); var grid = new LithophaneGrid(words);
+        LithophaneMesh.WriteHeader(expected, grid); LithophaneMesh.WriteStrip(expected, words, map, 0, grid.Rows);
+        Assert.Equal(expected.ToArray(), actual);
+        var saved = (await c.GetFromJsonAsync<LithophanePreview>($"{Root}/{project.Id}/preview"))!;
+        Assert.Equal(preview.ImageBase64, saved.ImageBase64);
+    }
+
+    [Fact]
     public async Task Idempotency_Is_Owner_Scoped_And_Rejects_A_Changed_Request()
     {
         using var f = Factory(); var (_, c) = await f.CreateAuthenticatedClientAsync();

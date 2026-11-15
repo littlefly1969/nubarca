@@ -1,7 +1,8 @@
 namespace NubArca.Api.Lithophanes;
 
-public sealed record LithophaneCreateRequest(Guid FileItemId, Guid RequestId, LithophaneSettings Settings);
-public sealed record LithophanePreviewRequest(Guid FileItemId, LithophaneSettings Settings);
+// FileItemId null: a lithophane of words only (Settings.Text is then required).
+public sealed record LithophaneCreateRequest(Guid? FileItemId, Guid RequestId, LithophaneSettings Settings);
+public sealed record LithophanePreviewRequest(Guid? FileItemId, LithophaneSettings Settings);
 public sealed record LithophaneStatusRequest(IReadOnlyList<Guid> Ids);
 public sealed record LithophaneQueueRequest(IReadOnlyList<Guid>? FileItemIds);
 public sealed record LithophaneQueueEntry(Guid FileItemId, string Name, string ThumbnailUrl, DateTime AddedAt);

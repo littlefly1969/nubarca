@@ -73,6 +73,9 @@
          scripts/check-brand-invariants.py already verifies. -->
     <Content Include="..\..\mobile\assets\fonts\SpaceGrotesk-Bold.ttf" Link="Assets\fonts\SpaceGrotesk-Bold.ttf" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\mobile\assets\fonts\Exo2-Medium.ttf" Link="Assets\fonts\Exo2-Medium.ttf" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The faces an owner may choose for their own words (TextFonts), the same
+         files the browser previews with from /fonts/text/. -->
+    <Content Include="..\..\frontend\public\fonts\text\*.ttf" Link="Assets\fonts\text\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

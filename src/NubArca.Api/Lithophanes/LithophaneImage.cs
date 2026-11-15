@@ -12,10 +12,22 @@ namespace NubArca.Api.Lithophanes;
 // existed loads with A = 255 everywhere and keeps its exact old thickness.
 public static class LithophaneImage
 {
-    public static Image<La16> CreateMap(Image<Rgba32> photo, LithophaneSettings settings, CancellationToken ct = default)
+    // A null photo is a lithophane of words only: the plain background wall
+    // with the words centred in the picture area.
+    public static Image<La16> CreateMap(Image<Rgba32>? photo, LithophaneSettings settings, CancellationToken ct = default)
     {
         var grid = new LithophaneGrid(settings);
         var result = new Image<La16>(grid.Columns, grid.Rows + 1, new La16(255, 0));
+        if (photo is null)
+        {
+            try
+            {
+                var middle = 90 * grid.Radius * Math.PI / 180;
+                LithophaneText.Apply(result, settings, new(0, middle, middle), centred: true, ct: ct);
+                return result;
+            }
+            catch { result.Dispose(); throw; }
+        }
         var placed = PhotoPlacementGeometry.Place((double)photo.Width / photo.Height,
             settings.PictureWidthDegrees / settings.PictureHeightDegrees,
             new(settings.CenterX, settings.CenterY, settings.Zoom));
@@ -28,40 +40,49 @@ public static class LithophaneImage
         var mmPerDegree = grid.Radius * Math.PI / 180;
         try
         {
-            if (lonRight <= lonLeft || latBottom <= latTop) return result;
-            for (var row = 1; row < grid.Rows; row++)
-            {
-                ct.ThrowIfCancellationRequested();
-                var theta = grid.Theta(row) * 180 / Math.PI;
-                var lat = Math.Clamp(theta, latTop, latBottom);
-                var latMm = Math.Abs(theta - lat) * mmPerDegree;
-                if (latMm >= LithophaneSettings.BlendMm) continue;
-                var ringMmPerDegree = mmPerDegree * Math.Sin(grid.Theta(row));
-                for (var col = 0; col < grid.Columns; col++)
-                {
-                    // The nearest point of the photo, across the seam when that is closer.
-                    var lon0 = 360d * col / grid.Columns - 180;
-                    var lon = lon0; var lonDistance = double.MaxValue;
-                    foreach (var candidate in new[] { lon0 - 360, lon0, lon0 + 360 })
-                    {
-                        var clamped = Math.Clamp(candidate, lonLeft, lonRight);
-                        if (Math.Abs(candidate - clamped) < lonDistance) { lonDistance = Math.Abs(candidate - clamped); lon = clamped; }
-                    }
-                    var distance = Math.Sqrt(latMm * latMm + Math.Pow(lonDistance * ringMmPerDegree, 2));
-                    if (distance >= LithophaneSettings.BlendMm) continue;
-                    var s = 1 - distance / LithophaneSettings.BlendMm;
-                    var coverage = latMm == 0 && lonDistance == 0 ? (byte)255 : (byte)Math.Round(255 * s * s * (3 - 2 * s));
-                    if (coverage == 0) continue;
-                    var u = lon / settings.PictureWidthDegrees + 0.5;
-                    var v = (lat - 90) / settings.PictureHeightDegrees + 0.5;
-                    var x = Math.Clamp((u - placed.Left) / placed.Width, 0, 1);
-                    var y = Math.Clamp((v - placed.Top) / placed.Height, 0, 1);
-                    result[col, row] = new La16(Tone(photo, x, y, settings), coverage);
-                }
-            }
+            Photo(result, photo, settings, grid, placed, lonLeft, lonRight, latTop, latBottom, ct);
+            LithophaneText.Apply(result, settings,
+                new((lonLeft + lonRight) / 2, latTop * mmPerDegree, latBottom * mmPerDegree), ct: ct);
             return result;
         }
         catch { result.Dispose(); throw; }
+    }
+
+    private static void Photo(Image<La16> result, Image<Rgba32> photo, LithophaneSettings settings, LithophaneGrid grid,
+        FrameRect placed, double lonLeft, double lonRight, double latTop, double latBottom, CancellationToken ct)
+    {
+        var mmPerDegree = grid.Radius * Math.PI / 180;
+        if (lonRight <= lonLeft || latBottom <= latTop) return;
+        for (var row = 1; row < grid.Rows; row++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var theta = grid.Theta(row) * 180 / Math.PI;
+            var lat = Math.Clamp(theta, latTop, latBottom);
+            var latMm = Math.Abs(theta - lat) * mmPerDegree;
+            if (latMm >= LithophaneSettings.BlendMm) continue;
+            var ringMmPerDegree = mmPerDegree * Math.Sin(grid.Theta(row));
+            for (var col = 0; col < grid.Columns; col++)
+            {
+                // The nearest point of the photo, across the seam when that is closer.
+                var lon0 = 360d * col / grid.Columns - 180;
+                var lon = lon0; var lonDistance = double.MaxValue;
+                foreach (var candidate in new[] { lon0 - 360, lon0, lon0 + 360 })
+                {
+                    var clamped = Math.Clamp(candidate, lonLeft, lonRight);
+                    if (Math.Abs(candidate - clamped) < lonDistance) { lonDistance = Math.Abs(candidate - clamped); lon = clamped; }
+                }
+                var distance = Math.Sqrt(latMm * latMm + Math.Pow(lonDistance * ringMmPerDegree, 2));
+                if (distance >= LithophaneSettings.BlendMm) continue;
+                var s = 1 - distance / LithophaneSettings.BlendMm;
+                var coverage = latMm == 0 && lonDistance == 0 ? (byte)255 : (byte)Math.Round(255 * s * s * (3 - 2 * s));
+                if (coverage == 0) continue;
+                var u = lon / settings.PictureWidthDegrees + 0.5;
+                var v = (lat - 90) / settings.PictureHeightDegrees + 0.5;
+                var x = Math.Clamp((u - placed.Left) / placed.Width, 0, 1);
+                var y = Math.Clamp((v - placed.Top) / placed.Height, 0, 1);
+                result[col, row] = new La16(Tone(photo, x, y, settings), coverage);
+            }
+        }
     }
 
     // What the browser preview shows: light through the actual wall, 255 where
