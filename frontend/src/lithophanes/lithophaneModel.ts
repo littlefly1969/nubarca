@@ -8,6 +8,37 @@ export const DEFAULT_LITHOPHANE_SETTINGS: LithophaneSettings = {
 
 const MAX_TRIANGLES = 2_000_000;
 
+export const LITHOPHANE_TEXT_MAX_LENGTH = 60;
+export const LITHOPHANE_TEXT_MAX_LINES = 2;
+export const DEFAULT_LITHOPHANE_TEXT_HEIGHT = 8;
+
+/** Mirrors the server: one or two lines, no other control characters, no emoji. */
+export function validLithophaneText(text: string | null | undefined): boolean {
+  if (!text) return true;
+  if (text.length > LITHOPHANE_TEXT_MAX_LENGTH) return false;
+  if (/[\uD800-\uDFFF]/.test(text)) return false;
+  if (/[\u0000-\u0009\u000B-\u001F\u007F-\u009F]/.test(text)) return false;
+  return text.split('\n').length <= LITHOPHANE_TEXT_MAX_LINES;
+}
+
+export const hasLithophaneText = (s: LithophaneSettings) => (s.text ?? '').trim().length > 0;
+
+/**
+ * What is sent: without words, no text fields at all, so a project without
+ * text is stored exactly as before text existed; the default face and
+ * position are sent as absent for the same reason.
+ */
+export function lithophaneRequestSettings(s: LithophaneSettings): LithophaneSettings {
+  const { text, textFont, textHeightMm, textPosition, ...rest } = s;
+  if (!hasLithophaneText(s)) return rest;
+  return {
+    ...rest, text: text!.replace(/\r/g, ''),
+    ...(textFont && textFont !== 'nubarca' ? { textFont } : {}),
+    textHeightMm: textHeightMm ?? DEFAULT_LITHOPHANE_TEXT_HEIGHT,
+    ...(textPosition && textPosition !== 'below' ? { textPosition } : {}),
+  };
+}
+
 // Immediate form feedback only. The server validates independently and decides
 // the exact mesh. No geometry is generated in the browser.
 function withinBounds(s: LithophaneSettings): boolean {
@@ -18,7 +49,8 @@ function withinBounds(s: LithophaneSettings): boolean {
     && between(s.resolutionMm, 0.15, 1) && between(s.pictureWidthDegrees, 40, 300)
     && between(s.pictureHeightDegrees, 30, 140) && between(s.centerX, 0, 1) && between(s.centerY, 0, 1)
     && between(s.zoom, 0.01, 4) && between(s.brightness, -0.5, 0.5)
-    && between(s.contrast, 0.25, 3) && between(s.gamma, 0.3, 3);
+    && between(s.contrast, 0.25, 3) && between(s.gamma, 0.3, 3)
+    && validLithophaneText(s.text) && (s.textHeightMm == null || between(s.textHeightMm, 3, 30));
 }
 
 /** Same triangle count as the server's LithophaneGrid (parity-tested on both sides). */

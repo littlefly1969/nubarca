@@ -141,6 +141,10 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
             return Refuse(OwnerPhotoPrintErrors.InvalidCaption);
         if (style == PrintLayouts.FullBleed && (caption is not null || request.Brand))
             return Refuse(OwnerPhotoPrintErrors.InvalidRequest);
+        // The caption's face: one of the table, and only with a caption. The
+        // default is recorded as absent, so such a print keeps its digest.
+        if (!TextFonts.IsKnown(request.CaptionFont)) return Refuse(OwnerPhotoPrintErrors.InvalidRequest);
+        var captionFont = caption is null || request.CaptionFont == TextFonts.Default ? null : request.CaptionFont;
         // An album's own logo is a choice of WHICH mark: only with a mark.
         if (request.LogoAlbumId is not null && !request.Brand)
             return Refuse(OwnerPhotoPrintErrors.InvalidRequest);
@@ -165,7 +169,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 request.IncludeDate ? zone!.Id : null)
             : SheetFingerprint(layout, style, fileIds, placements, stationId, deviceId, paper, portrait,
                 caption, request.Brand, request.IncludeDate, request.IncludeDate ? request.DateLocale : null,
-                request.IncludeDate ? zone!.Id : null, subjectPoint, request.LogoAlbumId);
+                request.IncludeDate ? zone!.Id : null, subjectPoint, request.LogoAlbumId, captionFont);
         if (await RepeatAsync(ownerUserId, keyHash, fingerprint, cancellationToken) is { } repeat) return repeat;
 
         // 3. The photographs: the caller's own, in their library, and photographs
@@ -358,7 +362,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 artifact = joined
                     ? PrintArtifactParts.Pack(await RenderHalvesAsync(layout, style,
                         [.. sources.Photos.Select(bytes => bytes!)], placements, photoPortrait,
-                        caption, request.Brand, dateTexts, PrintCalibration.Of(device), cancellationToken, logo))
+                        caption, request.Brand, dateTexts, PrintCalibration.Of(device), cancellationToken, logo, captionFont))
                     : style == PrintLayouts.FullBleed
                     ? await _renderer.RenderOwnerPhotoAsync(new OwnerPhotoComposition(
                         sources.Photos[0]!, paper, portrait, placements[0], dateText, PrintCalibration.Of(device)),
@@ -373,7 +377,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                         Orientation: photoPortrait ? PartyPrintOrientation.Portrait : PartyPrintOrientation.Landscape,
                         Calibration: PrintCalibration.Of(device),
                         Paper: paper,
-                        Words: new PrintSheetWords(caption, null, dateText, request.Brand),
+                        Words: new PrintSheetWords(caption, null, dateText, request.Brand, captionFont),
                         PopOutMask: subject?.Mask,
                         Logo: logo),
                         cancellationToken);
@@ -427,6 +431,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                         placements = placements.Select(p => new { centerX = p.CenterX, centerY = p.CenterY, zoom = p.Zoom }),
                         subject = subjectPoint is { } sp ? new { x = sp.X, y = sp.Y } : null,
                         caption,
+                        captionFont,
                         brand = request.Brand,
                         logo = !request.Brand ? "none" : logo is null ? "nubarca" : "custom",
                         includeDate = request.IncludeDate,
@@ -539,7 +544,8 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
     private async Task<IReadOnlyList<byte[]>> RenderHalvesAsync(
         string layout, string style, IReadOnlyList<byte[]> photos, IReadOnlyList<PhotoPlacement> placements,
         bool photoPortrait, string? caption, bool brand, IReadOnlyList<string> dateTexts,
-        PrintCalibration calibration, CancellationToken cancellationToken, PrintLogo? logo = null)
+        PrintCalibration calibration, CancellationToken cancellationToken, PrintLogo? logo = null,
+        string? captionFont = null)
     {
         var halves = new List<byte[]>(PrintLayouts.HalvesPerSheet);
         var perHalf = layout == PrintLayouts.Photo2 ? 1 : photos.Count / PrintLayouts.HalvesPerSheet;
@@ -564,7 +570,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 Orientation: photoPortrait ? PartyPrintOrientation.Portrait : PartyPrintOrientation.Landscape,
                 Calibration: calibration,
                 Paper: PrintPapers.Photo10x15,
-                Words: new PrintSheetWords(caption, null, date, brand),
+                Words: new PrintSheetWords(caption, null, date, brand, captionFont),
                 Logo: logo),
                 cancellationToken));
         }
@@ -600,7 +606,8 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
     internal static string SheetFingerprint(
         string layout, string style, IReadOnlyList<Guid> fileIds, IReadOnlyList<PhotoPlacement> placements,
         Guid stationId, Guid deviceId, string paper, bool portrait, string? caption, bool brand,
-        bool includeDate, string? dateLocale, string? zone, SubjectPoint? subject = null, Guid? logoAlbumId = null)
+        bool includeDate, string? dateLocale, string? zone, SubjectPoint? subject = null, Guid? logoAlbumId = null,
+        string? captionFont = null)
     {
         static string N(double v) => Math.Round(v, 6).ToString("R", CultureInfo.InvariantCulture);
         var photos = fileIds.Select((id, i) =>
@@ -614,6 +621,8 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         if (subject is { } point) canonical += $"|subject:{N(point.X)}:{N(point.Y)}";
         // Likewise an album's own logo in place of the NubArca mark.
         if (logoAlbumId is Guid album) canonical += $"|logo:{album:N}";
+        // And a caption face other than the band's own.
+        if (captionFont is not null) canonical += $"|font:{captionFont}";
         return Hash(canonical);
     }
 

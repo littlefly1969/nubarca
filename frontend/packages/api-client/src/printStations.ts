@@ -339,6 +339,8 @@ export interface OwnerPhotoPrintRequest {
   orientation?: 'portrait' | 'landscape';
   /** One line of the owner's own in a framed sheet's band. */
   caption?: string;
+  /** The face the caption is written in (a text font id). Absent: the band's own face. */
+  captionFont?: string;
   /** The NubArca wordmark in a framed sheet's band. */
   brand?: boolean;
   /** With `brand`: this album's own logo signs the band in place of the NubArca wordmark. */

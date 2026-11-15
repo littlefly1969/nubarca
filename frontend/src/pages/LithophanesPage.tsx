@@ -9,9 +9,13 @@ import { useI18n, type MessageKey } from '../i18n';
 import { LithophaneQueue, useLithophaneQueue } from '../lithophanes/LithophaneQueue';
 import { LithophaneSphere } from '../lithophanes/LithophaneSphere';
 import {
-  activeLithophane, DEFAULT_LITHOPHANE_SETTINGS, suggestedLithophaneResolution, validLithophaneSettings,
+  activeLithophane, DEFAULT_LITHOPHANE_SETTINGS, DEFAULT_LITHOPHANE_TEXT_HEIGHT, hasLithophaneText,
+  LITHOPHANE_TEXT_MAX_LENGTH, lithophaneRequestSettings, suggestedLithophaneResolution, validLithophaneSettings,
+  validLithophaneText,
 } from '../lithophanes/lithophaneModel';
 import '../lithophanes/lithophanes.css';
+import { TextFontPicker } from '../text/TextFontPicker';
+import { textFont } from '../text/textFonts';
 
 const FIELDS: { key: keyof LithophaneSettings; min: number; max: number; step: number; label: MessageKey }[] = [
   { key: 'diameterMm', min: 40, max: 200, step: 1, label: 'lithophane.diameter' },
@@ -29,11 +33,21 @@ const FIELDS: { key: keyof LithophaneSettings; min: number; max: number; step: n
   { key: 'contrast', min: 0.25, max: 3, step: 0.05, label: 'lithophane.contrast' },
   { key: 'gamma', min: 0.3, max: 3, step: 0.05, label: 'lithophane.gamma' },
 ];
+// A lithophane of words only has no photograph to place or tone.
+const SHAPE_FIELDS = new Set<keyof LithophaneSettings>([
+  'diameterMm', 'openingMm', 'minThicknessMm', 'maxThicknessMm', 'backgroundThicknessMm', 'resolutionMm',
+]);
+const TEXT_POSITIONS: { value: NonNullable<LithophaneSettings['textPosition']>; label: MessageKey }[] = [
+  { value: 'below', label: 'lithophane.textBelow' },
+  { value: 'above', label: 'lithophane.textAbove' },
+  { value: 'onPhoto', label: 'lithophane.textOnPhoto' },
+];
 
 export function LithophanesPage() {
   const { t, formatNumber } = useI18n();
   const { invalidateAuth } = useAuth();
-  const [photo, setPhoto] = useState<{ id: string; name: string } | null>(null);
+  // id null: a lithophane of words only. '' is a saved project whose photo is gone.
+  const [photo, setPhoto] = useState<{ id: string | null; name: string } | null>(null);
   const [settings, setSettings] = useState<LithophaneSettings>({ ...DEFAULT_LITHOPHANE_SETTINGS });
   const [preview, setPreview] = useState<LithophanePreview | null>(null);
   const [items, setItems] = useState<LithophaneSummary[]>([]);
@@ -45,7 +59,9 @@ export function LithophanesPage() {
   const [reload, setReload] = useState(0);
   const action = useRef<AbortController | null>(null);
   const request = useRef<{ fingerprint: string; id: string } | null>(null);
-  const valid = validLithophaneSettings(settings);
+  const textOnly = photo !== null && photo.id === null;
+  const textMissing = textOnly && !hasLithophaneText(settings);
+  const valid = validLithophaneSettings(settings) && !textMissing;
   const suggestedResolution = suggestedLithophaneResolution(settings);
   // The photo is already whole on the sphere below this zoom: lower values
   // change the number, not the map. Known only after a fresh preview.
@@ -114,16 +130,17 @@ export function LithophanesPage() {
     finally { if (!ctrl.signal.aborted) setBusy(false); }
   };
   const generate = (e: FormEvent) => {
-    e.preventDefault(); if (!photo?.id || !valid || busy) return;
-    const fingerprint = JSON.stringify({ fileItemId: photo.id, settings });
+    e.preventDefault(); if (!photo || photo.id === '' || !valid || busy) return;
+    const sent = lithophaneRequestSettings(settings);
+    const fingerprint = JSON.stringify({ fileItemId: photo.id, settings: sent });
     if (request.current?.fingerprint !== fingerprint) request.current = { fingerprint, id: crypto.randomUUID() };
     const requestId = request.current.id;
     void perform(async (signal) => {
-      const created = await createLithophane(photo.id, settings, requestId, signal);
+      const created = await createLithophane(photo.id, sent, requestId, signal);
       if (signal.aborted) return;
       setItems((old) => [created, ...old.filter((x) => x.id !== created.id)]);
       // The server ended this photo's wait when it accepted the generation.
-      queue.forget(photo.id);
+      if (photo.id) queue.forget(photo.id);
       setNotice(t('lithophane.created'));
       request.current = null;
     });
@@ -134,19 +151,52 @@ export function LithophanesPage() {
     <p>{t('lithophane.intro')}</p>
     {notice && <p role="status" className="lithophane-notice">{notice}</p>}
     <LithophaneQueue queue={queue} selected={photo?.id ?? null} disabled={busy} onSelect={choose} />
+    <p className="lithophane-text-only">
+      <button type="button" className="btn btn-secondary" disabled={busy} aria-pressed={textOnly} onClick={() => {
+        action.current?.abort(); setBusy(false);
+        setPhoto({ id: null, name: t('lithophane.textOnlyTitle') }); setPreview(null); setNotice(null);
+      }}>{t('lithophane.textOnlyStart')}</button>
+    </p>
     {photo && <div className="lithophane-editor">
       <form onSubmit={generate}>
         <div className="lithophane-photo-heading"><h4>{photo.name}</h4></div>
         <fieldset disabled={busy}>
           <legend>{t('lithophane.parameters')}</legend>
-          <div className="lithophane-fields">{FIELDS.map((field) => <label key={field.key}>{t(field.label)}
+          <div className="lithophane-fields">{FIELDS.filter((field) => !textOnly || SHAPE_FIELDS.has(field.key)).map((field) => <label key={field.key}>{t(field.label)}
             <input type="number" min={field.min} max={field.max} step={field.step} value={settings[field.key] ?? ''}
               onChange={(e) => {
                 setSettings((old) => ({ ...old, [field.key]: Number(e.target.value) })); setPreview(null);
               }} required />
           </label>)}</div>
         </fieldset>
-        {!valid && (suggestedResolution !== null
+        <fieldset disabled={busy} className="lithophane-text">
+          <legend>{t('lithophane.textSection')}</legend>
+          <label>{t('lithophane.text')}
+            <textarea rows={2} maxLength={LITHOPHANE_TEXT_MAX_LENGTH} value={settings.text ?? ''}
+              style={{ fontFamily: textFont(settings.textFont).family, fontWeight: textFont(settings.textFont).weight }}
+              aria-invalid={!validLithophaneText(settings.text) || textMissing} data-testid="lithophane-text"
+              aria-describedby="lithophane-text-hint"
+              onChange={(e) => { setSettings((old) => ({ ...old, text: e.target.value })); setPreview(null); }} />
+          </label>
+          <span id="lithophane-text-hint"
+            className={validLithophaneText(settings.text) ? 'lithophane-hint' : 'lithophane-hint lithophane-hint--error'}>
+            {t(textMissing ? 'lithophane.textRequired' : 'lithophane.textHelp', { max: LITHOPHANE_TEXT_MAX_LENGTH })}
+          </span>
+          <TextFontPicker name="lithophane-font" value={textFont(settings.textFont).id} disabled={busy}
+            onChange={(font) => { setSettings((old) => ({ ...old, textFont: font })); setPreview(null); }} />
+          <div className="lithophane-fields">
+            <label>{t('lithophane.textHeight')}
+              <input type="number" min={3} max={30} step={0.5} value={settings.textHeightMm ?? DEFAULT_LITHOPHANE_TEXT_HEIGHT}
+                onChange={(e) => { setSettings((old) => ({ ...old, textHeightMm: Number(e.target.value) })); setPreview(null); }} required />
+            </label>
+            {!textOnly && <label>{t('lithophane.textPosition')}
+              <select value={settings.textPosition ?? 'below'} onChange={(e) => {
+                setSettings((old) => ({ ...old, textPosition: e.target.value as LithophaneSettings['textPosition'] })); setPreview(null);
+              }}>{TEXT_POSITIONS.map((p) => <option key={p.value} value={p.value}>{t(p.label)}</option>)}</select>
+            </label>}
+          </div>
+        </fieldset>
+        {!valid && !textMissing && (suggestedResolution !== null
           ? <div role="alert" className="lithophane-too-detailed">
             <p>{t('lithophane.tooDetailed', { mm: formatNumber(suggestedResolution) })}</p>
             <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => {
@@ -156,9 +206,10 @@ export function LithophanesPage() {
           : <p role="alert">{t('lithophane.invalid')}</p>)}
         <div className="lithophane-actions">
           <button type="button" className="btn btn-secondary" disabled={!valid || busy} onClick={() => void perform(async (signal) => {
-            const result = await previewLithophane(photo.id, settings, signal); if (!signal.aborted) setPreview(result);
+            const result = await previewLithophane(photo.id, lithophaneRequestSettings(settings), signal);
+            if (!signal.aborted) setPreview(result);
           })}>{t('lithophane.preview')}</button>
-          <button type="submit" className="btn btn-primary" disabled={!valid || busy || !photo.id}>{t('lithophane.generate')}</button>
+          <button type="submit" className="btn btn-primary" disabled={!valid || busy || photo.id === ''}>{t('lithophane.generate')}</button>
           <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => {
             setSettings({ ...DEFAULT_LITHOPHANE_SETTINGS }); setPreview(null);
           }}>{t('lithophane.reset')}</button>
@@ -197,7 +248,9 @@ export function LithophanesPage() {
               if (signal.aborted) return;
               // Projects saved before the background wall existed used the photo's thinnest wall there.
               setSettings({ ...item.settings, backgroundThicknessMm: item.settings.backgroundThicknessMm ?? item.settings.minThicknessMm });
-              setPhoto({ id: item.fileItemId ?? '', name: item.name }); setPreview(result);
+              // No photograph but words: a lithophane of words only.
+              setPhoto({ id: item.fileItemId ?? (hasLithophaneText(item.settings) ? null : ''), name: item.name });
+              setPreview(result);
             })}>{t('lithophane.view')}</button>}
           {(item.status === 'queued' || item.status === 'running') && <button type="button" className="btn btn-secondary" disabled={busy}
             onClick={() => void perform(async (signal) => {

@@ -1,0 +1,41 @@
+{
+  "description": "Owner text faces (TextFonts / textFonts.ts). Unmodified upstream binaries from Google Fonts, SIL Open Font License 1.1. The default face, nubarca, is the brand Space Grotesk Bold from mobile/assets/fonts.",
+  "fonts": [
+    {
+      "id": "serif",
+      "file": "DMSerifDisplay-Regular.ttf",
+      "family": "DM Serif Display",
+      "source": "https://github.com/google/fonts/tree/main/ofl/dmserifdisplay",
+      "license": "OFL-1.1",
+      "licenseFile": "dm-serif-display-OFL.txt",
+      "sha256": "8cc3643535edf039aa5d95440a8542735e9197e4f4b8d9303e980fefbf5ab616"
+    },
+    {
+      "id": "hand",
+      "file": "Kalam-Bold.ttf",
+      "family": "Kalam Bold",
+      "source": "https://github.com/google/fonts/tree/main/ofl/kalam",
+      "license": "OFL-1.1",
+      "licenseFile": "kalam-OFL.txt",
+      "sha256": "2f6576601db015d4f6c08678120277fc8510b98c06e932ce7a6a9cbff4cbdded"
+    },
+    {
+      "id": "marker",
+      "file": "CaveatBrush-Regular.ttf",
+      "family": "Caveat Brush",
+      "source": "https://github.com/google/fonts/tree/main/ofl/caveatbrush",
+      "license": "OFL-1.1",
+      "licenseFile": "caveat-brush-OFL.txt",
+      "sha256": "e565bd7bffd895ca64f8d1cb77c816b9b38d9c010246386a07c9648592f6f282"
+    },
+    {
+      "id": "script",
+      "file": "DancingScript.ttf",
+      "family": "Dancing Script (variable, drawn at its default 400 instance)",
+      "source": "https://github.com/google/fonts/tree/main/ofl/dancingscript",
+      "license": "OFL-1.1",
+      "licenseFile": "dancing-script-OFL.txt",
+      "sha256": "21808625578fe8d8cd10cb684be546dca077b27cd03a53a2f1ec11dc743c924c"
+    }
+  ]
+}

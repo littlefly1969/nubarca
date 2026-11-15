@@ -92,6 +92,13 @@ fallback stack and is never invisible. Every font token ends in a real
 The licence notices are served at `/fonts/space-grotesk-OFL.txt` and
 `/fonts/exo-2-OFL.txt`.
 
+These two families are the product's UI. The faces an owner may choose for
+their own words (a framed print's line, a lithophane's text) are content, not
+UI: they live in `frontend/public/fonts/text/` with their OFL notices and
+`fonts-manifest.json`, are declared by `frontend/src/text/textFonts.css` (loaded
+only when a preview draws with them) and are the same files the server renders
+with (`TextFonts`). The default among them is Space Grotesk Bold.
+
 ## Geometry
 
 | Rule | Value | Token |

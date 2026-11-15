@@ -47,6 +47,68 @@ describe('Laboratory lithophanes', () => {
     expect(mock.calls.some((c) => /\/content|\/download/.test(c.url))).toBe(false);
   });
 
+  it('adds words to a photo in the chosen face and position', async () => {
+    const mock = installFetchMock({
+      'GET /api/lithophanes/queue': () => jsonResponse(queue),
+      'GET /api/lithophanes': () => jsonResponse({ items: [], nextCursor: null }),
+      'POST /api/lithophanes/preview': () => jsonResponse(preview),
+      'POST /api/lithophanes': () => jsonResponse(project, 201),
+    });
+    mount(); await choose();
+    fireEvent.change(screen.getByLabelText('Testo (una o due righe)'), { target: { value: 'Buon\nNatale' } });
+    fireEvent.click(screen.getByLabelText('Corsivo'));
+    fireEvent.change(screen.getByLabelText('Posizione'), { target: { value: 'above' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Aggiorna anteprima' }));
+    await screen.findByRole('img', { name: 'Sfera di prova' });
+    fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
+    await screen.findByText('In coda');
+    const previewRequest = mock.calls.find((c) => c.url === '/api/lithophanes/preview')!;
+    const request = mock.calls.find((c) => c.url === '/api/lithophanes' && c.method === 'POST')!;
+    const words = { text: 'Buon\nNatale', textFont: 'script', textHeightMm: 8, textPosition: 'above' };
+    expect(JSON.parse(previewRequest.body!).settings).toMatchObject(words);
+    expect(JSON.parse(request.body!)).toMatchObject({ fileItemId: photo.id, settings: words });
+  });
+
+  it('sends no text fields at all when there are no words', async () => {
+    const mock = installFetchMock({
+      'GET /api/lithophanes/queue': () => jsonResponse(queue),
+      'GET /api/lithophanes': () => jsonResponse({ items: [], nextCursor: null }),
+      'POST /api/lithophanes': () => jsonResponse(project, 201),
+    });
+    mount(); await choose();
+    fireEvent.click(screen.getByLabelText('Elegante'));
+    fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
+    await screen.findByText('In coda');
+    const settings = JSON.parse(mock.calls.find((c) => c.url === '/api/lithophanes' && c.method === 'POST')!.body!).settings;
+    for (const key of ['text', 'textFont', 'textHeightMm', 'textPosition']) expect(settings).not.toHaveProperty(key);
+  });
+
+  it('makes a lithophane of words only, without a photo', async () => {
+    const mock = installFetchMock({
+      'GET /api/lithophanes/queue': () => jsonResponse([]),
+      'GET /api/lithophanes': () => jsonResponse({ items: [], nextCursor: null }),
+      'POST /api/lithophanes/preview': () => jsonResponse(preview),
+      'POST /api/lithophanes': () => jsonResponse({ ...project, fileItemId: null, name: 'Auguri' }, 201),
+    });
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Crea una litofania con solo una scritta' }));
+    // Nothing to place or tone, and no position to choose.
+    expect(screen.queryByLabelText('Ingrandimento')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Posizione')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Genera STL' })).toBeDisabled();
+    expect(screen.getByText(/senza foto la scritta è tutta la litofania/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Testo (una o due righe)'), { target: { value: 'Auguri' } });
+    fireEvent.click(screen.getByLabelText('A mano'));
+    fireEvent.click(screen.getByRole('button', { name: 'Aggiorna anteprima' }));
+    await screen.findByRole('img', { name: 'Sfera di prova' });
+    fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
+    await screen.findByText('In coda');
+    const previewRequest = JSON.parse(mock.calls.find((c) => c.url === '/api/lithophanes/preview')!.body!);
+    const request = JSON.parse(mock.calls.find((c) => c.url === '/api/lithophanes' && c.method === 'POST')!.body!);
+    expect(previewRequest.fileItemId).toBeNull();
+    expect(request).toMatchObject({ fileItemId: null, settings: { text: 'Auguri', textFont: 'hand' } });
+  });
+
   it('explains a too-detailed large sphere and applies the suggested surface step', async () => {
     installFetchMock({
       'GET /api/lithophanes/queue': () => jsonResponse(queue),

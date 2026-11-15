@@ -687,10 +687,10 @@ public sealed class OwnerPhotoPrintTests : IDisposable
 
     private static object SheetBody(Printer printer, string layout, string? style, IEnumerable<Guid> photos,
         string? caption = null, bool brand = false, bool includeDate = false, string? orientation = null,
-        string paper = "10x15") => new
+        string paper = "10x15", string? captionFont = null) => new
     {
         printStationId = printer.StationId, printerDeviceId = printer.DeviceId, expectedPaperSize = paper,
-        layout, style, orientation, caption, brand, includeDate, dateLocale = "it", timeZone = "Europe/Rome",
+        layout, style, orientation, caption, brand, includeDate, dateLocale = "it", timeZone = "Europe/Rome", captionFont,
         photos = photos.Select(id => new { fileItemId = id, placement = new { centerX = 0.5, centerY = 0.5, zoom = 1.0 } }),
     };
 
@@ -754,6 +754,42 @@ public sealed class OwnerPhotoPrintTests : IDisposable
             caption: "Estate al lago", brand: true, includeDate: true, orientation: "portrait"))).StatusCode);
         using var signed = await PrintedSheetAsync(printer);
         Assert.True(BrightPixelsNotWhite(signed, markRow.x, markRow.y, markRow.w, markRow.h) > 50, "the NubArca mark");
+    }
+
+    [Fact]
+    public async Task The_Owners_Line_Is_Written_In_The_Face_They_Chose()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var photo = await PhotoAsync(people.Owner, 200, 300);
+        var band = PrintLayouts.PhotoFooter("10x15", portrait: true);
+        var (bandTop, bandHeight) = ((int)(band.Y * 1800) + 2, (int)(band.Height * 1800) - 4);
+
+        async Task<byte[]> LineAsync(string? font)
+        {
+            Assert.Equal(HttpStatusCode.Accepted, (await Submit(people.Owner, SheetBody(printer, "photo", "framed", [photo],
+                caption: "Estate al lago", orientation: "portrait", captionFont: font))).StatusCode);
+            var job = await Db(db => db.PrintJobs.OrderByDescending(j => j.CreatedAt).FirstAsync());
+            var spec = JsonDocument.Parse(job.RenderSpecificationJson).RootElement;
+            // The default face is recorded as no choice at all.
+            Assert.Equal(font is null or "nubarca" ? null : font, spec.GetProperty("captionFont").GetString());
+            using var sheet = await PrintedSheetAsync(printer);
+            var line = new List<byte>();
+            for (var y = bandTop; y < bandTop + bandHeight / 2; y++)
+                for (var x = 100; x < 1100; x++) line.Add(sheet[x, y].R);
+            return [.. line];
+        }
+
+        var standard = await LineAsync(null);
+        Assert.Equal(standard, await LineAsync("nubarca"));
+        Assert.NotEqual(standard, await LineAsync("script"));
+        Assert.NotEqual(standard, await LineAsync("hand"));
+
+        // A face that is not in the table is refused, never silently replaced.
+        var refused = await Submit(people.Owner, SheetBody(printer, "photo", "framed", [photo],
+            caption: "Estate", orientation: "portrait", captionFont: "comic-sans"));
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal("invalid_request", await Error(refused));
     }
 
     [Fact]
@@ -977,6 +1013,7 @@ public sealed class OwnerPhotoPrintTests : IDisposable
             SheetBody(printer, "grid4", null, photos, caption: "Gita al mare"),
             SheetBody(printer, "grid4", null, [photos[1], photos[0], photos[2], photos[3]], caption: "Gita"),
             SheetBody(printer, "grid4", null, photos, caption: "Gita", brand: true),
+            SheetBody(printer, "grid4", null, photos, caption: "Gita", captionFont: "serif"),
         })
         {
             var refused = await Submit(people.Owner, changed, "sheet-key");

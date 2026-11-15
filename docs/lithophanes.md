@@ -43,6 +43,27 @@ image decoding. No new runtime, AI service or geometry dependency is needed.
 The external sphere remains smooth; thickness varies inward. Bottom opening is
 the clear internal diameter, with a closed, flat annular rim. Model units are mm.
 
+### Words
+
+Settings may carry `text` (one or two lines separated by `\n`, at most 60
+characters, no other control characters, no emoji), `textFont` (a
+`TextFonts` id: `nubarca` default, `serif`, `hand`, `marker`, `script`),
+`textHeightMm` (cap height on the surface, 3–30, default 8) and
+`textPosition` (`below` default, `above`, `onPhoto`). Absent fields are never
+serialised, so a project without words keeps its stored settings and its
+idempotency fingerprint. The words are rasterised flat in millimetres
+(SixLabors.Fonts, the same TTF files the browser previews with) and laid on the
+sphere along each circle of latitude and meridian, centred on the photo's
+longitude, `BlendMm + 0.25 × height` away from the photo's edge. Their coverage
+mixes the wall toward the maximum thickness, so backlit they read dark. They are
+drawn into the persisted map, so preview, strips and STL agree.
+
+A create or preview request with `fileItemId: null` is a lithophane of words
+only: `text` is required, the background wall is the whole sphere and the words
+are centred on the equator facing longitude 0. Such a project stores
+`SourceFileItemId = Guid.Empty` and is named after its words; a photo project
+whose source was purged keeps its real source id and still cancels as before.
+
 ## Acceptance
 
 - STL topology: every edge used twice in opposite directions, no degenerate faces,

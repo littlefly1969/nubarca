@@ -55,6 +55,8 @@ export interface StudioFormat {
 /** A framed sheet's band: title above, a line under it, the wordmark left and a mark right. */
 export interface StudioBand {
   title: string | null;
+  /** The face the owner chose for the title (CSS family and weight). Absent: the band's own. */
+  titleFont?: { family: string; weight: number } | null;
   line: string | null;
   /** The text at the right of the signature row (an owner's date); a guest's number is never previewed. */
   mark: string | null;
@@ -249,7 +251,11 @@ function SheetBand({ band, dark, strip = false }: {
     // they are a touch larger, as on paper.
     <div className={strip ? 'party-print-sheet-footer is-strip' : 'party-print-sheet-footer'}>
       <span className="party-print-sheet-text">
-        {band.title && <span className="party-print-sheet-name">{band.title}</span>}
+        {band.title && <span
+          className="party-print-sheet-name"
+          data-testid="print-sheet-title"
+          style={band.titleFont ? { fontFamily: band.titleFont.family, fontWeight: band.titleFont.weight } : undefined}
+        >{band.title}</span>}
         {band.line && <span className="party-print-sheet-line">{band.line}</span>}
       </span>
       {/* Bottom-left the wordmark, bottom-right the mark — where the renderer

@@ -1,0 +1,56 @@
+/* The owner's text faces (textFonts.ts). Loaded only when a preview uses them:
+   a @font-face downloads nothing until text is drawn in its family. The same
+   files are what the server draws prints and lithophanes with. Licences: the
+   *-OFL.txt notices beside each file. */
+@font-face {
+  font-family: 'NubArca Text Serif';
+  src: url('/fonts/text/DMSerifDisplay-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'NubArca Text Hand';
+  src: url('/fonts/text/Kalam-Bold.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'NubArca Text Marker';
+  src: url('/fonts/text/CaveatBrush-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'NubArca Text Script';
+  src: url('/fonts/text/DancingScript.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+
+.text-font-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.text-font-picker legend {
+  padding: 0;
+  margin-bottom: 0.35rem;
+}
+.text-font-picker label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.4));
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-size: 1.15rem;
+  line-height: 1.2;
+}
+.text-font-picker label:has(input:checked) {
+  border-color: var(--accent, currentColor);
+  box-shadow: 0 0 0 1px var(--accent, currentColor);
+}
