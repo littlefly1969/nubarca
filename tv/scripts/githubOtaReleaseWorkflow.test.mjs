@@ -7,9 +7,11 @@ const repoRoot = resolve(import.meta.dirname, '../..');
 const workflow = readFileSync(resolve(repoRoot, '.github/workflows/tv-ota-release.yml'), 'utf8');
 const pullPublisher = readFileSync(resolve(repoRoot, 'deploy/pull-publish-tv-ota-image.sh'), 'utf8');
 const packageJson = readFileSync(resolve(repoRoot, 'tv/package.json'), 'utf8');
+const releaseWorkflow = readFileSync(resolve(repoRoot, '.github/workflows/release.yml'), 'utf8');
 
-test('OTA release is manual, main-only, confirmed, and production-environment scoped', () => {
+test('OTA release is main-only, confirmed, and production-environment scoped', () => {
   assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /workflow_call:/);
   assert.doesNotMatch(workflow, /^\s+(?:push|pull_request|schedule):/m);
   assert.match(workflow, /environment: tv-production/);
   assert.match(workflow, /GITHUB_REF.*refs\/heads\/main/);
@@ -51,4 +53,17 @@ test('production pulls only by digest and verifies provenance before atomic impo
     pullPublisher.indexOf('source_sha.*head_sha') < pullPublisher.indexOf('ota.mjs import-bundle')
       || pullPublisher.indexOf('[[ "$source_sha" == "$head_sha" ]]') < pullPublisher.indexOf('ota.mjs import-bundle'),
   );
+});
+
+test('every release publishes its TV OTA unless a published one is still its bundle', () => {
+  assert.match(releaseWorkflow, /tv_bundle_candidate_sources "\$GITHUB_SHA"/);
+  assert.match(releaseWorkflow, /nubarca-tv-ota/);
+  const job = releaseWorkflow.slice(releaseWorkflow.indexOf('\n  tv_ota:'));
+  assert.match(job, /if: needs\.plan\.outputs\.tv_ota == 'true'/);
+  assert.match(job, /uses: \.\/\.github\/workflows\/tv-ota-release\.yml/);
+  assert.match(job, /publish: true/);
+  assert.match(job, /confirm_git_sha: \$\{\{ github\.sha \}\}/);
+  // The server release never waits on the TV.
+  const manifest = releaseWorkflow.slice(releaseWorkflow.indexOf('\n  manifest:'));
+  assert.doesNotMatch(manifest.slice(0, manifest.indexOf('runs-on')), /tv_ota/);
 });

@@ -2,7 +2,20 @@ name: TV OTA release
 
 # GitHub is the only ordinary OTA signer/publisher. Production never builds or
 # signs: it pulls this validated bundle by digest and activates it locally.
+#
+# The Release workflow (release.yml) calls it on every push to main whose TV
+# bundle is not published yet, so a release that changes the TV ships its OTA
+# without anyone running this by hand. A release that does not change the TV
+# reuses the newest published bundle (scripts/lib/tv-bundle-source.sh).
 on:
+  workflow_call:
+    inputs:
+      publish:
+        required: true
+        type: boolean
+      confirm_git_sha:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       publish:
