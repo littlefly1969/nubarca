@@ -6,7 +6,20 @@ Laboratory → Lithophanes (`/lab/lithophanes`) converts one owner-library photo
 into a hollow, watertight spherical STL. The user chooses the external diameter,
 minimum/maximum wall thickness, bottom LED opening, surface resolution, photo
 coverage, framing and tonal correction. Defaults: 80 mm, 0.8–2.8 mm, 20 mm opening,
-0.3 mm sampling, 160° × 110° photo area. The remaining surface has a uniform wall.
+0.3 mm sampling, 160° × 110° photo area. The remaining surface has its own uniform
+background wall (0.4–2 mm, default 0.8 mm), independent of the photo's minimum and
+maximum. A coverage channel in the persisted map (grey + alpha) tells background
+from white photo pixels, and the photo's edge ramps into the background over
+`LithophaneSettings.BlendMm` (2 mm, smoothstep) outside the photograph. Only the
+inner surface moves. Maps saved before coverage existed load fully covered, and
+settings without a background value use the minimum wall, so older projects keep
+their exact geometry. Previews show light through the actual wall.
+
+Photos are chosen the same way as for Plates: *Add to → Lithophanes* from the
+Library, a list or an album puts them on an owner-private waiting list
+(`lithophane_queue_items`, references only, at most 200) shown at the top of the
+page. A generation ends that photo's wait, as does removing it; a trashed photo
+is hidden and its purge deletes the reference.
 An orientable preview uses the same processed luminance map as generation; its
 illumination is illustrative, not a calibrated prediction of a filament.
 
@@ -29,6 +42,27 @@ Hard limits bound dimensions, pixels, triangle count, active history and input
 image decoding. No new runtime, AI service or geometry dependency is needed.
 The external sphere remains smooth; thickness varies inward. Bottom opening is
 the clear internal diameter, with a closed, flat annular rim. Model units are mm.
+
+### Words
+
+Settings may carry `text` (one or two lines separated by `\n`, at most 60
+characters, no other control characters, no emoji), `textFont` (a
+`TextFonts` id: `nubarca` default, `serif`, `hand`, `marker`, `script`),
+`textHeightMm` (cap height on the surface, 3–30, default 8) and
+`textPosition` (`below` default, `above`, `onPhoto`). Absent fields are never
+serialised, so a project without words keeps its stored settings and its
+idempotency fingerprint. The words are rasterised flat in millimetres
+(SixLabors.Fonts, the same TTF files the browser previews with) and laid on the
+sphere along each circle of latitude and meridian, centred on the photo's
+longitude, `BlendMm + 0.25 × height` away from the photo's edge. Their coverage
+mixes the wall toward the maximum thickness, so backlit they read dark. They are
+drawn into the persisted map, so preview, strips and STL agree.
+
+A create or preview request with `fileItemId: null` is a lithophane of words
+only: `text` is required, the background wall is the whole sphere and the words
+are centred on the equator facing longitude 0. Such a project stores
+`SourceFileItemId = Guid.Empty` and is named after its words; a photo project
+whose source was purged keeps its real source id and still cancels as before.
 
 ## Acceptance
 

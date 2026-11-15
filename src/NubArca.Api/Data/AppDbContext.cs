@@ -83,6 +83,7 @@ public class AppDbContext : DbContext
     public DbSet<MediaDuplicateCleanupRun> MediaDuplicateCleanupRuns => Set<MediaDuplicateCleanupRun>();
     public DbSet<LithophaneProject> LithophaneProjects => Set<LithophaneProject>();
     public DbSet<LithophaneStrip> LithophaneStrips => Set<LithophaneStrip>();
+    public DbSet<LithophaneQueueItem> LithophaneQueueItems => Set<LithophaneQueueItem>();
 
     public DbSet<PhotoExportSession> PhotoExportSessions => Set<PhotoExportSession>();
     public DbSet<PhotoExportEntry> PhotoExportEntries => Set<PhotoExportEntry>();

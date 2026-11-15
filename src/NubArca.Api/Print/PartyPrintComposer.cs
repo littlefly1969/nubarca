@@ -141,7 +141,8 @@ public sealed record PartyPrintComposition(
 /// NubArca wordmark unless it says otherwise — signs the left of that row.
 /// Any of them may be absent.
 /// </summary>
-public sealed record PrintSheetWords(string? Title, string? Line, string? Mark, bool Brand);
+/// <para><paramref name="TitleFont"/> is an owner's chosen face for the title (TextFonts); null is the band's own.</para>
+public sealed record PrintSheetWords(string? Title, string? Line, string? Mark, bool Brand, string? TitleFont = null);
 
 /// <summary>
 /// Draws the sheet that is actually printed.
@@ -950,7 +951,9 @@ public sealed class PartyPrintComposer
         var title = Truncate(words.Title ?? string.Empty, PartyPrintGeometry.PartyNameMaxLength);
         if (title.Length > 0)
         {
-            var nameFont = _display.CreateFont(sizes.NameSize, FontStyle.Bold);
+            var nameFont = words.TitleFont is { } chosen
+                ? TextFonts.Family(chosen, _assetRoot).CreateFont(sizes.NameSize)
+                : _display.CreateFont(sizes.NameSize, FontStyle.Bold);
             sheet.Mutate(x => x.DrawText(
                 new RichTextOptions(nameFont)
                 {

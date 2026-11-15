@@ -14,6 +14,8 @@ export type IconName =
   | 'shared-albums'
   | 'people'
   | 'plates'
+  // A sphere lit from inside: the Laboratory's lithophanes.
+  | 'lithophane'
   | 'laboratory'
   | 'shares'
   | 'functions'
@@ -82,6 +84,7 @@ const PATHS: Record<IconName, string> = {
   'shared-albums': 'M4 7h11a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zM20 4v8M20 12l-3-3M20 12l3-3',
   people: 'M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M12 7a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM17 11a3 3 0 1 0 0-6M21 19v-1a4 4 0 0 0-3-3.9',
   plates: 'M3 9h18v6H3zM6 12h2M11 12h2M16 12h2',
+  lithophane: 'M12 20a8 8 0 1 1 0-16 8 8 0 0 1 0 16zM4 12h16M12 4a3.5 8 0 0 1 0 16M9 21h6',
   laboratory: 'M12 3l2.4 5.6L20 10l-4 4 1 6-5-2.8L7 20l1-6-4-4 5.6-1.4z',
   shares: 'M8 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM20 6a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM20 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM7.7 11l8.6-4M7.7 13l8.6 4',
   functions: 'M5 5h5v5H5zM14 5h5v5h-5zM5 14h5v5H5zM14 14h5v5h-5z',

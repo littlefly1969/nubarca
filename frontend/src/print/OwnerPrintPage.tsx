@@ -23,6 +23,8 @@ import {
   type AlbumSharePrintRequest,
   type OwnerPhotoPrintDate,
 } from '@nubarca/api-client';
+import { TextFontPicker } from '../text/TextFontPicker';
+import { DEFAULT_TEXT_FONT, textFont, textFontRequest, type TextFontId } from '../text/textFonts';
 import { formatOwnerPrintDate, layoutAllowed, layoutCut, type PrintLayout } from '@nubarca/contracts';
 import { useI18n, type MessageKey } from '../i18n';
 import { usePermissions } from '../auth/usePermissions';
@@ -357,6 +359,7 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
   // --- the owner's choices ------------------------------------------------------
   const [style, setStyle] = useState<PrintStyleChoice>('fullBleed');
   const [caption, setCaption] = useState('');
+  const [captionFont, setCaptionFont] = useState<TextFontId>(DEFAULT_TEXT_FONT);
   // The album's own logo, when it has one: it is then what a framed band
   // starts signed with. Null: the default — the album's logo, else no mark.
   const [customLogoUrl, setCustomLogoUrl] = useState<string | null>(null);
@@ -387,6 +390,7 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
   const resetChoices = useCallback(() => {
     setStyle('fullBleed');
     setCaption('');
+    setCaptionFont(DEFAULT_TEXT_FONT);
     setChosenLogo(null);
     setIncludeDate(false);
   }, []);
@@ -509,6 +513,7 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
         ...(composition.layout === 'photo' && style === 'popOut' && subjectPoint ? { subject: subjectPoint } : {}),
         ...(composition.orientation ? { orientation: composition.orientation } : {}),
         ...(framed && line ? { caption: line } : {}),
+        ...(framed && line && textFontRequest(captionFont) ? { captionFont } : {}),
         ...(framed && brand ? { brand: true } : {}),
         ...(framed && logo === 'custom' ? { customLogo: true } : {}),
         includeDate,
@@ -680,6 +685,7 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
         paperColor={(layout) => (framedFor(layout) ? FRAMED_PAPER : FULL_BLEED_PAPER)}
         band={{
           title: caption.replace(/\s+/g, ' ').trim() || null, line: null, mark: dateText, brand,
+          titleFont: captionFont === DEFAULT_TEXT_FONT ? null : textFont(captionFont),
           logoUrl: logo === 'custom' ? customLogoUrl : null,
           marks: chosen.layout === 'photo2' ? dateTexts : undefined,
         }}
@@ -687,7 +693,7 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
           const text = dateTexts[sheet.index] ?? null;
           return text ? <PrintedDate text={text} sheet={sheet} /> : null;
         } : undefined}
-        compositionKey={JSON.stringify([target?.key, style, caption, logo, includeDate, lang, subjectPoint])}
+        compositionKey={JSON.stringify([target?.key, style, caption, captionFont, logo, includeDate, lang, subjectPoint])}
         submitError={error ? t(error) : null}
         submitting={submitting}
         canSubmit={target !== null && target.unavailable === null && !captionInvalid
@@ -761,6 +767,8 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
                     {t(captionInvalid ? 'ownerPrint.captionInvalid' : 'ownerPrint.captionHelp', { max: CAPTION_MAX_LENGTH })}
                   </span>
                 </label>
+                <TextFontPicker name="owner-print-caption-font" value={captionFont} onChange={setCaptionFont}
+                  testId="owner-print-caption-font" />
                 {customLogoUrl ? (
                   // The album has a logo of its own: which mark signs the band.
                   <fieldset className="party-print-choice" data-testid="owner-print-logo">

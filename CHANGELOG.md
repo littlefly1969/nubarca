@@ -4,6 +4,38 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.11 — 2026-11-15
+
+- **Photos reach Lithophanes the way they reach Plates.** Select photos in the
+  Library, a list or an album and choose *Add to → Lithophanes*. They wait in
+  Laboratory → Lithophanes, in the order sent, until a generation uses them or
+  the owner removes them; the page's own search grid is gone. The waiting list
+  is owner-private, holds references only (no bytes are copied), shows small
+  thumbnails, and a trashed photo drops out of it. Albums now offer *Add to →
+  Plates* as well.
+- **Independent background wall.** A new *Background thickness* (0.4–2 mm,
+  default 0.8) sets the sphere's wall outside the photograph, while minimum and
+  maximum thickness stay for the photo alone; a white photo pixel still uses
+  the minimum. Only the inner surface moves, the outside stays a perfect
+  sphere, and the photo's edge blends into the background over about 2 mm so
+  the wall never steps. The preview shows the actual wall. Projects saved
+  before keep their exact geometry.
+- **Words on lithophanes, or words alone.** A lithophane can carry one or two
+  lines of the owner's text (up to 60 characters), below the photo, above it or
+  on its foot, with a letter height in mm (3–30, default 8). The letters are the
+  thickest wall, so they read dark when lit, and they keep their shape on the
+  curve. *Create a text-only lithophane* makes a sphere of words without any
+  photo. Words are drawn into the same map as the preview and the STL, so the
+  preview is what prints. Projects without text are stored exactly as before.
+- **A choice of typeface for the owner's own words**, shared by lithophanes and
+  the line in a framed print's band: NubArca (the band's face until now, still
+  the default), Elegant (DM Serif Display), Handwritten (Kalam), Marker
+  (Caveat Brush) and Script (Dancing Script) — all SIL Open Font License, the
+  same files in the browser preview and on paper. Album-share prints offer it
+  too.
+- Additive migration `AddLithophaneQueue` (new table only).
+  See [Lithophanes](docs/lithophanes.md).
+
 ## 0.4.10 — 2026-11-14
 
 ### The TV update follows every release on its own

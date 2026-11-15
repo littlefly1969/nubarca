@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeLithophane, DEFAULT_LITHOPHANE_SETTINGS as defaults, latitudeRow, lithophaneTriangleCount, suggestedLithophaneResolution, validLithophaneSettings } from './lithophaneModel';
+import { activeLithophane, DEFAULT_LITHOPHANE_SETTINGS as defaults, latitudeRow, lithophaneRequestSettings, lithophaneTriangleCount, suggestedLithophaneResolution, validLithophaneSettings, validLithophaneText } from './lithophaneModel';
 
 describe('lithophane form feedback', () => {
   it('accepts defaults and rejects non-finite, impossible and over-detailed models', () => {
@@ -51,5 +51,21 @@ describe('lithophane form feedback', () => {
     expect(latitudeRow(0, 20, 37, 2.9)).toBe(0);
     expect(latitudeRow(Math.PI / 2, 20, 37, 2.9)).toBe(20);
     expect(latitudeRow(2.9, 20, 37, 2.9)).toBe(37);
+  });
+});
+
+describe('lithophane words', () => {
+  it('accepts one or two lines and refuses what the server refuses', () => {
+    expect(validLithophaneText('Ciao')).toBe(true);
+    expect(validLithophaneText('Buon\nNatale')).toBe(true);
+    expect(validLithophaneText('a'.repeat(60))).toBe(true);
+    for (const bad of ['a'.repeat(61), 'uno\ndue\ntre', 'tab\tqui', 'festa \u{1F389}']) expect(validLithophaneText(bad)).toBe(false);
+    expect(validLithophaneSettings({ ...defaults, text: 'Ok', textHeightMm: 2 })).toBe(false);
+    expect(validLithophaneSettings({ ...defaults, text: 'Ok', textHeightMm: 30 })).toBe(true);
+  });
+  it('sends the default face and position as absent, and nothing without words', () => {
+    expect(lithophaneRequestSettings({ ...defaults, text: '  ', textFont: 'script' })).toEqual(defaults);
+    expect(lithophaneRequestSettings({ ...defaults, text: 'Ciao', textFont: 'nubarca', textPosition: 'below' }))
+      .toEqual({ ...defaults, text: 'Ciao', textHeightMm: 8 });
   });
 });

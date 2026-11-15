@@ -127,7 +127,9 @@ public sealed class LithophaneEndpointTests
         Assert.Equal("model/stl", download.Content.Headers.ContentType!.MediaType);
         Assert.Equal("no-store", download.Headers.CacheControl!.ToString());
         var actual = await download.Content.ReadAsByteArrayAsync();
-        using var map = Image.Load<L8>(Convert.FromBase64String(preview.ImageBase64));
+        // The same photograph the upload sent, mapped exactly as the worker does.
+        using var photo = new Image<Rgba32>(64, 40, new Rgba32(110, 70, 160));
+        using var map = LithophaneImage.CreateMap(photo, Fast);
         using var expected = new MemoryStream(); var grid = new LithophaneGrid(Fast);
         LithophaneMesh.WriteHeader(expected, grid); LithophaneMesh.WriteStrip(expected, Fast, map, 0, grid.Rows);
         Assert.Equal(expected.ToArray(), actual);
@@ -137,6 +139,47 @@ public sealed class LithophaneEndpointTests
         var raw = await c.GetStringAsync($"{Root}/{project.Id}");
         foreach (var forbidden in new[] { "storageKey", "blobObjectId", "sha256", "payloadJson", "checkpointJson", "/storage/", "lockOwner" })
             Assert.DoesNotContain(forbidden, raw, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Words_Only_Need_No_Photo_And_The_Download_Matches_The_Preview_Map()
+    {
+        using var f = Factory();
+        var (_, c) = await f.CreateAuthenticatedClientAsync();
+        var words = Fast with { Text = "Buon\nNatale", TextFont = "script", TextHeightMm = 6 };
+        // No photograph and no words: nothing to make.
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await c.PostAsJsonAsync(Root, new LithophaneCreateRequest(null, Guid.NewGuid(), Fast))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await c.PostAsJsonAsync($"{Root}/preview", new LithophanePreviewRequest(null, Fast))).StatusCode);
+
+        var previewResponse = await c.PostAsJsonAsync($"{Root}/preview", new LithophanePreviewRequest(null, words));
+        previewResponse.EnsureSuccessStatusCode();
+        var preview = (await previewResponse.Content.ReadFromJsonAsync<LithophanePreview>())!;
+        Assert.Null(preview.MinimumZoom);
+
+        var requestId = Guid.NewGuid();
+        var created = await c.PostAsJsonAsync(Root, new LithophaneCreateRequest(null, requestId, words));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var project = (await created.Content.ReadFromJsonAsync<LithophaneSummary>())!;
+        Assert.Null(project.FileItemId);
+        Assert.Equal("Buon Natale", project.Name);
+        // A retry is idempotent; the same id with a photograph is a different request.
+        var again = await c.PostAsJsonAsync(Root, new LithophaneCreateRequest(null, requestId, words));
+        Assert.Equal(project.Id, (await again.Content.ReadFromJsonAsync<LithophaneSummary>())!.Id);
+        var file = await Upload(c);
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await c.PostAsJsonAsync(Root, new LithophaneCreateRequest(file, requestId, words))).StatusCode);
+
+        var ready = await Finish(f, c, project.Id);
+        Assert.Equal("ready", ready.Status);
+        var actual = await c.GetByteArrayAsync($"{Root}/{project.Id}/download");
+        using var map = LithophaneImage.CreateMap(null, words);
+        using var expected = new MemoryStream(); var grid = new LithophaneGrid(words);
+        LithophaneMesh.WriteHeader(expected, grid); LithophaneMesh.WriteStrip(expected, words, map, 0, grid.Rows);
+        Assert.Equal(expected.ToArray(), actual);
+        var saved = (await c.GetFromJsonAsync<LithophanePreview>($"{Root}/{project.Id}/preview"))!;
+        Assert.Equal(preview.ImageBase64, saved.ImageBase64);
     }
 
     [Fact]
@@ -314,5 +357,71 @@ public sealed class LithophaneEndpointTests
         var services = new ServiceCollection(); services.AddNubArcaLithophanes(); services.AddNubArcaJobHandlers();
         Assert.Single(services, x => x.ImplementationType == typeof(LithophaneGenerateJobHandler));
         Assert.Single(services, x => x.ServiceType == typeof(LithophaneService));
+    }
+
+    private sealed record QueueResult(List<Guid> Added, List<QueueSkip> Skipped);
+    private sealed record QueueSkip(Guid ItemId, string Reason);
+    private static async Task<QueueResult> Send(HttpClient c, params Guid[] ids)
+    {
+        var r = await c.PostAsJsonAsync($"{Root}/queue", new { fileItemIds = ids });
+        r.EnsureSuccessStatusCode();
+        return (await r.Content.ReadFromJsonAsync<QueueResult>())!;
+    }
+    private static async Task<List<LithophaneQueueEntry>> Waiting(HttpClient c) =>
+        (await c.GetFromJsonAsync<List<LithophaneQueueEntry>>($"{Root}/queue"))!;
+
+    [Fact]
+    public async Task Photos_Sent_From_The_Library_Wait_In_Order_Until_Used_Or_Removed()
+    {
+        using var f = Factory(); var (_, c) = await f.CreateAuthenticatedClientAsync();
+        var first = await Upload(c, "first.png"); var second = await Upload(c, "second.png"); var third = await Upload(c, "third.png");
+        using var form = new MultipartFormDataContent { { new StringContent("not a photograph"), "file", "notes.txt" } };
+        var text = await c.PostAsync("/api/files", form); text.EnsureSuccessStatusCode();
+        var textId = (await text.Content.ReadFromJsonAsync<FileSummary>())!.Id;
+
+        var sent = await Send(c, second, first, textId, Guid.NewGuid());
+        Assert.Equal([second, first], sent.Added);
+        Assert.Equal(["not_a_photo", "not_a_photo"], sent.Skipped.Select(x => x.Reason));
+        // Sending again is harmless and keeps the original order.
+        Assert.Equal([first, third], (await Send(c, first, third)).Added);
+        var waiting = await Waiting(c);
+        Assert.Equal([second, first, third], waiting.Select(x => x.FileItemId));
+        Assert.Equal("second.png", waiting[0].Name);
+        Assert.Equal($"/api/files/{second}/thumbnail?size=small", waiting[0].ThumbnailUrl);
+        var raw = await c.GetStringAsync($"{Root}/queue");
+        foreach (var forbidden in new[] { "storageKey", "blobObjectId", "sha256", "/storage/", "/content" })
+            Assert.DoesNotContain(forbidden, raw, StringComparison.OrdinalIgnoreCase);
+
+        // Using a waiting photo ends its wait; removing one ends only that one.
+        await Create(c, first);
+        Assert.Equal([second, third], (await Waiting(c)).Select(x => x.FileItemId));
+        Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync($"{Root}/queue/{third}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.DeleteAsync($"{Root}/queue/{third}")).StatusCode);
+        // A trashed photo drops out of view; its purge removes the reference.
+        (await c.DeleteAsync($"/api/files/{second}")).EnsureSuccessStatusCode();
+        Assert.Empty(await Waiting(c));
+        (await c.DeleteAsync($"/api/trash/files/{second}")).EnsureSuccessStatusCode();
+        using var scope = f.Services.CreateScope();
+        Assert.Empty(await scope.ServiceProvider.GetRequiredService<AppDbContext>().LithophaneQueueItems.ToListAsync());
+    }
+
+    [Fact]
+    public async Task The_Waiting_List_Is_Owner_Private_Bounded_And_Needs_Both_Permissions()
+    {
+        using var f = Factory(); var (_, owner) = await f.CreateAuthenticatedClientAsync();
+        var (_, other) = await f.CreateAuthenticatedClientAsync("other@example.com");
+        var file = await Upload(owner);
+        Assert.Equal("not_a_photo", (await Send(other, file)).Skipped.Single().Reason);
+        await Send(owner, file);
+        Assert.Empty(await Waiting(other));
+        Assert.Equal(HttpStatusCode.NotFound, (await other.DeleteAsync($"{Root}/queue/{file}")).StatusCode);
+        Assert.Single(await Waiting(owner));
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync($"{Root}/queue", new { fileItemIds = Array.Empty<Guid>() })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync($"{Root}/queue",
+            new { fileItemIds = Enumerable.Range(0, LithophaneService.MaxQueueItems + 1).Select(_ => Guid.NewGuid()) })).StatusCode);
+
+        var (_, plain) = await f.CreatePermissionClientAsync("plain@example.com", Permissions.LaboratoryAccess);
+        Assert.Equal(HttpStatusCode.Forbidden, (await plain.GetAsync($"{Root}/queue")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await plain.PostAsJsonAsync($"{Root}/queue", new { fileItemIds = new[] { file } })).StatusCode);
     }
 }

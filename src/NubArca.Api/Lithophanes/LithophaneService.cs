@@ -29,8 +29,20 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
 {
     public const int StripRows = 16;
     public const int MaxProjectsPerOwner = 100;
+    public const int MaxQueueItems = 200;
     private const long MaxSourceBytes = 64 * 1024 * 1024;
     private const long MaxSourcePixels = 64_000_000;
+
+    // The stored source of a lithophane of words only. A photograph project
+    // whose source was purged keeps its real id here, so the two never mix.
+    internal static readonly Guid TextOnlySource = Guid.Empty;
+
+    // The history's name for a project without a photograph: its words, on one line.
+    private static string TextName(LithophaneSettings s)
+    {
+        var flat = string.Join(' ', s.Text!.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        return flat.Length <= 255 ? flat : flat[..255];
+    }
 
     private static LithophaneSettings Settings(LithophaneProject p) =>
         JsonSerializer.Deserialize<LithophaneSettings>(p.SettingsJson) ?? throw new LithophaneException("invalid_settings");
@@ -49,6 +61,10 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
     {
         Validate(request.Settings);
         if (request.RequestId == Guid.Empty || request.FileItemId == Guid.Empty) throw new LithophaneException("invalid_request");
+        // Words only: no photograph, so the words are the whole picture.
+        var textOnly = request.FileItemId is null;
+        if (textOnly && !request.Settings.HasText) throw new LithophaneException("invalid_request");
+        var sourceId = request.FileItemId ?? TextOnlySource;
         var id = await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
             await using var tx = await db.Database.BeginTransactionAsync(ct);
@@ -58,29 +74,78 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
                 .SingleOrDefaultAsync(x => x.OwnerUserId == owner && x.RequestId == request.RequestId, ct);
             if (existing is not null)
             {
-                if (existing.SourceFileItemId != request.FileItemId || existing.SettingsJson != json)
+                if (existing.SourceFileItemId != sourceId || existing.SettingsJson != json)
                     throw new LithophaneException("request_conflict", 409);
                 return existing.Id;
             }
-            var source = await Sources(owner).SingleOrDefaultAsync(x => x.Id == request.FileItemId, ct);
-            if (source is null) throw new LithophaneException("source_unavailable", 404);
-            if (source.SizeBytes > MaxSourceBytes) throw new LithophaneException("image_too_large", 413);
+            var source = textOnly ? null : await Sources(owner).SingleOrDefaultAsync(x => x.Id == sourceId, ct);
+            if (!textOnly && source is null) throw new LithophaneException("source_unavailable", 404);
+            if (source?.SizeBytes > MaxSourceBytes) throw new LithophaneException("image_too_large", 413);
             if (await db.LithophaneProjects.CountAsync(x => x.OwnerUserId == owner, ct) >= MaxProjectsPerOwner)
                 throw new LithophaneException("project_limit", 409);
             var project = new LithophaneProject
             {
                 Id = Guid.NewGuid(), OwnerUserId = owner, RequestId = request.RequestId,
-                FileItemId = source.Id, SourceFileItemId = source.Id, Name = source.Name, SettingsJson = json, CreatedAt = clock.GetUtcNow().UtcDateTime,
+                FileItemId = source?.Id, SourceFileItemId = sourceId, Name = source?.Name ?? TextName(request.Settings),
+                SettingsJson = json, CreatedAt = clock.GetUtcNow().UtcDateTime,
             };
             var job = await jobs.EnqueueAsync(JobTypes.LithophaneGenerate, new LithophaneJobPayload(project.Id), cancellationToken: ct);
             project.JobId = job.Id;
             db.LithophaneProjects.Add(project);
+            // The photograph was waiting for exactly this: using it ends the wait.
+            if (source is not null)
+                await db.LithophaneQueueItems.Where(x => x.OwnerUserId == owner && x.FileItemId == source.Id)
+                    .ExecuteDeleteAsync(ct);
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
             return project.Id;
         });
         return (await GetAsync(owner, id, ct))!;
     }
+
+    // The photographs the owner sent here from the gallery, a list or an album,
+    // oldest first. Only what is still an eligible photo of theirs is shown, so
+    // a trashed or excluded source quietly drops out without a cleanup pass.
+    public async Task<IReadOnlyList<LithophaneQueueEntry>> ListQueueAsync(Guid owner, CancellationToken ct)
+    {
+        var rows = await (from q in db.LithophaneQueueItems.AsNoTracking()
+                          join f in Sources(owner) on q.FileItemId equals f.Id
+                          where q.OwnerUserId == owner
+                          orderby q.AddedAt, q.FileItemId
+                          select new { f.Id, f.Name, q.AddedAt }).Take(MaxQueueItems).ToListAsync(ct);
+        return rows.Select(x => new LithophaneQueueEntry(x.Id, x.Name, $"/api/files/{x.Id}/thumbnail?size=small", x.AddedAt)).ToList();
+    }
+
+    // Idempotent: a photograph already waiting counts as added and keeps its place.
+    public async Task<LithophaneQueueResult> AddToQueueAsync(Guid owner, IReadOnlyList<Guid>? fileItemIds, CancellationToken ct)
+    {
+        var ids = (fileItemIds ?? []).Where(x => x != Guid.Empty).Distinct().ToList();
+        if (ids.Count == 0) throw new LithophaneException("no_items");
+        if (ids.Count > MaxQueueItems) throw new LithophaneException("batch_limit_exceeded");
+        var eligible = await Sources(owner).Where(x => ids.Contains(x.Id))
+            .Select(x => new { x.Id, x.SizeBytes }).ToDictionaryAsync(x => x.Id, x => x.SizeBytes, ct);
+        var queued = (await db.LithophaneQueueItems.AsNoTracking().Where(x => x.OwnerUserId == owner)
+            .Select(x => x.FileItemId).ToListAsync(ct)).ToHashSet();
+        var added = new List<Guid>();
+        var skipped = new List<LithophaneQueueSkip>();
+        var now = clock.GetUtcNow().UtcDateTime;
+        foreach (var id in ids)
+        {
+            if (!eligible.TryGetValue(id, out var size)) { skipped.Add(new(id, "not_a_photo")); continue; }
+            if (queued.Contains(id)) { added.Add(id); continue; }
+            if (size > MaxSourceBytes) { skipped.Add(new(id, "image_too_large")); continue; }
+            if (queued.Count >= MaxQueueItems) { skipped.Add(new(id, "queue_full")); continue; }
+            // Distinct ticks keep the selection order on databases that sort ties by key.
+            db.LithophaneQueueItems.Add(new LithophaneQueueItem { OwnerUserId = owner, FileItemId = id, AddedAt = now.AddTicks(added.Count) });
+            queued.Add(id); added.Add(id);
+        }
+        await db.SaveChangesAsync(ct);
+        return new(added, skipped);
+    }
+
+    public async Task<bool> RemoveFromQueueAsync(Guid owner, Guid fileItemId, CancellationToken ct) =>
+        await db.LithophaneQueueItems.Where(x => x.OwnerUserId == owner && x.FileItemId == fileItemId)
+            .ExecuteDeleteAsync(ct) > 0;
 
     public async Task<LithophanePage> ListAsync(Guid owner, Guid? cursor, CancellationToken ct)
     {
@@ -198,7 +263,13 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
     public async Task<LithophanePreview> PreviewAsync(Guid owner, LithophanePreviewRequest request, CancellationToken ct)
     {
         Validate(request.Settings);
-        var (map, photoAspect) = await ReadMapAsync(owner, request.FileItemId, request.Settings, ct);
+        if (request.FileItemId is null)
+        {
+            if (!request.Settings.HasText) throw new LithophaneException("invalid_request");
+            using var words = LithophaneImage.CreateMap(null, request.Settings, ct);
+            return await PreviewOfAsync(words, request.Settings, ct);
+        }
+        var (map, photoAspect) = await ReadMapAsync(owner, request.FileItemId.Value, request.Settings, ct);
         using (map)
         {
             // Below this the photo is whole on the sphere already: a smaller zoom
@@ -217,20 +288,20 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
         try { stream = await artifacts.OpenReadAsync(p.PixelMapStorageKey, ct); }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return null; }
         await using var streamScope = stream;
-        using var map = await Image.LoadAsync<L8>(stream, ct);
+        using var map = await Image.LoadAsync<La16>(stream, ct);
         return await PreviewOfAsync(map, Settings(p), ct);
     }
 
-    private static async Task<LithophanePreview> PreviewOfAsync(Image<L8> map, LithophaneSettings s, CancellationToken ct)
+    private static async Task<LithophanePreview> PreviewOfAsync(Image<La16> map, LithophaneSettings s, CancellationToken ct)
     {
         await using var stream = new MemoryStream();
-        await map.SaveAsPngAsync(stream, ct);
+        using (var light = LithophaneImage.Transmission(map, s)) await light.SaveAsPngAsync(stream, ct);
         var grid = new LithophaneGrid(s);
         return new(Convert.ToBase64String(stream.GetBuffer(), 0, (int)stream.Length), grid.Columns, grid.Rows,
             grid.TopRows, grid.BottomAngle, grid.TriangleCount, grid.StlBytes);
     }
 
-    private async Task<(Image<L8> Map, double PhotoAspect)> ReadMapAsync(Guid owner, Guid fileId, LithophaneSettings s, CancellationToken ct)
+    private async Task<(Image<La16> Map, double PhotoAspect)> ReadMapAsync(Guid owner, Guid fileId, LithophaneSettings s, CancellationToken ct)
     {
         var source = await Sources(owner).SingleOrDefaultAsync(x => x.Id == fileId, ct);
         if (source is null) throw new LithophaneException("source_unavailable", 404);
@@ -302,8 +373,13 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
         var units = 0;
         if (p.PixelMapStorageKey is null)
         {
-            Image<L8> map;
-            try { (map, _) = await ReadMapAsync(p.OwnerUserId, p.FileItemId ?? Guid.Empty, s, ct); }
+            Image<La16> map;
+            try
+            {
+                map = p.SourceFileItemId == TextOnlySource
+                    ? LithophaneImage.CreateMap(null, s, ct)
+                    : (await ReadMapAsync(p.OwnerUserId, p.FileItemId ?? Guid.Empty, s, ct)).Map;
+            }
             catch (LithophaneException ex) when (ex.Code == "source_unavailable") { await CancelWorkAsync(); return; }
             using (map)
             {
@@ -335,7 +411,7 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
         if (context.ShouldYield(units)) { Yield(next); return; }
 
         await using (var stream = await artifacts.OpenReadAsync(p.PixelMapStorageKey!, ct))
-        using (var map = await Image.LoadAsync<L8>(stream, ct))
+        using (var map = await Image.LoadAsync<La16>(stream, ct))
         {
             while (next < grid.Rows)
             {

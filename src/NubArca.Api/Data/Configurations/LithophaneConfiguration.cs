@@ -37,3 +37,18 @@ public sealed class LithophaneStripConfiguration : IEntityTypeConfiguration<Lith
         b.HasOne<LithophaneProject>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
     }
 }
+
+public sealed class LithophaneQueueItemConfiguration : IEntityTypeConfiguration<LithophaneQueueItem>
+{
+    public void Configure(EntityTypeBuilder<LithophaneQueueItem> b)
+    {
+        b.ToTable("lithophane_queue_items");
+        b.HasKey(x => new { x.OwnerUserId, x.FileItemId });
+        b.Property(x => x.AddedAt).HasColumnType("timestamp with time zone");
+        b.HasIndex(x => new { x.OwnerUserId, x.AddedAt });
+        b.HasIndex(x => x.FileItemId);
+        b.HasOne<User>().WithMany().HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.Restrict);
+        // A waiting reference never pins its source: a purge simply ends it.
+        b.HasOne<FileItem>().WithMany().HasForeignKey(x => x.FileItemId).OnDelete(DeleteBehavior.Cascade);
+    }
+}

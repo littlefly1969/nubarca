@@ -23,6 +23,28 @@ public static class LithophaneEndpoints
         group.MapGet("", async (Guid? cursor, HttpContext http, [FromServices] LithophaneService service, CancellationToken ct) =>
             Results.Ok(await service.ListAsync(Owner(http), cursor, ct))).WithName("ListLithophanes");
 
+        // The photographs waiting to become lithophanes, sent from the gallery,
+        // a list or an album. References only: no bytes are copied.
+        group.MapGet("/queue", async (HttpContext http, [FromServices] LithophaneService service, CancellationToken ct) =>
+            Results.Ok(await service.ListQueueAsync(Owner(http), ct))).WithName("ListLithophaneQueue");
+
+        group.MapPost("/queue", async ([FromBody] LithophaneQueueRequest request, HttpContext http,
+            [FromServices] LithophaneService service, [FromServices] IAuditLogger audit, CancellationToken ct) =>
+        {
+            var result = await service.AddToQueueAsync(Owner(http), request.FileItemIds, ct);
+            await audit.LogAsync(Owner(http), AuditActions.LithophaneQueueAdd, "lithophane", null,
+                http.Connection.RemoteIpAddress?.ToString(), new { added = result.Added.Count, skipped = result.Skipped.Count }, ct);
+            return Results.Ok(result);
+        }).WithName("AddLithophaneQueueItems");
+
+        group.MapDelete("/queue/{fileItemId:guid}", async (Guid fileItemId, HttpContext http,
+            [FromServices] LithophaneService service, [FromServices] IAuditLogger audit, CancellationToken ct) =>
+        {
+            if (!await service.RemoveFromQueueAsync(Owner(http), fileItemId, ct)) return Results.NotFound();
+            await AuditAsync(audit, http, AuditActions.LithophaneQueueRemove, fileItemId, ct);
+            return Results.NoContent();
+        }).WithName("RemoveLithophaneQueueItem");
+
         group.MapPost("/statuses", async ([FromBody] LithophaneStatusRequest request, HttpContext http,
             [FromServices] LithophaneService service, CancellationToken ct) =>
             Results.Ok(await service.GetStatusesAsync(Owner(http), request.Ids, ct))).WithName("GetLithophaneStatuses");

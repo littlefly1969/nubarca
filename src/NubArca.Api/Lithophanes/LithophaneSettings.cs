@@ -1,4 +1,6 @@
+using System.Text.Json.Serialization;
 using NubArca.Api.Print;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace NubArca.Api.Lithophanes;
 
@@ -17,22 +19,78 @@ public sealed record LithophaneSettings
     public double Brightness { get; init; }
     public double Contrast { get; init; } = 1;
     public double Gamma { get; init; } = 1;
+    // The wall outside the photograph. Only its inner surface moves: the
+    // outside stays a perfect sphere. Absent in projects saved before it
+    // existed, which keeps their background at the photo's thinnest wall.
+    public double? BackgroundThicknessMm { get; init; }
+
+    // Words of the owner's own, drawn as the thickest wall so they read dark
+    // against the light. Absent (null) in every project saved before text
+    // existed and in every project without text; never written as null, so
+    // such a project's stored settings are byte-for-byte what they were.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Text { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TextFont { get; init; }
+    // Height of a line of capitals on the sphere's surface, in mm.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? TextHeightMm { get; init; }
+    // "below" (default) or "above" the photograph, or "onPhoto": inside it, at its foot.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TextPosition { get; init; }
+
+    public const int TextMaxLength = 60;
+    public const int TextMaxLines = 2;
+    public const double DefaultTextHeightMm = 8;
+    public static readonly string[] TextPositions = ["below", "above", "onPhoto"];
+
+    [JsonIgnore]
+    public double TextHeight => TextHeightMm ?? DefaultTextHeightMm;
+    [JsonIgnore]
+    public string TextPlacement => TextPosition ?? "below";
+    [JsonIgnore]
+    public bool HasText => !string.IsNullOrWhiteSpace(Text);
+
+    public double BackgroundWallMm => BackgroundThicknessMm ?? MinThicknessMm;
+    // Width of the smooth ramp between the photograph's edge and the background.
+    public const double BlendMm = 2;
 
     public const int MaxTriangles = 2_000_000;
 
     public bool IsValid() =>
         Between(DiameterMm, 40, 200) && Between(MinThicknessMm, 0.4, 2)
+        && (BackgroundThicknessMm is null || Between(BackgroundThicknessMm.Value, 0.4, 2))
         && Between(MaxThicknessMm, MinThicknessMm + 0.1, 5)
         && Between(OpeningMm, 4, DiameterMm * 0.65)
         && Between(ResolutionMm, 0.15, 1)
         && Between(PictureWidthDegrees, 40, 300) && Between(PictureHeightDegrees, 30, 140)
         && PhotoPlacementGeometry.IsStructurallyValid(new(CenterX, CenterY, Zoom))
         && Between(Brightness, -0.5, 0.5) && Between(Contrast, 0.25, 3) && Between(Gamma, 0.3, 3)
+        && TextIsValid()
         && new LithophaneGrid(this).TriangleCount <= MaxTriangles;
+
+    // One or two lines, nothing invisible but the line break, and nothing the
+    // faces cannot draw (an emoji would print as an empty box). Refused, never
+    // silently trimmed: the preview shows exactly what will be printed.
+    private bool TextIsValid()
+    {
+        if (!TextFonts.IsKnown(TextFont)) return false;
+        if (TextHeightMm is { } height && !Between(height, 3, 30)) return false;
+        if (TextPosition is not null && !TextPositions.Contains(TextPosition)) return false;
+        if (Text is null) return true;
+        if (Text.Length > TextMaxLength || Text.Any(char.IsSurrogate)) return false;
+        if (Text.Any(c => char.IsControl(c) && c != '\n')) return false;
+        return Text.Split('\n').Length <= TextMaxLines;
+    }
 
     private static bool Between(double v, double min, double max) => double.IsFinite(v) && v >= min && v <= max;
 
     public double Thickness(byte luminance) => MinThicknessMm + (1 - luminance / 255d) * (MaxThicknessMm - MinThicknessMm);
+
+    // Photo wall and background wall mixed by coverage; a fully covered vertex
+    // is exactly the photograph's own thickness.
+    public double Thickness(La16 pixel) => pixel.A == 255 ? Thickness(pixel.L)
+        : pixel.A / 255d * Thickness(pixel.L) + (1 - pixel.A / 255d) * BackgroundWallMm;
 }
 
 // The equator is an exact ring and the longitude count is divisible by four:

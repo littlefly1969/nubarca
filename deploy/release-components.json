@@ -9,6 +9,7 @@
         "global.json",
         "assets/brand/nubarca/runtime/web",
         "mobile/assets/fonts",
+        "frontend/public/fonts/text",
         ".dockerignore",
         ".github/workflows/build-production-images.yml",
         "scripts/openvino-direct",

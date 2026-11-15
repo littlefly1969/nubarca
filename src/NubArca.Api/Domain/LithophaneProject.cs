@@ -25,3 +25,13 @@ public sealed class LithophaneStrip
     public int EndRow { get; set; }
     public string StorageKey { get; set; } = string.Empty;
 }
+
+// A photograph the owner sent to Lithophanes from the gallery, a list or an
+// album, waiting to be turned into a sphere. A reference only: no bytes are
+// copied, and generating a lithophane from it (or the source's purge) ends it.
+public sealed class LithophaneQueueItem
+{
+    public Guid OwnerUserId { get; set; }
+    public Guid FileItemId { get; set; }
+    public DateTime AddedAt { get; set; }
+}

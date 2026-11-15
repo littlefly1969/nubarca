@@ -14,6 +14,16 @@ export interface LithophaneSettings {
   brightness: number;
   contrast: number;
   gamma: number;
+  /** Wall outside the photograph. Null only in projects saved before it existed (= minThicknessMm). */
+  backgroundThicknessMm?: number | null;
+  /** The owner's words (one or two lines, \n between them), drawn as the thickest wall. Absent: none. */
+  text?: string | null;
+  /** A text font id (frontend/src/text/textFonts.ts). Absent: the default. */
+  textFont?: string | null;
+  /** Height of a line of capitals on the sphere, in mm (3–30). Absent: 8. */
+  textHeightMm?: number | null;
+  /** Where the words go with a photo. Absent: below. */
+  textPosition?: 'below' | 'above' | 'onPhoto' | null;
 }
 
 export interface LithophaneSummary {
@@ -45,13 +55,14 @@ export interface LithophanePreview {
 const base = '/api/lithophanes';
 export const listLithophanes = (cursor?: string | null, signal?: AbortSignal) =>
   api<LithophanePage>(`${base}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, { signal });
-export const createLithophane = (fileItemId: string, settings: LithophaneSettings, requestId: string, signal?: AbortSignal) =>
+/** fileItemId null: a lithophane of words only (settings.text is then required). */
+export const createLithophane = (fileItemId: string | null, settings: LithophaneSettings, requestId: string, signal?: AbortSignal) =>
   api<LithophaneSummary>(base, { method: 'POST', json: { fileItemId, settings, requestId }, signal });
 export const getLithophane = (id: string, signal?: AbortSignal) =>
   api<LithophaneSummary>(`${base}/${encodeURIComponent(id)}`, { signal });
 export const getLithophaneStatuses = (ids: string[], signal?: AbortSignal) =>
   api<LithophaneSummary[]>(`${base}/statuses`, { method: 'POST', json: { ids }, signal });
-export const previewLithophane = (fileItemId: string, settings: LithophaneSettings, signal?: AbortSignal) =>
+export const previewLithophane = (fileItemId: string | null, settings: LithophaneSettings, signal?: AbortSignal) =>
   api<LithophanePreview>(`${base}/preview`, { method: 'POST', json: { fileItemId, settings }, signal });
 export const getLithophanePreview = (id: string, signal?: AbortSignal) =>
   api<LithophanePreview>(`${base}/${encodeURIComponent(id)}/preview`, { signal });
@@ -60,3 +71,14 @@ export const cancelLithophane = (id: string, signal?: AbortSignal) =>
 export const deleteLithophane = (id: string, signal?: AbortSignal) =>
   api<void>(`${base}/${encodeURIComponent(id)}`, { method: 'DELETE', signal });
 export const lithophaneDownloadUrl = (id: string) => `${base}/${encodeURIComponent(id)}/download`;
+
+// Photographs the owner sent here from the gallery, a list or an album, waiting
+// to become lithophanes. References only: the thumbnail is the small derivative.
+export interface LithophaneQueueEntry { fileItemId: string; name: string; thumbnailUrl: string; addedAt: string }
+export interface LithophaneQueueResult { added: string[]; skipped: { itemId: string; reason: string }[] }
+export const listLithophaneQueue = (signal?: AbortSignal) =>
+  api<LithophaneQueueEntry[]>(`${base}/queue`, { signal });
+export const addToLithophaneQueue = (fileItemIds: string[], signal?: AbortSignal) =>
+  api<LithophaneQueueResult>(`${base}/queue`, { method: 'POST', json: { fileItemIds }, signal });
+export const removeFromLithophaneQueue = (fileItemId: string, signal?: AbortSignal) =>
+  api<void>(`${base}/queue/${encodeURIComponent(fileItemId)}`, { method: 'DELETE', signal });

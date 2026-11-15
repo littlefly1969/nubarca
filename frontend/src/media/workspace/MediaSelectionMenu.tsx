@@ -32,6 +32,7 @@ const TEST_IDS: Record<MediaSelectionActionId, string> = {
   trash: 'media-sel-trash',
   album: 'media-sel-album',
   plates: 'media-sel-plates',
+  lithophanes: 'media-sel-lithophanes',
   print: 'media-sel-print',
 };
 

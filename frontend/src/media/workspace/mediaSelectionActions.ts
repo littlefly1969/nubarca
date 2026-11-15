@@ -32,7 +32,8 @@ export type MediaSelectionActionId =
   | 'excluded'
   | 'trash'
   | 'album'
-  | 'plates';
+  | 'plates'
+  | 'lithophanes';
 
 export interface MediaSelectionAction {
   id: MediaSelectionActionId;
@@ -113,6 +114,14 @@ const ADD_TO: readonly Candidate[] = [
     icon: 'plates',
     capability: (c) => c.canUsePhotoOnlyDestinations,
     permissions: [PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryPlates],
+  },
+  {
+    // Waiting photos for the lithophane studio: references, never copies.
+    id: 'lithophanes',
+    labelKey: 'gallery.ws.destLithophanes',
+    icon: 'lithophane',
+    capability: (c) => c.canUsePhotoOnlyDestinations,
+    permissions: [PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryLithophanes],
   },
 ];
 

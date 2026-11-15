@@ -52,7 +52,9 @@ public sealed record AlbumSharePrintSubmitRequest(
     string? DateLocale = null,
     string? TimeZone = null,
     /// <summary>With <see cref="Brand"/>: the album's own logo instead of the NubArca mark.</summary>
-    bool CustomLogo = false);
+    bool CustomLogo = false,
+    /// <summary>The face of <see cref="Caption"/> (TextFonts). Absent: the default.</summary>
+    string? CaptionFont = null);
 
 /// <summary>
 /// The owner's printer as a visitor's studio sees it: whether it can print now,
@@ -172,7 +174,8 @@ public sealed class AlbumSharePrintService : IAlbumSharePrintService
                 Caption: request.Caption,
                 Brand: request.Brand,
                 // The album's logo is THIS album's: a visitor names no album.
-                LogoAlbumId: request.CustomLogo ? access.AlbumId : null),
+                LogoAlbumId: request.CustomLogo ? access.AlbumId : null,
+                CaptionFont: request.CaptionFont),
             idempotencyKey, cancellationToken, new OwnerPrintOrigin(access.AlbumId));
     }
 

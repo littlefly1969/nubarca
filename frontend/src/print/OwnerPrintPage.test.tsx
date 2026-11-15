@@ -319,8 +319,28 @@ describe('OwnerPrintPage', () => {
       includeDate: true, dateLocale: 'it',
     });
     expect(body.photos).toEqual([{ fileItemId: 'f2', placement: { centerX: 0.5, centerY: 0.5, zoom: 1 } }]);
+    expect(body).not.toHaveProperty('captionFont');
     expect(['portrait', 'landscape']).toContain(body.orientation);
     expect(await screen.findByTestId('owner-print-sent')).toHaveTextContent('Inviata alla stampa');
+  });
+
+  it('writes the line in the chosen face, in the preview and on the request', async () => {
+    const user = userEvent.setup();
+    const mock = mount(`/print?album=${ALBUM}&files=f2`);
+    await user.click(await screen.findByTestId('party-print-format-photo'));
+    await user.click(next());
+    await user.click(next());
+    await user.click(screen.getByRole('radio', { name: 'Cornice' }));
+    await user.type(screen.getByTestId('owner-print-caption'), 'Estate al lago');
+    // The band's own face until another is chosen.
+    expect(screen.getByRole('radio', { name: 'NubArca' })).toBeChecked();
+    expect(screen.getByTestId('print-sheet-title').style.fontFamily).toBe('');
+    await user.click(screen.getByRole('radio', { name: 'Corsivo' }));
+    expect(screen.getByTestId('print-sheet-title').style.fontFamily).toContain('NubArca Text Script');
+
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    expect(lastPost(mock.calls)).toMatchObject({ caption: 'Estate al lago', captionFont: 'script' });
   });
 
   it('signs Cornice with the album\'s own logo when it has one, and sends the album it comes from', async () => {
