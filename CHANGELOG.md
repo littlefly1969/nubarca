@@ -4,6 +4,13 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.12 — 2026-11-15
+
+- **Lithophanes: the parameters are always there.** The editor no longer waits
+  for a photo to be chosen: it opens straight away (as a words-only lithophane
+  until a photo is picked from the waiting list), so the shape, thickness and
+  text controls are visible even when no photo has been sent to Lithophanes.
+
 ## 0.4.11 — 2026-11-15
 
 - **Photos reach Lithophanes the way they reach Plates.** Select photos in the

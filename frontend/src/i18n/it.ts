@@ -87,6 +87,7 @@ const it = {
   "lithophane.textOnPhoto": "Sulla foto, in basso",
   "lithophane.textOnlyStart": "Crea una litofania con solo una scritta",
   "lithophane.textOnlyTitle": "Litofania con solo scritta",
+  "lithophane.textOnlyHint": "Nessuna foto scelta: scrivi un testo per una litofania di sole parole, oppure scegli una foto qui sopra.",
   "lithophane.textRequired": "Scrivi qualcosa: senza foto la scritta è tutta la litofania.",
 
   'partyHub.actions': 'Cosa vuoi fare?',
