@@ -10,6 +10,10 @@ public sealed record LithophaneSettings
     public double MinThicknessMm { get; init; } = 0.8;
     public double MaxThicknessMm { get; init; } = 2.8;
     public double OpeningMm { get; init; } = 20;
+    // Opted into by new projects. Omitted for legacy settings so their mesh,
+    // checkpoints and idempotency fingerprint remain unchanged.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool BaseCollar { get; init; }
     public double ResolutionMm { get; init; } = 0.3;
     public double PictureWidthDegrees { get; init; } = 160;
     public double PictureHeightDegrees { get; init; } = 110;
@@ -104,6 +108,16 @@ public sealed class LithophaneGrid
         TopRows = (int)Math.Ceiling(Math.PI * Radius / 2 / settings.ResolutionMm);
         var innerRadius = Radius - settings.MinThicknessMm;
         var bottomZ = -Math.Sqrt(innerRadius * innerRadius - settings.OpeningMm * settings.OpeningMm / 4);
+        if (settings.BaseCollar)
+        {
+            // A wider, straight annular foot, scaled to the clear LED opening.
+            // Truncate the sphere at the same outer radius as the collar so
+            // the two share their seam instead of overlapping separate solids.
+            var baseRadius = Math.Max(Math.Sqrt(Radius * Radius - bottomZ * bottomZ),
+                settings.OpeningMm / 2 + Math.Clamp(settings.OpeningMm * 0.2, 1.2, 5));
+            bottomZ = -Math.Sqrt(Radius * Radius - baseRadius * baseRadius);
+            BaseHeightMm = Math.Clamp(settings.OpeningMm * 0.1, 1, 4);
+        }
         BottomAngle = Math.Acos(bottomZ / Radius);
         Rows = TopRows + (int)Math.Ceiling((BottomAngle - Math.PI / 2) * Radius / settings.ResolutionMm);
     }
@@ -113,7 +127,9 @@ public sealed class LithophaneGrid
     public int TopRows { get; }
     public int Rows { get; }
     public double BottomAngle { get; }
-    public int TriangleCount => checked(4 * Columns * Rows);
+    public double BaseHeightMm { get; }
+    public double BaseRadiusMm => Radius * Math.Sin(BottomAngle);
+    public int TriangleCount => checked(4 * Columns * Rows + (BaseHeightMm > 0 ? 4 * Columns : 0));
     public long StlBytes => 84L + 50L * TriangleCount;
     public double Theta(int row) => row <= TopRows
         ? Math.PI / 2 * row / TopRows

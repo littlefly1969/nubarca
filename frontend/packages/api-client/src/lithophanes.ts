@@ -5,6 +5,8 @@ export interface LithophaneSettings {
   minThicknessMm: number;
   maxThicknessMm: number;
   openingMm: number;
+  /** Straight annular base proportional to the opening. Absent: legacy sphere. */
+  baseCollar?: boolean;
   resolutionMm: number;
   pictureWidthDegrees: number;
   pictureHeightDegrees: number;
@@ -50,6 +52,9 @@ export interface LithophanePreview {
   sizeBytes: number;
   /** Fresh previews only: the lowest zoom that still changes this photo's map. */
   minimumZoom?: number | null;
+  baseHeightRatio?: number;
+  baseRadiusRatio?: number;
+  baseTransmission?: number;
 }
 
 const base = '/api/lithophanes';

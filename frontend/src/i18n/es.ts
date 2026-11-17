@@ -23,6 +23,8 @@ const es: Partial<Record<MessageKey, string>> = {
   "lithophane.parameters": "Forma e imagen",
   "lithophane.diameter": "Diámetro exterior (mm)",
   "lithophane.opening": "Abertura inferior para el LED (mm)",
+  "lithophane.baseCollar": "Base vertical proporcional a la abertura",
+  "lithophane.baseCollarHelp": "Un pequeño collar abierto sostiene la esfera. Se adapta a la abertura sin estrecharla; con una abertura de 20 mm mide 2 mm de alto y al menos 28 mm de diámetro exterior.",
   "lithophane.minThickness": "Espesor mínimo (mm)",
   "lithophane.maxThickness": "Espesor máximo (mm)",
   "lithophane.resolution": "Paso de la superficie (mm)",
@@ -93,6 +95,7 @@ const es: Partial<Record<MessageKey, string>> = {
   "lithophane.textOnPhoto": "Sobre la foto, abajo",
   "lithophane.textOnlyStart": "Crear una litofanía solo con texto",
   "lithophane.textOnlyTitle": "Litofanía solo con texto",
+  "lithophane.textOnlyHint": "Ninguna foto elegida: escribe un texto para una litofanía solo de palabras, o elige una foto arriba.",
   "lithophane.textRequired": "Escribe algo: sin foto, el texto es toda la litofanía.",
 
   'partyHub.actions': '¿Qué te apetece hacer?',

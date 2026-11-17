@@ -31,4 +31,20 @@ describe('spherical lithophane preview', () => {
     expect(frame[(31 * 32 + 16) * 4 + 3]).toBe(0);
     expect(frame[(16 * 32 + 16) * 4 + 3]).toBe(255);
   });
+  it('shows a straight collar below the sphere with a constant width and its own wall transmission', () => {
+    const size = 200;
+    const base = { ...grid, bottomAngle: Math.acos(-0.8), baseHeightRatio: 0.15, baseRadiusRatio: 0.6, baseTransmission: 0 };
+    const frame = spherePixels(map(255), base, 0, true, size);
+    const legacy = spherePixels(map(255), { ...base, baseHeightRatio: 0 }, 0, true, size);
+    const opaqueXs = (y: number) => Array.from({ length: size }, (_, x) => x)
+      .filter((x) => frame[(y * size + x) * 4 + 3] === 255);
+    // Both rows lie below the sphere's cut plane and inside the vertical base.
+    expect(opaqueXs(176)).toEqual(opaqueXs(184));
+    expect(opaqueXs(176).length).toBeGreaterThan(100);
+    const centrePixel = (180 * size + size / 2) * 4;
+    expect(frame[centrePixel + 3]).toBe(255);
+    expect(frame[centrePixel]).toBeLessThan(40);
+    expect(legacy[centrePixel + 3]).toBe(0);
+    expect(frame[(190 * size + size / 2) * 4 + 3]).toBe(0);
+  });
 });

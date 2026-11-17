@@ -40,11 +40,32 @@ describe('Laboratory lithophanes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
     expect(await screen.findByText('In coda')).toBeInTheDocument();
     const request = mock.calls.find((c) => c.url === '/api/lithophanes' && c.method === 'POST')!;
-    expect(JSON.parse(request.body!)).toMatchObject({ fileItemId: photo.id, settings: { diameterMm: 90, backgroundThicknessMm: 0.8 } });
+    expect(JSON.parse(request.body!)).toMatchObject({ fileItemId: photo.id, settings: { diameterMm: 90, backgroundThicknessMm: 0.8, baseCollar: true } });
     // The server ended the photo's wait when it accepted the generation.
     expect(screen.queryByRole('button', { name: 'Famiglia.png' })).not.toBeInTheDocument();
     expect(JSON.parse(request.body!).requestId).toMatch(/^[a-f0-9-]{36}$/);
     expect(mock.calls.some((c) => /\/content|\/download/.test(c.url))).toBe(false);
+  });
+
+  it('can disable the default collar and uses that choice for preview and generation', async () => {
+    const mock = installFetchMock({
+      'GET /api/lithophanes/queue': () => jsonResponse(queue),
+      'GET /api/lithophanes': () => jsonResponse({ items: [], nextCursor: null }),
+      'POST /api/lithophanes/preview': () => jsonResponse(preview),
+      'POST /api/lithophanes': () => jsonResponse(project, 201),
+    });
+    mount(); await choose();
+    const collar = screen.getByRole('checkbox', { name: 'Base verticale proporzionata al foro' });
+    expect(collar).toBeChecked();
+    fireEvent.click(collar);
+    fireEvent.click(screen.getByRole('button', { name: 'Aggiorna anteprima' }));
+    await screen.findByRole('img', { name: 'Sfera di prova' });
+    fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
+    await screen.findByText('In coda');
+    for (const url of ['/api/lithophanes/preview', '/api/lithophanes']) {
+      const request = mock.calls.find((c) => c.url === url && c.method === 'POST')!;
+      expect(JSON.parse(request.body!).settings.baseCollar).toBe(false);
+    }
   });
 
   it('adds words to a photo in the chosen face and position', async () => {
@@ -81,6 +102,18 @@ describe('Laboratory lithophanes', () => {
     await screen.findByText('In coda');
     const settings = JSON.parse(mock.calls.find((c) => c.url === '/api/lithophanes' && c.method === 'POST')!.body!).settings;
     for (const key of ['text', 'textFont', 'textHeightMm', 'textPosition']) expect(settings).not.toHaveProperty(key);
+  });
+
+  it('shows the parameters and the text at once, even with no photo waiting', async () => {
+    installFetchMock({
+      'GET /api/lithophanes/queue': () => jsonResponse([]),
+      'GET /api/lithophanes': () => jsonResponse({ items: [], nextCursor: null }),
+    });
+    mount();
+    expect(await screen.findByText(/Nessuna foto in attesa/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Diametro esterno (mm)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Testo (una o due righe)')).toBeInTheDocument();
+    expect(screen.getByText(/Nessuna foto scelta/)).toBeInTheDocument();
   });
 
   it('makes a lithophane of words only, without a photo', async () => {

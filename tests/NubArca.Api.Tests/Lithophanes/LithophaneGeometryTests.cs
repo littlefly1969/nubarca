@@ -15,10 +15,17 @@ public sealed class LithophaneGeometryTests
     [InlineData(40, 10, 1, 2.0)]
     [InlineData(40, 26, 0.5, 2.0)]
     [InlineData(80, 20, 0.6, 0.4)]
-    public void Stl_Is_Closed_Oriented_And_Has_Exact_External_Diameter(double diameter, double opening, double resolution, double? background)
+    [InlineData(40, 10, 1, 0.8, true, 0.4)]
+    [InlineData(80, 20, 1, 0.8, true, 0.4)]
+    [InlineData(40, 26, 1, 2.0, true, 0.8)]
+    [InlineData(40, 4, 1, 0.4, true, 2.0)]
+    [InlineData(200, 130, 1, 2.0, true, 0.8)]
+    public void Stl_Is_Closed_Oriented_And_Has_Exact_External_Diameter(double diameter, double opening, double resolution, double? background,
+        bool collar = false, double minWall = 0.8)
     {
         var s = Coarse with { DiameterMm = diameter, OpeningMm = opening, ResolutionMm = resolution,
-            BackgroundThicknessMm = background, PictureWidthDegrees = 90, PictureHeightDegrees = 60 };
+            BackgroundThicknessMm = background, PictureWidthDegrees = 90, PictureHeightDegrees = 60,
+            BaseCollar = collar, MinThicknessMm = minWall };
         var grid = new LithophaneGrid(s);
         using var photo = new Image<Rgba32>(9, 7, new Rgba32(70, 80, 90));
         using var map = LithophaneImage.CreateMap(photo, s);
@@ -31,6 +38,8 @@ public sealed class LithophaneGeometryTests
         Assert.Equal(grid.TriangleCount, (int)count);
         var edges = new Dictionary<(Vector3, Vector3), (int Count, int Balance)>();
         var bottomRadii = new List<double>();
+        var joinZ = (float)Math.Cos(grid.BottomAngle) * (float)grid.Radius;
+        var baseZ = joinZ - (float)grid.BaseHeightMm;
         var min = new Vector3(float.MaxValue); var max = new Vector3(float.MinValue);
         double volume = 0;
         for (var i = 0; i < count; i++)
@@ -41,10 +50,17 @@ public sealed class LithophaneGeometryTests
             Assert.True(Vector3.Dot(Vector3.Normalize(cross), normal) > 0.999);
             foreach (var v in new[] { a, b, c })
             {
-                // The outside is a perfect sphere whatever the walls do inside.
-                Assert.True(v.Length() <= grid.Radius + 1e-4);
+                if (v.Z >= joinZ - 1e-4)
+                    Assert.True(v.Length() <= grid.Radius + 1e-4);
+                else
+                {
+                    // Both collar walls are vertical and the bore stays clear.
+                    var radius = Math.Sqrt(v.X * v.X + v.Y * v.Y);
+                    Assert.True(Math.Abs(radius - opening / 2) < 1e-4 || Math.Abs(radius - grid.BaseRadiusMm) < 1e-4);
+                    Assert.Equal(baseZ, v.Z, 4);
+                }
                 min = Vector3.Min(min, v); max = Vector3.Max(max, v);
-                if (Math.Abs(v.Z - (float)Math.Cos(grid.BottomAngle) * (float)grid.Radius) < 1e-4)
+                if (Math.Abs(v.Z - baseZ) < 1e-4)
                     bottomRadii.Add(Math.Sqrt(v.X * v.X + v.Y * v.Y));
             }
             volume += Vector3.Dot(a, Vector3.Cross(b, c)) / 6d;
@@ -55,6 +71,8 @@ public sealed class LithophaneGeometryTests
         Assert.Equal(diameter / 2, max.Z, 4);
         Assert.NotEmpty(bottomRadii);
         Assert.Equal(opening / 2, bottomRadii.Min(), 3); // clear aperture and planar printable rim
+        Assert.Equal(grid.BaseRadiusMm, bottomRadii.Max(), 3);
+        Assert.Equal(baseZ, min.Z, 4);
         Assert.True(volume > 0);
         // Hollow shell, never the filled ball.
         Assert.True(volume < 4d / 3 * Math.PI * Math.Pow(diameter / 2, 3) * 0.5);
@@ -75,20 +93,47 @@ public sealed class LithophaneGeometryTests
         var y = a.Y.CompareTo(b.Y); return y != 0 ? y : a.Z.CompareTo(b.Z);
     }
 
-    [Fact]
-    public void Arbitrary_Strip_Boundaries_Produce_Byte_Identical_Stl()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Arbitrary_Strip_Boundaries_Produce_Byte_Identical_Stl(bool collar)
     {
-        var g = new LithophaneGrid(Coarse);
+        var settings = Coarse with { BaseCollar = collar };
+        var g = new LithophaneGrid(settings);
         using var photo = new Image<Rgba32>(23, 17);
         for (var y = 0; y < photo.Height; y++) for (var x = 0; x < photo.Width; x++)
             photo[x, y] = new Rgba32((byte)(x * 11), (byte)(y * 13), 50);
-        using var map = LithophaneImage.CreateMap(photo, Coarse);
+        using var map = LithophaneImage.CreateMap(photo, settings);
         using var whole = new MemoryStream(); using var sliced = new MemoryStream();
         LithophaneMesh.WriteHeader(whole, g); LithophaneMesh.WriteHeader(sliced, g);
-        LithophaneMesh.WriteStrip(whole, Coarse, map, 0, g.Rows);
+        LithophaneMesh.WriteStrip(whole, settings, map, 0, g.Rows);
         for (var row = 0; row < g.Rows; row += 7)
-            LithophaneMesh.WriteStrip(sliced, Coarse, map, row, Math.Min(row + 7, g.Rows));
+            LithophaneMesh.WriteStrip(sliced, settings, map, row, Math.Min(row + 7, g.Rows));
         Assert.Equal(whole.ToArray(), sliced.ToArray());
+    }
+
+    [Theory]
+    [InlineData(4, 1, 6.4)]
+    [InlineData(10, 1, 14)]
+    [InlineData(20, 2, 28)]
+    [InlineData(40, 4, 50)]
+    public void Collar_Is_Proportional_To_The_Clear_Opening(double opening, double height, double baseDiameter)
+    {
+        var grid = new LithophaneGrid(new() { OpeningMm = opening, BaseCollar = true, MinThicknessMm = 0.4 });
+        Assert.Equal(height, grid.BaseHeightMm, 8);
+        // Existing thick rims may already be wider than the minimum collar.
+        Assert.True(grid.BaseRadiusMm * 2 >= baseDiameter - 1e-8);
+    }
+
+    [Fact]
+    public void Absent_Collar_Keeps_Legacy_Settings_And_Geometry()
+    {
+        var legacyJson = System.Text.Json.JsonSerializer.Serialize(Coarse);
+        Assert.DoesNotContain("BaseCollar", legacyJson);
+        var loaded = System.Text.Json.JsonSerializer.Deserialize<LithophaneSettings>(legacyJson)!;
+        Assert.False(loaded.BaseCollar);
+        Assert.Equal(0, new LithophaneGrid(loaded).BaseHeightMm);
+        Assert.Equal(new LithophaneGrid(Coarse).TriangleCount, new LithophaneGrid(loaded).TriangleCount);
     }
 
     [Theory]
@@ -136,19 +181,19 @@ public sealed class LithophaneGeometryTests
     // Same table as lithophaneModel.test.ts: the browser form must accept and
     // reject exactly what the server does, including next to the budget.
     [Theory]
-    [InlineData(80, 20, 0.8, 0.3, 1266720)]
-    [InlineData(95, 20, 0.8, 0.3, 1804752)]
-    [InlineData(96, 20, 0.8, 0.3, 1850688)]
-    [InlineData(100, 30, 1.2, 0.3, 1932512)]
-    [InlineData(120, 40, 0.8, 0.35, 2052000)]
-    [InlineData(120, 40, 0.8, 0.4, 1567040)]
-    [InlineData(150, 20, 0.8, 0.45, 2058272)]
-    [InlineData(150, 20, 0.8, 0.5, 1668992)]
-    [InlineData(200, 130, 2, 0.6, 1676800)]
-    [InlineData(200, 4, 0.4, 0.65, 1819840)]
-    [InlineData(40, 4, 0.4, 0.15, 1310400)]
-    [InlineData(60, 39, 0.6, 0.2, 1359360)]
-    public void Triangle_Count_Matches_The_Browser_Form(double diameter, double opening, double minWall, double step, int triangles)
+    [InlineData(80, 20, 0.8, 0.3, 1266720, 1253280)]
+    [InlineData(95, 20, 0.8, 0.3, 1804752, 1800768)]
+    [InlineData(96, 20, 0.8, 0.3, 1850688, 1842624)]
+    [InlineData(100, 30, 1.2, 0.3, 1932512, 1915744)]
+    [InlineData(120, 40, 0.8, 0.35, 2052000, 2017440)]
+    [InlineData(120, 40, 0.8, 0.4, 1567040, 1544384)]
+    [InlineData(150, 20, 0.8, 0.45, 2058272, 2062464)]
+    [InlineData(150, 20, 0.8, 0.5, 1668992, 1672768)]
+    [InlineData(200, 130, 2, 0.6, 1676800, 1660032)]
+    [InlineData(200, 4, 0.4, 0.65, 1819840, 1823712)]
+    [InlineData(40, 4, 0.4, 0.15, 1310400, 1313760)]
+    [InlineData(60, 39, 0.6, 0.2, 1359360, 1246080)]
+    public void Triangle_Count_Matches_The_Browser_Form(double diameter, double opening, double minWall, double step, int triangles, int collarTriangles)
     {
         var s = new LithophaneSettings
         {
@@ -157,6 +202,8 @@ public sealed class LithophaneGeometryTests
         };
         Assert.Equal(triangles, new LithophaneGrid(s).TriangleCount);
         Assert.Equal(triangles <= LithophaneSettings.MaxTriangles, s.IsValid());
+        Assert.Equal(collarTriangles, new LithophaneGrid(s with { BaseCollar = true }).TriangleCount);
+        Assert.Equal(collarTriangles <= LithophaneSettings.MaxTriangles, (s with { BaseCollar = true }).IsValid());
     }
 
     [Fact]

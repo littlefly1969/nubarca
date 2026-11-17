@@ -13,6 +13,8 @@ const en: Partial<Record<MessageKey, string>> = {
   "lithophane.parameters": "Shape and image",
   "lithophane.diameter": "External diameter (mm)",
   "lithophane.opening": "Bottom LED opening (mm)",
+  "lithophane.baseCollar": "Vertical base proportional to the opening",
+  "lithophane.baseCollarHelp": "A short open collar supports the sphere. It scales with the opening without narrowing it; a 20 mm opening gives a 2 mm high base with an outer diameter of at least 28 mm.",
   "lithophane.minThickness": "Minimum thickness (mm)",
   "lithophane.maxThickness": "Maximum thickness (mm)",
   "lithophane.resolution": "Surface sampling (mm)",
@@ -83,6 +85,7 @@ const en: Partial<Record<MessageKey, string>> = {
   "lithophane.textOnPhoto": "On the photo, at the bottom",
   "lithophane.textOnlyStart": "Create a text-only lithophane",
   "lithophane.textOnlyTitle": "Text-only lithophane",
+  "lithophane.textOnlyHint": "No photo chosen: write some text for a words-only lithophane, or choose a photo above.",
   "lithophane.textRequired": "Write something: without a photo the text is the whole lithophane.",
 
   'partyHub.actions': 'What would you like to do?',

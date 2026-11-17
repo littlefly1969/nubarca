@@ -23,6 +23,8 @@ const de: Partial<Record<MessageKey, string>> = {
   "lithophane.parameters": "Form und Bild",
   "lithophane.diameter": "Außendurchmesser (mm)",
   "lithophane.opening": "Untere LED-Öffnung (mm)",
+  "lithophane.baseCollar": "Senkrechter Sockel passend zur Öffnung",
+  "lithophane.baseCollarHelp": "Ein kurzer offener Ring trägt die Kugel. Er passt sich der Öffnung an, ohne sie zu verengen; bei 20 mm Öffnung ist er 2 mm hoch und hat mindestens 28 mm Außendurchmesser.",
   "lithophane.minThickness": "Minimale Wandstärke (mm)",
   "lithophane.maxThickness": "Maximale Wandstärke (mm)",
   "lithophane.resolution": "Oberflächenraster (mm)",
@@ -93,6 +95,7 @@ const de: Partial<Record<MessageKey, string>> = {
   "lithophane.textOnPhoto": "Im Foto, unten",
   "lithophane.textOnlyStart": "Lithophanie nur mit Text erstellen",
   "lithophane.textOnlyTitle": "Lithophanie nur mit Text",
+  "lithophane.textOnlyHint": "Kein Foto gewählt: Schreib einen Text für eine Lithophanie nur aus Worten oder wähle oben ein Foto.",
   "lithophane.textRequired": "Schreib etwas: Ohne Foto ist der Text die ganze Lithophanie.",
 
   'partyHub.actions': 'Was möchtest du tun?',
