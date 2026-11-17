@@ -43,6 +43,26 @@ image decoding. No new runtime, AI service or geometry dependency is needed.
 The external sphere remains smooth; thickness varies inward. Bottom opening is
 the clear internal diameter, with a closed, flat annular rim. Model units are mm.
 
+### Vertical pedestal
+
+New projects enable `baseCollar` by default in the editor. A short cylindrical
+annular foot starts vertically before the sphere, with a flat bottom and a clear
+bore exactly equal to `openingMm` through its full height. Height is 10% of the
+opening (bounded to 1–4 mm); minimum radial width is 20% of the opening (bounded
+to 1.2–5 mm), retaining a wider rim if the original geometry already requires
+one. A 20 mm opening therefore has a 2 mm high base with an outer diameter of
+at least 28 mm. The sphere is truncated at the collar's outer radius, and the
+surfaces share their seam: one watertight shell, no internal cap or overlapping
+solids. The sphere's diameter, photo thickness, and upper dome are unchanged.
+
+The last latitude strip emits the collar once, including on retries. Its faces
+count toward the same triangle budget, and previews show its shape and wall.
+`baseCollar` absent/false uses the original geometry; false is omitted from
+persisted settings, preserving old idempotency fingerprints and in-flight maps
+and strips. No database migration is needed. Existing downloaded STLs are not
+rewritten: generate a new project to print the pedestal. Support generation and
+removal remain slicer decisions; the pedestal does not make the dome support-free.
+
 ### Words
 
 Settings may carry `text` (one or two lines separated by `\n`, at most 60

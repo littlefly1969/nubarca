@@ -13,6 +13,8 @@ const en: Partial<Record<MessageKey, string>> = {
   "lithophane.parameters": "Shape and image",
   "lithophane.diameter": "External diameter (mm)",
   "lithophane.opening": "Bottom LED opening (mm)",
+  "lithophane.baseCollar": "Vertical base proportional to the opening",
+  "lithophane.baseCollarHelp": "A short open collar supports the sphere. It scales with the opening without narrowing it; a 20 mm opening gives a 2 mm high base with an outer diameter of at least 28 mm.",
   "lithophane.minThickness": "Minimum thickness (mm)",
   "lithophane.maxThickness": "Maximum thickness (mm)",
   "lithophane.resolution": "Surface sampling (mm)",

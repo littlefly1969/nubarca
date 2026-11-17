@@ -297,8 +297,14 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
         await using var stream = new MemoryStream();
         using (var light = LithophaneImage.Transmission(map, s)) await light.SaveAsPngAsync(stream, ct);
         var grid = new LithophaneGrid(s);
+        var thinnest = Math.Min(s.MinThicknessMm, s.BackgroundWallMm);
+        var thickest = Math.Max(s.MaxThicknessMm, s.BackgroundWallMm);
+        var baseTransmission = Math.Clamp((thickest - (grid.BaseRadiusMm - s.OpeningMm / 2))
+            / (thickest - thinnest), 0, 1);
         return new(Convert.ToBase64String(stream.GetBuffer(), 0, (int)stream.Length), grid.Columns, grid.Rows,
-            grid.TopRows, grid.BottomAngle, grid.TriangleCount, grid.StlBytes);
+            grid.TopRows, grid.BottomAngle, grid.TriangleCount, grid.StlBytes,
+            BaseHeightRatio: grid.BaseHeightMm / grid.Radius, BaseRadiusRatio: grid.BaseRadiusMm / grid.Radius,
+            BaseTransmission: baseTransmission);
     }
 
     private async Task<(Image<La16> Map, double PhotoAspect)> ReadMapAsync(Guid owner, Guid fileId, LithophaneSettings s, CancellationToken ct)

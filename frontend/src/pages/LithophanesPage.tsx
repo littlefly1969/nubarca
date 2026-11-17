@@ -17,7 +17,7 @@ import '../lithophanes/lithophanes.css';
 import { TextFontPicker } from '../text/TextFontPicker';
 import { textFont } from '../text/textFonts';
 
-const FIELDS: { key: keyof LithophaneSettings; min: number; max: number; step: number; label: MessageKey }[] = [
+const FIELDS: { key: Exclude<keyof LithophaneSettings, 'baseCollar'>; min: number; max: number; step: number; label: MessageKey }[] = [
   { key: 'diameterMm', min: 40, max: 200, step: 1, label: 'lithophane.diameter' },
   { key: 'openingMm', min: 4, max: 130, step: 1, label: 'lithophane.opening' },
   { key: 'minThicknessMm', min: 0.4, max: 2, step: 0.1, label: 'lithophane.minThickness' },
@@ -168,6 +168,11 @@ export function LithophanesPage() {
                 setSettings((old) => ({ ...old, [field.key]: Number(e.target.value) })); setPreview(null);
               }} required />
           </label>)}</div>
+          <label className="lithophane-check"><input type="checkbox" checked={settings.baseCollar ?? false}
+            onChange={(e) => {
+              setSettings((old) => ({ ...old, baseCollar: e.target.checked })); setPreview(null);
+            }} />{t('lithophane.baseCollar')}</label>
+          <p className="lithophane-hint">{t('lithophane.baseCollarHelp')}</p>
         </fieldset>
         <fieldset disabled={busy} className="lithophane-text">
           <legend>{t('lithophane.textSection')}</legend>

@@ -17,6 +17,8 @@ const it = {
   "lithophane.parameters": "Forma e immagine",
   "lithophane.diameter": "Diametro esterno (mm)",
   "lithophane.opening": "Apertura inferiore per il LED (mm)",
+  "lithophane.baseCollar": "Base verticale proporzionata al foro",
+  "lithophane.baseCollarHelp": "Un piccolo collare aperto sostiene la sfera. Si adatta al foro senza restringerlo; con apertura da 20 mm è alto 2 mm e largo almeno 28 mm all’esterno.",
   "lithophane.minThickness": "Spessore minimo (mm)",
   "lithophane.maxThickness": "Spessore massimo (mm)",
   "lithophane.resolution": "Passo della superficie (mm)",

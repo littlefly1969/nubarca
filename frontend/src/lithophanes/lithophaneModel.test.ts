@@ -11,25 +11,27 @@ describe('lithophane form feedback', () => {
   });
   it('counts triangles exactly like the server near the 2 million budget', () => {
     // Same table as LithophaneGeometryTests.Triangle_Count_Matches_The_Browser_Form.
-    // [diameter, opening, minimum wall, step, triangles]
-    const table: [number, number, number, number, number][] = [
-    [80, 20, 0.8, 0.3, 1266720],
-    [95, 20, 0.8, 0.3, 1804752],
-    [96, 20, 0.8, 0.3, 1850688],
-    [100, 30, 1.2, 0.3, 1932512],
-    [120, 40, 0.8, 0.35, 2052000],
-    [120, 40, 0.8, 0.4, 1567040],
-    [150, 20, 0.8, 0.45, 2058272],
-    [150, 20, 0.8, 0.5, 1668992],
-    [200, 130, 2, 0.6, 1676800],
-    [200, 4, 0.4, 0.65, 1819840],
-    [40, 4, 0.4, 0.15, 1310400],
-    [60, 39, 0.6, 0.2, 1359360],
+    // [diameter, opening, minimum wall, step, legacy triangles, collar triangles]
+    const table: [number, number, number, number, number, number][] = [
+    [80, 20, 0.8, 0.3, 1266720, 1253280],
+    [95, 20, 0.8, 0.3, 1804752, 1800768],
+    [96, 20, 0.8, 0.3, 1850688, 1842624],
+    [100, 30, 1.2, 0.3, 1932512, 1915744],
+    [120, 40, 0.8, 0.35, 2052000, 2017440],
+    [120, 40, 0.8, 0.4, 1567040, 1544384],
+    [150, 20, 0.8, 0.45, 2058272, 2062464],
+    [150, 20, 0.8, 0.5, 1668992, 1672768],
+    [200, 130, 2, 0.6, 1676800, 1660032],
+    [200, 4, 0.4, 0.65, 1819840, 1823712],
+    [40, 4, 0.4, 0.15, 1310400, 1313760],
+    [60, 39, 0.6, 0.2, 1359360, 1246080],
     ];
-    for (const [diameterMm, openingMm, minThicknessMm, resolutionMm, triangles] of table) {
-      const s = { ...defaults, diameterMm, openingMm, minThicknessMm, resolutionMm, maxThicknessMm: minThicknessMm + 2 };
+    for (const [diameterMm, openingMm, minThicknessMm, resolutionMm, triangles, collarTriangles] of table) {
+      const s = { ...defaults, baseCollar: false, diameterMm, openingMm, minThicknessMm, resolutionMm, maxThicknessMm: minThicknessMm + 2 };
       expect(lithophaneTriangleCount(s)).toBe(triangles);
       expect(validLithophaneSettings(s)).toBe(triangles <= 2_000_000);
+      expect(lithophaneTriangleCount({ ...s, baseCollar: true })).toBe(collarTriangles);
+      expect(validLithophaneSettings({ ...s, baseCollar: true })).toBe(collarTriangles <= 2_000_000);
     }
   });
   it('suggests the finest step that fits when only the detail is too high', () => {

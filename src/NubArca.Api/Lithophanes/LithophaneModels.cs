@@ -14,7 +14,8 @@ public sealed record LithophaneSummary(Guid Id, string Name, Guid? FileItemId, L
     DateTime CreatedAt, bool DownloadReady);
 public sealed record LithophanePage(IReadOnlyList<LithophaneSummary> Items, Guid? NextCursor);
 public sealed record LithophanePreview(string ImageBase64, int Columns, int Rows, int TopRows,
-    double BottomAngle, int TriangleCount, long SizeBytes, double? MinimumZoom = null);
+    double BottomAngle, int TriangleCount, long SizeBytes, double? MinimumZoom = null,
+    double BaseHeightRatio = 0, double BaseRadiusRatio = 0, double BaseTransmission = 0);
 public sealed class LithophaneException(string code, int statusCode = 400) : Exception(code)
 {
     public string Code { get; } = code;

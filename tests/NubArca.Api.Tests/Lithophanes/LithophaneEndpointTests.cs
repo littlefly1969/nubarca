@@ -42,9 +42,9 @@ public sealed class LithophaneEndpointTests
         var response = await client.PostAsync("/api/files", form); response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<FileSummary>())!.Id;
     }
-    private static async Task<LithophaneSummary> Create(HttpClient c, Guid file, Guid? requestId = null)
+    private static async Task<LithophaneSummary> Create(HttpClient c, Guid file, Guid? requestId = null, LithophaneSettings? settings = null)
     {
-        var r = await c.PostAsJsonAsync(Root, new LithophaneCreateRequest(file, requestId ?? Guid.NewGuid(), Fast));
+        var r = await c.PostAsJsonAsync(Root, new LithophaneCreateRequest(file, requestId ?? Guid.NewGuid(), settings ?? Fast));
         Assert.Equal(HttpStatusCode.Created, r.StatusCode);
         return (await r.Content.ReadFromJsonAsync<LithophaneSummary>())!;
     }
@@ -77,18 +77,22 @@ public sealed class LithophaneEndpointTests
         throw new Exception("Lithophane did not finish within bounded test slices.");
     }
 
-    [Fact]
-    public async Task Real_Workflow_Resumes_Across_Scopes_And_Download_Matches_The_Preview_Map()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Real_Workflow_Resumes_Across_Scopes_And_Download_Matches_The_Preview_Map(bool collar)
     {
+        var settings = Fast with { BaseCollar = collar };
         using var f = Factory(sliced: true);
         var (_, c) = await f.CreateAuthenticatedClientAsync();
         var file = await Upload(c);
-        var previewResponse = await c.PostAsJsonAsync($"{Root}/preview", new LithophanePreviewRequest(file, Fast));
+        var previewResponse = await c.PostAsJsonAsync($"{Root}/preview", new LithophanePreviewRequest(file, settings));
         previewResponse.EnsureSuccessStatusCode();
         var preview = (await previewResponse.Content.ReadFromJsonAsync<LithophanePreview>())!;
         // 64×40 photo in a 160°×110° area: below contain the map no longer changes.
         Assert.Equal(PhotoPlacementGeometry.ContainZoom(64d / 40, 160d / 110), preview.MinimumZoom!.Value, 9);
-        var project = await Create(c, file);
+        var project = await Create(c, file, settings: settings);
+        Assert.Equal(collar, project.Settings.BaseCollar);
         await Advance(f, project.Id, 1); // one preprocessing unit, then continuation
         using (var scope = f.Services.CreateScope())
         {
@@ -129,12 +133,19 @@ public sealed class LithophaneEndpointTests
         var actual = await download.Content.ReadAsByteArrayAsync();
         // The same photograph the upload sent, mapped exactly as the worker does.
         using var photo = new Image<Rgba32>(64, 40, new Rgba32(110, 70, 160));
-        using var map = LithophaneImage.CreateMap(photo, Fast);
-        using var expected = new MemoryStream(); var grid = new LithophaneGrid(Fast);
-        LithophaneMesh.WriteHeader(expected, grid); LithophaneMesh.WriteStrip(expected, Fast, map, 0, grid.Rows);
+        using var map = LithophaneImage.CreateMap(photo, settings);
+        using var expected = new MemoryStream(); var grid = new LithophaneGrid(settings);
+        LithophaneMesh.WriteHeader(expected, grid); LithophaneMesh.WriteStrip(expected, settings, map, 0, grid.Rows);
         Assert.Equal(expected.ToArray(), actual);
+        Assert.Equal(grid.BaseHeightMm / grid.Radius, preview.BaseHeightRatio, 9);
+        Assert.Equal(grid.BaseRadiusMm / grid.Radius, preview.BaseRadiusRatio, 9);
+        Assert.Equal(grid.TriangleCount, preview.TriangleCount);
+        Assert.Equal(actual.Length, preview.SizeBytes);
         var saved = (await c.GetFromJsonAsync<LithophanePreview>($"{Root}/{project.Id}/preview"))!;
         Assert.Equal(preview.ImageBase64, saved.ImageBase64);
+        Assert.Equal(preview.BaseHeightRatio, saved.BaseHeightRatio);
+        Assert.Equal(preview.BaseRadiusRatio, saved.BaseRadiusRatio);
+        Assert.Equal(preview.BaseTransmission, saved.BaseTransmission);
         Assert.Null(saved.MinimumZoom);
         var raw = await c.GetStringAsync($"{Root}/{project.Id}");
         foreach (var forbidden in new[] { "storageKey", "blobObjectId", "sha256", "payloadJson", "checkpointJson", "/storage/", "lockOwner" })

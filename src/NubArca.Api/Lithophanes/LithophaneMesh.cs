@@ -60,8 +60,20 @@ public static class LithophaneMesh
                 }
                 if (row + 1 == grid.Rows)
                 {
-                    Triangle(nextOuter[col], nextInner[col], nextInner[col + 1]);
-                    Triangle(nextOuter[col], nextInner[col + 1], nextOuter[col + 1]);
+                    var baseOffset = Vector3.UnitZ * (float)grid.BaseHeightMm;
+                    var a = nextOuter[col] - baseOffset;
+                    var b = nextOuter[col + 1] - baseOffset;
+                    var c = nextInner[col] - baseOffset;
+                    var d = nextInner[col + 1] - baseOffset;
+                    if (grid.BaseHeightMm > 0)
+                    {
+                        Triangle(nextOuter[col], a, b);
+                        Triangle(nextOuter[col], b, nextOuter[col + 1]);
+                        Triangle(nextInner[col], d, c);
+                        Triangle(nextInner[col], nextInner[col + 1], d);
+                    }
+                    Triangle(a, c, d);
+                    Triangle(a, d, b);
                 }
             }
             (outer, nextOuter) = (nextOuter, outer);

@@ -23,6 +23,8 @@ const es: Partial<Record<MessageKey, string>> = {
   "lithophane.parameters": "Forma e imagen",
   "lithophane.diameter": "Diámetro exterior (mm)",
   "lithophane.opening": "Abertura inferior para el LED (mm)",
+  "lithophane.baseCollar": "Base vertical proporcional a la abertura",
+  "lithophane.baseCollarHelp": "Un pequeño collar abierto sostiene la esfera. Se adapta a la abertura sin estrecharla; con una abertura de 20 mm mide 2 mm de alto y al menos 28 mm de diámetro exterior.",
   "lithophane.minThickness": "Espesor mínimo (mm)",
   "lithophane.maxThickness": "Espesor máximo (mm)",
   "lithophane.resolution": "Paso de la superficie (mm)",

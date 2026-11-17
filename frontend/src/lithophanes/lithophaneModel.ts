@@ -2,6 +2,7 @@ import type { LithophaneSettings } from '@nubarca/api-client';
 
 export const DEFAULT_LITHOPHANE_SETTINGS: LithophaneSettings = {
   diameterMm: 80, minThicknessMm: 0.8, maxThicknessMm: 2.8, openingMm: 20,
+  baseCollar: true,
   resolutionMm: 0.3, pictureWidthDegrees: 160, pictureHeightDegrees: 110,
   centerX: 0.5, centerY: 0.5, zoom: 1, brightness: 0, contrast: 1, gamma: 1, backgroundThicknessMm: 0.8,
 };
@@ -59,9 +60,15 @@ export function lithophaneTriangleCount(s: LithophaneSettings): number {
   const columns = 4 * Math.ceil(Math.PI * s.diameterMm / s.resolutionMm / 4);
   const top = Math.ceil(Math.PI * radius / 2 / s.resolutionMm);
   const innerRadius = radius - s.minThicknessMm;
-  const bottom = Math.acos(-Math.sqrt(innerRadius ** 2 - (s.openingMm / 2) ** 2) / radius);
+  let bottomZ = -Math.sqrt(innerRadius ** 2 - (s.openingMm / 2) ** 2);
+  if (s.baseCollar) {
+    const baseRadius = Math.max(Math.sqrt(radius ** 2 - bottomZ ** 2),
+      s.openingMm / 2 + Math.min(5, Math.max(1.2, s.openingMm * 0.2)));
+    bottomZ = -Math.sqrt(radius ** 2 - baseRadius ** 2);
+  }
+  const bottom = Math.acos(bottomZ / radius);
   const rows = top + Math.ceil((bottom - Math.PI / 2) * radius / s.resolutionMm);
-  return 4 * columns * rows;
+  return 4 * columns * rows + (s.baseCollar ? 4 * columns : 0);
 }
 
 export function validLithophaneSettings(s: LithophaneSettings): boolean {
