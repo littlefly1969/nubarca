@@ -13,6 +13,10 @@ originating repository and is deliberately not reproduced here.
   the preview. The option can be switched off; previously saved projects keep
   their geometry and resumable generation. Photo thickness and the dome are
   unchanged. No migration is required.
+- **Lithophanes: the parameters are always there.** The editor no longer waits
+  for a photo to be chosen: it opens straight away (as a words-only lithophane
+  until a photo is picked from the waiting list), so the shape, thickness and
+  text controls are visible even when no photo has been sent to Lithophanes.
 
 ## 0.4.11 — 2026-11-15
 

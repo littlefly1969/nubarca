@@ -104,6 +104,18 @@ describe('Laboratory lithophanes', () => {
     for (const key of ['text', 'textFont', 'textHeightMm', 'textPosition']) expect(settings).not.toHaveProperty(key);
   });
 
+  it('shows the parameters and the text at once, even with no photo waiting', async () => {
+    installFetchMock({
+      'GET /api/lithophanes/queue': () => jsonResponse([]),
+      'GET /api/lithophanes': () => jsonResponse({ items: [], nextCursor: null }),
+    });
+    mount();
+    expect(await screen.findByText(/Nessuna foto in attesa/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Diametro esterno (mm)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Testo (una o due righe)')).toBeInTheDocument();
+    expect(screen.getByText(/Nessuna foto scelta/)).toBeInTheDocument();
+  });
+
   it('makes a lithophane of words only, without a photo', async () => {
     const mock = installFetchMock({
       'GET /api/lithophanes/queue': () => jsonResponse([]),

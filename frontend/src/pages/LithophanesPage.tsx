@@ -47,7 +47,8 @@ export function LithophanesPage() {
   const { t, formatNumber } = useI18n();
   const { invalidateAuth } = useAuth();
   // id null: a lithophane of words only. '' is a saved project whose photo is gone.
-  const [photo, setPhoto] = useState<{ id: string | null; name: string } | null>(null);
+  // The editor is always open: until a photo is chosen it makes a lithophane of words only.
+  const [photo, setPhoto] = useState<{ id: string | null; name: string }>({ id: null, name: '' });
   const [settings, setSettings] = useState<LithophaneSettings>({ ...DEFAULT_LITHOPHANE_SETTINGS });
   const [preview, setPreview] = useState<LithophanePreview | null>(null);
   const [items, setItems] = useState<LithophaneSummary[]>([]);
@@ -59,7 +60,7 @@ export function LithophanesPage() {
   const [reload, setReload] = useState(0);
   const action = useRef<AbortController | null>(null);
   const request = useRef<{ fingerprint: string; id: string } | null>(null);
-  const textOnly = photo !== null && photo.id === null;
+  const textOnly = photo.id === null;
   const textMissing = textOnly && !hasLithophaneText(settings);
   const valid = validLithophaneSettings(settings) && !textMissing;
   const suggestedResolution = suggestedLithophaneResolution(settings);
@@ -130,7 +131,7 @@ export function LithophanesPage() {
     finally { if (!ctrl.signal.aborted) setBusy(false); }
   };
   const generate = (e: FormEvent) => {
-    e.preventDefault(); if (!photo || photo.id === '' || !valid || busy) return;
+    e.preventDefault(); if (photo.id === '' || !valid || busy) return;
     const sent = lithophaneRequestSettings(settings);
     const fingerprint = JSON.stringify({ fileItemId: photo.id, settings: sent });
     if (request.current?.fingerprint !== fingerprint) request.current = { fingerprint, id: crypto.randomUUID() };
@@ -150,16 +151,17 @@ export function LithophanesPage() {
     <h3>{t('lab.lithophanes')}</h3>
     <p>{t('lithophane.intro')}</p>
     {notice && <p role="status" className="lithophane-notice">{notice}</p>}
-    <LithophaneQueue queue={queue} selected={photo?.id ?? null} disabled={busy} onSelect={choose} />
+    <LithophaneQueue queue={queue} selected={photo.id} disabled={busy} onSelect={choose} />
     <p className="lithophane-text-only">
       <button type="button" className="btn btn-secondary" disabled={busy} aria-pressed={textOnly} onClick={() => {
         action.current?.abort(); setBusy(false);
-        setPhoto({ id: null, name: t('lithophane.textOnlyTitle') }); setPreview(null); setNotice(null);
+        setPhoto({ id: null, name: '' }); setPreview(null); setNotice(null);
       }}>{t('lithophane.textOnlyStart')}</button>
     </p>
-    {photo && <div className="lithophane-editor">
+    <div className="lithophane-editor">
       <form onSubmit={generate}>
-        <div className="lithophane-photo-heading"><h4>{photo.name}</h4></div>
+        <div className="lithophane-photo-heading"><h4>{photo.name || t('lithophane.textOnlyTitle')}</h4></div>
+        {textOnly && <p className="lithophane-hint">{t('lithophane.textOnlyHint')}</p>}
         <fieldset disabled={busy}>
           <legend>{t('lithophane.parameters')}</legend>
           <div className="lithophane-fields">{FIELDS.filter((field) => !textOnly || SHAPE_FIELDS.has(field.key)).map((field) => <label key={field.key}>{t(field.label)}
@@ -230,7 +232,7 @@ export function LithophanesPage() {
           onClick={() => setSettings((old) => ({ ...old, zoom: zoomFix! }))}>
           {t('lithophane.useZoom', { zoom: formatNumber(zoomFix!) })}</button>
       </p>}</> : <p className="lithophane-preview-placeholder">{t('lithophane.previewPrompt')}</p>}</div>
-    </div>}
+    </div>
 
     <section aria-label={t('lithophane.history')} className="lithophane-history">
       <h4>{t('lithophane.history')}</h4>

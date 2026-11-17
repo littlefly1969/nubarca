@@ -95,6 +95,7 @@ const es: Partial<Record<MessageKey, string>> = {
   "lithophane.textOnPhoto": "Sobre la foto, abajo",
   "lithophane.textOnlyStart": "Crear una litofanía solo con texto",
   "lithophane.textOnlyTitle": "Litofanía solo con texto",
+  "lithophane.textOnlyHint": "Ninguna foto elegida: escribe un texto para una litofanía solo de palabras, o elige una foto arriba.",
   "lithophane.textRequired": "Escribe algo: sin foto, el texto es toda la litofanía.",
 
   'partyHub.actions': '¿Qué te apetece hacer?',
