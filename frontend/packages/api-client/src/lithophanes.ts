@@ -7,6 +7,13 @@ export interface LithophaneSettings {
   openingMm: number;
   /** Straight annular base proportional to the opening. Absent: legacy sphere. */
   baseCollar?: boolean;
+  externalRelief?: boolean;
+  hanging?: boolean;
+  printAnchor?: boolean;
+  /** Width/height of the independent 2D crop frame. Absent: legacy framing. */
+  frameAspect?: number | null;
+  /** Fraction of the largest crop area that fits away from the opening (0.2–1). */
+  pictureScale?: number | null;
   resolutionMm: number;
   pictureWidthDegrees: number;
   pictureHeightDegrees: number;
@@ -55,6 +62,13 @@ export interface LithophanePreview {
   baseHeightRatio?: number;
   baseRadiusRatio?: number;
   baseTransmission?: number;
+  hanging?: boolean;
+  externalRelief?: boolean;
+  innerRadiusRatio?: number;
+  minWallRatio?: number;
+  maxWallRatio?: number;
+  crownRadiusRatio?: number;
+  capTransmission?: number;
 }
 
 const base = '/api/lithophanes';
@@ -76,6 +90,7 @@ export const cancelLithophane = (id: string, signal?: AbortSignal) =>
 export const deleteLithophane = (id: string, signal?: AbortSignal) =>
   api<void>(`${base}/${encodeURIComponent(id)}`, { method: 'DELETE', signal });
 export const lithophaneDownloadUrl = (id: string) => `${base}/${encodeURIComponent(id)}/download`;
+export const lithophaneCapUrl = (id: string) => `${base}/${encodeURIComponent(id)}/cap`;
 
 // Photographs the owner sent here from the gallery, a list or an album, waiting
 // to become lithophanes. References only: the thumbnail is the small derivative.

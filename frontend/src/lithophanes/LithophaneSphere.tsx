@@ -10,6 +10,7 @@ export function LithophaneSphere({ preview }: { preview: LithophanePreview }) {
   const [rotation, setRotation] = useState(0);
   const [lit, setLit] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   useEffect(() => {
     setPixels(null); setFailed(false);
@@ -32,13 +33,19 @@ export function LithophaneSphere({ preview }: { preview: LithophanePreview }) {
     if (!ctx || !pixels) return;
     const size = 360;
     const frame = ctx.createImageData(size, size);
-    frame.data.set(spherePixels(pixels, preview, rotation, lit, size));
+    frame.data.set(spherePixels(pixels, preview, rotation, lit, size, printing));
     ctx.putImageData(frame, 0, 0);
-  }, [lit, pixels, preview, rotation]);
+  }, [lit, pixels, preview, rotation, printing]);
 
   return <figure className="lithophane-sphere">
     <canvas ref={ref} width={360} height={360} role="img" aria-label={t('lithophane.sphere')} />
     {failed && <p role="alert">{t('lithophane.previewUnavailable')}</p>}
+    {preview.hanging && <label>{t('lithophane.useMode')}
+      <select value={printing ? 'print' : 'use'} onChange={(e) => setPrinting(e.target.value === 'print')}>
+        <option value="use">{t('lithophane.previewUse')}</option>
+        <option value="print">{t('lithophane.previewPrint')}</option>
+      </select>
+    </label>}
     <label>{t('lithophane.rotation')}
       <input type="range" min={-180} max={180} value={rotation} onChange={(e) => setRotation(Number(e.target.value))} />
     </label>

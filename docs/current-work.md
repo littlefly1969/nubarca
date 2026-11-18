@@ -12,12 +12,16 @@ is built is described by `ARCHITECTURE.md`.
   arrive through *Add to → Lithophanes* (library, lists, albums) onto an
   owner-private waiting list; the sphere has an independent background wall.
   New projects default to an open vertical base collar proportional to the LED
-  opening; existing projects keep their original geometry. Persisted
+  opening; existing projects keep their original geometry. New projects default
+  to external relief. A 2D crop frame (drag/zoom and aspect) is separate from
+  one sphere-size control. Hanging mode prints opening-down with photo/text
+  rotated for use, an optional sacrificial foot and a separate flush cap STL
+  with a short adhesive locating lip, cable bore and hanging windows. Persisted
   grayscale maps and strips own derived bytes recognised by reconciliation,
   BlobJanitor and print-artifact cleanup. Access requires `laboratory.access`
   plus `laboratory.lithophanes`, rechecked by workers. See [lithophanes.md](lithophanes.md).
 
-- Release: `0.4.12` (server and web)
+- Release: `0.4.13` (server and web)
 - NubArca TV: `1.0.11`, `versionCode` 13, OTA runtime `nubarca-tv-native-12`
 - Backend: ASP.NET Core / .NET 10, EF Core, PostgreSQL 17
 - Frontend: React, TypeScript, Vite

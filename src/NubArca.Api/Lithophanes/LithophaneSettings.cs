@@ -14,6 +14,18 @@ public sealed record LithophaneSettings
     // checkpoints and idempotency fingerprint remain unchanged.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool BaseCollar { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ExternalRelief { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Hanging { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool PrintAnchor { get; init; }
+    // The crop frame and its size on the sphere are independent. Missing in
+    // legacy settings: their angular area and framing remain byte-compatible.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? FrameAspect { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? PictureScale { get; init; }
     public double ResolutionMm { get; init; } = 0.3;
     public double PictureWidthDegrees { get; init; } = 160;
     public double PictureHeightDegrees { get; init; } = 110;
@@ -56,6 +68,26 @@ public sealed record LithophaneSettings
     public bool HasText => !string.IsNullOrWhiteSpace(Text);
 
     public double BackgroundWallMm => BackgroundThicknessMm ?? MinThicknessMm;
+    [JsonIgnore]
+    public double InnerRadiusMm => DiameterMm / 2 - (ExternalRelief ? BackgroundWallMm : MinThicknessMm);
+    [JsonIgnore]
+    public double PhotoHeightDegrees => FrameAspect is null ? PictureHeightDegrees
+        : PhotoHeightLimit * (PictureScale ?? 0.8);
+    [JsonIgnore]
+    public double PhotoWidthDegrees => FrameAspect is null ? PictureWidthDegrees : PhotoHeightDegrees * FrameAspect.Value;
+    [JsonIgnore]
+    private double PhotoHeightLimit
+    {
+        get
+        {
+            // Keep the crop away from the opening and the cap seam, including
+            // its blend. A square/portrait frame must not disappear into a lid.
+            var grid = new LithophaneGrid(this);
+            var height = 2 * (grid.BottomAngle * 180 / Math.PI - 90)
+                - 2 * BlendMm / grid.Radius * 180 / Math.PI - 4;
+            return Math.Min(Math.Min(140, 280 / FrameAspect!.Value), height);
+        }
+    }
     // Width of the smooth ramp between the photograph's edge and the background.
     public const double BlendMm = 2;
 
@@ -66,10 +98,14 @@ public sealed record LithophaneSettings
         && (BackgroundThicknessMm is null || Between(BackgroundThicknessMm.Value, 0.4, 2))
         && Between(MaxThicknessMm, MinThicknessMm + 0.1, 5)
         && Between(OpeningMm, 4, DiameterMm * 0.65)
+        && (!Hanging || (ExternalRelief && Between(OpeningMm, 16, DiameterMm * 0.65)
+            && BackgroundWallMm >= 0.8))
         && Between(ResolutionMm, 0.15, 1)
         && Between(PictureWidthDegrees, 40, 300) && Between(PictureHeightDegrees, 30, 140)
         && PhotoPlacementGeometry.IsStructurallyValid(new(CenterX, CenterY, Zoom))
         && Between(Brightness, -0.5, 0.5) && Between(Contrast, 0.25, 3) && Between(Gamma, 0.3, 3)
+        && (FrameAspect is null || Between(FrameAspect.Value, 0.2, 5))
+        && (PictureScale is null || (FrameAspect is not null && Between(PictureScale.Value, 0.2, 1)))
         && TextIsValid()
         && new LithophaneGrid(this).TriangleCount <= MaxTriangles;
 
@@ -106,9 +142,11 @@ public sealed class LithophaneGrid
         Radius = settings.DiameterMm / 2;
         Columns = 4 * (int)Math.Ceiling(Math.PI * settings.DiameterMm / settings.ResolutionMm / 4);
         TopRows = (int)Math.Ceiling(Math.PI * Radius / 2 / settings.ResolutionMm);
-        var innerRadius = Radius - settings.MinThicknessMm;
+        var innerRadius = settings.InnerRadiusMm;
         var bottomZ = -Math.Sqrt(innerRadius * innerRadius - settings.OpeningMm * settings.OpeningMm / 4);
-        if (settings.BaseCollar)
+        if (settings.Hanging)
+            BaseHeightMm = settings.PrintAnchor ? Math.Clamp(settings.OpeningMm * 0.1, 2, 4) : 0;
+        else if (settings.BaseCollar)
         {
             // A wider, straight annular foot, scaled to the clear LED opening.
             // Truncate the sphere at the same outer radius as the collar so
@@ -120,6 +158,9 @@ public sealed class LithophaneGrid
         }
         BottomAngle = Math.Acos(bottomZ / Radius);
         Rows = TopRows + (int)Math.Ceiling((BottomAngle - Math.PI / 2) * Radius / settings.ResolutionMm);
+        RimSegments = settings.Hanging && settings.PrintAnchor ? 6 : BaseHeightMm > 0 ? 3 : 1;
+        PrintFootRadiusMm = BaseRadiusMm + (settings.Hanging && settings.PrintAnchor
+            ? Math.Clamp(settings.OpeningMm * 0.15, 3, 6) : 0);
     }
 
     public double Radius { get; }
@@ -129,9 +170,14 @@ public sealed class LithophaneGrid
     public double BottomAngle { get; }
     public double BaseHeightMm { get; }
     public double BaseRadiusMm => Radius * Math.Sin(BottomAngle);
-    public int TriangleCount => checked(4 * Columns * Rows + (BaseHeightMm > 0 ? 4 * Columns : 0));
+    public double PrintFootRadiusMm { get; }
+    public int RimSegments { get; }
+    public int TriangleCount => checked(4 * Columns * Rows + 2 * Columns * (RimSegments - 1));
     public long StlBytes => 84L + 50L * TriangleCount;
     public double Theta(int row) => row <= TopRows
         ? Math.PI / 2 * row / TopRows
         : Math.PI / 2 + (BottomAngle - Math.PI / 2) * (row - TopRows) / (Rows - TopRows);
+
+    public double DesignTheta(int row, bool hanging) => hanging ? Math.PI - Theta(row) : Theta(row);
+    public double DesignLongitude(int col, bool hanging) => (360d * col / Columns - 180) * (hanging ? -1 : 1);
 }

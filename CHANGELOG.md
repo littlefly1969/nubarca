@@ -4,6 +4,27 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.13 — 2026-11-18
+
+- **Frame the photograph before placing it on the sphere.** A square or
+  rectangular 2D crop uses drag, keyboard and zoom. A separate size slider
+  scales the selected area without cropping it again; angular coverage is
+  derived from its proportions and kept clear of the opening.
+- **External lithophane relief** is the new editor default. The inner sphere
+  stays regular and photo/text thickness varies on the outside. The diameter
+  describes the background sphere; thick photo areas may project beyond it.
+- **Standing and hanging spheres.** Standing keeps the tested pedestal.
+  Hanging prints opening-down, with photo and words upright after turning the
+  sphere over, plus an optional broad sacrificial anchor with a cut groove.
+  A separate full cap STL restores the sphere's curve, with a 0.8 mm locating
+  lip for an adhesive joint, a 4 mm cable bore and lateral thread windows.
+  The preview distinguishes assembled appearance and printing orientation.
+  Cap downloads are owner-private, permission-checked and available only once
+  the project is ready. No partial/test-section export is added.
+- Previously saved settings, persisted maps, retry checkpoints and STLs retain
+  their geometry. No database migration is required. Fit, foot removal, bond
+  strength and the illuminated seam need physical printing acceptance.
+
 ## 0.4.12 — 2026-11-17
 
 - **Vertical pedestal for spherical lithophanes.** New projects start with a
