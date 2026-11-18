@@ -158,24 +158,63 @@ describe('Laboratory lithophanes', () => {
     expect(screen.getByRole('button', { name: 'Genera STL' })).toBeEnabled();
   });
 
-  it('says when the zoom is below what changes the photo and offers the minimum', async () => {
-    installFetchMock({
+  it('chooses a crop with a preview and scales it independently on the sphere', async () => {
+    const mock = installFetchMock({
       'GET /api/lithophanes/queue': () => jsonResponse(queue),
       'GET /api/lithophanes': () => jsonResponse({ items: [], nextCursor: null }),
-      'POST /api/lithophanes/preview': () => jsonResponse({ ...preview, minimumZoom: 0.6234 }),
+      'POST /api/lithophanes/preview': () => jsonResponse(preview),
+      'POST /api/lithophanes': () => jsonResponse(project, 201),
     });
     mount(); await choose();
+    const frame = screen.getByTestId('lithophane-crop');
+    const image = frame.querySelector('img')!;
+    expect(image).toHaveAttribute('src', '/api/files/photo-1/preview');
+    Object.defineProperty(image, 'naturalWidth', { value: 1200 });
+    Object.defineProperty(image, 'naturalHeight', { value: 600 });
+    fireEvent.load(image);
+    fireEvent.change(screen.getByLabelText('Proporzioni del ritaglio'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Zoom del ritaglio'), { target: { value: '2' } });
+    fireEvent.keyDown(frame, { key: 'ArrowRight' });
+    const cropStyle = image.getAttribute('style');
+    fireEvent.change(screen.getByLabelText('2. Dimensione sulla sfera'), { target: { value: '60' } });
+    expect(image.getAttribute('style')).toBe(cropStyle);
+    expect(screen.queryByLabelText('Larghezza della foto sulla sfera (°)')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Altezza della foto sulla sfera (°)')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Aggiorna anteprima' }));
     await screen.findByRole('img', { name: 'Sfera di prova' });
-    expect(screen.queryByText(/lo zoom non cambia più nulla/)).not.toBeInTheDocument(); // default zoom 1
-    fireEvent.change(screen.getByLabelText('Ingrandimento'), { target: { value: '0.3' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Aggiorna anteprima' }));
-    expect(await screen.findByText(/Sotto 0,63 lo zoom non cambia più nulla/)).toBeInTheDocument();
-    // The fix lands on the field's 0.05 step, which the browser would otherwise refuse.
-    fireEvent.click(screen.getByRole('button', { name: 'Usa 0,65' }));
-    expect((screen.getByLabelText('Ingrandimento') as HTMLInputElement).value).toBe('0.65');
-    expect((screen.getByLabelText('Ingrandimento') as HTMLInputElement).validity.valid).toBe(true);
-    expect(screen.queryByText(/lo zoom non cambia più nulla/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
+    await screen.findByText('In coda');
+    const sent = mock.calls.filter((c) => c.method === 'POST').map((c) => JSON.parse(c.body!).settings);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toEqual(sent[1]);
+    expect(sent[0]).toMatchObject({ frameAspect: 1, pictureScale: 0.6, centerX: 0.52, centerY: 0.5, zoom: 2, externalRelief: true });
+    expect(mock.calls.some((c) => /content|download/.test(c.url))).toBe(false);
+  });
+
+  it('offers hanging orientation with an extraction aperture and removable anchor', async () => {
+    const mock = installFetchMock({
+      'GET /api/lithophanes/queue': () => jsonResponse(queue),
+      'GET /api/lithophanes': () => jsonResponse({ items: [], nextCursor: null }),
+      'POST /api/lithophanes': () => jsonResponse(project, 201),
+    });
+    mount(); await choose();
+    fireEvent.change(screen.getByLabelText('Come userai la sfera'), { target: { value: 'hanging' } });
+    expect(screen.getByLabelText('Ancoraggio temporaneo da rimuovere')).toBeChecked();
+    expect(screen.queryByLabelText('Base verticale proporzionata al foro')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /parziale/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
+    await screen.findByText('In coda');
+    expect(JSON.parse(mock.calls.find((c) => c.method === 'POST')!.body!).settings)
+      .toMatchObject({ hanging: true, externalRelief: true, printAnchor: true, openingMm: 30 });
+  });
+
+  it('offers a complete cap only for a ready hanging project', async () => {
+    installFetchMock({
+      'GET /api/lithophanes/queue': () => jsonResponse([]),
+      'GET /api/lithophanes': () => jsonResponse({ items: [{ ...project, settings: { ...project.settings, hanging: true }, status: 'ready', downloadReady: true }], nextCursor: null }),
+    });
+    mount();
+    expect(await screen.findByRole('link', { name: 'Scarica calotta STL' })).toHaveAttribute('href', '/api/lithophanes/project-1/cap');
   });
 
   it('preserves the idempotency key after a lost creation response', async () => {

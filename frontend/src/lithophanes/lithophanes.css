@@ -38,3 +38,7 @@
 .lithophane-page .text-font-picker label { flex-direction: row; align-items: center; font-size: 1.15rem; }
 .lithophane-page .text-font-picker input { width: auto; min-height: 0; }
 .lithophane-page select { min-height: 44px; padding: .4rem .6rem; border: 1px solid var(--border-color, #636775); border-radius: .5rem; color: inherit; background: var(--surface-color, transparent); }
+.lithophane-crop-editor { display: grid; gap: .75rem; margin-bottom: 1rem; }
+.lithophane-crop-stage { width: 100%; margin-inline: auto; }
+.lithophane-crop-stage .photo-crop { width: 100%; border: 2px solid var(--accent-color, #7ba8ff); border-radius: .35rem; }
+.lithophane-crop-guide { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(to right, transparent 33%, rgb(255 255 255 / .4) 33.2%, transparent 33.5%, transparent 66%, rgb(255 255 255 / .4) 66.2%, transparent 66.5%), linear-gradient(to bottom, transparent 33%, rgb(255 255 255 / .4) 33.2%, transparent 33.5%, transparent 66%, rgb(255 255 255 / .4) 66.2%, transparent 66.5%); }

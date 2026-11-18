@@ -50,13 +50,13 @@ public static class LithophaneText
         for (var row = 1; row < grid.Rows; row++)
         {
             ct.ThrowIfCancellationRequested();
-            var theta = grid.Theta(row);
+            var theta = grid.DesignTheta(row, settings.Hanging);
             var y = (theta * mmPerRadian - top) * pxPerMm;
             if (y < 0 || y > mask.Height - 1) continue;
             var ringMmPerDegree = mmPerRadian * Math.Sin(theta) * Math.PI / 180;
             for (var col = 0; col < grid.Columns; col++)
             {
-                var lon = 360d * col / grid.Columns - 180 - photo.CenterLonDegrees;
+                var lon = grid.DesignLongitude(col, settings.Hanging) - photo.CenterLonDegrees;
                 lon = lon - 360 * Math.Round(lon / 360);
                 var x = (lon * ringMmPerDegree + widthMm / 2) * pxPerMm;
                 if (x < 0 || x > mask.Width - 1) continue;

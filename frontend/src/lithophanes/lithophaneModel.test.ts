@@ -27,7 +27,7 @@ describe('lithophane form feedback', () => {
     [60, 39, 0.6, 0.2, 1359360, 1246080],
     ];
     for (const [diameterMm, openingMm, minThicknessMm, resolutionMm, triangles, collarTriangles] of table) {
-      const s = { ...defaults, baseCollar: false, diameterMm, openingMm, minThicknessMm, resolutionMm, maxThicknessMm: minThicknessMm + 2 };
+      const s = { ...defaults, externalRelief: false, baseCollar: false, diameterMm, openingMm, minThicknessMm, resolutionMm, maxThicknessMm: minThicknessMm + 2 };
       expect(lithophaneTriangleCount(s)).toBe(triangles);
       expect(validLithophaneSettings(s)).toBe(triangles <= 2_000_000);
       expect(lithophaneTriangleCount({ ...s, baseCollar: true })).toBe(collarTriangles);
@@ -43,6 +43,20 @@ describe('lithophane form feedback', () => {
       const step = suggestedLithophaneResolution(big)!;
       expect(validLithophaneSettings({ ...big, resolutionMm: step })).toBe(true);
       expect(validLithophaneSettings({ ...big, resolutionMm: Math.round((step - 0.05) * 100) / 100 })).toBe(false);
+    }
+  });
+  it('matches the external-relief and sacrificial-anchor budgets on the server', () => {
+    const cases = [
+      [80, 30, 0.4, 0.3, false, false, 1179360],
+      [80, 30, 0.4, 0.3, true, true, 1221360],
+      [80, 40, 0.8, 0.3, true, true, 1164240],
+      [40, 16, 0.8, 1, true, true, 28928],
+      [200, 130, 0.8, 0.6, true, false, 1693568],
+    ] as const;
+    for (const [diameterMm, openingMm, minThicknessMm, resolutionMm, hanging, printAnchor, expected] of cases) {
+      const settings = { ...defaults, diameterMm, openingMm, minThicknessMm, resolutionMm, hanging, printAnchor };
+      expect(lithophaneTriangleCount(settings)).toBe(expected);
+      expect(validLithophaneSettings(settings)).toBe(true);
     }
   });
   it('distinguishes active runs from terminal results', () => {

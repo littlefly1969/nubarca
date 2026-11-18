@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   ApiError, cancelLithophane, createLithophane, deleteLithophane, getLithophanePreview,
-  getLithophaneStatuses, listLithophanes, lithophaneDownloadUrl, previewLithophane,
+  getLithophaneStatuses, listLithophanes, lithophaneDownloadUrl, lithophaneCapUrl, previewLithophane,
   type LithophanePreview, type LithophaneQueueEntry, type LithophaneSettings, type LithophaneSummary,
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
 import { LithophaneQueue, useLithophaneQueue } from '../lithophanes/LithophaneQueue';
 import { LithophaneSphere } from '../lithophanes/LithophaneSphere';
+import { LithophanePhotoEditor } from '../lithophanes/LithophanePhotoEditor';
 import {
   activeLithophane, DEFAULT_LITHOPHANE_SETTINGS, DEFAULT_LITHOPHANE_TEXT_HEIGHT, hasLithophaneText,
   LITHOPHANE_TEXT_MAX_LENGTH, lithophaneRequestSettings, suggestedLithophaneResolution, validLithophaneSettings,
@@ -17,18 +18,14 @@ import '../lithophanes/lithophanes.css';
 import { TextFontPicker } from '../text/TextFontPicker';
 import { textFont } from '../text/textFonts';
 
-const FIELDS: { key: Exclude<keyof LithophaneSettings, 'baseCollar'>; min: number; max: number; step: number; label: MessageKey }[] = [
+type NumericField = 'diameterMm' | 'openingMm' | 'minThicknessMm' | 'maxThicknessMm' | 'backgroundThicknessMm' | 'resolutionMm' | 'brightness' | 'contrast' | 'gamma';
+const FIELDS: { key: NumericField; min: number; max: number; step: number; label: MessageKey }[] = [
   { key: 'diameterMm', min: 40, max: 200, step: 1, label: 'lithophane.diameter' },
   { key: 'openingMm', min: 4, max: 130, step: 1, label: 'lithophane.opening' },
   { key: 'minThicknessMm', min: 0.4, max: 2, step: 0.1, label: 'lithophane.minThickness' },
   { key: 'maxThicknessMm', min: 0.5, max: 5, step: 0.1, label: 'lithophane.maxThickness' },
   { key: 'backgroundThicknessMm', min: 0.4, max: 2, step: 0.1, label: 'lithophane.backgroundThickness' },
   { key: 'resolutionMm', min: 0.15, max: 1, step: 0.05, label: 'lithophane.resolution' },
-  { key: 'pictureWidthDegrees', min: 40, max: 300, step: 5, label: 'lithophane.pictureWidth' },
-  { key: 'pictureHeightDegrees', min: 30, max: 140, step: 5, label: 'lithophane.pictureHeight' },
-  { key: 'centerX', min: 0, max: 1, step: 0.05, label: 'lithophane.centerX' },
-  { key: 'centerY', min: 0, max: 1, step: 0.05, label: 'lithophane.centerY' },
-  { key: 'zoom', min: 0.05, max: 4, step: 0.05, label: 'lithophane.zoom' },
   { key: 'brightness', min: -0.5, max: 0.5, step: 0.05, label: 'lithophane.brightness' },
   { key: 'contrast', min: 0.25, max: 3, step: 0.05, label: 'lithophane.contrast' },
   { key: 'gamma', min: 0.3, max: 3, step: 0.05, label: 'lithophane.gamma' },
@@ -122,6 +119,7 @@ export function LithophanesPage() {
   const choose = (p: LithophaneQueueEntry) => {
     action.current?.abort(); setBusy(false);
     setPhoto({ id: p.fileItemId, name: p.name }); setPreview(null); setNotice(null);
+    setSettings((old) => ({ ...old, centerX: 0.5, centerY: 0.5, zoom: 1 }));
   };
   const perform = async (work: (signal: AbortSignal) => Promise<void>) => {
     action.current?.abort();
@@ -162,19 +160,43 @@ export function LithophanesPage() {
       <form onSubmit={generate}>
         <div className="lithophane-photo-heading"><h4>{photo.name || t('lithophane.textOnlyTitle')}</h4></div>
         {textOnly && <p className="lithophane-hint">{t('lithophane.textOnlyHint')}</p>}
+        {photo.id && <LithophanePhotoEditor key={photo.id} fileId={photo.id} settings={settings} disabled={busy}
+          onChange={(s) => { setSettings(s); setPreview(null); }} />}
         <fieldset disabled={busy}>
           <legend>{t('lithophane.parameters')}</legend>
+          <label>{t('lithophane.useMode')}
+            <select value={settings.hanging ? 'hanging' : 'standing'} onChange={(e) => {
+              const hanging = e.target.value === 'hanging';
+              setSettings((old) => ({ ...old, hanging,
+                ...(hanging ? { externalRelief: true, printAnchor: true,
+                  openingMm: Math.min(old.diameterMm * 0.65, Math.max(30, old.openingMm)),
+                  backgroundThicknessMm: Math.max(0.8, old.backgroundThicknessMm ?? old.minThicknessMm) } : {}),
+              })); setPreview(null);
+            }}>
+              <option value="standing">{t('lithophane.standing')}</option>
+              <option value="hanging">{t('lithophane.hanging')}</option>
+            </select>
+          </label>
           <div className="lithophane-fields">{FIELDS.filter((field) => !textOnly || SHAPE_FIELDS.has(field.key)).map((field) => <label key={field.key}>{t(field.label)}
-            <input type="number" min={field.min} max={field.max} step={field.step} value={settings[field.key] ?? ''}
+            <input type="number" min={field.key === 'openingMm' && settings.hanging ? 16 : field.key === 'backgroundThicknessMm' && settings.hanging ? 0.8 : field.min}
+              max={field.key === 'openingMm' ? settings.diameterMm * 0.65 : field.max} step={field.step} value={settings[field.key] ?? ''}
               onChange={(e) => {
                 setSettings((old) => ({ ...old, [field.key]: Number(e.target.value) })); setPreview(null);
               }} required />
           </label>)}</div>
-          <label className="lithophane-check"><input type="checkbox" checked={settings.baseCollar ?? false}
+          {!settings.hanging && <><label className="lithophane-check"><input type="checkbox" checked={settings.baseCollar ?? false}
             onChange={(e) => {
               setSettings((old) => ({ ...old, baseCollar: e.target.checked })); setPreview(null);
             }} />{t('lithophane.baseCollar')}</label>
           <p className="lithophane-hint">{t('lithophane.baseCollarHelp')}</p>
+          <label className="lithophane-check"><input type="checkbox" checked={settings.externalRelief ?? false}
+            onChange={(e) => { setSettings((old) => ({ ...old, externalRelief: e.target.checked })); setPreview(null); }} />
+            {t('lithophane.externalRelief')}</label></>}
+          <p className="lithophane-hint">{t('lithophane.reliefHelp')}</p>
+          {settings.hanging && <><label className="lithophane-check"><input type="checkbox" checked={settings.printAnchor ?? false}
+            onChange={(e) => { setSettings((old) => ({ ...old, printAnchor: e.target.checked })); setPreview(null); }} />
+            {t('lithophane.printAnchor')}</label>
+            <p className="lithophane-hint">{t('lithophane.hangingHelp')}</p></>}
         </fieldset>
         <fieldset disabled={busy} className="lithophane-text">
           <legend>{t('lithophane.textSection')}</legend>
@@ -249,6 +271,7 @@ export function LithophanesPage() {
         </div>
         <div className="lithophane-actions">
           {item.downloadReady && <a className="btn btn-primary" href={lithophaneDownloadUrl(item.id)} download>{t('lithophane.download')}</a>}
+          {item.downloadReady && item.settings.hanging && <a className="btn btn-secondary" href={lithophaneCapUrl(item.id)} download>{t('lithophane.downloadCap')}</a>}
           {(item.downloadReady || item.completedRows > 0) && <button type="button" className="btn btn-secondary" disabled={busy}
             onClick={() => void perform(async (signal) => {
               const result = await getLithophanePreview(item.id, signal);

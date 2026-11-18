@@ -3,6 +3,7 @@ import type { LithophaneSettings } from '@nubarca/api-client';
 export const DEFAULT_LITHOPHANE_SETTINGS: LithophaneSettings = {
   diameterMm: 80, minThicknessMm: 0.8, maxThicknessMm: 2.8, openingMm: 20,
   baseCollar: true,
+  externalRelief: true, hanging: false, printAnchor: true, frameAspect: 4 / 3, pictureScale: 0.8,
   resolutionMm: 0.3, pictureWidthDegrees: 160, pictureHeightDegrees: 110,
   centerX: 0.5, centerY: 0.5, zoom: 1, brightness: 0, contrast: 1, gamma: 1, backgroundThicknessMm: 0.8,
 };
@@ -47,6 +48,10 @@ function withinBounds(s: LithophaneSettings): boolean {
   return between(s.diameterMm, 40, 200) && between(s.minThicknessMm, 0.4, 2)
     && (s.backgroundThicknessMm == null || between(s.backgroundThicknessMm, 0.4, 2))
     && between(s.maxThicknessMm, s.minThicknessMm + 0.1, 5) && between(s.openingMm, 4, s.diameterMm * 0.65)
+    && (!s.hanging || (!!s.externalRelief && between(s.openingMm, 16, s.diameterMm * 0.65)
+      && (s.backgroundThicknessMm ?? s.minThicknessMm) >= 0.8))
+    && (s.frameAspect == null || between(s.frameAspect, 0.2, 5))
+    && (s.pictureScale == null || (s.frameAspect != null && between(s.pictureScale, 0.2, 1)))
     && between(s.resolutionMm, 0.15, 1) && between(s.pictureWidthDegrees, 40, 300)
     && between(s.pictureHeightDegrees, 30, 140) && between(s.centerX, 0, 1) && between(s.centerY, 0, 1)
     && between(s.zoom, 0.01, 4) && between(s.brightness, -0.5, 0.5)
@@ -55,20 +60,32 @@ function withinBounds(s: LithophaneSettings): boolean {
 }
 
 /** Same triangle count as the server's LithophaneGrid (parity-tested on both sides). */
-export function lithophaneTriangleCount(s: LithophaneSettings): number {
+export function lithophaneGrid(s: LithophaneSettings) {
   const radius = s.diameterMm / 2;
   const columns = 4 * Math.ceil(Math.PI * s.diameterMm / s.resolutionMm / 4);
   const top = Math.ceil(Math.PI * radius / 2 / s.resolutionMm);
-  const innerRadius = radius - s.minThicknessMm;
+  const innerRadius = radius - (s.externalRelief ? (s.backgroundThicknessMm ?? s.minThicknessMm) : s.minThicknessMm);
   let bottomZ = -Math.sqrt(innerRadius ** 2 - (s.openingMm / 2) ** 2);
-  if (s.baseCollar) {
+  if (s.baseCollar && !s.hanging) {
     const baseRadius = Math.max(Math.sqrt(radius ** 2 - bottomZ ** 2),
       s.openingMm / 2 + Math.min(5, Math.max(1.2, s.openingMm * 0.2)));
     bottomZ = -Math.sqrt(radius ** 2 - baseRadius ** 2);
   }
   const bottom = Math.acos(bottomZ / radius);
   const rows = top + Math.ceil((bottom - Math.PI / 2) * radius / s.resolutionMm);
-  return 4 * columns * rows + (s.baseCollar ? 4 * columns : 0);
+  const rimSegments = s.hanging ? (s.printAnchor ? 6 : 1) : s.baseCollar ? 3 : 1;
+  return { radius, columns, top, bottom, rows, triangles: 4 * columns * rows + 2 * columns * (rimSegments - 1) };
+}
+
+export const lithophaneTriangleCount = (s: LithophaneSettings) => lithophaneGrid(s).triangles;
+
+/** The same aspect-preserving crop area as the server; zoom never crops it again. */
+export function lithophanePhotoArea(s: LithophaneSettings) {
+  if (s.frameAspect == null) return { width: s.pictureWidthDegrees, height: s.pictureHeightDegrees };
+  const grid = lithophaneGrid(s);
+  const available = 2 * (grid.bottom * 180 / Math.PI - 90) - 4 / grid.radius * 180 / Math.PI - 4;
+  const height = Math.min(140, 280 / s.frameAspect, available) * (s.pictureScale ?? 0.8);
+  return { width: height * s.frameAspect, height };
 }
 
 export function validLithophaneSettings(s: LithophaneSettings): boolean {

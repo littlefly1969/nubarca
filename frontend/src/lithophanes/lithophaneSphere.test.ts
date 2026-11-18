@@ -31,6 +31,23 @@ describe('spherical lithophane preview', () => {
     expect(frame[(31 * 32 + 16) * 4 + 3]).toBe(0);
     expect(frame[(16 * 32 + 16) * 4 + 3]).toBe(255);
   });
+  it('turns a hanging map upright for use and leaves it inverted in the printing view', () => {
+    const photo = map(255);
+    for (let row = 0; row < 8; row++) for (let col = 0; col < 32; col++) photo.data[(row * 32 + col) * 4] = 0;
+    const hanging = { ...grid, hanging: true, crownRadiusRatio: 0.125 };
+    const use = spherePixels(photo, hanging, 0, true, 64);
+    const print = spherePixels(photo, hanging, 0, true, 64, true);
+    const top = (20 * 64 + 32) * 4;
+    const bottom = (44 * 64 + 32) * 4;
+    expect(use[top]).toBeGreaterThan(use[bottom] + 100);
+    expect(print[bottom]).toBeGreaterThan(print[top] + 100);
+  });
+  it('shows external relief under unlit shading, including its larger silhouette', () => {
+    const photo = map(255);
+    for (let row = 2; row < 15; row++) for (let col = 12; col < 20; col++) photo.data[(row * 32 + col) * 4] = 0;
+    const relief = { ...grid, externalRelief: true, innerRadiusRatio: 0.98, minWallRatio: 0.02, maxWallRatio: 0.08 };
+    expect(spherePixels(photo, relief, 0, false, 64)).not.toEqual(spherePixels(map(255), relief, 0, false, 64));
+  });
   it('shows a straight collar below the sphere with a constant width and its own wall transmission', () => {
     const size = 200;
     const base = { ...grid, bottomAngle: Math.acos(-0.8), baseHeightRatio: 0.15, baseRadiusRatio: 0.6, baseTransmission: 0 };

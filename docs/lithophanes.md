@@ -5,13 +5,19 @@
 Laboratory → Lithophanes (`/lab/lithophanes`) converts one owner-library photograph
 into a hollow, watertight spherical STL. The user chooses the external diameter,
 minimum/maximum wall thickness, bottom LED opening, surface resolution, photo
-coverage, framing and tonal correction. Defaults: 80 mm, 0.8–2.8 mm, 20 mm opening,
-0.3 mm sampling, 160° × 110° photo area. The remaining surface has its own uniform
+coverage, framing and tonal correction. Editor defaults: 80 mm, 0.8–2.8 mm,
+20 mm opening, 0.3 mm sampling, external relief, a 4:3 crop and 80% photo size.
+Requests without the new crop fields retain the legacy 160° × 110° area.
+The remaining surface has its own uniform
 background wall (0.4–2 mm, default 0.8 mm), independent of the photo's minimum and
 maximum. A coverage channel in the persisted map (grey + alpha) tells background
 from white photo pixels, and the photo's edge ramps into the background over
-`LithophaneSettings.BlendMm` (2 mm, smoothstep) outside the photograph. Only the
-inner surface moves. Maps saved before coverage existed load fully covered, and
+`LithophaneSettings.BlendMm` (2 mm, smoothstep) outside the photograph.
+With `externalRelief: true`, the inner radius stays at `diameter/2 - backgroundWall`
+and the outer radius is that inner radius plus the local wall. Diameter is the
+nominal background sphere, not the largest relief extent. Absent/false retains
+the original smooth outer sphere and variable inner surface.
+Maps saved before coverage existed load fully covered, and
 settings without a background value use the minimum wall, so older projects keep
 their exact geometry. Previews show light through the actual wall.
 
@@ -40,7 +46,7 @@ uses the existing reconciliation mechanism, including shared-content protection.
 
 Hard limits bound dimensions, pixels, triangle count, active history and input
 image decoding. No new runtime, AI service or geometry dependency is needed.
-The external sphere remains smooth; thickness varies inward. Bottom opening is
+Bottom opening is
 the clear internal diameter, with a closed, flat annular rim. Model units are mm.
 
 ### Vertical pedestal
@@ -62,6 +68,54 @@ persisted settings, preserving old idempotency fingerprints and in-flight maps
 and strips. No database migration is needed. Existing downloaded STLs are not
 rewritten: generate a new project to print the pedestal. Support generation and
 removal remain slicer decisions; the pedestal does not make the dome support-free.
+
+### Crop and sphere size
+
+The editor shows the owner-private medium photo preview in the shared
+`PhotoCropFrame`: choose square/portrait/landscape or original proportions,
+drag or use arrow keys, and zoom inside that window. `centerX`, `centerY` and
+`zoom` keep the shared photo-placement semantics. `frameAspect` (0.2–5) is the
+window's width/height, independently of the photo's angular footprint.
+`pictureScale` (0.2–1, default 0.8) scales this fixed crop on the sphere, keeping
+its aspect; it does not crop the photo a second time. The largest footprint
+fits within 280° width and 140° height and leaves the opening plus blend clear.
+Preview and generation calculate this area with the same settings. Changing a
+photo resets its pan/zoom; changing sphere size does not reset the crop.
+
+Both new numeric fields are absent from legacy settings, preserving their
+serialized fingerprint and old map. An old project's angular settings still
+render exactly as saved; editing its size/proportions opts into the new framing.
+Fresh image previews use only the medium derivative; the worker still decodes
+the original through the existing bounded reader.
+
+### Hanging sphere and flush cap
+
+`hanging: true` requires external relief, an opening of at least 16 mm (still
+at most 65% of diameter) and a background wall of at least 0.8 mm. The body is
+printed opening-down, like the standing sphere. Map sampling rotates photograph
+AND words by a proper 180° rotation about Y, never a horizontal mirror, so both
+are upright when the opening is at the top in use. The preview offers both
+assembled appearance and printing orientation; its lighting is illustrative.
+
+`printAnchor: true` adds a broad annular sacrificial foot, 2–4 mm tall, with
+3–6 mm extra radial footprint and a 0.6 mm radial neck at a groove 0.32 mm below
+the final mating plane. Cut at the groove and dress the remaining rim to that
+plane. With it disabled, the complete body ends at its ordinary annular rim.
+Standing projects use the existing `baseCollar` instead. Neither option changes
+the clear extraction aperture. No partial/test-section STL export exists.
+
+A ready hanging project offers a separate **complete cap STL**, generated
+deterministically from its fixed settings under the same owner/permission
+checks and download audit, with the export rate limit and `no-store` headers.
+No new persisted artifacts or migration are needed. The cap continues the
+nominal spherical surface, has a 0.8 mm deep, 0.8 mm thick internal locating lip
+with 0.2 mm radial clearance, a 10 mm diameter/5 mm high crown, a 4 mm axial
+cable bore and two opposing lateral thread windows. It is designed for an
+adhesive joint, not a snap lock. Fit, foot removal, hanging bond strength and
+illuminated seam visibility require physical acceptance on the chosen filament;
+the preview cannot predict adhesive transmission or certify the hanging load.
+The cap uses a bounded 128-column, at most 128-row lathe mesh with manifold
+window walls. Body and cap are separate closed solids; no overlapping fake union.
 
 ### Words
 
@@ -87,7 +141,8 @@ whose source was purged keeps its real source id and still cancels as before.
 ## Acceptance
 
 - STL topology: every edge used twice in opposite directions, no degenerate faces,
-  outward outer normals/inward inner normals, exact bounding diameter, correct rim.
+  outward outer normals/inward inner normals, correct nominal/background diameter
+  (exact bounding diameter in legacy smooth mode), clear aperture and cap fit.
 - White and black map to minimum and maximum thickness; framing, gamma and EXIF
   orientation are deterministic; preview and STL use the same map.
 - Forced one-unit slices and retry/crash recovery produce byte-identical output to
@@ -173,6 +228,7 @@ DTOs never contain storage keys, hashes, blob ids, raw job payloads or paths.
 | GET | `/{id}` | Safe settings, progress and lifecycle status |
 | GET | `/{id}/preview` | Preview of the persisted map |
 | GET | `/{id}/download` | Authenticated binary STL attachment in mm |
+| GET | `/{id}/cap` | Complete cap STL for a ready hanging project; same private access |
 | POST | `/{id}/cancel` | Idempotent cancellation request |
 | DELETE | `/{id}` | Cancel work and remove project/artifact ownership |
 

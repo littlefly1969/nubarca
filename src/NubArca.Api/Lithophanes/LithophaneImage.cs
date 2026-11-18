@@ -28,15 +28,17 @@ public static class LithophaneImage
             }
             catch { result.Dispose(); throw; }
         }
+        var width = settings.PhotoWidthDegrees;
+        var height = settings.PhotoHeightDegrees;
         var placed = PhotoPlacementGeometry.Place((double)photo.Width / photo.Height,
-            settings.PictureWidthDegrees / settings.PictureHeightDegrees,
+            settings.FrameAspect ?? width / height,
             new(settings.CenterX, settings.CenterY, settings.Zoom));
         // The photograph's visible rectangle on the sphere, in degrees of
         // longitude (−180…180) and of latitude from the north pole (0…180).
-        var lonLeft = (Math.Max(0, placed.Left) - 0.5) * settings.PictureWidthDegrees;
-        var lonRight = (Math.Min(1, placed.Left + placed.Width) - 0.5) * settings.PictureWidthDegrees;
-        var latTop = 90 + (Math.Max(0, placed.Top) - 0.5) * settings.PictureHeightDegrees;
-        var latBottom = 90 + (Math.Min(1, placed.Top + placed.Height) - 0.5) * settings.PictureHeightDegrees;
+        var lonLeft = (Math.Max(0, placed.Left) - 0.5) * width;
+        var lonRight = (Math.Min(1, placed.Left + placed.Width) - 0.5) * width;
+        var latTop = 90 + (Math.Max(0, placed.Top) - 0.5) * height;
+        var latBottom = 90 + (Math.Min(1, placed.Top + placed.Height) - 0.5) * height;
         var mmPerDegree = grid.Radius * Math.PI / 180;
         try
         {
@@ -53,10 +55,12 @@ public static class LithophaneImage
     {
         var mmPerDegree = grid.Radius * Math.PI / 180;
         if (lonRight <= lonLeft || latBottom <= latTop) return;
+        var width = settings.PhotoWidthDegrees;
+        var height = settings.PhotoHeightDegrees;
         for (var row = 1; row < grid.Rows; row++)
         {
             ct.ThrowIfCancellationRequested();
-            var theta = grid.Theta(row) * 180 / Math.PI;
+            var theta = grid.DesignTheta(row, settings.Hanging) * 180 / Math.PI;
             var lat = Math.Clamp(theta, latTop, latBottom);
             var latMm = Math.Abs(theta - lat) * mmPerDegree;
             if (latMm >= LithophaneSettings.BlendMm) continue;
@@ -64,7 +68,7 @@ public static class LithophaneImage
             for (var col = 0; col < grid.Columns; col++)
             {
                 // The nearest point of the photo, across the seam when that is closer.
-                var lon0 = 360d * col / grid.Columns - 180;
+                var lon0 = grid.DesignLongitude(col, settings.Hanging);
                 var lon = lon0; var lonDistance = double.MaxValue;
                 foreach (var candidate in new[] { lon0 - 360, lon0, lon0 + 360 })
                 {
@@ -76,8 +80,8 @@ public static class LithophaneImage
                 var s = 1 - distance / LithophaneSettings.BlendMm;
                 var coverage = latMm == 0 && lonDistance == 0 ? (byte)255 : (byte)Math.Round(255 * s * s * (3 - 2 * s));
                 if (coverage == 0) continue;
-                var u = lon / settings.PictureWidthDegrees + 0.5;
-                var v = (lat - 90) / settings.PictureHeightDegrees + 0.5;
+                var u = lon / width + 0.5;
+                var v = (lat - 90) / height + 0.5;
                 var x = Math.Clamp((u - placed.Left) / placed.Width, 0, 1);
                 var y = Math.Clamp((v - placed.Top) / placed.Height, 0, 1);
                 result[col, row] = new La16(Tone(photo, x, y, settings), coverage);

@@ -84,6 +84,16 @@ public static class LithophaneEndpoints
             return Results.File(stream, "model/stl", $"nubarca-lithophane-{id:N}.stl", enableRangeProcessing: true);
         }).WithName("DownloadLithophane");
 
+        group.MapGet("/{id:guid}/cap", async (Guid id, HttpContext http, [FromServices] LithophaneService service,
+            [FromServices] IAuditLogger audit, CancellationToken ct) =>
+        {
+            var stream = await service.OpenCapDownloadAsync(Owner(http), id, ct);
+            if (stream is null) return Results.NotFound();
+            try { await AuditAsync(audit, http, AuditActions.LithophaneDownload, id, ct); }
+            catch { await stream.DisposeAsync(); throw; }
+            return Results.File(stream, "model/stl", $"nubarca-lithophane-cap-{id:N}.stl");
+        }).WithName("DownloadLithophaneCap").RequireRateLimiting("export-create");
+
         group.MapPost("/{id:guid}/cancel", async (Guid id, HttpContext http, [FromServices] LithophaneService service,
             [FromServices] IAuditLogger audit, CancellationToken ct) =>
         {

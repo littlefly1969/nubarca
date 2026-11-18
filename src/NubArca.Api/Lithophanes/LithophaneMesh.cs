@@ -60,20 +60,50 @@ public static class LithophaneMesh
                 }
                 if (row + 1 == grid.Rows)
                 {
-                    var baseOffset = Vector3.UnitZ * (float)grid.BaseHeightMm;
-                    var a = nextOuter[col] - baseOffset;
-                    var b = nextOuter[col + 1] - baseOffset;
-                    var c = nextInner[col] - baseOffset;
-                    var d = nextInner[col + 1] - baseOffset;
-                    if (grid.BaseHeightMm > 0)
+                    if (settings.Hanging && settings.PrintAnchor)
                     {
-                        Triangle(nextOuter[col], a, b);
-                        Triangle(nextOuter[col], b, nextOuter[col + 1]);
-                        Triangle(nextInner[col], d, c);
-                        Triangle(nextInner[col], nextInner[col + 1], d);
+                        // A broad sacrificial foot and a 0.6 mm radial neck.
+                        // The groove is 0.32 mm below the final mating plane:
+                        // cut there and dress the rim before gluing the cap.
+                        var z = nextOuter[col].Z;
+                        Vector3 Point(double radius, float height, int c) => new(
+                            (float)(radius * longitudeSin[c % grid.Columns]),
+                            (float)(-radius * longitudeCos[c % grid.Columns]), height);
+                        var profile = new (double Radius, float Z)[]
+                        {
+                            (grid.BaseRadiusMm, z - 0.32f),
+                            (grid.PrintFootRadiusMm, z - (float)grid.BaseHeightMm + 0.4f),
+                            (grid.PrintFootRadiusMm, z - (float)grid.BaseHeightMm),
+                            (settings.OpeningMm / 2, z - (float)grid.BaseHeightMm),
+                            (grid.BaseRadiusMm - 0.6, z - 0.32f),
+                        };
+                        var a = nextOuter[col]; var b = nextOuter[col + 1];
+                        foreach (var p in profile)
+                        {
+                            var c = Point(p.Radius, p.Z, col); var d = Point(p.Radius, p.Z, col + 1);
+                            Triangle(a, c, d); Triangle(a, d, b);
+                            a = c; b = d;
+                        }
+                        Triangle(a, nextInner[col], nextInner[col + 1]);
+                        Triangle(a, nextInner[col + 1], b);
                     }
-                    Triangle(a, c, d);
-                    Triangle(a, d, b);
+                    else
+                    {
+                        var baseOffset = Vector3.UnitZ * (float)grid.BaseHeightMm;
+                        var a = nextOuter[col] - baseOffset;
+                        var b = nextOuter[col + 1] - baseOffset;
+                        var c = nextInner[col] - baseOffset;
+                        var d = nextInner[col + 1] - baseOffset;
+                        if (grid.BaseHeightMm > 0)
+                        {
+                            Triangle(nextOuter[col], a, b);
+                            Triangle(nextOuter[col], b, nextOuter[col + 1]);
+                            Triangle(nextInner[col], d, c);
+                            Triangle(nextInner[col], nextInner[col + 1], d);
+                        }
+                        Triangle(a, c, d);
+                        Triangle(a, d, b);
+                    }
                 }
             }
             (outer, nextOuter) = (nextOuter, outer);
@@ -89,8 +119,9 @@ public static class LithophaneMesh
             {
                 var direction = row == 0 ? Vector3.UnitZ
                     : new Vector3((float)(sin * longitudeSin[col]), (float)(-sin * longitudeCos[col]), (float)cos);
-                outside[col] = direction * (float)grid.Radius;
-                inside[col] = direction * (float)(grid.Radius - settings.Thickness(map[col, row]));
+                var wall = settings.Thickness(map[col, row]);
+                outside[col] = direction * (float)(settings.ExternalRelief ? settings.InnerRadiusMm + wall : grid.Radius);
+                inside[col] = direction * (float)(settings.ExternalRelief ? settings.InnerRadiusMm : grid.Radius - wall);
                 if (row == grid.Rows)
                     inside[col] = new Vector3((float)(settings.OpeningMm / 2 * longitudeSin[col]),
                         (float)(-settings.OpeningMm / 2 * longitudeCos[col]), outside[col].Z);

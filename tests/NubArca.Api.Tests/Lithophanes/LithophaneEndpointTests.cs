@@ -209,6 +209,45 @@ public sealed class LithophaneEndpointTests
     }
 
     [Fact]
+    public async Task Hanging_Workflow_Persists_Crop_And_Offers_A_Private_Complete_Cap()
+    {
+        using var f = Factory(sliced: true);
+        var (ownerId, owner) = await f.CreatePermissionClientAsync("hanging@example.com", Permissions.LaboratoryAccess, Permissions.LaboratoryLithophanes);
+        var (_, other) = await f.CreateAuthenticatedClientAsync("other-hanging@example.com");
+        var file = await Upload(owner);
+        var s = Fast with { ExternalRelief = true, Hanging = true, PrintAnchor = true,
+            OpeningMm = 20, BackgroundThicknessMm = 0.8, FrameAspect = 1, PictureScale = 0.7, Zoom = 2 };
+        var key = Guid.NewGuid();
+        var project = await Create(owner, file, key, s);
+        Assert.Equal(s, project.Settings);
+        Assert.Equal(HttpStatusCode.NotFound, (await owner.GetAsync($"{Root}/{project.Id}/cap")).StatusCode);
+        var preview = await owner.PostAsJsonAsync($"{Root}/preview", new LithophanePreviewRequest(file, s));
+        preview.EnsureSuccessStatusCode();
+        var fresh = (await preview.Content.ReadFromJsonAsync<LithophanePreview>())!;
+        Assert.True(fresh.Hanging); Assert.True(fresh.ExternalRelief);
+        Assert.Equal(s.InnerRadiusMm / (s.DiameterMm / 2), fresh.InnerRadiusRatio, 9);
+        var ready = await Finish(f, owner, project.Id);
+        Assert.Equal("ready", ready.Status);
+        var response = await owner.GetAsync($"{Root}/{project.Id}/cap");
+        response.EnsureSuccessStatusCode();
+        Assert.Equal("model/stl", response.Content.Headers.ContentType!.MediaType);
+        Assert.Equal("no-store", response.Headers.CacheControl!.ToString());
+        using var expected = new MemoryStream(); LithophaneCap.Write(expected, s);
+        Assert.Equal(expected.ToArray(), await response.Content.ReadAsByteArrayAsync());
+        var saved = (await owner.GetFromJsonAsync<LithophanePreview>($"{Root}/{project.Id}/preview"))!;
+        Assert.Equal(fresh with { MinimumZoom = null }, saved);
+        Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"{Root}/{project.Id}/cap")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await owner.GetAsync($"{Root}/{Guid.NewGuid()}/cap")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await owner.PostAsJsonAsync(Root,
+            new LithophaneCreateRequest(file, key, s with { PictureScale = 0.8 }))).StatusCode);
+        string role;
+        using (var scope = f.Services.CreateScope())
+            role = (await scope.ServiceProvider.GetRequiredService<AppDbContext>().Users.SingleAsync(u => u.Id == ownerId)).RoleKey;
+        await f.SetRolePermissionsRawAsync(role, Permissions.LaboratoryAccess);
+        Assert.Equal(HttpStatusCode.Forbidden, (await owner.GetAsync($"{Root}/{project.Id}/cap")).StatusCode);
+    }
+
+    [Fact]
     public async Task Every_Surface_Is_Owner_Private_Including_Batch_Status_And_Source_Selection()
     {
         using var f = Factory(); var (_, owner) = await f.CreateAuthenticatedClientAsync();

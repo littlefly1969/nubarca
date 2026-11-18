@@ -275,7 +275,7 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
             // Below this the photo is whole on the sphere already: a smaller zoom
             // changes the number, not the map. The form shows it after a preview.
             var minimumZoom = PhotoPlacementGeometry.ContainZoom(photoAspect,
-                request.Settings.PictureWidthDegrees / request.Settings.PictureHeightDegrees);
+                request.Settings.FrameAspect ?? request.Settings.PictureWidthDegrees / request.Settings.PictureHeightDegrees);
             return await PreviewOfAsync(map, request.Settings, ct) with { MinimumZoom = minimumZoom };
         }
     }
@@ -303,8 +303,28 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
             / (thickest - thinnest), 0, 1);
         return new(Convert.ToBase64String(stream.GetBuffer(), 0, (int)stream.Length), grid.Columns, grid.Rows,
             grid.TopRows, grid.BottomAngle, grid.TriangleCount, grid.StlBytes,
-            BaseHeightRatio: grid.BaseHeightMm / grid.Radius, BaseRadiusRatio: grid.BaseRadiusMm / grid.Radius,
-            BaseTransmission: baseTransmission);
+            BaseHeightRatio: grid.BaseHeightMm / grid.Radius, BaseRadiusRatio: grid.PrintFootRadiusMm / grid.Radius,
+            BaseTransmission: baseTransmission, Hanging: s.Hanging, ExternalRelief: s.ExternalRelief,
+            InnerRadiusRatio: s.InnerRadiusMm / grid.Radius,
+            MinWallRatio: thinnest / grid.Radius, MaxWallRatio: thickest / grid.Radius,
+            CrownRadiusRatio: s.Hanging ? LithophaneCap.CrownRadiusMm / grid.Radius : 0,
+            CapTransmission: (thickest - s.BackgroundWallMm) / (thickest - thinnest));
+    }
+
+    public async Task<Stream?> OpenCapDownloadAsync(Guid owner, Guid id, CancellationToken ct)
+    {
+        var p = await FindAsync(owner, id, ct);
+        if (p is null || !(await SummaryAsync(p, ct)).DownloadReady) return null;
+        var settings = Settings(p);
+        if (!settings.Hanging) return null;
+        var result = new MemoryStream();
+        try
+        {
+            LithophaneCap.Write(result, settings, ct);
+            result.Position = 0;
+            return result;
+        }
+        catch { result.Dispose(); throw; }
     }
 
     private async Task<(Image<La16> Map, double PhotoAspect)> ReadMapAsync(Guid owner, Guid fileId, LithophaneSettings s, CancellationToken ct)
