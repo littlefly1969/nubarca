@@ -4,13 +4,14 @@ using System.Text;
 namespace NubArca.Api.Lithophanes;
 
 // A complete, separate cap, not a partial sphere export. Its outer dome
-// continues the nominal sphere. A short clearance-fit spigot locates an
-// adhesive joint; it is not a snap-fit or a claimed load-rated fastening.
+// continues the nominal sphere. New projects use a 2 mm straight locating
+// spigot; legacy projects retain their adhesive lip. Neither is a bayonet.
 public static class LithophaneCap
 {
     public const double SeatDepthMm = 0.8;
     public const double RadialClearanceMm = 0.2;
     public const double SeatWallMm = 0.8;
+    public const double FitRadialClearanceMm = 0.15;
     public const double CrownRadiusMm = 5;
     public const double CableRadiusMm = 2;
     public const double CrownHeightMm = 5;
@@ -47,16 +48,25 @@ public static class LithophaneCap
         Point(CableRadiusMm, crownZ);
         // Hollow crown roof and inner spherical dome, ending at the locating
         // spigot. Only this short lip thickens the joint, to limit its shadow.
-        var plugOuter = settings.OpeningMm / 2 - RadialClearanceMm;
-        var plugInner = plugOuter - SeatWallMm;
+        var depth = settings.InternalFit ? LithophaneSettings.FitDepthMm : SeatDepthMm;
+        var plugOuter = settings.OpeningMm / 2 - (settings.InternalFit ? FitRadialClearanceMm : RadialClearanceMm);
+        var plugInner = plugOuter - (settings.InternalFit ? LithophaneSettings.FitWallMm : SeatWallMm);
         var innerEnd = Math.Asin(plugInner / inner);
         for (var row = 0; row <= rows; row++)
         {
             var a = crownAngle + (innerEnd - crownAngle) * row / rows;
             Point(inner * Math.Sin(a), inner * Math.Cos(a));
         }
-        Point(plugInner, z - SeatDepthMm);
-        Point(plugOuter, z - SeatDepthMm);
+        if (settings.PrintBrim)
+        {
+            // First-layer adhesion on the INSIDE of the spigot only. Peel this
+            // thin annulus away after printing; the exterior and fit stay clean.
+            Point(plugInner, z - depth + LithophaneSettings.BrimThicknessMm);
+            Point(plugInner - LithophaneSettings.CapBrimWidthMm, z - depth + LithophaneSettings.BrimThicknessMm);
+            Point(plugInner - LithophaneSettings.CapBrimWidthMm, z - depth);
+        }
+        else Point(plugInner, z - depth);
+        Point(plugOuter, z - depth);
         Point(plugOuter, z);
 
         var rings = profile.Select(p => Enumerable.Range(0, Columns).Select(col =>

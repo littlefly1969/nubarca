@@ -4,6 +4,19 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.14 — 2026-11-19
+
+- **Hanging lithophanes keep their spherical outline.** New hanging projects
+  replace the flared sacrificial foot with a 1 mm internal collar, 2 mm deep,
+  and a matching straight cap spigot. The cap continues the original sphere;
+  there is no projecting pedestal or bayonet. Fit still needs a print trial.
+- **Inward brims on both parts.** An optional 0.16 mm first-layer annulus is
+  included in the body and cap STLs, extending only inward (5 mm on the body,
+  3 mm on the cap). Remove both thin brims before assembly to restore the
+  chosen clear opening. The exterior and fitting surfaces are not widened.
+- Saved projects retain their existing anchor/lip geometry and resumable
+  output. The new options are omitted when false; no migration is required.
+
 ## 0.4.13 — 2026-11-18
 
 - **Frame the photograph before placing it on the sphere.** A square or

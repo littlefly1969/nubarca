@@ -191,7 +191,7 @@ describe('Laboratory lithophanes', () => {
     expect(mock.calls.some((c) => /content|download/.test(c.url))).toBe(false);
   });
 
-  it('offers hanging orientation with an extraction aperture and removable anchor', async () => {
+  it('offers a short internal joint and inward brims on both hanging parts', async () => {
     const mock = installFetchMock({
       'GET /api/lithophanes/queue': () => jsonResponse(queue),
       'GET /api/lithophanes': () => jsonResponse({ items: [], nextCursor: null }),
@@ -199,13 +199,36 @@ describe('Laboratory lithophanes', () => {
     });
     mount(); await choose();
     fireEvent.change(screen.getByLabelText('Come userai la sfera'), { target: { value: 'hanging' } });
-    expect(screen.getByLabelText('Ancoraggio temporaneo da rimuovere')).toBeChecked();
+    expect(screen.getByLabelText('Brim interno rimovibile su sfera e calotta')).toBeChecked();
+    expect(screen.queryByLabelText('Ancoraggio temporaneo da rimuovere')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Base verticale proporzionata al foro')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /parziale/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
     await screen.findByText('In coda');
     expect(JSON.parse(mock.calls.find((c) => c.method === 'POST')!.body!).settings)
-      .toMatchObject({ hanging: true, externalRelief: true, printAnchor: true, openingMm: 30 });
+      .toMatchObject({ hanging: true, externalRelief: true, printAnchor: false, internalFit: true, printBrim: true, openingMm: 30 });
+  });
+
+  it('can omit both built-in brims and resets the internal joint when returning to standing mode', async () => {
+    const mock = installFetchMock({
+      'GET /api/lithophanes/queue': () => jsonResponse(queue),
+      'GET /api/lithophanes': () => jsonResponse({ items: [], nextCursor: null }),
+      'POST /api/lithophanes': () => jsonResponse(project, 201),
+    });
+    mount(); await choose();
+    const mode = screen.getByLabelText('Come userai la sfera');
+    fireEvent.change(mode, { target: { value: 'hanging' } });
+    fireEvent.click(screen.getByLabelText('Brim interno rimovibile su sfera e calotta'));
+    fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
+    await screen.findByText('In coda');
+    expect(JSON.parse(mock.calls.find((c) => c.method === 'POST')!.body!).settings)
+      .toMatchObject({ internalFit: true, printBrim: false, printAnchor: false });
+    fireEvent.change(mode, { target: { value: 'standing' } });
+    expect(screen.queryByLabelText('Brim interno rimovibile su sfera e calotta')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
+    await waitFor(() => expect(mock.calls.filter((c) => c.method === 'POST')).toHaveLength(2));
+    expect(JSON.parse(mock.calls.filter((c) => c.method === 'POST')[1].body!).settings)
+      .toMatchObject({ internalFit: false, printBrim: false, hanging: false });
   });
 
   it('offers a complete cap only for a ready hanging project', async () => {
@@ -215,6 +238,29 @@ describe('Laboratory lithophanes', () => {
     });
     mount();
     expect(await screen.findByRole('link', { name: 'Scarica calotta STL' })).toHaveAttribute('href', '/api/lithophanes/project-1/cap');
+  });
+
+  it('keeps a saved legacy preview and lets its next generation opt into the internal joint', async () => {
+    const saved = { ...project, status: 'ready', downloadReady: true,
+      settings: { ...project.settings, hanging: true, printAnchor: true, openingMm: 30 } };
+    const mock = installFetchMock({
+      'GET /api/lithophanes/queue': () => jsonResponse([]),
+      'GET /api/lithophanes': () => jsonResponse({ items: [saved], nextCursor: null }),
+      'GET /api/lithophanes/project-1/preview': () => jsonResponse({ ...preview, hanging: true }),
+      'POST /api/lithophanes': () => jsonResponse(project, 201),
+    });
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Vedi anteprima' }));
+    const fit = await screen.findByLabelText('Innesto interno da 2 mm, senza piede svasato');
+    expect(fit).not.toBeChecked();
+    expect(screen.getByLabelText('Ancoraggio temporaneo da rimuovere')).toBeChecked();
+    fireEvent.click(fit);
+    expect(screen.getByLabelText('Brim interno rimovibile su sfera e calotta')).toBeChecked();
+    expect(screen.queryByLabelText('Ancoraggio temporaneo da rimuovere')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
+    await waitFor(() => expect(mock.calls.some((c) => c.method === 'POST')).toBe(true));
+    expect(JSON.parse(mock.calls.find((c) => c.method === 'POST')!.body!).settings)
+      .toMatchObject({ internalFit: true, printBrim: true, printAnchor: false, openingMm: 30 });
   });
 
   it('preserves the idempotency key after a lost creation response', async () => {

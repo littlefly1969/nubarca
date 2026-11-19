@@ -18,7 +18,7 @@ public sealed record LithophanePreview(string ImageBase64, int Columns, int Rows
     double BaseHeightRatio = 0, double BaseRadiusRatio = 0, double BaseTransmission = 0,
     bool Hanging = false, bool ExternalRelief = false, double InnerRadiusRatio = 0,
     double MinWallRatio = 0, double MaxWallRatio = 0, double CrownRadiusRatio = 0,
-    double CapTransmission = 1);
+    double CapTransmission = 1, double FitDepthRatio = 0, double FitRadiusRatio = 0);
 public sealed class LithophaneException(string code, int statusCode = 400) : Exception(code)
 {
     public string Code { get; } = code;

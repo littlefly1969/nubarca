@@ -20,6 +20,17 @@ public sealed record LithophaneSettings
     public bool Hanging { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool PrintAnchor { get; init; }
+    // New hanging joint; absent fields preserve already generated projects.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool InternalFit { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool PrintBrim { get; init; }
+
+    public const double FitDepthMm = 2;
+    public const double FitWallMm = 1;
+    public const double BrimThicknessMm = 0.16;
+    public const double BodyBrimWidthMm = 5;
+    public const double CapBrimWidthMm = 3;
     // The crop frame and its size on the sphere are independent. Missing in
     // legacy settings: their angular area and framing remain byte-compatible.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -100,6 +111,8 @@ public sealed record LithophaneSettings
         && Between(OpeningMm, 4, DiameterMm * 0.65)
         && (!Hanging || (ExternalRelief && Between(OpeningMm, 16, DiameterMm * 0.65)
             && BackgroundWallMm >= 0.8))
+        && (!InternalFit || (Hanging && !PrintAnchor))
+        && (!PrintBrim || InternalFit)
         && Between(ResolutionMm, 0.15, 1)
         && Between(PictureWidthDegrees, 40, 300) && Between(PictureHeightDegrees, 30, 140)
         && PhotoPlacementGeometry.IsStructurallyValid(new(CenterX, CenterY, Zoom))
@@ -157,8 +170,13 @@ public sealed class LithophaneGrid
             BaseHeightMm = Math.Clamp(settings.OpeningMm * 0.1, 1, 4);
         }
         BottomAngle = Math.Acos(bottomZ / Radius);
+        InnerBottomAngle = settings.InternalFit
+            ? Math.PI - Math.Asin((settings.OpeningMm / 2 + LithophaneSettings.FitWallMm) / innerRadius)
+            : BottomAngle;
+        InnerJoinZ = settings.InternalFit ? innerRadius * Math.Cos(InnerBottomAngle) : bottomZ;
         Rows = TopRows + (int)Math.Ceiling((BottomAngle - Math.PI / 2) * Radius / settings.ResolutionMm);
-        RimSegments = settings.Hanging && settings.PrintAnchor ? 6 : BaseHeightMm > 0 ? 3 : 1;
+        RimSegments = settings.InternalFit ? (settings.PrintBrim ? 6 : 4)
+            : settings.Hanging && settings.PrintAnchor ? 6 : BaseHeightMm > 0 ? 3 : 1;
         PrintFootRadiusMm = BaseRadiusMm + (settings.Hanging && settings.PrintAnchor
             ? Math.Clamp(settings.OpeningMm * 0.15, 3, 6) : 0);
     }
@@ -168,6 +186,8 @@ public sealed class LithophaneGrid
     public int TopRows { get; }
     public int Rows { get; }
     public double BottomAngle { get; }
+    public double InnerBottomAngle { get; }
+    public double InnerJoinZ { get; }
     public double BaseHeightMm { get; }
     public double BaseRadiusMm => Radius * Math.Sin(BottomAngle);
     public double PrintFootRadiusMm { get; }
@@ -177,6 +197,9 @@ public sealed class LithophaneGrid
     public double Theta(int row) => row <= TopRows
         ? Math.PI / 2 * row / TopRows
         : Math.PI / 2 + (BottomAngle - Math.PI / 2) * (row - TopRows) / (Rows - TopRows);
+
+    public double InnerTheta(int row) => row <= TopRows ? Theta(row)
+        : Math.PI / 2 + (InnerBottomAngle - Math.PI / 2) * (row - TopRows) / (Rows - TopRows);
 
     public double DesignTheta(int row, bool hanging) => hanging ? Math.PI - Theta(row) : Theta(row);
     public double DesignLongitude(int col, bool hanging) => (360d * col / Columns - 180) * (hanging ? -1 : 1);

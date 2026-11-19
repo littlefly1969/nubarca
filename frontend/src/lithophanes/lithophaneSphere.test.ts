@@ -64,4 +64,21 @@ describe('spherical lithophane preview', () => {
     expect(legacy[centrePixel + 3]).toBe(0);
     expect(frame[(190 * size + size / 2) * 4 + 3]).toBe(0);
   });
+  it('keeps the internal joint out of the exterior silhouette and confines its illustrative shadow to the opening', () => {
+    const size = 400;
+    const plain = { ...grid, bottomAngle: Math.acos(-0.9), hanging: true, crownRadiusRatio: 0.125 };
+    const joint = { ...plain, fitDepthRatio: 0.05, fitRadiusRatio: 0.375 };
+    const white = map(255);
+    expect(spherePixels(white, joint, 0, false, size)).toEqual(spherePixels(white, plain, 0, false, size));
+    const lit = spherePixels(white, joint, 0, true, size);
+    const before = spherePixels(white, plain, 0, true, size);
+    let changed = 0;
+    for (let i = 0; i < lit.length; i += 4) {
+      expect(lit[i + 3]).toBe(before[i + 3]);
+      if (lit[i] !== before[i]) { changed++; expect(lit[i]).toBeLessThan(before[i]); }
+    }
+    expect(changed).toBeGreaterThan(0);
+    const centrePixel = (size / 2 * size + size / 2) * 4;
+    expect(lit[centrePixel]).toBe(before[centrePixel]);
+  });
 });

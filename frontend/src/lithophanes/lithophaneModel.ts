@@ -3,7 +3,7 @@ import type { LithophaneSettings } from '@nubarca/api-client';
 export const DEFAULT_LITHOPHANE_SETTINGS: LithophaneSettings = {
   diameterMm: 80, minThicknessMm: 0.8, maxThicknessMm: 2.8, openingMm: 20,
   baseCollar: true,
-  externalRelief: true, hanging: false, printAnchor: true, frameAspect: 4 / 3, pictureScale: 0.8,
+  externalRelief: true, hanging: false, printAnchor: false, frameAspect: 4 / 3, pictureScale: 0.8,
   resolutionMm: 0.3, pictureWidthDegrees: 160, pictureHeightDegrees: 110,
   centerX: 0.5, centerY: 0.5, zoom: 1, brightness: 0, contrast: 1, gamma: 1, backgroundThicknessMm: 0.8,
 };
@@ -50,6 +50,8 @@ function withinBounds(s: LithophaneSettings): boolean {
     && between(s.maxThicknessMm, s.minThicknessMm + 0.1, 5) && between(s.openingMm, 4, s.diameterMm * 0.65)
     && (!s.hanging || (!!s.externalRelief && between(s.openingMm, 16, s.diameterMm * 0.65)
       && (s.backgroundThicknessMm ?? s.minThicknessMm) >= 0.8))
+    && (!s.internalFit || (!!s.hanging && !s.printAnchor))
+    && (!s.printBrim || !!s.internalFit)
     && (s.frameAspect == null || between(s.frameAspect, 0.2, 5))
     && (s.pictureScale == null || (s.frameAspect != null && between(s.pictureScale, 0.2, 1)))
     && between(s.resolutionMm, 0.15, 1) && between(s.pictureWidthDegrees, 40, 300)
@@ -73,7 +75,8 @@ export function lithophaneGrid(s: LithophaneSettings) {
   }
   const bottom = Math.acos(bottomZ / radius);
   const rows = top + Math.ceil((bottom - Math.PI / 2) * radius / s.resolutionMm);
-  const rimSegments = s.hanging ? (s.printAnchor ? 6 : 1) : s.baseCollar ? 3 : 1;
+  const rimSegments = s.internalFit ? (s.printBrim ? 6 : 4)
+    : s.hanging ? (s.printAnchor ? 6 : 1) : s.baseCollar ? 3 : 1;
   return { radius, columns, top, bottom, rows, triangles: 4 * columns * rows + 2 * columns * (rimSegments - 1) };
 }
 

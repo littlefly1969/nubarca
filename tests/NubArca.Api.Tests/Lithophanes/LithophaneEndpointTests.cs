@@ -208,14 +208,17 @@ public sealed class LithophaneEndpointTests
         Assert.Equal(1, await db.BackgroundJobs.CountAsync(x => x.Type == JobTypes.LithophaneGenerate));
     }
 
-    [Fact]
-    public async Task Hanging_Workflow_Persists_Crop_And_Offers_A_Private_Complete_Cap()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Hanging_Workflow_Persists_Crop_And_Offers_A_Private_Complete_Cap(bool internalFit, bool brim)
     {
         using var f = Factory(sliced: true);
         var (ownerId, owner) = await f.CreatePermissionClientAsync("hanging@example.com", Permissions.LaboratoryAccess, Permissions.LaboratoryLithophanes);
         var (_, other) = await f.CreateAuthenticatedClientAsync("other-hanging@example.com");
         var file = await Upload(owner);
-        var s = Fast with { ExternalRelief = true, Hanging = true, PrintAnchor = true,
+        var s = Fast with { ExternalRelief = true, Hanging = true, PrintAnchor = !internalFit, InternalFit = internalFit, PrintBrim = brim,
             OpeningMm = 20, BackgroundThicknessMm = 0.8, FrameAspect = 1, PictureScale = 0.7, Zoom = 2 };
         var key = Guid.NewGuid();
         var project = await Create(owner, file, key, s);
@@ -225,6 +228,7 @@ public sealed class LithophaneEndpointTests
         preview.EnsureSuccessStatusCode();
         var fresh = (await preview.Content.ReadFromJsonAsync<LithophanePreview>())!;
         Assert.True(fresh.Hanging); Assert.True(fresh.ExternalRelief);
+        Assert.Equal(internalFit ? 2 / (s.DiameterMm / 2) : 0, fresh.FitDepthRatio, 9);
         Assert.Equal(s.InnerRadiusMm / (s.DiameterMm / 2), fresh.InnerRadiusRatio, 9);
         var ready = await Finish(f, owner, project.Id);
         Assert.Equal("ready", ready.Status);
@@ -240,6 +244,9 @@ public sealed class LithophaneEndpointTests
         Assert.Equal(HttpStatusCode.NotFound, (await owner.GetAsync($"{Root}/{Guid.NewGuid()}/cap")).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await owner.PostAsJsonAsync(Root,
             new LithophaneCreateRequest(file, key, s with { PictureScale = 0.8 }))).StatusCode);
+        if (internalFit)
+            Assert.Equal(HttpStatusCode.Conflict, (await owner.PostAsJsonAsync(Root,
+                new LithophaneCreateRequest(file, key, s with { PrintBrim = !brim }))).StatusCode);
         string role;
         using (var scope = f.Services.CreateScope())
             role = (await scope.ServiceProvider.GetRequiredService<AppDbContext>().Users.SingleAsync(u => u.Id == ownerId)).RoleKey;

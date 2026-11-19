@@ -10,6 +10,10 @@ export interface LithophaneSettings {
   externalRelief?: boolean;
   hanging?: boolean;
   printAnchor?: boolean;
+  /** 1 mm internal socket, 2 mm deep, with a matching straight cap spigot. */
+  internalFit?: boolean;
+  /** Removable 0.16 mm brims inside both body and cap. Requires internalFit. */
+  printBrim?: boolean;
   /** Width/height of the independent 2D crop frame. Absent: legacy framing. */
   frameAspect?: number | null;
   /** Fraction of the largest crop area that fits away from the opening (0.2–1). */
@@ -69,6 +73,8 @@ export interface LithophanePreview {
   maxWallRatio?: number;
   crownRadiusRatio?: number;
   capTransmission?: number;
+  fitDepthRatio?: number;
+  fitRadiusRatio?: number;
 }
 
 const base = '/api/lithophanes';

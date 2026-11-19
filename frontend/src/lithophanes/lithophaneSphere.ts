@@ -62,7 +62,13 @@ export function spherePixels(map: PixelMap, grid: Grid, rotation: number, lit: b
         }
         if (square < 0) continue;
       }
-      const value = base ? (grid.baseTransmission ?? 0) : cap ? (neck ? 0.1 : grid.capTransmission ?? 1) : point.value;
+      let value = base ? (grid.baseTransmission ?? 0) : cap ? (neck ? 0.1 : grid.capTransmission ?? 1) : point.value;
+      // Illustrative local shadow from the internal joint; its sleeve never
+      // changes the external silhouette or appears as a projecting pedestal.
+      const bodyZ = hanging ? -z : z;
+      if (lit && !base && !cap && (grid.fitDepthRatio ?? 0) > 0
+        && bodyZ >= bottomZ && bodyZ <= bottomZ + grid.fitDepthRatio!
+        && Math.abs(nx) < (grid.fitRadiusRatio ?? 0)) value *= 0.65;
       let normalDepth = base ? depth / footRadius : neck ? depth / crown : depth;
       if (relief && !base && !cap) {
         const slope = ((grid.maxWallRatio ?? 0) - (grid.minWallRatio ?? 0)) * map.width / (2 * Math.PI);
