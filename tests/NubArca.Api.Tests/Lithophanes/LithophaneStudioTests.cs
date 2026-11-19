@@ -143,10 +143,115 @@ public sealed class LithophaneStudioTests
     {
         var old = new LithophaneSettings();
         var json = JsonSerializer.Serialize(old);
-        foreach (var name in new[] { "ExternalRelief", "Hanging", "PrintAnchor", "FrameAspect", "PictureScale", "PhotoWidthDegrees", "InnerRadiusMm" }) Assert.DoesNotContain(name, json);
+        foreach (var name in new[] { "ExternalRelief", "Hanging", "PrintAnchor", "InternalFit", "PrintBrim", "FrameAspect", "PictureScale", "PhotoWidthDegrees", "InnerRadiusMm" }) Assert.DoesNotContain(name, json);
         foreach (var s in new[] { Settings() with { FrameAspect = double.NaN }, Settings() with { PictureScale = 0 },
             Settings() with { FrameAspect = null }, Settings() with { OpeningMm = 10 },
             Settings() with { BackgroundThicknessMm = 0.4 }, Settings() with { ExternalRelief = false } }) Assert.False(s.IsValid());
+    }
+
+    [Theory]
+    [InlineData(40, 16)]
+    [InlineData(40, 26)]
+    [InlineData(80, 30)]
+    [InlineData(80, 40)]
+    [InlineData(200, 130)]
+    public void Short_Internal_Joint_And_Inward_Brims_Are_Closed_And_Leave_The_Exterior_Unchanged(double diameter, double opening)
+    {
+        foreach (var brim in new[] { false, true })
+        {
+            var s = Settings(diameter, opening) with { InternalFit = true, PrintAnchor = false, PrintBrim = brim };
+            Assert.True(s.IsValid());
+            var grid = new LithophaneGrid(s);
+            Assert.Equal(0, grid.BaseHeightMm);
+            Assert.Equal(brim ? 6 : 4, grid.RimSegments);
+            using var map = LithophaneImage.CreateMap(null, s);
+            using var body = new MemoryStream();
+            LithophaneMesh.WriteHeader(body, grid);
+            LithophaneMesh.WriteStrip(body, s, map, 0, grid.Rows);
+            Assert.Equal(grid.StlBytes, body.Length);
+            var vertices = CheckMesh(body);
+            var z = vertices.Min(v => v.Z);
+            Assert.Equal(grid.Radius * Math.Cos(grid.BottomAngle), z, 4);
+            var rim = vertices.Where(v => Math.Abs(v.Z - z) < 1e-4).ToList();
+            Assert.Equal(opening / 2 - (brim ? LithophaneSettings.BodyBrimWidthMm : 0), rim.Min(Radial), 4);
+            Assert.Equal(grid.BaseRadiusMm, rim.Max(Radial), 4);
+            var tip = vertices.Where(v => Math.Abs(v.Z - z - 2) < 1e-4 && Radial(v) <= opening / 2 + 1.001).ToList();
+            Assert.NotEmpty(tip);
+            Assert.Equal(opening / 2, tip.Min(Radial), 4);
+            Assert.Equal(opening / 2 + 1, tip.Max(Radial), 4);
+            Assert.All(vertices.Where(v => v.Z > z + LithophaneSettings.BrimThicknessMm + 1e-4 && v.Z < z + 2.001),
+                v => Assert.True(Radial(v) >= opening / 2 - 1e-4));
+            // Every exterior ring is byte-for-byte the ordinary spherical wall.
+            var plain = s with { InternalFit = false, PrintBrim = false };
+            using var plainBody = new MemoryStream();
+            LithophaneMesh.WriteHeader(plainBody, new LithophaneGrid(plain));
+            LithophaneMesh.WriteStrip(plainBody, plain, map, 0, grid.Rows);
+            var expectedOuter = Read(plainBody).SelectMany(t => new[] { t.A, t.B, t.C })
+                .Where(v => Math.Abs(v.Length() - grid.Radius) < 1e-4).ToHashSet();
+            var actualOuter = vertices.Where(v => Math.Abs(v.Length() - grid.Radius) < 1e-4).ToHashSet();
+            Assert.True(expectedOuter.SetEquals(actualOuter));
+
+            using var cap = new MemoryStream();
+            LithophaneCap.Write(cap, s);
+            var capVertices = CheckMesh(cap);
+            var seatZ = -grid.Radius * Math.Cos(grid.BottomAngle) - 2;
+            Assert.Equal(seatZ, capVertices.Min(v => v.Z), 4);
+            var seat = capVertices.Where(v => Math.Abs(v.Z - seatZ) < 1e-4).ToList();
+            var plugOuter = opening / 2 - LithophaneCap.FitRadialClearanceMm;
+            Assert.Equal(plugOuter, seat.Max(Radial), 4);
+            Assert.Equal(plugOuter - 1 - (brim ? LithophaneSettings.CapBrimWidthMm : 0), seat.Min(Radial), 4);
+            Assert.All(capVertices, v => Assert.True(Radial(v) >= LithophaneCap.CableRadiusMm - 1e-4));
+            // Brim never extends outside the fitting cylinder or into its mating surface.
+            Assert.All(capVertices.Where(v => v.Z < seatZ + LithophaneSettings.BrimThicknessMm + 1e-4),
+                v => Assert.True(Radial(v) <= plugOuter + 1e-4));
+            if (brim)
+            {
+                Assert.Contains(vertices, v => Math.Abs(v.Z - z - 0.16) < 1e-4 && Math.Abs(Radial(v) - opening / 2 + 5) < 1e-4);
+                Assert.Contains(capVertices, v => Math.Abs(v.Z - seatZ - 0.16) < 1e-4 && Math.Abs(Radial(v) - plugOuter + 4) < 1e-4);
+            }
+        }
+
+        static double Radial(Vector3 v) => Math.Sqrt(v.X * v.X + v.Y * v.Y);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void New_Joint_Is_Identical_When_Resuming_At_Every_Latitude(bool brim)
+    {
+        var s = Settings() with { PrintAnchor = false, InternalFit = true, PrintBrim = brim };
+        var grid = new LithophaneGrid(s);
+        using var map = LithophaneImage.CreateMap(null, s);
+        using var whole = new MemoryStream();
+        using var slices = new MemoryStream();
+        LithophaneMesh.WriteHeader(whole, grid); LithophaneMesh.WriteHeader(slices, grid);
+        LithophaneMesh.WriteStrip(whole, s, map, 0, grid.Rows);
+        for (var row = 0; row < grid.Rows; row++) LithophaneMesh.WriteStrip(slices, s, map, row, row + 1);
+        Assert.Equal(whole.ToArray(), slices.ToArray());
+    }
+
+    [Fact]
+    public void Internal_Joint_Refuses_Legacy_Anchor_And_Orphan_Brims()
+    {
+        var s = Settings() with { PrintAnchor = false, InternalFit = true };
+        Assert.True(s.IsValid());
+        Assert.False((s with { Hanging = false }).IsValid());
+        Assert.False((s with { PrintAnchor = true }).IsValid());
+        Assert.False((s with { InternalFit = false, PrintBrim = true }).IsValid());
+    }
+
+    [Theory]
+    [InlineData(80, 30, 0.3, false, 1218000)]
+    [InlineData(80, 30, 0.3, true, 1221360)]
+    [InlineData(40, 16, 1, false, 28416)]
+    [InlineData(40, 16, 1, true, 28928)]
+    [InlineData(200, 130, 0.6, false, 1699856)]
+    [InlineData(200, 130, 0.6, true, 1704048)]
+    public void Internal_Joint_Triangle_Budget_Matches_The_Browser(double diameter, double opening, double step, bool brim, int expected)
+    {
+        var s = Settings(diameter, opening) with { ResolutionMm = step, InternalFit = true, PrintBrim = brim, PrintAnchor = false };
+        Assert.Equal(expected, new LithophaneGrid(s).TriangleCount);
+        Assert.True(s.IsValid());
     }
 
     private static List<Vector3> CheckMesh(MemoryStream stream)

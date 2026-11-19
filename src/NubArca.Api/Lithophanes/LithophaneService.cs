@@ -308,7 +308,9 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
             InnerRadiusRatio: s.InnerRadiusMm / grid.Radius,
             MinWallRatio: thinnest / grid.Radius, MaxWallRatio: thickest / grid.Radius,
             CrownRadiusRatio: s.Hanging ? LithophaneCap.CrownRadiusMm / grid.Radius : 0,
-            CapTransmission: (thickest - s.BackgroundWallMm) / (thickest - thinnest));
+            CapTransmission: (thickest - s.BackgroundWallMm) / (thickest - thinnest),
+            FitDepthRatio: s.InternalFit ? LithophaneSettings.FitDepthMm / grid.Radius : 0,
+            FitRadiusRatio: s.InternalFit ? s.OpeningMm / 2 / grid.Radius : 0);
     }
 
     public async Task<Stream?> OpenCapDownloadAsync(Guid owner, Guid id, CancellationToken ct)

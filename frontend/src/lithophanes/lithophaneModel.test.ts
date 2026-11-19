@@ -63,6 +63,24 @@ describe('lithophane form feedback', () => {
     expect(['queued', 'running', 'cancelling'].every(activeLithophane)).toBe(true);
     expect(['ready', 'failed', 'cancelled'].some(activeLithophane)).toBe(false);
   });
+  it('budgets the internal joint and both brim options and rejects incompatible settings', () => {
+    const s = { ...defaults, hanging: true, openingMm: 30, printAnchor: false, internalFit: true };
+    // One extra ring boundary per profile segment; the cap is a separate STL.
+    const plain = lithophaneTriangleCount({ ...s, internalFit: false });
+    const columns = 4 * Math.ceil(Math.PI * s.diameterMm / s.resolutionMm / 4);
+    expect(lithophaneTriangleCount(s)).toBe(plain + 6 * columns);
+    expect(lithophaneTriangleCount({ ...s, printBrim: true })).toBe(plain + 10 * columns);
+    expect(validLithophaneSettings({ ...s, printBrim: true })).toBe(true);
+    expect(validLithophaneSettings({ ...s, hanging: false })).toBe(false);
+    expect(validLithophaneSettings({ ...s, printAnchor: true })).toBe(false);
+    expect(validLithophaneSettings({ ...s, internalFit: false, printBrim: true })).toBe(false);
+    // Same independent fixtures as Internal_Joint_Triangle_Budget_Matches_The_Browser.
+    const cases = [[80, 30, 0.3, false, 1218000], [80, 30, 0.3, true, 1221360],
+      [40, 16, 1, false, 28416], [40, 16, 1, true, 28928],
+      [200, 130, 0.6, false, 1699856], [200, 130, 0.6, true, 1704048]] as const;
+    for (const [diameterMm, openingMm, resolutionMm, printBrim, expected] of cases)
+      expect(lithophaneTriangleCount({ ...s, diameterMm, openingMm, resolutionMm, printBrim })).toBe(expected);
+  });
   it('maps pole, exact equator and aperture to the persisted pixel grid', () => {
     expect(latitudeRow(0, 20, 37, 2.9)).toBe(0);
     expect(latitudeRow(Math.PI / 2, 20, 37, 2.9)).toBe(20);

@@ -60,7 +60,37 @@ public static class LithophaneMesh
                 }
                 if (row + 1 == grid.Rows)
                 {
-                    if (settings.Hanging && settings.PrintAnchor)
+                    if (settings.InternalFit)
+                    {
+                        // Follow the boundary of ONE solid: flat natural rim,
+                        // optional inward first-layer brim, short socket, then
+                        // back to the inner sphere. No overlapping cylinders.
+                        var z = nextOuter[col].Z;
+                        var opening = settings.OpeningMm / 2;
+                        var profile = new List<(double Radius, float Z)>();
+                        if (settings.PrintBrim)
+                        {
+                            profile.Add((opening - LithophaneSettings.BodyBrimWidthMm, z));
+                            profile.Add((opening - LithophaneSettings.BodyBrimWidthMm, z + (float)LithophaneSettings.BrimThicknessMm));
+                            profile.Add((opening, z + (float)LithophaneSettings.BrimThicknessMm));
+                        }
+                        else profile.Add((opening, z));
+                        profile.Add((opening, z + (float)LithophaneSettings.FitDepthMm));
+                        profile.Add((opening + LithophaneSettings.FitWallMm, z + (float)LithophaneSettings.FitDepthMm));
+                        var a = nextOuter[col]; var b = nextOuter[col + 1];
+                        foreach (var p in profile)
+                        {
+                            var c = Point(p.Radius, p.Z, col); var d = Point(p.Radius, p.Z, col + 1);
+                            Triangle(a, c, d); Triangle(a, d, b);
+                            a = c; b = d;
+                        }
+                        Triangle(a, nextInner[col], nextInner[col + 1]);
+                        Triangle(a, nextInner[col + 1], b);
+                        Vector3 Point(double radius, float height, int c) => new(
+                            (float)(radius * longitudeSin[c % grid.Columns]),
+                            (float)(-radius * longitudeCos[c % grid.Columns]), height);
+                    }
+                    else if (settings.Hanging && settings.PrintAnchor)
                     {
                         // A broad sacrificial foot and a 0.6 mm radial neck.
                         // The groove is 0.32 mm below the final mating plane:
@@ -115,6 +145,7 @@ public static class LithophaneMesh
             var theta = grid.Theta(row);
             var sin = Math.Sin(theta);
             var cos = Math.Cos(theta);
+            var (innerSin, innerCos) = settings.InternalFit ? Math.SinCos(grid.InnerTheta(row)) : (sin, cos);
             for (var col = 0; col < grid.Columns; col++)
             {
                 var direction = row == 0 ? Vector3.UnitZ
@@ -122,9 +153,19 @@ public static class LithophaneMesh
                 var wall = settings.Thickness(map[col, row]);
                 outside[col] = direction * (float)(settings.ExternalRelief ? settings.InnerRadiusMm + wall : grid.Radius);
                 inside[col] = direction * (float)(settings.ExternalRelief ? settings.InnerRadiusMm : grid.Radius - wall);
+                if (settings.InternalFit && row > grid.TopRows)
+                {
+                    inside[col] = new Vector3(
+                        (float)(settings.InnerRadiusMm * innerSin * longitudeSin[col]),
+                        (float)(-settings.InnerRadiusMm * innerSin * longitudeCos[col]),
+                        (float)(settings.InnerRadiusMm * innerCos));
+                }
                 if (row == grid.Rows)
-                    inside[col] = new Vector3((float)(settings.OpeningMm / 2 * longitudeSin[col]),
-                        (float)(-settings.OpeningMm / 2 * longitudeCos[col]), outside[col].Z);
+                {
+                    var innerRadius = settings.OpeningMm / 2 + (settings.InternalFit ? LithophaneSettings.FitWallMm : 0);
+                    inside[col] = new Vector3((float)(innerRadius * longitudeSin[col]),
+                        (float)(-innerRadius * longitudeCos[col]), settings.InternalFit ? (float)grid.InnerJoinZ : outside[col].Z);
+                }
             }
             // Exact same vertex at the seam, not sin(2π)'s rounded neighbour.
             outside[grid.Columns] = outside[0];

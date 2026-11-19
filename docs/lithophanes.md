@@ -97,7 +97,35 @@ AND words by a proper 180° rotation about Y, never a horizontal mirror, so both
 are upright when the opening is at the top in use. The preview offers both
 assembled appearance and printing orientation; its lighting is illustrative.
 
-`printAnchor: true` adds a broad annular sacrificial foot, 2–4 mm tall, with
+New hanging projects use `internalFit: true` and `printAnchor: false`. The
+body ends at the original spherical cut plane: no exterior collar, flange or
+flared foot. A 1 mm thick cylindrical sleeve extends only 2 mm into the body,
+with its bore equal to `openingMm`. The root meets the regular inner sphere
+at their exact intersection; the inner surface is sampled to that intersection
+and the last strip follows the socket's continuous boundary. It is one closed
+shell, not overlapping cylinders. The cap continues the same nominal sphere
+and has a matching 2 mm straight spigot with 1 mm wall and 0.15 mm radial
+clearance. This is a locating fit, without a bayonet or guaranteed retention;
+test fit and holding strength on the chosen printer and filament.
+
+`printBrim: true` (enabled by the hanging editor) includes inward-only brims in
+**both** STLs. The brim is 0.16 mm thick, coplanar with the lowest layer: 5 mm
+wide inside the body's opening and 3 mm inside the cap's spigot. Neither brim
+extends outside the spherical wall or across a mating surface. The body's
+aperture is temporarily narrowed by 10 mm in diameter; remove its thin annulus
+to restore `openingMm`. Remove the cap's brim too before assembly. Print the
+body opening-down and the cap spigot-down; inspect the first layer in the
+slicer. Do not add another slicer brim when using these built-in brims. They
+are optional, do not simulate bed adhesion and do not eliminate support needs.
+
+`internalFit` requires hanging mode and excludes `printAnchor`; `printBrim`
+requires `internalFit`. False values are omitted from saved JSON so old settings,
+fingerprints, maps, checkpoints and output remain unchanged. Both socket and
+brim faces count toward the body's browser/server triangle budget. The preview
+keeps the exterior spherical and indicates a local joint shadow, not a calibrated
+optical prediction. No database migration or new persisted artifact is needed.
+
+Legacy `printAnchor: true` adds a broad annular sacrificial foot, 2–4 mm tall, with
 3–6 mm extra radial footprint and a 0.6 mm radial neck at a groove 0.32 mm below
 the final mating plane. Cut at the groove and dress the remaining rim to that
 plane. With it disabled, the complete body ends at its ordinary annular rim.
@@ -108,10 +136,11 @@ A ready hanging project offers a separate **complete cap STL**, generated
 deterministically from its fixed settings under the same owner/permission
 checks and download audit, with the export rate limit and `no-store` headers.
 No new persisted artifacts or migration are needed. The cap continues the
-nominal spherical surface, has a 0.8 mm deep, 0.8 mm thick internal locating lip
+nominal spherical surface. Legacy settings without `internalFit` retain a
+0.8 mm deep, 0.8 mm thick internal locating lip
 with 0.2 mm radial clearance, a 10 mm diameter/5 mm high crown, a 4 mm axial
-cable bore and two opposing lateral thread windows. It is designed for an
-adhesive joint, not a snap lock. Fit, foot removal, hanging bond strength and
+cable bore and two opposing lateral thread windows. That legacy lip is designed
+for an adhesive joint, not a snap lock. Fit, brim/foot removal, holding strength and
 illuminated seam visibility require physical acceptance on the chosen filament;
 the preview cannot predict adhesive transmission or certify the hanging load.
 The cap uses a bounded 128-column, at most 128-row lathe mesh with manifold

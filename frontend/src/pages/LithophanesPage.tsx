@@ -167,8 +167,8 @@ export function LithophanesPage() {
           <label>{t('lithophane.useMode')}
             <select value={settings.hanging ? 'hanging' : 'standing'} onChange={(e) => {
               const hanging = e.target.value === 'hanging';
-              setSettings((old) => ({ ...old, hanging,
-                ...(hanging ? { externalRelief: true, printAnchor: true,
+              setSettings((old) => ({ ...old, hanging, internalFit: hanging, printBrim: hanging, printAnchor: false,
+                ...(hanging ? { externalRelief: true,
                   openingMm: Math.min(old.diameterMm * 0.65, Math.max(30, old.openingMm)),
                   backgroundThicknessMm: Math.max(0.8, old.backgroundThicknessMm ?? old.minThicknessMm) } : {}),
               })); setPreview(null);
@@ -193,10 +193,21 @@ export function LithophanesPage() {
             onChange={(e) => { setSettings((old) => ({ ...old, externalRelief: e.target.checked })); setPreview(null); }} />
             {t('lithophane.externalRelief')}</label></>}
           <p className="lithophane-hint">{t('lithophane.reliefHelp')}</p>
-          {settings.hanging && <><label className="lithophane-check"><input type="checkbox" checked={settings.printAnchor ?? false}
-            onChange={(e) => { setSettings((old) => ({ ...old, printAnchor: e.target.checked })); setPreview(null); }} />
-            {t('lithophane.printAnchor')}</label>
-            <p className="lithophane-hint">{t('lithophane.hangingHelp')}</p></>}
+          {settings.hanging && <><label className="lithophane-check"><input type="checkbox" checked={settings.internalFit ?? false}
+            onChange={(e) => {
+              setSettings((old) => ({ ...old, internalFit: e.target.checked, printAnchor: false, printBrim: e.target.checked }));
+              setPreview(null);
+            }} />{t('lithophane.internalFit')}</label>
+            {settings.internalFit ? <><p className="lithophane-hint">{t('lithophane.internalFitHelp')}</p>
+              <label className="lithophane-check"><input type="checkbox" checked={settings.printBrim ?? false}
+              onChange={(e) => { setSettings((old) => ({ ...old, printBrim: e.target.checked })); setPreview(null); }} />
+              {t('lithophane.printBrim')}</label>
+              <p className="lithophane-hint">{t('lithophane.printBrimHelp')}</p></>
+              : <><label className="lithophane-check"><input type="checkbox" checked={settings.printAnchor ?? false}
+                onChange={(e) => { setSettings((old) => ({ ...old, printAnchor: e.target.checked })); setPreview(null); }} />
+                {t('lithophane.printAnchor')}</label>
+                <p className="lithophane-hint">{t('lithophane.hangingHelp')}</p></>}
+          </>}
         </fieldset>
         <fieldset disabled={busy} className="lithophane-text">
           <legend>{t('lithophane.textSection')}</legend>
