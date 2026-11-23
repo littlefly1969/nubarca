@@ -21,7 +21,8 @@
 // `scripts/tv-browser-e2e.sh` at the repository root brings the stack up
 // (a throwaway PostgreSQL, the API, the owner, the built frontend) and runs it.
 
-import { spawn, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
+import { launchChromium } from './chromium-launch.mjs';
 import { existsSync, readdirSync, mkdtempSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -159,7 +160,6 @@ function findChrome() {
 }
 
 const profile = mkdtempSync(join(tmpdir(), 'nubarca-tv-e2e-'));
-let launches = 0;
 
 /**
  * Start Chromium on THE display's profile and attach to a fresh page. Called
@@ -168,23 +168,7 @@ let launches = 0;
  * this test adds no persistence of its own.
  */
 async function launchBrowser() {
-  launches += 1;
-  const port = 9300 + ((process.pid + launches * 7) % 500);
-  const proc = spawn(findChrome(), [
-    '--headless=new', '--disable-gpu', '--no-sandbox', '--no-first-run',
-    '--autoplay-policy=no-user-gesture-required',
-    `--user-data-dir=${profile}`, `--remote-debugging-port=${port}`,
-    '--window-size=1280,720', 'about:blank',
-  ], { stdio: 'ignore' });
-  const exited = new Promise((resolve) => proc.once('exit', resolve));
-
-  let url = null;
-  for (let i = 0; i < 150 && !url; i += 1) {
-    try {
-      url = (await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()).webSocketDebuggerUrl;
-    } catch { await delay(100); }
-  }
-  if (!url) throw new Error('Chromium did not start');
+  const { proc, exited, url } = await launchChromium(findChrome(), profile);
 
   const ws = new WebSocket(url);
   await new Promise((resolve) => { ws.onopen = resolve; });

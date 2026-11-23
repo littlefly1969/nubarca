@@ -10,6 +10,9 @@ originating repository and is deliberately not reproduced here.
   revealing the next activity, start it before opening its vote. A deterministic
   regression repeats the game-winner path and verifies the return to the
   slideshow; the CI gate requires it to run and pass.
+- Browser TV end-to-end tests wait for Chromium’s announced DevTools endpoint
+  on an OS-assigned port, with a bounded startup deadline and diagnostic output
+  on early exit or timeout. Browser restart still reuses the display profile.
 
 ## 0.4.14 — 2026-11-19
 
