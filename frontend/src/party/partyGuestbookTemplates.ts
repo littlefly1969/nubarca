@@ -17,8 +17,8 @@ import type { MessageKey } from '../i18n';
 //   * no version is removed while a memory may still name it.
 //
 // What a template decides is deliberately small: the photograph's frame, and
-// the class the stylesheet draws the rest with. The guest chooses the memory,
-// not the layout.
+// the class the stylesheet draws the rest with. A memory may additionally
+// carry a normalized text overlay, independently of this versioned frame.
 
 export interface GuestbookTemplate {
   key: PartyGuestbookTemplateKey;

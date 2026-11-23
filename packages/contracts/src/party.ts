@@ -1,3 +1,4 @@
+import type { PhotoTextLayout } from './photoText.ts';
 // Party: owner settings, guest-media moderation and message moderation
 // (§30-§37).
 //
@@ -371,6 +372,7 @@ export interface PartyGuestbookMedia {
   height: number;
   orientation: PartyGuestbookOrientation;
   crop: PartyGuestbookCrop;
+  textLayout?: PhotoTextLayout | null;
 }
 
 /** One memory as a GUEST reads it. No status: a guest only ever receives
@@ -386,6 +388,7 @@ export interface PartyGuestbookEntry {
   /** `version` is the one the memory was published with; draw THAT one. */
   template: { key: string; version: number };
   media: PartyGuestbookMedia;
+  textLayout?: PhotoTextLayout | null;
 }
 
 export interface PartyGuestbookPage {
@@ -432,6 +435,7 @@ export interface PartyGuestbookSubmissionRequest {
   body: string;
   templateKey: PartyGuestbookTemplateKey;
   crop: PartyGuestbookCrop;
+  textLayout?: PhotoTextLayout | null;
 }
 
 /**
@@ -448,6 +452,7 @@ export const PARTY_GUESTBOOK_FIELD_ERRORS = [
   'guestbook_invalid_author',
   'guestbook_invalid_body',
   'guestbook_invalid_template',
+  'guestbook_invalid_text_layout',
   'guestbook_invalid_crop',
 ] as const;
 export const PARTY_GUESTBOOK_CLOSED_ERRORS = ['guestbook_disabled', 'guestbook_limit_reached'] as const;
@@ -473,6 +478,7 @@ export interface PartyGuestbookManagedEntry {
   moderatedAt: string | null;
   template: { key: string; version: number };
   media: PartyGuestbookMedia;
+  textLayout?: PhotoTextLayout | null;
 }
 
 export interface PartyGuestbookManagerList {

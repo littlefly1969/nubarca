@@ -1,3 +1,6 @@
+import { DEFAULT_PHOTO_TEXT, type PhotoTextLayout } from '@nubarca/contracts';
+import { PhotoTextControls } from '../text/PhotoTextControls';
+import { PhotoTextOverlay } from '../text/PhotoTextOverlay';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import {
@@ -359,6 +362,7 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
   // --- the owner's choices ------------------------------------------------------
   const [style, setStyle] = useState<PrintStyleChoice>('fullBleed');
   const [caption, setCaption] = useState('');
+  const [textLayout, setTextLayout] = useState<PhotoTextLayout>({ ...DEFAULT_PHOTO_TEXT });
   const [captionFont, setCaptionFont] = useState<TextFontId>(DEFAULT_TEXT_FONT);
   // The album's own logo, when it has one: it is then what a framed band
   // starts signed with. Null: the default — the album's logo, else no mark.
@@ -391,6 +395,7 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
     setStyle('fullBleed');
     setCaption('');
     setCaptionFont(DEFAULT_TEXT_FONT);
+    setTextLayout({ ...DEFAULT_PHOTO_TEXT });
     setChosenLogo(null);
     setIncludeDate(false);
   }, []);
@@ -512,10 +517,11 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
         photos: composition.slots.map((slot) => ({ fileItemId: slot.itemId, placement: slot.placement })),
         ...(composition.layout === 'photo' && style === 'popOut' && subjectPoint ? { subject: subjectPoint } : {}),
         ...(composition.orientation ? { orientation: composition.orientation } : {}),
-        ...(framed && line ? { caption: line } : {}),
-        ...(framed && line && textFontRequest(captionFont) ? { captionFont } : {}),
+        ...((framed || textLayout.mode !== 'below') && line ? { caption: line } : {}),
+        ...((framed || textLayout.mode !== 'below') && line && textFontRequest(captionFont) ? { captionFont } : {}),
         ...(framed && brand ? { brand: true } : {}),
         ...(framed && logo === 'custom' ? { customLogo: true } : {}),
+        ...(line && textLayout.mode !== 'below' ? { textLayout } : {}),
         includeDate,
         ...(includeDate ? { dateLocale: lang, timeZone: browserTimeZone() } : {}),
       }, composition.key);
@@ -684,7 +690,7 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
         bandDark={() => false}
         paperColor={(layout) => (framedFor(layout) ? FRAMED_PAPER : FULL_BLEED_PAPER)}
         band={{
-          title: caption.replace(/\s+/g, ' ').trim() || null, line: null, mark: dateText, brand,
+          title: textLayout.mode === 'below' ? caption.replace(/\s+/g, ' ').trim() || null : null, line: null, mark: dateText, brand,
           titleFont: captionFont === DEFAULT_TEXT_FONT ? null : textFont(captionFont),
           logoUrl: logo === 'custom' ? customLogoUrl : null,
           marks: chosen.layout === 'photo2' ? dateTexts : undefined,
@@ -693,7 +699,9 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
           const text = dateTexts[sheet.index] ?? null;
           return text ? <PrintedDate text={text} sheet={sheet} /> : null;
         } : undefined}
-        compositionKey={JSON.stringify([target?.key, style, caption, captionFont, logo, includeDate, lang, subjectPoint])}
+        photoWords={textLayout.mode !== 'below' && caption.trim() ? () =>
+          <PhotoTextOverlay text={caption.replace(/\s+/g, ' ').trim()} layout={textLayout} font={textFont(captionFont)} onChange={setTextLayout} /> : undefined}
+        compositionKey={JSON.stringify([target?.key, style, caption, captionFont, textLayout, logo, includeDate, lang, subjectPoint])}
         submitError={error ? t(error) : null}
         submitting={submitting}
         canSubmit={target !== null && target.unavailable === null && !captionInvalid
@@ -751,7 +759,11 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
                 )}
               </fieldset>
             )}
-            {framedFor(layout) && (
+            <PhotoTextControls value={textLayout} onChange={(next) => {
+              setTextLayout(next);
+              if (next.mode === 'below' && !framedFor(layout)) setStyle('framed');
+            }} />
+            {(framedFor(layout) || textLayout.mode !== 'below') && (
               <div className="owner-print-words">
                 <label className="owner-print-caption">
                   <span>{t('ownerPrint.caption')}</span>

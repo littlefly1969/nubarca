@@ -131,7 +131,8 @@ public sealed record PartyPrintComposition(
     /// framed band it is drawn only where <see cref="PrintSheetWords.Brand"/>
     /// asks for a mark at all.
     /// </summary>
-    PrintLogo? Logo = null);
+    PrintLogo? Logo = null,
+    string? PhotoText = null, string? PhotoTextFont = null, PhotoTextLayout? TextLayout = null);
 
 /// <summary>
 /// The words in a framed sheet's band: a title line (a party's name, or an
@@ -210,6 +211,15 @@ public sealed class PartyPrintComposer
             PrintLayouts.QuadStrip4 => RenderSlots(composition, PrintLayouts.QuadStrip4, strip: true),
             _ => RenderPhoto(composition),
         };
+        if (composition.TextLayout is { Mode: not "below" })
+        {
+            var portrait = sheet.Height >= sheet.Width;
+            var style = composition.PopOutMask is not null ? PrintLayouts.PopOut : PrintLayouts.Framed;
+            var arranged = PrintLayouts.Arrange(composition.Product, style, composition.Paper, portrait);
+            foreach (var slot in arranged.Slots)
+                PhotoTextRenderer.Draw(sheet, ToPixels(slot, sheet.Width, sheet.Height), composition.PhotoText,
+                    composition.TextLayout, composition.PhotoTextFont, _assetRoot);
+        }
         return await EncodeAsync(sheet, composition.Calibration, cancellationToken);
     }
 

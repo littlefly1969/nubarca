@@ -66,6 +66,13 @@ public sealed record LithophaneSettings
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? TextPosition { get; init; }
 
+    // Null preserves the photo-relative positioning of existing projects.
+    // Explicit zero centres the text block on the sphere's equator.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? TextLatitudeDegrees { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? TextLongitudeDegrees { get; init; }
+
     public const int TextMaxLength = 60;
     public const int TextMaxLines = 2;
     public const double DefaultTextHeightMm = 8;
@@ -130,6 +137,8 @@ public sealed record LithophaneSettings
         if (!TextFonts.IsKnown(TextFont)) return false;
         if (TextHeightMm is { } height && !Between(height, 3, 30)) return false;
         if (TextPosition is not null && !TextPositions.Contains(TextPosition)) return false;
+        if (TextLatitudeDegrees is { } latitude && !Between(latitude, -60, 60)) return false;
+        if (TextLongitudeDegrees is { } longitude && !Between(longitude, -180, 180)) return false;
         if (Text is null) return true;
         if (Text.Length > TextMaxLength || Text.Any(char.IsSurrogate)) return false;
         if (Text.Any(c => char.IsControl(c) && c != '\n')) return false;

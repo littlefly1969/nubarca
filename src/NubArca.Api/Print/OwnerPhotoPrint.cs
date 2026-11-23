@@ -60,7 +60,8 @@ public sealed record OwnerPhotoPrintSubmitRequest(
     /// The face <see cref="Caption"/> is written in, a <see cref="TextFonts"/>
     /// id. Absent (or the default): the face the band always used.
     /// </summary>
-    string? CaptionFont = null);
+    string? CaptionFont = null,
+    PhotoTextLayout? TextLayout = null);
 
 /// <summary>A touched point, normalized to the upright photograph: (0,0) top-left, (1,1) bottom-right.</summary>
 public sealed record OwnerPrintSubjectRequest(double X, double Y)
@@ -167,7 +168,8 @@ public sealed record OwnerPhotoComposition(
     PhotoPlacement Placement,
     /// <summary>The text to print bottom-right of the visible photograph, or null for none.</summary>
     string? DateText = null,
-    PrintCalibration? Calibration = null);
+    PrintCalibration? Calibration = null,
+    string? Caption = null, string? CaptionFont = null, PhotoTextLayout? TextLayout = null);
 
 /// <summary>
 /// The date a direct print carries, and how it is written. One table, mirrored

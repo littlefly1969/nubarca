@@ -24,7 +24,17 @@ is built is described by `ARCHITECTURE.md`.
   BlobJanitor and print-artifact cleanup. Access requires `laboratory.access`
   plus `laboratory.lithophanes`, rechecked by workers. See [lithophanes.md](lithophanes.md).
 
-- Release: `0.4.14` (server and web)
+- Photo text: owner/share print and guestbook accept an optional `textLayout`
+  (`below`, `overlay`, `bubble`; normalized x/y and width/height, left/right tail).
+  Editors share numeric controls and drag/arrow-key positioning. Guestbook stores
+  the composition separately from the immutable photograph; web and native TV
+  render it. Missing layout preserves existing designs. Owner print fingerprints
+  include overlay geometry; calibration still applies after text rendering.
+- Lithophane words: new editor drafts start at explicit latitude/longitude 0°,
+  independently of the photo footprint, with ±60° vertical and ±180° horizontal
+  controls. Absent coordinates retain saved photo-relative text positions.
+
+- Release: `0.4.15` (server and web)
 - NubArca TV: `1.0.11`, `versionCode` 13, OTA runtime `nubarca-tv-native-12`
 - Backend: ASP.NET Core / .NET 10, EF Core, PostgreSQL 17
 - Frontend: React, TypeScript, Vite

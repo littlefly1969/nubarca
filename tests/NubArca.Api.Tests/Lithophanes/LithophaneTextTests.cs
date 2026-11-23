@@ -55,6 +55,35 @@ public sealed class LithophaneTextTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Explicit_coordinates_place_words_relative_to_sphere_centre(bool hanging)
+    {
+        var s = Base with { Text = "CIAO", TextHeightMm = 8, TextLatitudeDegrees = 25,
+            TextLongitudeDegrees = 30, Hanging = hanging, ExternalRelief = true };
+        Assert.True(s.IsValid());
+        var grid = new LithophaneGrid(s);
+        using var map = Map(s);
+        var ink = Inked(map, s);
+        Assert.NotEmpty(ink);
+        var latitude = ink.Average(p => 90 - grid.DesignTheta(p.Row, hanging) * 180 / Math.PI);
+        var longitude = ink.Average(p => grid.DesignLongitude(p.Col, hanging));
+        Assert.InRange(latitude, 24, 26);
+        Assert.InRange(longitude, 29, 31);
+        using var wordsOnly = LithophaneImage.CreateMap(null, s);
+        var wordsInk = Inked(wordsOnly, s);
+        Assert.Equal(ink, wordsInk);
+    }
+
+    [Theory]
+    [InlineData(double.NaN, 0)]
+    [InlineData(0, double.PositiveInfinity)]
+    [InlineData(61, 0)]
+    [InlineData(0, -181)]
+    public void Invalid_text_coordinates_are_refused(double latitude, double longitude) =>
+        Assert.False((Base with { Text = "CIAO", TextLatitudeDegrees = latitude, TextLongitudeDegrees = longitude }).IsValid());
+
+    [Theory]
     [InlineData("below")]
     [InlineData("above")]
     [InlineData("onPhoto")]

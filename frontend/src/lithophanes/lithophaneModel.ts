@@ -1,6 +1,7 @@
 import type { LithophaneSettings } from '@nubarca/api-client';
 
 export const DEFAULT_LITHOPHANE_SETTINGS: LithophaneSettings = {
+  textLatitudeDegrees: 0, textLongitudeDegrees: 0,
   diameterMm: 80, minThicknessMm: 0.8, maxThicknessMm: 2.8, openingMm: 20,
   baseCollar: true,
   externalRelief: true, hanging: false, printAnchor: false, frameAspect: 4 / 3, pictureScale: 0.8,
@@ -31,12 +32,14 @@ export const hasLithophaneText = (s: LithophaneSettings) => (s.text ?? '').trim(
  * position are sent as absent for the same reason.
  */
 export function lithophaneRequestSettings(s: LithophaneSettings): LithophaneSettings {
-  const { text, textFont, textHeightMm, textPosition, ...rest } = s;
+  const { text, textFont, textHeightMm, textPosition, textLatitudeDegrees, textLongitudeDegrees, ...rest } = s;
   if (!hasLithophaneText(s)) return rest;
   return {
     ...rest, text: text!.replace(/\r/g, ''),
     ...(textFont && textFont !== 'nubarca' ? { textFont } : {}),
     textHeightMm: textHeightMm ?? DEFAULT_LITHOPHANE_TEXT_HEIGHT,
+    ...(textLatitudeDegrees != null ? { textLatitudeDegrees } : {}),
+    ...(textLongitudeDegrees != null ? { textLongitudeDegrees } : {}),
     ...(textPosition && textPosition !== 'below' ? { textPosition } : {}),
   };
 }
@@ -58,6 +61,8 @@ function withinBounds(s: LithophaneSettings): boolean {
     && between(s.pictureHeightDegrees, 30, 140) && between(s.centerX, 0, 1) && between(s.centerY, 0, 1)
     && between(s.zoom, 0.01, 4) && between(s.brightness, -0.5, 0.5)
     && between(s.contrast, 0.25, 3) && between(s.gamma, 0.3, 3)
+    && (s.textLatitudeDegrees == null || between(s.textLatitudeDegrees, -60, 60))
+    && (s.textLongitudeDegrees == null || between(s.textLongitudeDegrees, -180, 180))
     && validLithophaneText(s.text) && (s.textHeightMm == null || between(s.textHeightMm, 3, 30));
 }
 

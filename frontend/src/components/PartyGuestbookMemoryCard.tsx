@@ -1,3 +1,5 @@
+import { PhotoTextOverlay } from '../text/PhotoTextOverlay';
+import type { PhotoTextLayout } from '@nubarca/contracts';
 import type { CSSProperties, Ref } from 'react';
 import { useI18n } from '../i18n';
 import { placePhoto } from '@nubarca/contracts';
@@ -21,6 +23,7 @@ export interface GuestbookMemoryView {
   authorDisplayName: string;
   /** Plain text with LF paragraphs. Rendered as text, never as markup. */
   body: string;
+  textLayout?: PhotoTextLayout | null;
   template: { key: string; version: number };
   media: {
     url: string;
@@ -54,6 +57,7 @@ export function PartyGuestbookMemoryCard({
   testId = 'guestbook-memory',
   tv,
   wordsRef,
+  onTextLayoutChange,
 }: {
   memory: GuestbookMemoryView;
   /** Shown, muted, while a draft has no words yet. */
@@ -65,6 +69,7 @@ export function PartyGuestbookMemoryCard({
   tv?: GuestbookMemoryTvLayout;
   /** The words column, for a stage that measures whether they fit. */
   wordsRef?: Ref<HTMLElement>;
+  onTextLayoutChange?(layout: PhotoTextLayout): void;
 }) {
   const { t } = useI18n();
   const template = guestbookTemplateFor(memory.template.key, memory.template.version);
@@ -90,9 +95,10 @@ export function PartyGuestbookMemoryCard({
     } as CSSProperties)
     : undefined;
 
+  const overlay = memory.textLayout && memory.textLayout.mode !== 'below' ? memory.textLayout : null;
   return (
     <figure
-      className={`guestbook-memory ${template.className}${tv ? ' guestbook-memory--tv' : ''}`}
+      className={`guestbook-memory ${template.className}${tv ? ' guestbook-memory--tv' : ''}${overlay ? ' guestbook-memory--overlay' : ''}`}
       data-template={template.key}
       data-template-version={template.version}
       data-testid={testId}
@@ -108,11 +114,12 @@ export function PartyGuestbookMemoryCard({
           draggable={false}
           style={photoPlacementStyle(placed)}
         />
+        {overlay && <PhotoTextOverlay text={body} author={author} layout={overlay} onChange={onTextLayoutChange} />}
       </div>
       {/* The decoration, where a design has any, is drawn by the stylesheet
           and says nothing to a screen reader. */}
       <span className="guestbook-memory-ornament" aria-hidden="true" />
-      <figcaption className="guestbook-memory-words" style={wordsStyle} ref={wordsRef}>
+      {!overlay && <figcaption className="guestbook-memory-words" style={wordsStyle} ref={wordsRef}>
         {/* TEXT, always: never dangerouslySetInnerHTML and never a Markdown
             renderer. Paragraphs survive through `white-space: pre-wrap`. */}
         <p
@@ -130,7 +137,7 @@ export function PartyGuestbookMemoryCard({
           <span aria-hidden="true">— </span>
           {author}
         </p>
-      </figcaption>
+      </figcaption>}
     </figure>
   );
 }

@@ -1,3 +1,5 @@
+import { DEFAULT_PHOTO_TEXT, type PhotoTextLayout } from '@nubarca/contracts';
+import { PhotoTextControls } from '../text/PhotoTextControls';
 import { useEffect, useId, useRef, useState } from 'react';
 import {
   ApiError,
@@ -37,9 +39,8 @@ import { PartyGuestbookPhotoPicker } from './PartyGuestbookPhotoPicker';
 // everything and offers to try again. The draft does not outlive the page —
 // a memory half-written on someone else's phone is not something to keep.
 //
-// The composition is never designed by the guest. They choose a photograph,
-// a design among four and, if they want, the framing; the layout is the
-// template's.
+// The template supplies the frame. An optional text layout places the words
+// on the photograph instead of in the template’s dedication area.
 
 type Step = 'photo' | 'compose' | 'sent';
 
@@ -55,13 +56,14 @@ type Failure =
  * is not public yet — whose entry route is, deliberately, not readable.
  */
 function draftMemory(
-  photo: PartyGuestbookPhoto, author: string, body: string, template: GuestbookTemplate, view: CropView,
+  photo: PartyGuestbookPhoto, author: string, body: string, template: GuestbookTemplate, view: CropView, textLayout: PhotoTextLayout,
 ): GuestbookMemoryView {
   return {
     // What the server will store, so the preview never promises a blank line
     // or a stray space the book will not keep.
     authorDisplayName: normalizePartyMessageText(author),
     body: normalizePartyMultilineText(body),
+    textLayout,
     template: { key: template.key, version: template.version },
     media: { url: photo.previewUrl, width: photo.width, height: photo.height, crop: view },
   };
@@ -94,6 +96,7 @@ export function PartyGuestbookComposer({
   const [view, setView] = useState<CropView>(DEFAULT_CROP_VIEW);
   const [template, setTemplate] = useState<GuestbookTemplate>(DEFAULT_GUESTBOOK_TEMPLATE);
   const [body, setBody] = useState('');
+  const [textLayout, setTextLayout] = useState<PhotoTextLayout>({ ...DEFAULT_PHOTO_TEXT });
   const [author, setAuthor] = useState('');
   const [repositioning, setRepositioning] = useState(false);
   const [sending, setSending] = useState(false);
@@ -147,6 +150,7 @@ export function PartyGuestbookComposer({
         authorDisplayName: author,
         body,
         templateKey: template.key,
+        ...(textLayout.mode !== 'below' ? { textLayout } : {}),
         // The zoom as drawn in THIS design's frame: a photograph zoomed out in
         // one design and moved to a design that frames it closer is sent as
         // that design's contain, never below it.
@@ -160,7 +164,7 @@ export function PartyGuestbookComposer({
       // them.
       setSentMemory(result.status === 'visible' && result.entry
         ? result.entry
-        : draftMemory(photo, author, body, template, view));
+        : draftMemory(photo, author, body, template, view, textLayout));
       setLeft(result.remaining ?? null);
       setStep('sent');
       onPublished(result);
@@ -218,6 +222,7 @@ export function PartyGuestbookComposer({
     setView(DEFAULT_CROP_VIEW);
     setTemplate(DEFAULT_GUESTBOOK_TEMPLATE);
     setBody('');
+    setTextLayout({ ...DEFAULT_PHOTO_TEXT });
     setSent(null);
     setSentMemory(null);
     setFailure(null);
@@ -274,7 +279,7 @@ export function PartyGuestbookComposer({
   if (!photo) return null;
 
   const photoAspect = photo.width > 0 && photo.height > 0 ? photo.width / photo.height : 1;
-  const preview = draftMemory(photo, author, body, template, view);
+  const preview = draftMemory(photo, author, body, template, view, textLayout);
   const bodyErrorId = `${ids}-body-error`;
   const authorErrorId = `${ids}-author-error`;
   const bodyCounterId = `${ids}-body-counter`;
@@ -344,7 +349,7 @@ export function PartyGuestbookComposer({
           </div>
         ) : (
           <PartyGuestbookMemoryCard
-            memory={preview}
+            memory={preview} onTextLayoutChange={setTextLayout}
             bodyPlaceholder={t('partyGuestbookComposer.previewBody')}
             authorPlaceholder={t('partyGuestbookComposer.previewName')}
             loading="eager"
@@ -352,6 +357,8 @@ export function PartyGuestbookComposer({
           />
         )}
       </div>
+
+      <PhotoTextControls value={textLayout} onChange={setTextLayout} />
 
       {/* 2. THE DESIGN, one of four, changing the preview at once. */}
       <fieldset className="guestbook-templates" data-testid="guestbook-templates">

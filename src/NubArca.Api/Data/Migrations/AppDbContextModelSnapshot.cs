@@ -5620,6 +5620,9 @@ namespace NubArca.Api.Data.Migrations
                     b.Property<int>("TemplateVersion")
                         .HasColumnType("integer");
 
+                    b.Property<string>("TextLayout")
+                        .HasColumnType("text");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 

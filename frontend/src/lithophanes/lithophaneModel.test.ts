@@ -98,7 +98,7 @@ describe('lithophane words', () => {
     expect(validLithophaneSettings({ ...defaults, text: 'Ok', textHeightMm: 30 })).toBe(true);
   });
   it('sends the default face and position as absent, and nothing without words', () => {
-    expect(lithophaneRequestSettings({ ...defaults, text: '  ', textFont: 'script' })).toEqual(defaults);
+    expect(lithophaneRequestSettings({ ...defaults, text: '  ', textFont: 'script' })).toEqual((({ textLatitudeDegrees: _lat, textLongitudeDegrees: _lon, ...shape }) => shape)(defaults));
     expect(lithophaneRequestSettings({ ...defaults, text: 'Ciao', textFont: 'nubarca', textPosition: 'below' }))
       .toEqual({ ...defaults, text: 'Ciao', textHeightMm: 8 });
   });

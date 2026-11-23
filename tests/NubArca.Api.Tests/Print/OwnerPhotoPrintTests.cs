@@ -26,6 +26,31 @@ public sealed class OwnerPhotoPrintTests : IDisposable
     public OwnerPhotoPrintTests() => _factory.EnsureDatabaseCreated();
     public void Dispose() => _factory.Dispose();
 
+    [Fact]
+    public async Task Bubble_is_in_the_printed_photo_and_moving_it_changes_idempotency()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var photo = await PhotoAsync(people.Owner);
+        var layout = new PhotoTextLayout("bubble", 1, 0);
+        object Request(PhotoTextLayout position) => new {
+            fileItemId = photo, printStationId = printer.StationId, printerDeviceId = printer.DeviceId,
+            expectedPaperSize = "10x15", orientation = "landscape", style = "fullBleed",
+            placement = new { centerX = .5, centerY = .5, zoom = 1 },
+            caption = "Auguri!", textLayout = position,
+        };
+        var key = Guid.NewGuid().ToString("N");
+        (await Submit(people.Owner, Request(layout), key)).EnsureSuccessStatusCode();
+        (await Submit(people.Owner, Request(layout), key)).EnsureSuccessStatusCode();
+        var changed = await Submit(people.Owner, Request(layout with { X = 0 }), key);
+        Assert.Equal(HttpStatusCode.Conflict, changed.StatusCode);
+        using var sheet = await PrintedSheetAsync(printer);
+        var white = sheet[(int)(sheet.Width * .94), (int)(sheet.Height * .03)];
+        Assert.True(white.R > 230 && white.G > 230 && white.B > 230);
+        var untouched = sheet[(int)(sheet.Width * .1), (int)(sheet.Height * .1)];
+        Assert.True(untouched.R > 150 && untouched.G < 60 && untouched.B < 60);
+    }
+
     private sealed record Printer(Guid StationId, Guid DeviceId, string Credential);
 
     private sealed record People(HttpClient Owner, Guid OwnerId, HttpClient Mario, Guid MarioId, HttpClient Stranger, Guid StrangerId);

@@ -136,10 +136,13 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         var photoPortrait = request.Orientation != "landscape";
         var portrait = PrintLayouts.SheetPortrait(layout, paper, photoPortrait);
 
-        // Words only where there is a band for them.
+        if (request.TextLayout is { } requestedText && !requestedText.IsValid())
+            return Refuse(OwnerPhotoPrintErrors.InvalidRequest);
+        var textLayout = request.TextLayout is { Mode: not "below" } ? request.TextLayout : null;
+        // The caption is either on each photograph or in the band's existing position.
         if (!OwnerPrintText.TryNormaliseCaption(request.Caption, out var caption))
             return Refuse(OwnerPhotoPrintErrors.InvalidCaption);
-        if (style == PrintLayouts.FullBleed && (caption is not null || request.Brand))
+        if (style == PrintLayouts.FullBleed && ((caption is not null && textLayout is null) || request.Brand))
             return Refuse(OwnerPhotoPrintErrors.InvalidRequest);
         // The caption's face: one of the table, and only with a caption. The
         // default is recorded as absent, so such a print keeps its digest.
@@ -162,14 +165,14 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         // 2. A repeat is answered from its record — the same composition with
         // the same job, a different one under the same key refused.
         var keyHash = Hash(idempotencyKey);
-        var fingerprint = layout == PrintLayouts.Photo && style == PrintLayouts.FullBleed
+        var fingerprint = layout == PrintLayouts.Photo && style == PrintLayouts.FullBleed && textLayout is null
             // Today's one-photograph print keeps the very digest it always had.
             ? Fingerprint(fileIds[0], stationId, deviceId, paper, request.Orientation!, placements[0],
                 request.IncludeDate, request.IncludeDate ? request.DateLocale : null,
                 request.IncludeDate ? zone!.Id : null)
             : SheetFingerprint(layout, style, fileIds, placements, stationId, deviceId, paper, portrait,
                 caption, request.Brand, request.IncludeDate, request.IncludeDate ? request.DateLocale : null,
-                request.IncludeDate ? zone!.Id : null, subjectPoint, request.LogoAlbumId, captionFont);
+                request.IncludeDate ? zone!.Id : null, subjectPoint, request.LogoAlbumId, captionFont, textLayout);
         if (await RepeatAsync(ownerUserId, keyHash, fingerprint, cancellationToken) is { } repeat) return repeat;
 
         // 3. The photographs: the caller's own, in their library, and photographs
@@ -362,10 +365,10 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 artifact = joined
                     ? PrintArtifactParts.Pack(await RenderHalvesAsync(layout, style,
                         [.. sources.Photos.Select(bytes => bytes!)], placements, photoPortrait,
-                        caption, request.Brand, dateTexts, PrintCalibration.Of(device), cancellationToken, logo, captionFont))
+                        caption, request.Brand, dateTexts, PrintCalibration.Of(device), cancellationToken, logo, captionFont, textLayout))
                     : style == PrintLayouts.FullBleed
                     ? await _renderer.RenderOwnerPhotoAsync(new OwnerPhotoComposition(
-                        sources.Photos[0]!, paper, portrait, placements[0], dateText, PrintCalibration.Of(device)),
+                        sources.Photos[0]!, paper, portrait, placements[0], dateText, PrintCalibration.Of(device), caption, captionFont, textLayout),
                         cancellationToken)
                     : await _composer.RenderAsync(new PartyPrintComposition(
                         layout,
@@ -377,9 +380,9 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                         Orientation: photoPortrait ? PartyPrintOrientation.Portrait : PartyPrintOrientation.Landscape,
                         Calibration: PrintCalibration.Of(device),
                         Paper: paper,
-                        Words: new PrintSheetWords(caption, null, dateText, request.Brand, captionFont),
+                        Words: new PrintSheetWords(textLayout is null ? caption : null, null, dateText, request.Brand, captionFont),
                         PopOutMask: subject?.Mask,
-                        Logo: logo),
+                        Logo: logo, PhotoText: caption, PhotoTextFont: captionFont, TextLayout: textLayout),
                         cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -432,6 +435,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                         subject = subjectPoint is { } sp ? new { x = sp.X, y = sp.Y } : null,
                         caption,
                         captionFont,
+                        textLayout,
                         brand = request.Brand,
                         logo = !request.Brand ? "none" : logo is null ? "nubarca" : "custom",
                         includeDate = request.IncludeDate,
@@ -545,7 +549,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         string layout, string style, IReadOnlyList<byte[]> photos, IReadOnlyList<PhotoPlacement> placements,
         bool photoPortrait, string? caption, bool brand, IReadOnlyList<string> dateTexts,
         PrintCalibration calibration, CancellationToken cancellationToken, PrintLogo? logo = null,
-        string? captionFont = null)
+        string? captionFont = null, PhotoTextLayout? textLayout = null)
     {
         var halves = new List<byte[]>(PrintLayouts.HalvesPerSheet);
         var perHalf = layout == PrintLayouts.Photo2 ? 1 : photos.Count / PrintLayouts.HalvesPerSheet;
@@ -557,7 +561,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
             if (layout == PrintLayouts.Photo2 && style == PrintLayouts.FullBleed)
             {
                 halves.Add(await _renderer.RenderOwnerPhotoAsync(new OwnerPhotoComposition(
-                    photos[half], PrintPapers.Photo10x15, photoPortrait, placements[half], date, calibration),
+                    photos[half], PrintPapers.Photo10x15, photoPortrait, placements[half], date, calibration, caption, captionFont, textLayout),
                     cancellationToken));
                 continue;
             }
@@ -570,8 +574,8 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 Orientation: photoPortrait ? PartyPrintOrientation.Portrait : PartyPrintOrientation.Landscape,
                 Calibration: calibration,
                 Paper: PrintPapers.Photo10x15,
-                Words: new PrintSheetWords(caption, null, date, brand, captionFont),
-                Logo: logo),
+                Words: new PrintSheetWords(textLayout is null ? caption : null, null, date, brand, captionFont),
+                Logo: logo, PhotoText: caption, PhotoTextFont: captionFont, TextLayout: textLayout),
                 cancellationToken));
         }
         return halves;
@@ -607,7 +611,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         string layout, string style, IReadOnlyList<Guid> fileIds, IReadOnlyList<PhotoPlacement> placements,
         Guid stationId, Guid deviceId, string paper, bool portrait, string? caption, bool brand,
         bool includeDate, string? dateLocale, string? zone, SubjectPoint? subject = null, Guid? logoAlbumId = null,
-        string? captionFont = null)
+        string? captionFont = null, PhotoTextLayout? textLayout = null)
     {
         static string N(double v) => Math.Round(v, 6).ToString("R", CultureInfo.InvariantCulture);
         var photos = fileIds.Select((id, i) =>
@@ -623,6 +627,7 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
         if (logoAlbumId is Guid album) canonical += $"|logo:{album:N}";
         // And a caption face other than the band's own.
         if (captionFont is not null) canonical += $"|font:{captionFont}";
+        if (textLayout is not null) canonical += "|text:" + JsonSerializer.Serialize(textLayout);
         return Hash(canonical);
     }
 

@@ -546,7 +546,9 @@ public sealed record PartyGuestbookEntryDto(
     string Body,
     DateTime CreatedAt,
     PartyGuestbookTemplateDto Template,
-    PartyGuestbookMediaDto Media);
+    PartyGuestbookMediaDto Media,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    NubArca.Api.Print.PhotoTextLayout? TextLayout = null);
 
 // Which design, and which VERSION of it, the memory was published with. The
 // version is the server's: a client draws the version it is told.
@@ -625,7 +627,9 @@ public sealed record PartyGuestbookSubmission(
     string? TemplateKey,
     double? CropCenterX,
     double? CropCenterY,
-    double? CropZoom);
+    double? CropZoom,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    NubArca.Api.Print.PhotoTextLayout? TextLayout = null);
 
 // Why a memory was refused. The HTTP layer maps these to a status code and a
 // stable machine code; the service never formats copy of its own.
@@ -668,6 +672,7 @@ public enum PartyGuestbookSubmissionError
 
     // A framing outside the crop editor's limits, or not a number.
     InvalidCrop,
+    InvalidTextLayout,
 }
 
 public sealed record PartyGuestbookSubmissionResult(
@@ -692,7 +697,9 @@ public sealed record PartyGuestbookManagedEntryDto(
     DateTime CreatedAt,
     DateTime? ModeratedAt,
     PartyGuestbookTemplateDto Template,
-    PartyGuestbookMediaDto Media);
+    PartyGuestbookMediaDto Media,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    NubArca.Api.Print.PhotoTextLayout? TextLayout = null);
 
 // The manager queue for a party's book. `IsOwner` is what the UI uses to decide
 // whether to render the configuration switches, exactly as on the greetings

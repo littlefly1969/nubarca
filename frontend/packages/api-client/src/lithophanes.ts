@@ -37,6 +37,8 @@ export interface LithophaneSettings {
   textHeightMm?: number | null;
   /** Where the words go with a photo. Absent: below. */
   textPosition?: 'below' | 'above' | 'onPhoto' | null;
+  textLatitudeDegrees?: number | null;
+  textLongitudeDegrees?: number | null;
 }
 
 export interface LithophaneSummary {

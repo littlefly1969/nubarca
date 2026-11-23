@@ -4,6 +4,12 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.15 — 2026-11-23
+
+- Litofanie: testo centrato sulla sfera, con spostamenti orizzontali e verticali in gradi; anteprima e STL usano le stesse coordinate. I progetti precedenti conservano le posizioni originali.
+- Foto e guestbook: testo sotto la foto, sovrapposto o in un fumetto; posizione e dimensioni regolabili, trascinamento e tasti freccia nell’anteprima. La composizione viene conservata nel book e resa sulla stampa, anche dagli album condivisi abilitati.
+- Guestbook: le nuove composizioni vengono mostrate anche sulle TV web e Fire TV aggiornate. Migrazione additiva di una colonna nullable per la posizione del testo.
+
 ## 0.4.14 — 2026-11-19
 
 - **Hanging lithophanes keep their spherical outline.** New hanging projects

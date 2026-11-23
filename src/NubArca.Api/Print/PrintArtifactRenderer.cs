@@ -147,6 +147,7 @@ public sealed class PrintArtifactRenderer
             DrawDate(sheet, text, PhotoPlacementGeometry.Visible(placed));
         }
 
+        PhotoTextRenderer.Draw(sheet, frame, composition.Caption, composition.TextLayout, composition.CaptionFont, _assetRoot);
         (composition.Calibration ?? PrintCalibration.Neutral).ApplyTo(sheet);
         sheet.Metadata.ExifProfile = null;
         sheet.Metadata.XmpProfile = null;

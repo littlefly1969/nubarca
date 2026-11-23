@@ -78,14 +78,15 @@ describe('Laboratory lithophanes', () => {
     mount(); await choose();
     fireEvent.change(screen.getByLabelText('Testo (una o due righe)'), { target: { value: 'Buon\nNatale' } });
     fireEvent.click(screen.getByLabelText('Corsivo'));
-    fireEvent.change(screen.getByLabelText('Posizione'), { target: { value: 'above' } });
+    fireEvent.change(screen.getByTestId('lithophane-text-latitude'), { target: { value: '25' } });
+    fireEvent.change(screen.getByTestId('lithophane-text-longitude'), { target: { value: '-30' } });
     fireEvent.click(screen.getByRole('button', { name: 'Aggiorna anteprima' }));
     await screen.findByRole('img', { name: 'Sfera di prova' });
     fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
     await screen.findByText('In coda');
     const previewRequest = mock.calls.find((c) => c.url === '/api/lithophanes/preview')!;
     const request = mock.calls.find((c) => c.url === '/api/lithophanes' && c.method === 'POST')!;
-    const words = { text: 'Buon\nNatale', textFont: 'script', textHeightMm: 8, textPosition: 'above' };
+    const words = { text: 'Buon\nNatale', textFont: 'script', textHeightMm: 8, textLatitudeDegrees: 25, textLongitudeDegrees: -30 };
     expect(JSON.parse(previewRequest.body!).settings).toMatchObject(words);
     expect(JSON.parse(request.body!)).toMatchObject({ fileItemId: photo.id, settings: words });
   });

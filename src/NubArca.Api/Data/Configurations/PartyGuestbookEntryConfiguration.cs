@@ -46,6 +46,10 @@ public class PartyGuestbookEntryConfiguration : IEntityTypeConfiguration<PartyGu
             .IsRequired()
             .HasMaxLength(PartyGuestbookTemplates.MaxKeyLength);
 
+        builder.Property(e => e.TextLayout).HasColumnType("text").HasConversion(
+            value => value == null ? null : System.Text.Json.JsonSerializer.Serialize(value, (System.Text.Json.JsonSerializerOptions?)null),
+            value => value == null ? null : System.Text.Json.JsonSerializer.Deserialize<NubArca.Api.Print.PhotoTextLayout>(value, (System.Text.Json.JsonSerializerOptions?)null));
+
         builder.Property(e => e.Status).IsRequired().HasMaxLength(32);
 
         builder.Property(e => e.CreatedAt).HasColumnType("timestamp with time zone");

@@ -40,6 +40,46 @@ public sealed class PartyGuestbookTests : IDisposable
 
     public void Dispose() => _factory.Dispose();
 
+    [Theory]
+    [InlineData("overlay")]
+    [InlineData("bubble")]
+    public async Task Text_layout_survives_publication_reload_and_manager_projection(string mode)
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var party = await OpenPartyAsync(owner, guestbook: true);
+        var layout = new NubArca.Api.Print.PhotoTextLayout(mode, .8, .2, .7, .4, "right");
+        var submitted = await SubmitAsync(party.ViewToken, Memory(party.PhotoId, "Ada", "Auguri", textLayout: layout));
+        foreach (var entry in new[] { submitted.GetProperty("entry"),
+            (await PublicBookAsync(party.ViewToken)).GetProperty("entries")[0],
+            (await ManagerListAsync(owner, party.PartyId)).GetProperty("entries")[0] })
+        {
+            var saved = entry.GetProperty("textLayout");
+            Assert.Equal(mode, saved.GetProperty("mode").GetString());
+            Assert.Equal(.8, saved.GetProperty("x").GetDouble());
+            Assert.Equal(.2, saved.GetProperty("y").GetDouble());
+            Assert.Equal(.7, saved.GetProperty("width").GetDouble());
+            Assert.Equal(.4, saved.GetProperty("height").GetDouble());
+            Assert.Equal("right", saved.GetProperty("tail").GetString());
+        }
+    }
+
+    [Theory]
+    [InlineData("unknown", .5)]
+    [InlineData("bubble", 1.01)]
+    [InlineData("overlay", -.01)]
+    public async Task Invalid_text_layout_spends_no_reference_or_memory(string mode, double x)
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var party = await OpenPartyAsync(owner, guestbook: true);
+        var before = await ReferenceCountAsync(party.PhotoId);
+        var response = await SubmitRawAsync(party.ViewToken, Memory(party.PhotoId, "Ada", "Auguri",
+            textLayout: new NubArca.Api.Print.PhotoTextLayout(mode, x)));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("guestbook_invalid_text_layout", await ErrorOf(response));
+        Assert.Equal(before, await ReferenceCountAsync(party.PhotoId));
+        Assert.Empty((await PublicBookAsync(party.ViewToken)).GetProperty("entries").EnumerateArray());
+    }
+
     // ── Closed by default ───────────────────────────────────────────────────
 
     [Fact]
@@ -1138,12 +1178,13 @@ public sealed class PartyGuestbookTests : IDisposable
         string? template = "nubarca",
         double centerX = 0.5,
         double centerY = 0.5,
-        double zoom = 1.0) => new
+        double zoom = 1.0, NubArca.Api.Print.PhotoTextLayout? textLayout = null) => new
         {
             sourceMediaItemId = photoId,
             authorDisplayName = author,
             body,
             templateKey = template,
+            textLayout,
             crop = new { centerX, centerY, zoom },
         };
 

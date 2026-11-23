@@ -203,6 +203,9 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
         }
 
         // The client names the design; the SERVER decides its version.
+        if (submission.TextLayout is { } textLayout && !textLayout.IsValid())
+            return PartyGuestbookSubmissionResult.Fail(PartyGuestbookSubmissionError.InvalidTextLayout);
+
         if (!PartyGuestbookTemplates.TryCurrentVersion(submission.TemplateKey, out var templateVersion))
         {
             return PartyGuestbookSubmissionResult.Fail(PartyGuestbookSubmissionError.InvalidTemplate);
@@ -239,6 +242,7 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
             PartyParticipantId = participantId,
             AuthorDisplayName = author,
             Body = text,
+            TextLayout = submission.TextLayout,
             TemplateKey = submission.TemplateKey!,
             TemplateVersion = templateVersion,
             CropCenterX = centerX,
@@ -390,7 +394,7 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
             partyId, grant.GuestbookEnabled, grant.RequireGuestbookApproval, grant.IsOwner,
             rows.Select(e => new PartyGuestbookManagedEntryDto(
                 e.Id, e.AuthorDisplayName, e.Body, e.Status, e.CreatedAt, e.ModeratedAt,
-                Template(e), Media(e, photoUrl(e.Id)))).ToList());
+                Template(e), Media(e, photoUrl(e.Id)), e.TextLayout)).ToList());
     }
 
     public async Task<Stream?> OpenManagedPhotoAsync(
@@ -545,7 +549,7 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
     // ── Projections ─────────────────────────────────────────────────────────
 
     private static PartyGuestbookEntryDto ToPublicDto(PartyGuestbookEntry e, string photoUrl) =>
-        new(e.Id, e.AuthorDisplayName, e.Body, e.CreatedAt, Template(e), Media(e, photoUrl));
+        new(e.Id, e.AuthorDisplayName, e.Body, e.CreatedAt, Template(e), Media(e, photoUrl), e.TextLayout);
 
     private static PartyGuestbookTemplateDto Template(PartyGuestbookEntry e) =>
         new(e.TemplateKey, e.TemplateVersion);

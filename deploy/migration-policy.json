@@ -286,6 +286,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Additive: creates only lithophane_queue_items, owner references to photographs waiting for a lithophane (source file ON DELETE CASCADE). No existing schema, row or file bytes change and no bytes are copied. The previous application neither reads nor writes the new table. Down drops only the waiting references."
+    },
+    "20261123222537_AddGuestbookTextLayout": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds only a nullable text column TextLayout to party_guestbook_entries, without backfill, constraints or new foreign keys. Old rows remain null and retain their existing composition. Previous application versions omit the column on insert and ignore it on read; rollback keeps the schema compatible, though older clients display new overlays with their historical below-photo layout."
     }
   }
 }
