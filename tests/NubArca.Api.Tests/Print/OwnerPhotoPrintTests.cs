@@ -11,6 +11,7 @@ using NubArca.Api.Print;
 using NubArca.Api.Tests.Endpoints;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Metadata.Profiles.Exif;
 using SixLabors.ImageSharp.PixelFormats;
 
 namespace NubArca.Api.Tests.Print;
@@ -90,11 +91,36 @@ public sealed class OwnerPhotoPrintTests : IDisposable
         // Each photograph its own bytes: identical bytes are ONE blob, and a
         // test setting one photo's metadata would rewrite another's.
         using var image = new Image<Rgb24>(width, height, color ?? Red);
-        image[0, 0] = new Rgb24((byte)Random.Shared.Next(256), (byte)Random.Shared.Next(256), 0);
-        image[1, 0] = new Rgb24((byte)Random.Shared.Next(256), 0, (byte)Random.Shared.Next(256));
+        // Keep the pixels uniform, including the corners tested by full bleed
+        // printing. Random corner pixels survive decoding and JPEG ringing can
+        // turn a blue edge pale enough to look like unprinted paper.
+        image.Metadata.ExifProfile = new ExifProfile();
+        image.Metadata.ExifProfile.SetValue(ExifTag.ImageUniqueID, Guid.NewGuid().ToString("N"));
         using var stream = new MemoryStream();
         image.Save(stream, new JpegEncoder());
         return stream.ToArray();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Distinct_source_fixtures_preserve_their_colour_at_every_edge(bool blue)
+    {
+        var colour = blue ? Blue : Red;
+        var first = Jpeg(64, 40, colour);
+        var second = Jpeg(64, 40, colour);
+        Assert.False(first.SequenceEqual(second));
+        foreach (var bytes in new[] { first, second })
+        {
+            using var image = Image.Load<Rgb24>(bytes);
+            foreach (var (x, y) in new[] { (0, 0), (63, 0), (0, 39), (63, 39), (32, 20) })
+            {
+                var pixel = image[x, y];
+                Assert.InRange(Math.Abs(pixel.R - colour.R), 0, 3);
+                Assert.InRange(Math.Abs(pixel.G - colour.G), 0, 3);
+                Assert.InRange(Math.Abs(pixel.B - colour.B), 0, 3);
+            }
+        }
     }
 
     /// <summary>A photograph in the owner's library with the metadata a real one carries.</summary>

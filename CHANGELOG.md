@@ -13,6 +13,8 @@ originating repository and is deliberately not reproduced here.
 - Browser TV end-to-end tests wait for Chromium’s announced DevTools endpoint
   on an OS-assigned port, with a bounded startup deadline and diagnostic output
   on early exit or timeout. Browser restart still reuses the display profile.
+- Owner print test photographs use a unique EXIF identifier instead of random
+  corner pixels, preserving the uniform colours used to verify full bleed.
 
 ## 0.4.14 — 2026-11-19
 
