@@ -172,6 +172,25 @@ public sealed class PartyGuestbookGameRacePostgresTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    public async Task A_game_win_returns_to_intermission_before_the_next_race()
+    {
+        Skip.IfNot(_fixture.Available, "Docker is not available; integration test skipped.");
+
+        // Exercise the game's cleanup deterministically: the simultaneous race
+        // may let the guest book win every time and never take this path.
+        for (var round = 0; round < 3; round++)
+        {
+            await using var host = NewContext();
+            var started = await Game(host).ExecuteAsync(
+                _ownerId, _albumId, PartyGameCommands.NextChallenge, await GameVersionAsync());
+            Assert.Null(started.Error);
+            Assert.Equal(PartyGamePhases.ChallengeReveal, started.Snapshot!.Phase);
+            await AssertOneHolderAsync(expectGuestbook: false);
+            await PlayBackToIntermissionAsync();
+        }
+    }
+
+    [SkippableFact]
     public async Task Released_together_again_and_again_there_is_always_exactly_one_winner()
     {
         Skip.IfNot(_fixture.Available, "Docker is not available; integration test skipped.");
@@ -248,12 +267,23 @@ public sealed class PartyGuestbookGameRacePostgresTests : IAsyncLifetime
     private async Task PlayBackToIntermissionAsync()
     {
         await using var db = NewContext();
+        // NextChallenge reveals the activity. It must be started before the
+        // room can vote, exactly as it is in the control room.
         foreach (var command in new[]
         {
-            PartyGameCommands.OpenVoting, PartyGameCommands.CloseVoting,
+            PartyGameCommands.StartChallenge, PartyGameCommands.OpenVoting, PartyGameCommands.CloseVoting,
             PartyGameCommands.RevealResult, PartyGameCommands.ReturnToParty,
         })
-            Assert.Null((await Game(db).ExecuteAsync(_ownerId, _albumId, command, await GameVersionAsync(db))).Error);
+        {
+            var result = await Game(db).ExecuteAsync(_ownerId, _albumId, command, await GameVersionAsync(db));
+            Assert.True(result.Error is null,
+                $"reset command {command}: error={result.Error}, phase={result.Snapshot?.Phase}");
+        }
+
+        var snapshot = await Game(db).GetOwnerSnapshotAsync(_ownerId, _albumId);
+        Assert.Equal(PartyGamePhases.Intermission, snapshot!.Phase);
+        Assert.Null(snapshot.CurrentChallenge);
+        Assert.Equal(TvPartyPresentations.Slideshow, (await Projection(db).ProjectAsync(_linkId)).Presentation);
     }
 
     private async Task<int> GameVersionAsync(AppDbContext? db = null)

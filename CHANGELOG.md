@@ -4,6 +4,13 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.15 — 2026-11-24
+
+- Fix the PostgreSQL game/guestbook concurrency test's reset sequence: after
+  revealing the next activity, start it before opening its vote. A deterministic
+  regression repeats the game-winner path and verifies the return to the
+  slideshow; the CI gate requires it to run and pass.
+
 ## 0.4.14 — 2026-11-19
 
 - **Hanging lithophanes keep their spherical outline.** New hanging projects

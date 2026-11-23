@@ -35,6 +35,7 @@ REQUIRED = {
     # share the screen, and an ended party never keeps the book on it.
     "A_guest_book_that_commits_first_turns_the_next_challenge_away",
     "A_challenge_that_commits_first_turns_the_guest_book_away",
+    "A_game_win_returns_to_intermission_before_the_next_race",
     "Released_together_again_and_again_there_is_always_exactly_one_winner",
     "A_show_on_tv_that_wins_the_row_is_cleared_by_the_end_of_the_party",
     "A_show_on_tv_that_arrives_after_the_end_is_claimed_is_refused_as_not_live",
