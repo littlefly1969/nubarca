@@ -15,6 +15,9 @@ originating repository and is deliberately not reproduced here.
   on early exit or timeout. Browser restart still reuses the display profile.
 - Owner print test photographs use a unique EXIF identifier instead of random
   corner pixels, preserving the uniform colours used to verify full bleed.
+- Direct AI preload checks its monotonic deadline after each native stage and
+  before readiness, so a delayed cancellation timer cannot accept an overdue
+  preload or start another model after the budget is spent.
 
 ## 0.4.14 — 2026-11-19
 

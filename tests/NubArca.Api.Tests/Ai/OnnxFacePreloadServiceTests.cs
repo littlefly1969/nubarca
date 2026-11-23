@@ -66,7 +66,7 @@ public sealed class OnnxFacePreloadServiceTests
     {
         public int InitCount, DetectorAcquireCount, RecognizerAcquireCount;
         public Exception? DetectorThrows, RecognizerThrows;
-        public int AcquireSleepMs;
+        public int AcquireSleepMs, NativeInitSleepMs;
         public readonly FakeSession Detector = new() { Outputs = ValidDetectorOutputs() };
         public readonly FakeSession Recognizer = new() { Outputs = ValidRecognizerOutputs() };
 
@@ -87,7 +87,11 @@ public sealed class OnnxFacePreloadServiceTests
             return new Lease(Recognizer);
         }
 
-        public void EnsureNativeProviderInitialized() => Interlocked.Increment(ref InitCount);
+        public void EnsureNativeProviderInitialized()
+        {
+            Interlocked.Increment(ref InitCount);
+            if (NativeInitSleepMs > 0) Thread.Sleep(NativeInitSleepMs);
+        }
         public OnnxNativeCoreState NativeCoreState => OnnxNativeCoreState.OpenVinoCore;
         public void Dispose() { }
 
@@ -206,6 +210,23 @@ public sealed class OnnxFacePreloadServiceTests
 
         Assert.False(state.Current.IsReady);
         Assert.Equal(FacePreloadFailureCodes.PreloadTimeout, state.Current.FailureCode);
+        Assert.Equal(0, factory.RecognizerAcquireCount); // the expired detector cannot start the next model
+    }
+
+    [Fact]
+    public async Task Native_Initialization_Over_The_Deadline_Does_Not_Compile_Models()
+    {
+        var state = new OnnxFacePreloadState();
+        var factory = new FakeFactory { NativeInitSleepMs = 100 };
+        var svc = Service(DirectOptions(TempModelDir()), factory, state);
+        svc.PreloadCeilingForTests = TimeSpan.FromMilliseconds(10);
+
+        await svc.RunPreloadAsync(CancellationToken.None);
+
+        Assert.False(state.Current.IsReady);
+        Assert.Equal(FacePreloadFailureCodes.PreloadTimeout, state.Current.FailureCode);
+        Assert.Equal(0, factory.DetectorAcquireCount);
+        Assert.Equal(0, factory.RecognizerAcquireCount);
     }
 
     [Fact]
