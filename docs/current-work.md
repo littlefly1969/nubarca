@@ -16,6 +16,9 @@ is built is described by `ARCHITECTURE.md`.
   wait up to 45 seconds for its announced endpoint. Startup errors preserve
   bounded stderr diagnostics and terminate failed processes. A real browser
   restart retains the same display profile; startup lifecycle tests run in CI.
+- Owner print fixtures remain distinct through an EXIF identifier without
+  altering their pixels. Full-bleed corner assertions therefore measure the
+  renderer rather than random marks in the source photograph.
 
 - Laboratory lithophanes (`/lab/lithophanes`): one owner photograph, optional words
   (or words alone, no photo) to a spherical STL; `lithophane.generate` uses the shared cooperative job engine. Photos
