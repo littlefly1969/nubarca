@@ -12,6 +12,10 @@ is built is described by `ARCHITECTURE.md`.
   reveal → start activity → vote → result → intermission sequence and verifies
   that the slideshow owns the screen again. CI requires this regression to
   execute and pass; a skipped or missing result fails the gate.
+- Browser TV end-to-end tests launch Chromium with an OS-assigned CDP port and
+  wait up to 45 seconds for its announced endpoint. Startup errors preserve
+  bounded stderr diagnostics and terminate failed processes. A real browser
+  restart retains the same display profile; startup lifecycle tests run in CI.
 
 - Laboratory lithophanes (`/lab/lithophanes`): one owner photograph, optional words
   (or words alone, no photo) to a spherical STL; `lithophane.generate` uses the shared cooperative job engine. Photos

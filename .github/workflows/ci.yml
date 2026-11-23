@@ -437,6 +437,10 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Test browser startup handling
+        working-directory: frontend
+        run: node --test scripts/chromium-launch.test.mjs
+
       - name: Run the browser display end to end
         run: CHROME_BIN="$(command -v google-chrome)" scripts/tv-browser-e2e.sh
 
