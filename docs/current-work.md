@@ -19,6 +19,9 @@ is built is described by `ARCHITECTURE.md`.
 - Owner print fixtures remain distinct through an EXIF identifier without
   altering their pixels. Full-bleed corner assertions therefore measure the
   renderer rather than random marks in the source photograph.
+- Direct AI startup preload checks both cancellation and a monotonic deadline
+  after native initialization and each compilation, and before declaring ready.
+  Delayed timer callbacks cannot make an overdue preload healthy.
 
 - Laboratory lithophanes (`/lab/lithophanes`): one owner photograph, optional words
   (or words alone, no photo) to a spherical STL; `lithophane.generate` uses the shared cooperative job engine. Photos
