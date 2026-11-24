@@ -258,6 +258,7 @@ public sealed class PartyPrintRequestConfiguration : IEntityTypeConfiguration<Pa
     public void Configure(EntityTypeBuilder<PartyPrintRequest> builder)
     {
         builder.ToTable("party_print_requests");
+        builder.Property(r => r.RequestFingerprint).HasMaxLength(64);
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.IdempotencyKeyHash).IsRequired().HasMaxLength(64).IsFixedLength();

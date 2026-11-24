@@ -9,6 +9,26 @@
 // Pluralization: define `<key>_one` and `<key>_other`; call tn(count, key) and
 // {count} is injected automatically.
 const it = {
+  "photoEdit.printMemory": "Stampa ricordo",
+  "photoEdit.memoryPrintHelp": "La dedica, la firma e il fumetto restano quelli pubblicati. Il ricordo viene stampato intero, senza ritagli.",
+  "photoEdit.memoryPreview": "Anteprima del ricordo da stampare",
+
+  "photoEdit.title": "Testo e fumetto",
+  "photoEdit.ownUpload": "Caricata da te",
+  "photoEdit.sharedHelp": "Le modifiche salvate si vedono nell’album e nel carosello.",
+  "photoEdit.text": "Testo (massimo 300 caratteri, senza emoji)",
+  "photoEdit.save": "Salva nell’album",
+  "photoEdit.remove": "Rimuovi testo e fumetto",
+  "photoEdit.loadError": "Impossibile caricare la modifica.",
+  "photoEdit.saveError": "Impossibile salvare. Riprova.",
+  "photoEdit.conflict": "La foto è stata modificata. Ricarica prima di salvare.",
+  "photoEdit.printVersion": "Versione da stampare",
+  "photoEdit.original": "Originale",
+  "photoEdit.decorated": "Con testo o fumetto",
+  "photoEdit.printText": "Aggiungi testo alla stampa",
+  "photoEdit.printHelp": "Queste aggiunte valgono solo per la tua stampa.",
+  "photoEdit.reload": "Ricarica",
+
   "lab.lithophanes": "Litofanie",
   "perm.laboratoryLithophanes": "Laboratorio — Litofanie",
   "permDesc.laboratoryLithophanes": "Crea sfere stampabili in 3D dalle tue foto.",

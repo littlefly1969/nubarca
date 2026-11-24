@@ -4,6 +4,17 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.17 — 2026-11-24
+
+- Party album photographs keep one membership and their immutable originals, with optional album-local text or a positioned speech bubble. Guests edit only their own uploads; the organizer edits any eligible album photograph. The guest gallery marks “Caricata da te” independently of edit privileges.
+- “Testo e fumetto” opens from the party photo viewer and the organizer’s album content actions. Saved edits refresh the web and native TV slideshow in place; optimistic versions refuse stale overwrites.
+- Party, owner and verified share printing choose the original or the decorated photograph, then optionally add personal text or another bubble to that print only. Source versions and personal composition are checked before reserving paper; idempotency distinguishes changed compositions.
+- Published guestbook memories print through the existing party printer and budgets, keeping their photograph, dedication, signature, framing and bubble together. The book’s visibility and moderation still apply; printing creates no album item and survives removal of the source album photograph.
+- Decorated party photographs are rendered once per version and kept in a bounded in-memory cache; browsers keep the current version like any other derivative and revalidate an older one.
+- A guestbook memory can be printed even when it is older than the book's most recent page.
+- A print bubble on a halved 20x15 is placed by its photographs' orientation; a text position without words no longer changes an owner print's digest.
+- Additive migration: nullable album text/layout, a defaulted album text version and a nullable party print request fingerprint. Existing photos, memories and jobs retain their previous behavior.
+
 ## 0.4.16 — 2026-11-24
 
 - Litofanie: testo centrato sulla sfera, con spostamenti orizzontali e verticali in gradi; anteprima e STL usano le stesse coordinate. I progetti precedenti conservano le posizioni originali.

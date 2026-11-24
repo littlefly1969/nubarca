@@ -40,6 +40,7 @@ function mount(path: string, { stations = [station()], extra = {} }: {
   const mock = installFetchMock({
     'GET /api/print/stations': () => jsonResponse(stations),
     'GET /api/print/shared-printers': () => jsonResponse([]),
+    [`GET /api/albums/${ALBUM}/photo-text`]: () => jsonResponse([]),
     [`GET /api/albums/${ALBUM}`]: () => jsonResponse({ id: ALBUM, name: 'Vacanze 2026' }),
     [`GET /api/albums/${ALBUM}/items`]: () => jsonResponse(items(['f1', 'f2', 'f3', 'f4', 'f5', 'v1'])
       .map((it) => (it.fileItemId === 'v1' ? { ...it, mimeType: 'video/mp4' } : it))),

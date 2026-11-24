@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using NubArca.Api.Data;
 using Microsoft.AspNetCore.Mvc;
 using NubArca.Api.Albums.Sharing;
 using NubArca.Api.Audit;
@@ -311,6 +313,7 @@ public static class AlbumShareLinkEndpoints
             HttpContext httpContext,
             [FromServices] IAlbumShareService shares,
             [FromServices] NubArca.Api.Party.IPartyMediaService media,
+            [FromServices] AppDbContext db,
             CancellationToken cancellationToken) =>
         {
             NoStore(httpContext);
@@ -321,6 +324,9 @@ public static class AlbumShareLinkEndpoints
                 access.OwnerUserId, access.AlbumId, cancellationToken);
             if (items is null) return Results.NotFound();
 
+            var textVersions = await db.AlbumItems.AsNoTracking().Where(i => i.AlbumId == access.AlbumId && i.PhotoTextVersion > 0)
+                .ToDictionaryAsync(i => i.FileItemId, i => new { i.PhotoText, i.PhotoTextVersion }, cancellationToken);
+            string V(Guid id) => textVersions.TryGetValue(id, out var v) ? $"?v={v.PhotoTextVersion}" : "";
             var enc = Uri.EscapeDataString(token);
             return Results.Ok(new AlbumShareItemsDto(
                 // An id, a picture and whether it moves. No file name, no date
@@ -331,8 +337,8 @@ public static class AlbumShareLinkEndpoints
                     var isVideo = i.Kind == NubArca.Api.Party.PartyMediaKind.Video;
                     return new AlbumShareItemDto(
                         i.FileItemId,
-                        $"/api/album-share/{enc}/media/{i.FileItemId}/thumbnail",
-                        $"/api/album-share/{enc}/media/{i.FileItemId}/preview",
+                        $"/api/album-share/{enc}/media/{i.FileItemId}/thumbnail{V(i.FileItemId)}",
+                        $"/api/album-share/{enc}/media/{i.FileItemId}/preview{V(i.FileItemId)}",
                         // TAKING A COPY AND WATCHING IT ARE DIFFERENT POWERS,
                         // so they are different URLs. A download hands over a
                         // file; with originals off a video has none to hand
@@ -347,7 +353,8 @@ public static class AlbumShareLinkEndpoints
                         // them: a visitor can watch without the owner having
                         // to hand over the camera's file.
                         isVideo ? $"/api/album-share/{enc}/media/{i.FileItemId}/video" : null,
-                        isVideo);
+                        isVideo, textVersions.GetValueOrDefault(i.FileItemId)?.PhotoText is not null,
+                        textVersions.GetValueOrDefault(i.FileItemId)?.PhotoTextVersion ?? 0);
                 }).ToList(),
                 NextCursor: null));
         }).WithName("GetAlbumShareItems").RequireRateLimiting(PublicRateLimitPolicy);
@@ -373,8 +380,8 @@ public static class AlbumShareLinkEndpoints
                 var kind = await media.GetVisibleMediaKindAsync(
                     access.OwnerUserId, access.AlbumId, fileId, cancellationToken);
                 if (kind is null) return Results.NotFound();
-                return await PartyEndpoints.ServeAuthorizedDerivativeAsync(
-                    access.OwnerUserId, fileId, kind.Value, v, httpContext,
+                return await PartyEndpoints.ServeResolvedPartyMediaAsync(
+                    access.OwnerUserId, access.AlbumId, fileId, v, httpContext, media,
                     thumbnails, stripper, cancellationToken);
             }).WithName($"GetAlbumShareMedia{v}").RequireRateLimiting(MediaRateLimitPolicy);
         }

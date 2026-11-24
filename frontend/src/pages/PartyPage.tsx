@@ -1,3 +1,4 @@
+import { AlbumPhotoTextEditor } from '../text/AlbumPhotoTextEditor';
 import {
   useCallback, useEffect, useMemo, useRef, useState,
   type ReactNode,
@@ -249,12 +250,14 @@ function CapabilityDeck({ capabilities }: { capabilities: Capability[] }) {
 function sameItemIds(a: PartyItem[], b: PartyItem[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) {
-    if (a[i].id !== b[i].id) return false;
+    if (a[i].id !== b[i].id || a[i].previewUrl !== b[i].previewUrl
+      || a[i].isOwnUpload !== b[i].isOwnUpload || a[i].canEditPhotoText !== b[i].canEditPhotoText) return false;
   }
   return true;
 }
 
 export function PartyPage() {
+  const [editingPhoto, setEditingPhoto] = useState<PartyItem | null>(null);
   const { token } = useParams<{ token: string }>();
   const { t, tn } = useI18n();
   const navigate = useNavigate();
@@ -536,8 +539,8 @@ export function PartyPage() {
             const alive = new Set(fresh.items.map((it) => it.id));
             const current = lb.items[lb.index];
             if (!alive.has(current.id)) return null;
-            const items = lb.items.filter((it) => alive.has(it.id));
-            return items.length === lb.items.length
+            const items = lb.items.filter((it) => alive.has(it.id)).map((it) => fresh.items.find((f) => f.id === it.id)!);
+            return sameItemIds(items, lb.items)
               ? lb
               : { items, index: items.findIndex((it) => it.id === current.id) };
           });
@@ -975,6 +978,7 @@ export function PartyPage() {
           testId="party-grid"
           items={visibleItems.map((item) => ({
             id: item.id, thumbnailUrl: item.thumbnailUrl, isVideo: item.mediaType === 'video',
+            badge: item.isOwnUpload ? t('photoEdit.ownUpload') : undefined,
           }))}
           onOpen={(index, tile) => openViewer(visibleItems, index, tile)}
           // Picking is for printing, so it is offered only where printing is.
@@ -1035,7 +1039,7 @@ export function PartyPage() {
           it starts. It keeps the download the server offered, which is the one
           thing a content poster never has. Only the Live/memories surface has a
           gallery, so `lightbox` is simply null on the other two. */}
-      {lightbox && (() => {
+      {lightbox && !editingPhoto && (() => {
         const item = lightbox.items[lightbox.index];
         // Clamped HERE, not only by which buttons this render showed: several
         // key presses can land before the next render, each one an update on
@@ -1056,6 +1060,8 @@ export function PartyPage() {
         return (
           <PublicMediaViewer
             item={shown}
+            actions={item.canEditPhotoText ? <button type="button" className="public-viewer-action"
+              onClick={() => setEditingPhoto(item)}>{t('photoEdit.title')}</button> : undefined}
             selection={canPick ? {
               selected: picked,
               label: t(picked ? 'party.unpick' : 'party.pick'),
@@ -1069,6 +1075,22 @@ export function PartyPage() {
           />
         );
       })()}
+
+      {editingPhoto && token && <AlbumPhotoTextEditor
+        endpoint={`/api/party/${encodeURIComponent(token)}/photos/${editingPhoto.id}/text`}
+        previewUrl={editingPhoto.previewUrl}
+        onClose={() => setEditingPhoto(null)}
+        onSaved={() => {
+          setEditingPhoto(null);
+          void getPartyItems(token).then((fresh) => {
+            setState((cur) => cur.kind === 'ready' ? { ...cur, items: fresh.items } : cur);
+            setLightbox((cur) => {
+              if (!cur) return null;
+              const items = cur.items.map((i) => fresh.items.find((f) => f.id === i.id) ?? i);
+              return { ...cur, items };
+            });
+          });
+        }} />}
 
       {/* A content POSTER, in the same viewer and with no download at all: a
           Party reference authorizes looking at a derived, metadata-stripped

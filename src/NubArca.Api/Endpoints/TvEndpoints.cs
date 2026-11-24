@@ -1827,6 +1827,18 @@ public static class TvEndpoints
                 return Results.NotFound();
             }
 
+            if (Guid.TryParse(httpContext.Request.Query["album"], out var albumId))
+            {
+                // The rendition's ALBUM is authority too: a file shown in one
+                // album must not expose a decoration from a private one.
+                var db = httpContext.RequestServices.GetRequiredService<NubArca.Api.Data.AppDbContext>();
+                if (!await db.Albums.AnyAsync(a => a.Id == albumId && a.OwnerUserId == ownerUserId.Value
+                    && (a.ShowOnTv || a.Id == viewer!.AssignedPartyAlbumId), cancellationToken)) return Results.NotFound();
+                var partyMedia = httpContext.RequestServices.GetRequiredService<NubArca.Api.Party.IPartyMediaService>();
+                var stripper = httpContext.RequestServices.GetRequiredService<NubArca.Api.Metadata.IImageMetadataStripper>();
+                return await PartyEndpoints.ServeResolvedPartyMediaAsync(ownerUserId.Value, albumId, fileId,
+                    "thumbnail", httpContext, partyMedia, thumbnails, stripper, cancellationToken);
+            }
             var content = await thumbnails.EnsureAsync(
                 fileId, ownerUserId.Value, ThumbnailSizes.Small, cancellationToken);
             if (content is null)
@@ -1858,6 +1870,18 @@ public static class TvEndpoints
                 return Results.NotFound();
             }
 
+            if (Guid.TryParse(httpContext.Request.Query["album"], out var albumId))
+            {
+                // The rendition's ALBUM is authority too: a file shown in one
+                // album must not expose a decoration from a private one.
+                var db = httpContext.RequestServices.GetRequiredService<NubArca.Api.Data.AppDbContext>();
+                if (!await db.Albums.AnyAsync(a => a.Id == albumId && a.OwnerUserId == ownerUserId.Value
+                    && (a.ShowOnTv || a.Id == viewer!.AssignedPartyAlbumId), cancellationToken)) return Results.NotFound();
+                var partyMedia = httpContext.RequestServices.GetRequiredService<NubArca.Api.Party.IPartyMediaService>();
+                var stripper = httpContext.RequestServices.GetRequiredService<NubArca.Api.Metadata.IImageMetadataStripper>();
+                return await PartyEndpoints.ServeResolvedPartyMediaAsync(ownerUserId.Value, albumId, fileId,
+                    "preview", httpContext, partyMedia, thumbnails, stripper, cancellationToken);
+            }
             var content = await thumbnails.EnsureAsync(
                 fileId, ownerUserId.Value, ThumbnailSizes.Medium, cancellationToken);
             if (content is null)

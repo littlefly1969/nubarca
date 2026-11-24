@@ -7,6 +7,11 @@ is built is described by `ARCHITECTURE.md`.
 
 ## Baseline
 
+- Party photo text belongs to one `AlbumItem`, never a second `FileItem` or a changed original blob. Uploader identity is the existing party browser participant; absent historical provenance grants no guest edit right. The organizer edits eligible own album photos, including moderated uploads, without publishing them. The public gallery labels only the viewer’s own uploads and exposes editor eligibility separately.
+- Shared decorations are rasterized before print framing; personal print text is drawn afterwards on the chosen slot. Party/owner/share studios choose original or decorated bytes, and quote decoration versions. Stale shared versions cost no paper; retry keys bind the whole personal composition. Web and native TV refresh changed rendition URLs while preserving photo identity and position.
+- Guestbook printing uses the book’s own visibility, moderation, blob, template, crop, dedication, signature and text layout. Its print preview is server-rendered from the fixed memory; the complete card is contained on the sheet, with no personal text editor or crop. It uses ordinary party photo budgets and jobs, references the memory in the render specification and adds no album or slideshow item.
+
+
 - The PostgreSQL game/guestbook concurrency gate also exercises a deterministic
   game winner across repeated rounds. Between races the test follows the full
   reveal → start activity → vote → result → intermission sequence and verifies
@@ -50,7 +55,7 @@ is built is described by `ARCHITECTURE.md`.
   independently of the photo footprint, with ±60° vertical and ±180° horizontal
   controls. Absent coordinates retain saved photo-relative text positions.
 
-- Release: `0.4.16` (server and web)
+- Release: `0.4.17` (server and web)
 - NubArca TV: `1.0.11`, `versionCode` 13, OTA runtime `nubarca-tv-native-12`
 - Backend: ASP.NET Core / .NET 10, EF Core, PostgreSQL 17
 - Frontend: React, TypeScript, Vite

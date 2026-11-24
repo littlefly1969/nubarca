@@ -124,6 +124,28 @@ describe('PartyPage (public party landing)', () => {
 
   const hub = context();
 
+  it('marks only the viewer’s uploads and offers the text editor only on authorized photos', async () => {
+    const user = userEvent.setup();
+    const own = { ...items.items[0], isOwnUpload: true, canEditPhotoText: true };
+    const other = { ...items.items[0], id: 'f2', isOwnUpload: false, canEditPhotoText: false };
+    installFetchMock({
+      'GET /api/party/tok-1': () => jsonResponse(hub),
+      'GET /api/party/tok-1/items': () => jsonResponse({ ...items, items: [own, other] }),
+      'GET /api/party/tok-1/photos/f1/text': () => jsonResponse({ text: null, layout: null, version: 0 }),
+    });
+    render(wrapper());
+    expect(await screen.findAllByText('Caricata da te')).toHaveLength(1);
+    const tiles = screen.getByTestId('party-grid').querySelectorAll<HTMLButtonElement>('button.public-gallery-tile');
+    await user.click(tiles[1]);
+    expect(screen.queryByRole('button', { name: 'Testo e fumetto' })).toBeNull();
+    await user.click(screen.getByTestId('public-viewer-close'));
+    await user.click(tiles[0]);
+    await user.click(screen.getByRole('button', { name: 'Testo e fumetto' }));
+    expect(await screen.findByRole('textbox')).toBeInTheDocument();
+    expect(screen.queryByTestId('public-viewer')).toBeNull();
+  });
+
+
   it('is the canonical Guest Hub and keeps both legacy capabilities reachable', async () => {
     installFetchMock({
       'GET /api/party/tok-1': () => jsonResponse(hub),

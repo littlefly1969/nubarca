@@ -1,3 +1,4 @@
+import { usePhotoVersions } from './usePhotoVersions';
 import { DEFAULT_PHOTO_TEXT, type PhotoTextLayout } from '@nubarca/contracts';
 import { PhotoTextControls } from '../text/PhotoTextControls';
 import { PhotoTextOverlay } from '../text/PhotoTextOverlay';
@@ -7,6 +8,7 @@ import {
   ApiError,
   PERMISSIONS,
   getAlbum,
+  getAlbumPhotoTexts,
   getAlbumPrintLogo,
   getAlbumShare,
   albumSharePrintLogoUrl,
@@ -98,6 +100,7 @@ const ERROR_KEYS: Record<string, MessageKey> = {
   not_found: 'ownerPrint.error.photo',
   not_image: 'ownerPrint.error.photo',
   invalid_source: 'ownerPrint.error.photo',
+  photo_changed: 'photoEdit.conflict',
   invalid_caption: 'ownerPrint.error.caption',
   render_failed: 'ownerPrint.error.render',
   no_subject: 'ownerPrint.popOut.noSubject',
@@ -208,7 +211,13 @@ export function OwnerPrintPage() {
       loadPhotos: async (signal) => {
         // From the library: the photographs that were selected, and only those.
         if (!albumId) return { title: null, photos: preselected.map(photo) };
-        const [album, items] = await Promise.all([getAlbum(albumId, signal), listAlbumItems(albumId, signal)]);
+        const [album, items, texts] = await Promise.all([getAlbum(albumId, signal), listAlbumItems(albumId, signal), getAlbumPhotoTexts(albumId, signal)]);
+        const albumPhoto = (id: string): StudioPhoto => {
+          const text = texts.find((entry) => entry.fileItemId === id);
+          return text ? { id, hasPhotoText: !!text.text, photoTextVersion: text.version,
+            thumbnailUrl: `/api/albums/${albumId}/photos/${id}/thumbnail?v=${text.version}`,
+            previewUrl: `/api/albums/${albumId}/photos/${id}/preview?v=${text.version}` } : photo(id);
+        };
         const images = new Set(items.filter((item) => item.mimeType.toLowerCase().startsWith('image/'))
           .map((item) => item.fileItemId));
         return {
@@ -217,8 +226,8 @@ export function OwnerPrintPage() {
           // in the order selected. With none selected (the album's own
           // "Stampa"), every photograph of the album, as a party offers all of its own.
           photos: preselected.length > 0
-            ? preselected.filter((id) => images.has(id)).map(photo)
-            : items.filter((item) => images.has(item.fileItemId)).map((item) => photo(item.fileItemId)),
+            ? preselected.filter((id) => images.has(id)).map(albumPhoto)
+            : items.filter((item) => images.has(item.fileItemId)).map((item) => albumPhoto(item.fileItemId)),
         };
       },
       resolveDate: (fileItemId, timeZone, signal) => getOwnerPhotoPrintDate(fileItemId, timeZone, signal),
@@ -228,6 +237,7 @@ export function OwnerPrintPage() {
         : null),
       submit: (target, { customLogo, ...request }, key) => submitOwnerPhotoPrint({
         ...request, printStationId: target.stationId, printerDeviceId: target.deviceId,
+        ...(albumId ? { photoAlbumId: albumId } : {}),
         ...(customLogo && albumId ? { logoAlbumId: albumId } : {}),
       }, key),
     };
@@ -292,7 +302,7 @@ export function SharePrintPage() {
       return {
         title: album.albumName,
         photos: items.items.filter((item) => !item.isVideo)
-          .map((item) => ({ id: item.id, thumbnailUrl: item.thumbnailUrl, previewUrl: item.previewUrl })),
+          .map((item) => ({ id: item.id, thumbnailUrl: item.thumbnailUrl, previewUrl: item.previewUrl, hasPhotoText: item.hasPhotoText, photoTextVersion: item.photoTextVersion })),
       };
     },
     resolveDate: (fileItemId, timeZone, signal) => getAlbumSharePrintDate(token, fileItemId, timeZone, signal),
@@ -357,7 +367,8 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
     return () => controller.abort();
   }, [from]);
   const photos = source.kind === 'ready' ? source.photos : [];
-  const photoById = useMemo(() => new Map(photos.map((p) => [p.id, p] as const)), [photos]);
+  const versions = usePhotoVersions(photos);
+  const photoById = useMemo(() => new Map(versions.photos.map((p) => [p.id, p] as const)), [versions.photos]);
 
   // --- the owner's choices ------------------------------------------------------
   const [style, setStyle] = useState<PrintStyleChoice>('fullBleed');
@@ -514,7 +525,7 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
         expectedPaperSize: target.paper,
         layout: composition.layout,
         style: styleFor(composition.layout),
-        photos: composition.slots.map((slot) => ({ fileItemId: slot.itemId, placement: slot.placement })),
+        photos: composition.slots.map((slot) => ({ fileItemId: slot.itemId, placement: slot.placement, ...versions.source(slot.itemId) })),
         ...(composition.layout === 'photo' && style === 'popOut' && subjectPoint ? { subject: subjectPoint } : {}),
         ...(composition.orientation ? { orientation: composition.orientation } : {}),
         ...((framed || textLayout.mode !== 'below') && line ? { caption: line } : {}),
@@ -529,7 +540,12 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
       resetChoices();
     } catch (err) {
       const code = refusalOf(err);
-      if (code === 'paper_changed') {
+      if (code === 'photo_changed') {
+        const refreshed = await from.loadPhotos(new AbortController().signal);
+        setSource({ kind: 'ready', ...refreshed });
+        setResetSignal((n) => n + 1);
+        setNotice('photoEdit.conflict');
+      } else if (code === 'paper_changed') {
         // Another paper is in: what can be made has changed, so begin again
         // from the formats it offers, saying why.
         setResetSignal((n) => n + 1);
@@ -639,7 +655,8 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
       <PrintStudio
         paper={paper}
         formats={formats}
-        gallery={photos}
+        gallery={versions.photos}
+        photoOptions={versions.controls}
         photoById={photoById}
         preselected={preselected}
         formatHeader={<>{note}{!from.choosesPrinter ? (
@@ -701,7 +718,7 @@ function PrintPage({ source: from, back, noPrinters, note, popOut = false, popOu
         } : undefined}
         photoWords={textLayout.mode !== 'below' && caption.trim() ? () =>
           <PhotoTextOverlay text={caption.replace(/\s+/g, ' ').trim()} layout={textLayout} font={textFont(captionFont)} onChange={setTextLayout} /> : undefined}
-        compositionKey={JSON.stringify([target?.key, style, caption, captionFont, textLayout, logo, includeDate, lang, subjectPoint])}
+        compositionKey={JSON.stringify([versions.key, target?.key, style, caption, captionFont, textLayout, logo, includeDate, lang, subjectPoint])}
         submitError={error ? t(error) : null}
         submitting={submitting}
         canSubmit={target !== null && target.unavailable === null && !captionInvalid

@@ -38,7 +38,10 @@ const WORDMARK_DARK = '/brand/nubarca-wordmark-on-dark-480w.png';
 // renderer draws.
 const WORDMARK_LIGHT = '/brand/nubarca-wordmark-on-light-480w.png';
 
-export interface StudioPhoto { id: string; thumbnailUrl: string; previewUrl: string }
+export interface StudioPhoto {
+  id: string; thumbnailUrl: string; previewUrl: string;
+  hasPhotoText?: boolean; photoTextVersion?: number;
+}
 
 /** One way to print, as offered: a format of the catalogue and how many photographs it takes. */
 export interface StudioFormat {
@@ -623,6 +626,7 @@ export interface PrintStudioProps {
   sheetData?: Record<string, string>;
   /** The preview step's own choices (looks, words…) for the format being composed. */
   options: (layout: PrintLayout) => ReactNode;
+  photoOptions?: (id: string) => ReactNode;
   /** Every choice of the page's that changes the sheet: a new one earns a new key. */
   compositionKey: string;
   /** Said on the format step: why the person is back there. */
@@ -1155,6 +1159,7 @@ export function PrintStudio(props: PrintStudioProps) {
               </p>
             )}
             {orientationControls}
+            {props.photoOptions?.(id)}
             {photo && (
               /* Sized to the screen as well as the column: see the CSS. */
               <div

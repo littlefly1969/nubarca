@@ -263,6 +263,7 @@ export function AlbumDetailPage() {
 
       {contentOpen && (
         <AlbumSharedContentPanel
+          allowPhotoText={canParty}
           albumId={albumId}
           onClose={() => setContentOpen(false)}
           returnFocusRef={overflowButtonRef}

@@ -152,6 +152,10 @@ public sealed class TvMediaService : ITvMediaService
             })
             .ToListAsync(cancellationToken);
 
+        var textVersions = await _db.AlbumItems.AsNoTracking().Where(i => i.AlbumId == albumId && i.PhotoTextVersion > 0)
+            .ToDictionaryAsync(i => i.FileItemId, i => i.PhotoTextVersion, cancellationToken);
+        string Decorated(string url, Guid id) => textVersions.TryGetValue(id, out var v) ? $"{url}?album={albumId}&v={v}" : url;
+
         var items = rows
             .Select(x =>
             {
@@ -177,8 +181,8 @@ public sealed class TvMediaService : ITvMediaService
                     isVideo ? "video" : "image",
                     width,
                     height,
-                    ThumbnailUrl(x.Id),
-                    PreviewUrl(x.Id),
+                    Decorated(ThumbnailUrl(x.Id), x.Id),
+                    Decorated(PreviewUrl(x.Id), x.Id),
                     isVideo ? PosterUrl(x.Id) : null,
                     isVideo ? VideoUrl(x.Id) : null,
                     isVideo ? PreviewStripUrl(x.Id) : null);

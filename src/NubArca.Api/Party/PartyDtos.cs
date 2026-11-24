@@ -292,7 +292,9 @@ public sealed record PartyItemDto(
     string ThumbnailUrl,
     string PreviewUrl, // a video's poster
     string? DownloadUrl, // null for videos: a party hands out no originals
-    string? PlaybackUrl = null); // a video's HLS ladder; null for images and without HLS
+    string? PlaybackUrl = null, // a video's HLS ladder; null for images and without HLS
+    bool IsOwnUpload = false, // this browser's guest (or this signed-in user) uploaded it
+    bool CanEditPhotoText = false); // may write the album's text/bubble on this photograph
 
 public sealed record PartyItemsDto(string AlbumName, IReadOnlyList<PartyItemDto> Items);
 
@@ -585,7 +587,7 @@ public sealed record PartyGuestbookPageDto(
     int? Remaining = null,
     // "all" — the whole book — or "mine": during the live evening, until the
     // regia opens the book to the room, a guest reads only what they wrote.
-    string Scope = PartyGuestbookScopes.All);
+    string Scope = PartyGuestbookScopes.All, string? PrintUrl = null);
 
 public static class PartyGuestbookScopes
 {

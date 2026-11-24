@@ -29,7 +29,7 @@ namespace NubArca.Api.Tests.Party;
 //   * only what a manager let in is public, recomputed from the CURRENT state;
 //   * the book belongs to the PARTY, not to the album, so it survives a
 //     re-minted link.
-public sealed class PartyGuestbookTests : IDisposable
+public sealed partial class PartyGuestbookTests : IDisposable
 {
     private const string OwnerEmail = "host@example.com";
     private const string StrangerEmail = "stranger@example.com";

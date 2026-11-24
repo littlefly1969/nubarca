@@ -342,6 +342,12 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
         return readable ? await _photos.OpenAsync(entryId, cancellationToken) : null;
     }
 
+    public async Task<bool> IsReadableAsync(
+        PartyAccess access, Guid entryId, Guid? participantId = null,
+        CancellationToken cancellationToken = default) =>
+        Readable(access) && await ReadableBy(access, participantId)
+            .AnyAsync(e => e.Id == entryId, cancellationToken);
+
     // ── The television's book ───────────────────────────────────────────────
 
     public async Task<IReadOnlyList<PartyGuestbookEntryDto>> ListForTelevisionAsync(

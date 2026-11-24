@@ -1,10 +1,31 @@
-import type { MessageKey } from './it';
+import type {
+ MessageKey } from './it';
 
 // English dictionary. Typed as Partial<Record<MessageKey, string>> against the
 // canonical Italian keys: English can never introduce a key Italian lacks, and
 // any key omitted here falls back to the Italian text at render time (so a raw
 // key is never shown). Translations are natural English, not word-for-word.
 const en: Partial<Record<MessageKey, string>> = {
+  "photoEdit.printMemory": "Print memory",
+  "photoEdit.memoryPrintHelp": "The published dedication, signature and bubble stay together. The complete memory is printed without cropping.",
+  "photoEdit.memoryPreview": "Preview of the memory to print",
+
+  "photoEdit.title": "Text and speech bubble",
+  "photoEdit.ownUpload": "Uploaded by you",
+  "photoEdit.sharedHelp": "Saved changes appear in the album and slideshow.",
+  "photoEdit.text": "Text (up to 300 characters, no emoji)",
+  "photoEdit.save": "Save to album",
+  "photoEdit.remove": "Remove text and bubble",
+  "photoEdit.loadError": "Could not load the edit.",
+  "photoEdit.saveError": "Could not save. Try again.",
+  "photoEdit.conflict": "The photo changed. Reload before saving.",
+  "photoEdit.printVersion": "Version to print",
+  "photoEdit.original": "Original",
+  "photoEdit.decorated": "With text or bubble",
+  "photoEdit.printText": "Add text to this print",
+  "photoEdit.printHelp": "These additions apply only to your print.",
+  "photoEdit.reload": "Reload",
+
   "lab.lithophanes": "Lithophanes",
   "perm.laboratoryLithophanes": "Laboratory — Lithophanes",
   "permDesc.laboratoryLithophanes": "Create 3D-printable spheres from your photos.",

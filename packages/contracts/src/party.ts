@@ -392,6 +392,7 @@ export interface PartyGuestbookEntry {
 }
 
 export interface PartyGuestbookPage {
+  printUrl?: string | null;
   entries: PartyGuestbookEntry[];
   /** Whether a memory may be ADDED right now. Reading and writing are
    * different questions: the book outlives the party, and nothing new goes

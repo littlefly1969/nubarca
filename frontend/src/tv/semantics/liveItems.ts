@@ -8,7 +8,8 @@ import type { TvAlbumItem } from '@nubarca/api-client';
 export function sameItemIds(a: TvAlbumItem[], b: TvAlbumItem[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) {
-    if (a[i].id !== b[i].id) return false;
+    if (a[i].id !== b[i].id || a[i].previewUrl !== b[i].previewUrl
+      || a[i].thumbnailUrl !== b[i].thumbnailUrl) return false;
   }
   return true;
 }

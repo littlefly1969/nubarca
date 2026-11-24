@@ -107,6 +107,8 @@ export interface AlbumSharePrintAccepted {
 }
 
 export interface AlbumShareItem {
+  hasPhotoText?: boolean;
+  photoTextVersion?: number;
   id: string;
   thumbnailUrl: string;
   previewUrl: string;

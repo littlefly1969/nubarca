@@ -23,6 +23,13 @@ public sealed class PartyPrintRequest
     /// <summary>SHA-256 of the client's Idempotency-Key, hex, lowercase.</summary>
     public string IdempotencyKeyHash { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The whole submission this key claimed (slots, words, versions, guest), so
+    /// a key reused for a different sheet is refused. Null on requests stored
+    /// before it existed, which are matched by product alone.
+    /// </summary>
+    public string? RequestFingerprint { get; set; }
+
     /// <summary>Which product this key claimed, so a key cannot cross products.</summary>
     public string Product { get; set; } = PartyPrintProducts.Photo;
 

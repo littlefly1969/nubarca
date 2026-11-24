@@ -3,15 +3,15 @@ import { DEFAULT_PHOTO_TEXT, type PhotoTextLayout } from '@nubarca/contracts';
 import { useI18n } from '../i18n';
 import './photoText.css';
 
-export function PhotoTextControls({ value, onChange }: {
-  value: PhotoTextLayout; onChange(value: PhotoTextLayout): void;
+export function PhotoTextControls({ value, onChange, allowBelow = true }: {
+  value: PhotoTextLayout; onChange(value: PhotoTextLayout): void; allowBelow?: boolean;
 }) {
   const { t } = useI18n();
   return <fieldset className="photo-text-controls" data-testid="photo-text-controls">
     <legend>{t('photoText.layout')}</legend>
     <label>{t('photoText.mode')}
       <select value={value.mode} onChange={(e) => onChange({ ...value, mode: e.target.value as PhotoTextLayout['mode'] })}>
-        {(['below', 'overlay', 'bubble'] as const).map((mode) =>
+        {(['below', 'overlay', 'bubble'] as const).filter((mode) => allowBelow || mode !== 'below').map((mode) =>
           <option key={mode} value={mode}>{t(`photoText.${mode}`)}</option>)}
       </select>
     </label>

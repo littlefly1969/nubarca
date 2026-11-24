@@ -27,7 +27,7 @@ public sealed record PartyPrintSubmitRequest(
     /// unreadable is the NubArca mark, as every sheet before the choice; a
     /// choice this party does not offer is refused, never quietly swapped.
     /// </summary>
-    string? Logo = null);
+    string? Logo = null, string? Caption = null, PhotoTextLayout? TextLayout = null, Guid? GuestbookEntryId = null);
 
 /// <summary>
 /// One photograph of the sheet and how it is framed. A current studio sends
@@ -40,7 +40,9 @@ public sealed record PartyPrintSubmitRequest(
 public sealed record PartyPrintSlotRequest(
     Guid ItemId,
     double? CropX = null, double? CropY = null, double? CropWidth = null, double? CropHeight = null,
-    PartyPrintPlacementRequest? Placement = null)
+    PartyPrintPlacementRequest? Placement = null,
+    // A quoted version opts into the shared composition; legacy clients keep the original.
+    bool UseOriginal = false, long? PhotoTextVersion = null)
 {
     public bool HasCrop => CropX is not null || CropY is not null || CropWidth is not null || CropHeight is not null;
 }
@@ -73,6 +75,7 @@ public enum PartyPrintRefusal
     /// nothing; the studio reloads and offers what the new paper can make.
     /// </summary>
     PaperChanged,
+    PhotoChanged,
     /// <summary>
     /// The printer is lent to the host and the loan's sheets are spent. Costs
     /// nothing; the owner raises the ceiling if they want more.

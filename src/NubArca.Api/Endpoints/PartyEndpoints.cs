@@ -481,6 +481,8 @@ public static class PartyEndpoints
             [FromServices] NubArca.Api.Party.IPartyLinkService party,
             [FromServices] NubArca.Api.Party.IPartyMediaService partyMedia,
             [FromServices] VideoHlsServingService hlsServing,
+            [FromServices] AppDbContext db,
+            [FromServices] NubArca.Api.Party.IPartyParticipantService participants,
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
@@ -500,6 +502,18 @@ public static class PartyEndpoints
                 return Results.NotFound();
             }
 
+            var guest = await PartyGuestSession.ResolveAsync(httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
+            var user = httpContext.GetCurrentUserId();
+            var owner = user == access.OwnerUserId;
+            var mine = await db.AlbumItems.AsNoTracking().Where(i => i.AlbumId == access.MainAlbumId
+                && (db.PartyUploadItems.Any(u => u.AlbumId == i.AlbumId && u.FileItemId == i.FileItemId
+                        && guest != null && u.PartyParticipantId == guest)
+                    || (user != null && i.AddedByUserId == user
+                        && !db.PartyUploadItems.Any(u => u.FileItemId == i.FileItemId))))
+                .Select(i => i.FileItemId).ToListAsync(cancellationToken);
+            var versions = await db.AlbumItems.AsNoTracking().Where(i => i.AlbumId == access.MainAlbumId && i.PhotoTextVersion > 0)
+                .ToDictionaryAsync(i => i.FileItemId, i => i.PhotoTextVersion, cancellationToken);
+            string V(Guid id) => versions.TryGetValue(id, out var v) ? $"?v={v}" : "";
             var enc = Uri.EscapeDataString(token);
             var dtos = items.Select(i =>
             {
@@ -507,15 +521,16 @@ public static class PartyEndpoints
                 return new NubArca.Api.Party.PartyItemDto(
                     i.FileItemId,
                     isVideo ? "video" : "image",
-                    $"/api/party/{enc}/media/{i.FileItemId}/thumbnail",
-                    $"/api/party/{enc}/media/{i.FileItemId}/preview",
+                    $"/api/party/{enc}/media/{i.FileItemId}/thumbnail{V(i.FileItemId)}",
+                    $"/api/party/{enc}/media/{i.FileItemId}/preview{V(i.FileItemId)}",
                     // Images get a metadata-stripped medium download. A video
                     // has none: a party hands out no originals, and a camera's
                     // video is nothing but its original.
-                    isVideo ? null : $"/api/party/{enc}/media/{i.FileItemId}/download",
+                    isVideo ? null : $"/api/party/{enc}/media/{i.FileItemId}/download{V(i.FileItemId)}",
                     // A video is WATCHED, through the same adaptive ladder the
                     // owner's player uses (PublicAlbumVideo) — never the file.
-                    isVideo && hlsServing.Enabled ? $"/api/party/{enc}/media/{i.FileItemId}/video" : null);
+                    isVideo && hlsServing.Enabled ? $"/api/party/{enc}/media/{i.FileItemId}/video" : null,
+                    mine.Contains(i.FileItemId), !isVideo && (owner || (access.Capabilities.Contributions && mine.Contains(i.FileItemId))));
             }).ToList();
 
             return Results.Ok(new NubArca.Api.Party.PartyItemsDto(header.Name, dtos));
@@ -1553,8 +1568,45 @@ public static class PartyEndpoints
             return Results.NotFound();
         }
 
+        return await ServeAlbumDerivativeAsync(ownerUserId, albumId, fileId, kind.Value, variant,
+            httpContext, thumbnails, stripper, cancellationToken);
+    }
+
+    internal static async Task<IResult> ServeAlbumDerivativeAsync(Guid ownerUserId, Guid albumId, Guid fileId,
+        NubArca.Api.Party.PartyMediaKind kind, string variant, HttpContext httpContext,
+        IFileThumbnailService thumbnails, NubArca.Api.Metadata.IImageMetadataStripper stripper, CancellationToken cancellationToken)
+    {
+        // The album decoration belongs to this membership only. "original"
+        // selects the undecorated DERIVATIVE, never the full-resolution blob.
+        if (kind == NubArca.Api.Party.PartyMediaKind.Image && httpContext.Request.Query["original"] != "true")
+        {
+            var db = httpContext.RequestServices.GetRequiredService<AppDbContext>();
+            var text = await NubArca.Api.Party.AlbumPhotoText.ReadAsync(db, albumId, fileId, cancellationToken);
+            if (text?.Text is not null)
+            {
+                var size = variant == "thumbnail" ? ThumbnailSizes.Small : ThumbnailSizes.Medium;
+                var bytes = await NubArca.Api.Party.AlbumPhotoText.CachedRenditionAsync(albumId, fileId, size, text.Version, async () =>
+                {
+                    var content = await thumbnails.EnsureAsync(fileId, ownerUserId, size, cancellationToken);
+                    if (content is null) return null;
+                    await using var input = content.Content;
+                    await using var buffer = new MemoryStream();
+                    await input.CopyToAsync(buffer, cancellationToken);
+                    return await NubArca.Api.Party.AlbumPhotoText.RenderAsync(buffer.ToArray(), text, cancellationToken);
+                });
+                if (bytes is null) return Results.NotFound();
+                // The listing URLs carry ?v=<version>: a request for the CURRENT
+                // version may be kept like any derivative; an older or missing
+                // one is revalidated, so an edit is never hidden behind a cache.
+                if (httpContext.Request.Query["v"] == text.Version.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                    SetPrivateDerivativeCache(httpContext);
+                else
+                    httpContext.Response.Headers.CacheControl = "private, no-cache";
+                return Results.File(bytes, "image/jpeg", variant == "download" ? $"photo-{fileId.ToString("N")[..8]}.jpg" : null);
+            }
+        }
         return await ServeAuthorizedDerivativeAsync(
-            ownerUserId, fileId, kind.Value, variant, httpContext,
+            ownerUserId, fileId, kind, variant, httpContext,
             thumbnails, stripper, cancellationToken);
     }
 
