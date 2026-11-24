@@ -22,9 +22,9 @@ public sealed class GuestbookPrintSource(AppDbContext db, IPartyLinkService link
         var token = links.DeriveViewToken(access.PartyAlbumLinkId);
         var view = await links.ResolvePublicAsync(token, ct);
         if (view is null || view.OwnerUserId != access.OwnerUserId || view.MainAlbumId != access.PartyAlbumId) return null;
-        // Reuse the book's visibility and moderation rules, including "only mine".
-        var page = await book.GetPublicPageAsync(view, token, guest, ct);
-        if (page is null || !page.Entries.Any(e => e.Id == entryId)) return null;
+        // Reuse the book's visibility and moderation rules, including "only mine",
+        // for every memory of the book, not only the page's most recent ones.
+        if (!await book.IsReadableAsync(view, entryId, guest, ct)) return null;
         return await db.PartyGuestbookEntries.AsNoTracking().SingleOrDefaultAsync(e => e.Id == entryId && e.PartyId == view.PartyId, ct);
     }
 

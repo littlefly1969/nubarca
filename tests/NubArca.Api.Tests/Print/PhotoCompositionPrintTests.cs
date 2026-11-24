@@ -49,6 +49,26 @@ public sealed partial class OwnerPhotoPrintTests
         Assert.Equal(1, saved.PhotoTextVersion);
         Assert.Equal("Primo", saved.PhotoText);
     }
+
+    [Fact]
+    public async Task A_text_position_without_words_changes_neither_the_print_nor_its_digest()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var photo = await PhotoAsync(people.Owner, 600, 400);
+        object Print(object? textLayout) => new {
+            printStationId = printer.StationId, printerDeviceId = printer.DeviceId, expectedPaperSize = "10x15",
+            orientation = "landscape", style = "fullBleed",
+            photos = new[] { new { fileItemId = photo, placement = new { centerX = .5, centerY = .5, zoom = 1 } } },
+            textLayout,
+        };
+        var plain = await Submit(people.Owner, Print(null), "same-sheet");
+        Assert.Equal(HttpStatusCode.Accepted, plain.StatusCode);
+        var placed = await Submit(people.Owner, Print(new PhotoTextLayout("bubble", X: 1, Y: 1)), "same-sheet");
+        Assert.Equal(HttpStatusCode.Accepted, placed.StatusCode);
+        Assert.Equal((await plain.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("jobId").GetGuid(),
+            (await placed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("jobId").GetGuid());
+    }
 }
 
 public sealed partial class PartyPrintSubmissionTests

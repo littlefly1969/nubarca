@@ -82,6 +82,31 @@ public sealed class PartyPrintComposerTests
     }
 
     [Fact]
+    public async Task A_Bubble_On_A_Halved_Sheet_Lands_In_Each_Photographs_Own_Slot()
+    {
+        // The halved 20x15 lies when its photographs stand: the bubble must be
+        // placed by the photographs' way up, not by the sheet's.
+        var composer = new PartyPrintComposer();
+        var layout = new PhotoTextLayout("bubble", X: 0, Y: 0, Width: .4, Height: .4);
+        var sheet = await composer.RenderAsync(new PartyPrintComposition(
+            PrintLayouts.Photo2, PartyPrintTheme.Pure,
+            [PartyPrintPhoto.Placed(Fixture(0, 1000, 1400), new PhotoPlacement(.5, .5, 1)),
+             PartyPrintPhoto.Placed(Fixture(1, 1000, 1400), new PhotoPlacement(.5, .5, 1))],
+            "Festa", null, Orientation: PartyPrintOrientation.Portrait, Paper: PrintPapers.Photo20x15,
+            PhotoText: "Ciao", TextLayout: layout), default);
+        using var image = Image.Load<Rgb24>(sheet);
+        Assert.True(image.Width > image.Height);
+        var arranged = PrintLayouts.Arrange(PrintLayouts.Photo2, PrintLayouts.Framed, PrintPapers.Photo20x15, portrait: true);
+        Assert.Equal(2, arranged.Slots.Count);
+        foreach (var (x, y, w, h) in arranged.Slots)
+        {
+            // Just inside the bubble's top-left corner, away from its centred words.
+            var pixel = image[(int)((x + w * .4 * .06) * image.Width), (int)((y + h * .4 * .06) * image.Height)];
+            Assert.True(pixel.R > 230 && pixel.G > 230 && pixel.B > 230, $"no bubble at slot ({x:0.00},{y:0.00}): {pixel}");
+        }
+    }
+
+    [Fact]
     public async Task The_Guests_Number_Is_Printed_On_The_Sheet_And_Nothing_Is_Printed_Without_One()
     {
         // The number on the paper is the number their phone showed, so a stack

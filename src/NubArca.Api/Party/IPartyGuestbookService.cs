@@ -77,6 +77,14 @@ public interface IPartyGuestbookService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Whether this reader may read one memory: the page's own rule, for any
+    /// memory of the book rather than only the most recent page.
+    /// </summary>
+    Task<bool> IsReadableAsync(
+        PartyAccess access, Guid entryId, Guid? participantId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// The book as a PAIRED TELEVISION draws it: every VISIBLE memory of the
     /// party, in the book's own order, each with its picture on the television's
     /// route. Never a pending, hidden or rejected one. The caller has already

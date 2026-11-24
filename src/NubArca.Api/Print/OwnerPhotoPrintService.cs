@@ -138,10 +138,12 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
 
         if (request.TextLayout is { } requestedText && !requestedText.IsValid())
             return Refuse(OwnerPhotoPrintErrors.InvalidRequest);
-        var textLayout = request.TextLayout is { Mode: not "below" } ? request.TextLayout : null;
         // The caption is either on each photograph or in the band's existing position.
         if (!OwnerPrintText.TryNormaliseCaption(request.Caption, out var caption))
             return Refuse(OwnerPhotoPrintErrors.InvalidCaption);
+        // A position without words draws nothing, so it is not part of the print
+        // either: the same sheet keeps the same digest.
+        var textLayout = caption is not null && request.TextLayout is { Mode: not "below" } ? request.TextLayout : null;
         if (style == PrintLayouts.FullBleed && ((caption is not null && textLayout is null) || request.Brand))
             return Refuse(OwnerPhotoPrintErrors.InvalidRequest);
         // The caption's face: one of the table, and only with a caption. The

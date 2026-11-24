@@ -76,6 +76,33 @@ public sealed partial class PartyUploadTests
     }
 
     [Fact]
+    public async Task A_decorated_photo_is_kept_by_browsers_only_for_its_current_version()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var album = await CreateAlbumAsync(owner, "Versioni");
+        var status = await EnablePartyAsync(owner, album);
+        var view = ViewTokenFromStatus(status);
+        var id = await AddPngAsync(owner, album, "festa.png");
+        (await owner.PutAsJsonAsync($"/api/albums/{album}/photos/{id}/text",
+            new { text = "Primo", layout = new PhotoTextLayout("bubble"), expectedVersion = 0 })).EnsureSuccessStatusCode();
+        var guest = _factory.CreateClient();
+        var preview = (await guest.GetFromJsonAsync<JsonElement>($"/api/party/{view}/items"))
+            .GetProperty("items")[0].GetProperty("previewUrl").GetString()!;
+        Assert.EndsWith("?v=1", preview);
+        var current = await guest.GetAsync(preview);
+        current.EnsureSuccessStatusCode();
+        Assert.Equal(TimeSpan.FromDays(1), current.Headers.CacheControl!.MaxAge);
+        var again = await guest.GetByteArrayAsync(preview);
+        Assert.True((await current.Content.ReadAsByteArrayAsync()).SequenceEqual(again));
+        var stale = await guest.GetAsync(preview.Replace("?v=1", "?v=0"));
+        Assert.True(stale.Headers.CacheControl!.NoCache);
+        (await owner.PutAsJsonAsync($"/api/albums/{album}/photos/{id}/text",
+            new { text = "Secondo, diverso", layout = new PhotoTextLayout("overlay"), expectedVersion = 1 })).EnsureSuccessStatusCode();
+        var edited = await guest.GetByteArrayAsync(preview.Replace("?v=1", "?v=2"));
+        Assert.False(edited.SequenceEqual(again));
+    }
+
+    [Fact]
     public async Task Legacy_uploads_owner_photos_videos_and_foreign_albums_never_grant_guest_edit_rights()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync();

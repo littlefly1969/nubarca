@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Print;
@@ -51,6 +52,23 @@ public static class AlbumPhotoText
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { return "photo_changed"; }
         return null;
+    }
+
+    // Decorated renditions are derived and regenerable: kept in memory, keyed by
+    // the decoration's version, so a slideshow or a busy gallery does not redraw
+    // the same picture on every request. A new version is a new key; the old one
+    // ages out. Bounded by bytes, never by count.
+    private static readonly MemoryCache Renditions = new(new MemoryCacheOptions { SizeLimit = 64L * 1024 * 1024 });
+
+    public static async Task<byte[]?> CachedRenditionAsync(Guid albumId, Guid fileId, string size, long version,
+        Func<Task<byte[]?>> render)
+    {
+        var key = (albumId, fileId, size, version);
+        if (Renditions.TryGetValue(key, out byte[]? cached)) return cached;
+        var bytes = await render();
+        if (bytes is not null)
+            Renditions.Set(key, bytes, new MemoryCacheEntryOptions { Size = bytes.Length, SlidingExpiration = TimeSpan.FromHours(6) });
+        return bytes;
     }
 
     // Applied BEFORE print framing: an already published bubble is part of the

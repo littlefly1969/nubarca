@@ -1584,15 +1584,25 @@ public static class PartyEndpoints
             var text = await NubArca.Api.Party.AlbumPhotoText.ReadAsync(db, albumId, fileId, cancellationToken);
             if (text?.Text is not null)
             {
-                var content = await thumbnails.EnsureAsync(fileId, ownerUserId,
-                    variant == "thumbnail" ? ThumbnailSizes.Small : ThumbnailSizes.Medium, cancellationToken);
-                if (content is null) return Results.NotFound();
-                await using var input = content.Content;
-                await using var buffer = new MemoryStream();
-                await input.CopyToAsync(buffer, cancellationToken);
-                var bytes = await NubArca.Api.Party.AlbumPhotoText.RenderAsync(buffer.ToArray(), text, cancellationToken);
-                httpContext.Response.Headers.CacheControl = "private, no-cache";
-                return Results.File(bytes, "image/jpeg", variant == "download" ? $"photo-{fileId:N}.jpg" : null);
+                var size = variant == "thumbnail" ? ThumbnailSizes.Small : ThumbnailSizes.Medium;
+                var bytes = await NubArca.Api.Party.AlbumPhotoText.CachedRenditionAsync(albumId, fileId, size, text.Version, async () =>
+                {
+                    var content = await thumbnails.EnsureAsync(fileId, ownerUserId, size, cancellationToken);
+                    if (content is null) return null;
+                    await using var input = content.Content;
+                    await using var buffer = new MemoryStream();
+                    await input.CopyToAsync(buffer, cancellationToken);
+                    return await NubArca.Api.Party.AlbumPhotoText.RenderAsync(buffer.ToArray(), text, cancellationToken);
+                });
+                if (bytes is null) return Results.NotFound();
+                // The listing URLs carry ?v=<version>: a request for the CURRENT
+                // version may be kept like any derivative; an older or missing
+                // one is revalidated, so an edit is never hidden behind a cache.
+                if (httpContext.Request.Query["v"] == text.Version.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                    SetPrivateDerivativeCache(httpContext);
+                else
+                    httpContext.Response.Headers.CacheControl = "private, no-cache";
+                return Results.File(bytes, "image/jpeg", variant == "download" ? $"photo-{fileId.ToString("N")[..8]}.jpg" : null);
             }
         }
         return await ServeAuthorizedDerivativeAsync(

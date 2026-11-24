@@ -213,10 +213,13 @@ public sealed class PartyPrintComposer
         };
         if (composition.TextLayout is { Mode: not "below" })
         {
-            var portrait = sheet.Height >= sheet.Width;
+            // Arrange takes the PHOTOGRAPHS' way up, not the sheet's: they agree
+            // except on the halved 20x15, which lies when its photographs stand.
+            var sheetPortrait = sheet.Height >= sheet.Width;
+            var photoPortrait = composition.Product == PrintLayouts.Photo2 ? !sheetPortrait : sheetPortrait;
             var style = composition.PopOutMask is not null ? PrintLayouts.PopOut
                 : composition.Theme == PartyPrintTheme.Overlay ? PrintLayouts.FullBleed : PrintLayouts.Framed;
-            var arranged = PrintLayouts.Arrange(composition.Product, style, composition.Paper, portrait);
+            var arranged = PrintLayouts.Arrange(composition.Product, style, composition.Paper, photoPortrait);
             foreach (var slot in arranged.Slots)
                 PhotoTextRenderer.Draw(sheet, ToPixels(slot, sheet.Width, sheet.Height), composition.PhotoText,
                     composition.TextLayout, composition.PhotoTextFont, _assetRoot);

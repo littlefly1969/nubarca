@@ -292,8 +292,9 @@ public sealed record PartyItemDto(
     string ThumbnailUrl,
     string PreviewUrl, // a video's poster
     string? DownloadUrl, // null for videos: a party hands out no originals
-    string? PlaybackUrl = null,
-    bool IsOwnUpload = false, bool CanEditPhotoText = false); // a video's HLS ladder; null for images and without HLS
+    string? PlaybackUrl = null, // a video's HLS ladder; null for images and without HLS
+    bool IsOwnUpload = false, // this browser's guest (or this signed-in user) uploaded it
+    bool CanEditPhotoText = false); // may write the album's text/bubble on this photograph
 
 public sealed record PartyItemsDto(string AlbumName, IReadOnlyList<PartyItemDto> Items);
 

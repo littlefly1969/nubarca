@@ -22,21 +22,7 @@ public sealed partial class PartyGuestbookTests
         var published = await SubmitAsync(party.ViewToken, Memory(party.PhotoId, "Anna", "La dedica pubblicata",
             textLayout: new PhotoTextLayout("bubble", X: .8, Y: .2)));
         var id = published.GetProperty("id").GetGuid();
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var ownerId = await db.Albums.Where(a => a.Id == party.AlbumId).Select(a => a.OwnerUserId).SingleAsync();
-            var station = Guid.NewGuid(); var printer = Guid.NewGuid();
-            db.PrintStations.Add(new PrintStation { Id = station, OwnerUserId = ownerId, Name = "Ricordi",
-                Enabled = true, CreatedAt = DateTime.UtcNow, LastSeenAt = DateTime.UtcNow });
-            db.PrinterDevices.Add(new PrinterDevice { Id = printer, PrintStationId = station, DeviceKey = "memory-printer",
-                DisplayName = "Foto", AdapterKind = "fake", CapabilitiesJson = "{\"formats\":[\"10x15\"]}",
-                LoadedPaperSize = "10x15", LastObservedState = PrintDeviceStates.Ready, LastSeenAt = DateTime.UtcNow });
-            db.PartyPrintProfiles.Add(new PartyPrintProfile { Id = Guid.NewGuid(), PartyAlbumId = party.AlbumId,
-                OwnerUserId = ownerId, Enabled = true, PrintStationId = station, PrinterDeviceId = printer,
-                PhotoEnabled = true, PhotoMaxPrints = 4, PublicSequenceNext = 1, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
-            await db.SaveChangesAsync();
-        }
+        await EnableMemoryPrinterAsync(party.AlbumId);
         var guest = _factory.CreateClient();
         var book = await guest.GetFromJsonAsync<JsonElement>($"/api/party/{party.ViewToken}/guestbook");
         var printUrl = book.GetProperty("printUrl").GetString()!;
@@ -75,5 +61,53 @@ public sealed partial class PartyGuestbookTests
         }
         Assert.Equal(HttpStatusCode.NotFound, (await guest.GetAsync($"/api/party/{token}/print/guestbook/{id}/preview")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await Print(request)).StatusCode);
+    }
+
+    private async Task EnableMemoryPrinterAsync(Guid albumId)
+    {
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var ownerId = await db.Albums.Where(a => a.Id == albumId).Select(a => a.OwnerUserId).SingleAsync();
+            var station = Guid.NewGuid(); var printer = Guid.NewGuid();
+            db.PrintStations.Add(new PrintStation { Id = station, OwnerUserId = ownerId, Name = "Ricordi",
+                Enabled = true, CreatedAt = DateTime.UtcNow, LastSeenAt = DateTime.UtcNow });
+            db.PrinterDevices.Add(new PrinterDevice { Id = printer, PrintStationId = station, DeviceKey = "memory-printer",
+                DisplayName = "Foto", AdapterKind = "fake", CapabilitiesJson = "{\"formats\":[\"10x15\"]}",
+                LoadedPaperSize = "10x15", LastObservedState = PrintDeviceStates.Ready, LastSeenAt = DateTime.UtcNow });
+            db.PartyPrintProfiles.Add(new PartyPrintProfile { Id = Guid.NewGuid(), PartyAlbumId = albumId,
+                OwnerUserId = ownerId, Enabled = true, PrintStationId = station, PrinterDeviceId = printer,
+                PhotoEnabled = true, PhotoMaxPrints = 4, PublicSequenceNext = 1, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+        }
+    }
+
+    [Fact]
+    public async Task A_memory_older_than_the_books_page_can_still_be_printed()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var party = await OpenPartyAsync(owner, guestbook: true);
+        var oldest = (await SubmitAsync(party.ViewToken, Memory(party.PhotoId, "Anna", "La prima dedica")))
+            .GetProperty("id").GetGuid();
+        await EnableMemoryPrinterAsync(party.AlbumId);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            // A full page of newer memories pushes the first one off the page.
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var entry = await db.PartyGuestbookEntries.AsNoTracking().SingleAsync(e => e.Id == oldest);
+            for (var i = 1; i <= 200; i++)
+            {
+                var copy = (PartyGuestbookEntry)db.Entry(entry).CurrentValues.ToObject();
+                copy.Id = Guid.NewGuid();
+                copy.CreatedAt = entry.CreatedAt.AddMinutes(i);
+                db.PartyGuestbookEntries.Add(copy);
+            }
+            await db.SaveChangesAsync();
+        }
+        var guest = _factory.CreateClient();
+        var book = await guest.GetFromJsonAsync<JsonElement>($"/api/party/{party.ViewToken}/guestbook");
+        Assert.DoesNotContain(book.GetProperty("entries").EnumerateArray(), e => e.GetProperty("id").GetGuid() == oldest);
+        var token = book.GetProperty("printUrl").GetString()!.Split('/')[2];
+        (await guest.GetAsync($"/api/party/{token}/print/guestbook/{oldest}/preview")).EnsureSuccessStatusCode();
     }
 }
