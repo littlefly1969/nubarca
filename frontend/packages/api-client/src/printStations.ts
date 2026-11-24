@@ -322,6 +322,7 @@ export function revokePrinterShare(shareId: string): Promise<void> {
 
 /** One of the owner's own photographs, printed on their printer or one lent to them. */
 export interface OwnerPhotoPrintRequest {
+  photoAlbumId?: string;
   printStationId: string;
   printerDeviceId: string;
   /** The paper the composition was made for: refused as paper_changed if another is loaded. */
@@ -334,7 +335,7 @@ export interface OwnerPhotoPrintRequest {
    */
   style: 'fullBleed' | 'framed' | 'popOut';
   /** The photographs in the order they were arranged, each placed in its slot (the shared PhotoPlacement). */
-  photos: { fileItemId: string; placement: { centerX: number; centerY: number; zoom: number } }[];
+  photos: { fileItemId: string; useOriginal?: boolean; photoTextVersion?: number; placement: { centerX: number; centerY: number; zoom: number } }[];
   /** Which way a single photograph (or two 10x15) stands; absent for four and the strips. */
   orientation?: 'portrait' | 'landscape';
   /** One line of the owner's own in a framed sheet's band. */

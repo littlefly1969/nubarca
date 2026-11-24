@@ -59,8 +59,9 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         IDerivedBlobStorage artifacts, PartyPrintComposer composer,
         IPrintPhotoSourceReader sources,
         NubArca.Api.Party.IPartyParticipantService participants,
-        IPrinterAccess printers)
+        IPrinterAccess printers, GuestbookPrintSource? memories = null)
     {
+        _memories = memories;
         _participants = participants;
         _printers = printers;
         _db = db;
@@ -72,6 +73,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
     }
 
     private readonly IPrinterAccess _printers;
+    private readonly GuestbookPrintSource? _memories;
 
     public async Task<PartyPrintSubmitResult> SubmitAsync(
         PartyPrintAccess access,
@@ -123,6 +125,19 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         if (product is null || !product.Enabled)
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Unavailable);
 
+        NubArca.Api.Domain.PartyGuestbookEntry? memory = null;
+        byte[]? memoryPreview = null;
+        if (request.GuestbookEntryId is Guid entryId)
+        {
+            if (_memories is null || productId != PartyPrintProducts.Photo || request.Slots[0].ItemId != entryId
+                || request.Caption is not null || request.TextLayout is not null || request.Theme != "pure")
+                return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
+            memory = await _memories.FindAsync(access, participantId, entryId, cancellationToken);
+            if (memory is null) return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.InvalidSource);
+            memoryPreview = await _memories.RenderAsync(memory, preview: true, cancellationToken);
+            if (memoryPreview is null) return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.InvalidSource);
+        }
+
         // 2. Sources, checked against the database rather than trusted.
         var visible = await _media.ListItemsAsync(
             access.OwnerUserId, access.PartyAlbumId, cancellationToken);
@@ -132,7 +147,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             .Select(i => i.FileItemId)
             .ToHashSet();
         // Videos are not printable, and a video's poster is not a photograph.
-        if (request.Slots.Any(s => !printable.Contains(s.ItemId)))
+        if (memory is null && request.Slots.Any(s => !printable.Contains(s.ItemId)))
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.InvalidSource);
 
         // How far OUT a photograph may go depends on its shape and its frame's:
@@ -148,8 +163,13 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         var orientation = productId == PartyPrintProducts.Photo
             ? ParseOrientation(request.Orientation)
             : PartyPrintOrientation.FollowPhoto;
-        var shapes = await PrintPhotoShapes.DisplayAspectsAsync(
-            _db, access.OwnerUserId, request.Slots.Select(s => s.ItemId).ToList(), cancellationToken);
+        var shapes = (await PrintPhotoShapes.DisplayAspectsAsync(
+            _db, access.OwnerUserId, request.Slots.Select(s => s.ItemId).ToList(), cancellationToken)).ToDictionary(x => x.Key, x => x.Value);
+        if (memory is not null)
+        {
+            var size = SixLabors.ImageSharp.Image.Identify(memoryPreview!);
+            shapes[memory.Id] = (double)size.Width / size.Height;
+        }
         double? FrameAspectOf(Guid itemId)
         {
             if (productId == PartyPrintProducts.TwinStrip4) return PrintLayouts.SlotAspect(PrintLayouts.TwinStrip4, PrintLayouts.Framed, Domain.Print.PrintPapers.Photo10x15, portrait: true);
@@ -167,6 +187,9 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 ? PrintLayouts.SlotAspect(PrintLayouts.Photo, PrintLayouts.FullBleed, paper, portrait)
                 : PrintLayouts.SlotAspect(PrintLayouts.Photo, PrintLayouts.Framed, paper, portrait);
         }
+        if (memory is not null && FrameAspectOf(memory.Id) is double memoryFrame)
+            request = request with { Slots = [new PartyPrintSlotRequest(memory.Id,
+                Placement: new PartyPrintPlacementRequest(.5, .5, PhotoPlacementGeometry.ContainZoom(shapes[memory.Id], memoryFrame)))] };
         foreach (var slot in request.Slots)
         {
             if (slot.Placement is not { } requested) continue;
@@ -179,18 +202,25 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             }
         }
 
+        if (!OwnerPrintText.TryNormaliseCaption(request.Caption, out var caption)
+            || (request.TextLayout is { } layout && !layout.IsValid())
+            || (theme == PartyPrintTheme.Overlay && caption is not null && request.TextLayout is null or { Mode: "below" }))
+            return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
+
+        var fingerprint = HashKey(JsonSerializer.Serialize(request with { Product = productId }) + "|" + participantId?.ToString("N"));
         // 3. Idempotency: the same key answers with the same job, always.
         var keyHash = HashKey(idempotencyKey);
         var existing = await _db.PartyPrintRequests.AsNoTracking()
             .Where(r => r.PartyAlbumId == access.PartyAlbumId && r.IdempotencyKeyHash == keyHash)
-            .Select(r => new { r.PrintJobId, r.Product })
+            .Select(r => new { r.PrintJobId, r.Product, r.RequestFingerprint })
             .FirstOrDefaultAsync(cancellationToken);
         if (existing is not null)
         {
             // A key belongs to one submission; reusing it for a different
             // product is a client bug, not a second print. (A key stored as
             // "strip4" is the twin strip.)
-            if (PartyPrintProducts.Normalize(existing.Product) != productId)
+            if (PartyPrintProducts.Normalize(existing.Product) != productId
+                || (existing.RequestFingerprint is not null && existing.RequestFingerprint != fingerprint))
                 return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
             var seq = await _db.PrintJobs.AsNoTracking()
                 .Where(j => j.Id == existing.PrintJobId)
@@ -201,6 +231,13 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 await QueueAheadAsync(
                     access.PrintStationId, existing.PrintJobId, cancellationToken)));
         }
+
+        var photoTexts = await _db.AlbumItems.AsNoTracking()
+            .Where(i => i.AlbumId == access.PartyAlbumId && request.Slots.Select(s => s.ItemId).Contains(i.FileItemId))
+            .ToDictionaryAsync(i => i.FileItemId, i => new AlbumPhotoTextDto(i.PhotoText, i.PhotoTextLayout, i.PhotoTextVersion), cancellationToken);
+        if (request.Slots.Any(s => !s.UseOriginal && s.PhotoTextVersion is long version
+            && version != (photoTexts.GetValueOrDefault(s.ItemId)?.Version ?? 0)))
+            return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.PhotoChanged);
 
         // 4a. The GUEST's own allowance first, atomically.
         //
@@ -304,8 +341,10 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             }
 
             // Held until the sheet is drawn: HEIC frames keep their decode slots.
-            await using var sources = await _sources.OpenAsync(
-                access.OwnerUserId, request.Slots.Select(s => s.ItemId).ToList(), cancellationToken);
+            var memoryBytes = memory is null ? null : await _memories!.RenderAsync(memory, preview: false, cancellationToken);
+            await using var sources = memory is null
+                ? await _sources.OpenAsync(access.OwnerUserId, request.Slots.Select(s => s.ItemId).ToList(), cancellationToken)
+                : memoryBytes is null ? null : new PrintPhotoSources([memoryBytes]);
             if (sources is null)
             {
                 await ReleaseUnlessAcceptedAsync();
@@ -315,7 +354,8 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             for (var i = 0; i < request.Slots.Count; i++)
             {
                 var slot = request.Slots[i];
-                var bytes = sources.Photos[i];
+                var bytes = await AlbumPhotoText.RenderAsync(sources.Photos[i],
+                    slot.UseOriginal || slot.PhotoTextVersion is null ? null : photoTexts.GetValueOrDefault(slot.ItemId), cancellationToken);
                 photos.Add(slot.Placement is { } placement
                     ? PartyPrintPhoto.Placed(bytes, placement.ToPlacement())
                     : new PartyPrintPhoto(bytes, slot.CropX!.Value, slot.CropY!.Value,
@@ -331,13 +371,14 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             var overlay = theme == PartyPrintTheme.Overlay ? ParseOverlay(request) : null;
             var artifact = await _composer.RenderAsync(new PartyPrintComposition(
                 productId, theme, photos,
-                access.PartyName, access.FooterText,
+                access.PartyName, request.TextLayout is null or { Mode: "below" } && caption is not null
+                    ? string.Join(" · ", new[] { access.FooterText, caption }.Where(s => !string.IsNullOrEmpty(s))) : access.FooterText,
                 reservation.PublicSequence,
                 orientation,
                 access.Calibration,
                 overlay,
                 paper,
-                Logo: logo), cancellationToken);
+                Logo: logo, PhotoText: caption, TextLayout: request.TextLayout), cancellationToken);
             // What was actually printed, read off the sheet itself rather than
             // re-derived: a photograph that followed its own shape says so here.
             var drawn = SixLabors.ImageSharp.Image.Identify(artifact);
@@ -370,7 +411,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                     // The composition's first photograph, so the job still has the
                     // single FK the pipeline expects; all of them are in the child
                     // table below.
-                    FileItemId = request.Slots[0].ItemId,
+                    FileItemId = memory is null ? request.Slots[0].ItemId : null,
                     Kind = productId switch
                     {
                         PartyPrintProducts.Grid4 => PrintJobKinds.PartyGrid4,
@@ -393,6 +434,8 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                         overlayText = overlay?.Text.ToString().ToLowerInvariant(),
                         overlayLogo = overlay?.Logo.ToString().ToLowerInvariant(),
                         logo = logoKind.ToString().ToLowerInvariant(),
+                        caption, textLayout = request.TextLayout, guestbookEntryId = memory?.Id,
+                        photoVersions = request.Slots.Select(s => new { s.ItemId, s.UseOriginal, version = photoTexts.GetValueOrDefault(s.ItemId)?.Version ?? 0 }),
                     }),
                     ArtifactStorageKey = stored.StorageKey,
                     ArtifactContentType = "image/jpeg",
@@ -400,7 +443,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                     CreatedAt = now,
                     RenderedAt = now,
                 });
-                for (var i = 0; i < request.Slots.Count; i++)
+                for (var i = 0; memory is null && i < request.Slots.Count; i++)
                 {
                     var slot = request.Slots[i];
                     var source = new PrintJobSource
@@ -435,7 +478,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 {
                     Id = Guid.NewGuid(),
                     PartyAlbumId = access.PartyAlbumId,
-                    IdempotencyKeyHash = keyHash,
+                    IdempotencyKeyHash = keyHash, RequestFingerprint = fingerprint,
                     Product = productId,
                     PrintJobId = jobId,
                     CreatedAt = now,
@@ -458,16 +501,18 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             var winner = await _db.PartyPrintRequests.AsNoTracking()
                 .Where(r => r.PartyAlbumId == access.PartyAlbumId
                     && r.IdempotencyKeyHash == keyHash)
-                .Select(r => r.PrintJobId)
+                .Select(r => new { r.PrintJobId, r.RequestFingerprint })
                 .FirstOrDefaultAsync(CancellationToken.None);
-            if (winner == Guid.Empty)
+            if (winner is null)
                 return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.RenderFailed);
+            if (winner.RequestFingerprint is not null && winner.RequestFingerprint != fingerprint)
+                return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.Invalid);
             var seq = await _db.PrintJobs.AsNoTracking()
-                .Where(j => j.Id == winner).Select(j => j.PublicSequence)
+                .Where(j => j.Id == winner.PrintJobId).Select(j => j.PublicSequence)
                 .FirstOrDefaultAsync(CancellationToken.None);
             return PartyPrintSubmitResult.Accept(new PartyPrintAccepted(
-                winner, seq ?? 0, productId, product.Remaining,
-                await QueueAheadAsync(access.PrintStationId, winner, CancellationToken.None)));
+                winner.PrintJobId, seq ?? 0, productId, product.Remaining,
+                await QueueAheadAsync(access.PrintStationId, winner.PrintJobId, CancellationToken.None)));
         }
         catch when (cancellationToken.IsCancellationRequested)
         {

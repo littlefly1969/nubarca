@@ -17,6 +17,11 @@ public class AlbumItemConfiguration : IEntityTypeConfiguration<AlbumItem>
         builder.Property(ai => ai.Id).ValueGeneratedNever();
         builder.HasAlternateKey(ai => ai.Id);
         builder.Property(ai => ai.AddedAt).HasColumnType("timestamp with time zone");
+        builder.Property(ai => ai.PhotoText).HasMaxLength(600);
+        builder.Property(ai => ai.PhotoTextVersion).HasDefaultValue(0L).IsConcurrencyToken();
+        builder.Property(ai => ai.PhotoTextLayout).HasColumnType("text").HasConversion(
+            value => value == null ? null : System.Text.Json.JsonSerializer.Serialize(value, (System.Text.Json.JsonSerializerOptions?)null),
+            value => value == null ? null : System.Text.Json.JsonSerializer.Deserialize<NubArca.Api.Print.PhotoTextLayout>(value, (System.Text.Json.JsonSerializerOptions?)null));
 
         // Reverse lookup "which albums is this file in" — the index behind the
         // albumMembership=assigned/unassigned EXISTS / NOT EXISTS predicates on

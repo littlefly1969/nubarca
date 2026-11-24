@@ -83,7 +83,10 @@ public static class PartyGuestbookEndpoints
             // not-found, exactly like every other absent Party capability: a
             // guest has no business learning that the surface exists elsewhere.
             var page = await guestbook.GetPublicPageAsync(access, token, reader, cancellationToken);
-            return page is null ? Results.NotFound() : Results.Ok(page);
+            if (page is null) return Results.NotFound();
+            var printUrl = await httpContext.RequestServices.GetRequiredService<IPartyPrintUrlProvider>()
+                .GetAsync(access.PartyAlbumLinkId, access.MainAlbumId, cancellationToken);
+            return Results.Ok(page with { PrintUrl = printUrl });
         }).WithName("GetPartyGuestbook").RequireRateLimiting(PartyEndpoints.PublicRateLimitPolicy);
 
         // The photographs a guest may make a memory from: the main album's,

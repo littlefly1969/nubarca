@@ -163,7 +163,7 @@ public sealed record AlbumShareItemDto(
     /// null when the installation has no HLS provider.
     /// </summary>
     string? PlaybackUrl,
-    bool IsVideo);
+    bool IsVideo, bool HasPhotoText = false, long PhotoTextVersion = 0);
 
 public sealed record AlbumShareItemsDto(
     IReadOnlyList<AlbumShareItemDto> Items, string? NextCursor);

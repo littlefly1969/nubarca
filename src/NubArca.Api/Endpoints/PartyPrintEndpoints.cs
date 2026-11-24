@@ -36,6 +36,7 @@ public static class PartyPrintEndpoints
             HttpContext httpContext,
             [FromServices] IPartyPrintAccessResolver resolver,
             [FromServices] IPartyMediaService media,
+            [FromServices] AppDbContext db,
             [FromServices] NubArca.Api.Party.IPartyParticipantService participants,
             CancellationToken cancellationToken) =>
         {
@@ -65,6 +66,9 @@ public static class PartyPrintEndpoints
                 access.OwnerUserId, access.PartyAlbumId, cancellationToken);
             if (items is null) return Results.NotFound();
 
+            var texts = await db.AlbumItems.AsNoTracking().Where(i => i.AlbumId == access.PartyAlbumId && i.PhotoTextVersion > 0)
+                .ToDictionaryAsync(i => i.FileItemId, i => new AlbumPhotoTextDto(i.PhotoText, i.PhotoTextLayout, i.PhotoTextVersion), cancellationToken);
+            string V(Guid id) => texts.TryGetValue(id, out var text) ? $"?v={text.Version}" : "";
             var enc = Uri.EscapeDataString(printToken);
             // Only photographs: a video cannot be printed, and its poster is not
             // a photograph. The guest is never offered one to choose.
@@ -72,8 +76,9 @@ public static class PartyPrintEndpoints
                 .Where(i => i.Kind == PartyMediaKind.Image)
                 .Select(i => new PartyPrintPhotoDto(
                     i.FileItemId,
-                    $"/api/party/{enc}/print/media/{i.FileItemId}/thumbnail",
-                    $"/api/party/{enc}/print/media/{i.FileItemId}/preview"))
+                    $"/api/party/{enc}/print/media/{i.FileItemId}/thumbnail{V(i.FileItemId)}",
+                    $"/api/party/{enc}/print/media/{i.FileItemId}/preview{V(i.FileItemId)}",
+                    texts.GetValueOrDefault(i.FileItemId)?.Text is not null, texts.GetValueOrDefault(i.FileItemId)?.Version ?? 0))
                 .ToList();
 
             // Only what this printer, with the paper it has in, can make — the
@@ -141,12 +146,12 @@ public static class PartyPrintEndpoints
                     // Each slot as sent: a placement (the current studio) or the
                     // four crop fractions (a page from before placements).
                     (body.Slots ?? []).Select(s => new PartyPrintSlotRequest(
-                        s.ItemId, s.CropX, s.CropY, s.CropWidth, s.CropHeight, s.Placement)).ToList(),
+                        s.ItemId, s.CropX, s.CropY, s.CropWidth, s.CropHeight, s.Placement, s.UseOriginal, s.PhotoTextVersion)).ToList(),
                     body.Orientation,
                     body.OverlayText,
                     body.OverlayLogo,
                     body.PaperSize,
-                    body.Logo),
+                    body.Logo, body.Caption, body.TextLayout, body.GuestbookEntryId),
                 key,
                 participantId,
                 cancellationToken);
@@ -180,6 +185,7 @@ public static class PartyPrintEndpoints
                     Results.Json(new { error = "render_failed" }, statusCode: 503),
                 // The operator changed the paper: the studio reloads and offers
                 // what the new paper can make. Nothing was spent.
+                PartyPrintRefusal.PhotoChanged => Results.Conflict(new { error = "photo_changed" }),
                 PartyPrintRefusal.PaperChanged =>
                     Results.Conflict(new { error = "paper_changed" }),
                 // A lent printer whose sheets are spent: the party may still
@@ -215,6 +221,20 @@ public static class PartyPrintEndpoints
                 access.OwnerUserId, access.PartyAlbumId, fileId, variant,
                 httpContext, media, thumbnails, stripper, cancellationToken);
         }).WithName("GetPartyPrintMedia").RequireRateLimiting(PartyPublicRateLimitPolicy);
+
+        app.MapGet("/api/party/{printToken}/print/guestbook/{entryId:guid}/preview", async (
+            string printToken, Guid entryId, HttpContext http, IPartyPrintAccessResolver resolver,
+            IPartyParticipantService participants, GuestbookPrintSource memories, CancellationToken ct) =>
+        {
+            http.Response.Headers.CacheControl = "no-store";
+            var access = await resolver.ResolveAsync(printToken, ct);
+            if (access is null) return Results.NotFound();
+            var guest = await PartyGuestSession.ResolveAsync(http, participants, access.PartyAlbumLinkId, ct);
+            var entry = await memories.FindAsync(access, guest, entryId, ct);
+            if (entry is null) return Results.NotFound();
+            var bytes = await memories.RenderAsync(entry, preview: true, ct);
+            return bytes is null ? Results.NotFound() : Results.File(bytes, "image/jpeg");
+        }).RequireRateLimiting(PartyPublicRateLimitPolicy);
 
         // How is my print doing?
         app.MapGet("/api/party/{printToken}/print/{jobId:guid}", async (
@@ -337,14 +357,15 @@ public sealed record PartyPrintFormatDto(
     IReadOnlyList<int>? PhotoCounts = null);
 
 /// <summary>A choosable photograph: safe derived URLs only, never an original.</summary>
-public sealed record PartyPrintPhotoDto(Guid Id, string ThumbnailUrl, string PreviewUrl);
+public sealed record PartyPrintPhotoDto(Guid Id, string ThumbnailUrl, string PreviewUrl,
+    bool HasPhotoText = false, long PhotoTextVersion = 0);
 
 public sealed record PartyPrintSubmitBody(
     string? Product, string? Theme, List<PartyPrintSlotBody>? Slots,
     string? Orientation = null, string? OverlayText = null, string? OverlayLogo = null,
     string? PaperSize = null,
     /// <summary>"nubarca" (absent), "custom" or "none" — among those the manifest offers.</summary>
-    string? Logo = null);
+    string? Logo = null, string? Caption = null, PhotoTextLayout? TextLayout = null, Guid? GuestbookEntryId = null);
 
 /// <summary>
 /// One photograph on the sheet as the studio sends it: a <paramref name="Placement"/>
@@ -353,7 +374,7 @@ public sealed record PartyPrintSubmitBody(
 /// </summary>
 public sealed record PartyPrintSlotBody(
     Guid ItemId, double? CropX = null, double? CropY = null, double? CropWidth = null, double? CropHeight = null,
-    PartyPrintPlacementRequest? Placement = null);
+    PartyPrintPlacementRequest? Placement = null, bool UseOriginal = false, long? PhotoTextVersion = null);
 
 public sealed record PartyPrintAcceptedDto(
     Guid JobId, long PublicSequence, string Product, int RemainingForProduct,

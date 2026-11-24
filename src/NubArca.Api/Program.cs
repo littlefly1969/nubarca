@@ -1081,6 +1081,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<
         NubArca.Api.Print.IPartyPrintSubmissionService, NubArca.Api.Print.PartyPrintSubmissionService>();
     builder.Services.AddSingleton<NubArca.Api.Print.PartyPrintComposer>();
+    builder.Services.AddScoped<NubArca.Api.Print.GuestbookPrintSource>();
     builder.Services.AddScoped<
         NubArca.Api.Party.IPartyPrintUrlProvider, NubArca.Api.Party.PartyPrintUrlProvider>();
     builder.Services.AddScoped<
@@ -1756,6 +1757,7 @@ app.MapPartyAttendanceEndpoints();
 app.MapPartyGameEndpoints();
 app.MapPartyDisplayEndpoints();
 app.MapPartyPrintEndpoints();
+app.MapAlbumPhotoTextEndpoints();
 app.MapPartyPrintOwnerEndpoints();
 app.MapAlbumPrintLogoEndpoints();
 

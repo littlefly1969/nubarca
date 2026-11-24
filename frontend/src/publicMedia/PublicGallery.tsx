@@ -59,6 +59,7 @@ export interface PublicGalleryItem {
   id: string;
   thumbnailUrl: string;
   isVideo: boolean;
+  badge?: string;
 }
 
 /** A personal pick on each tile: the round control, apart from opening. */
@@ -92,9 +93,10 @@ export function PublicGallery({
             data-shape={shapes[index]}
             data-testid={itemTestId?.(item)}
             onClick={(e) => onOpen(index, e.currentTarget)}
-            aria-label={item.isVideo ? t('party.openVideo') : t('party.openPhoto')}
+            aria-label={`${item.isVideo ? t('party.openVideo') : t('party.openPhoto')}${item.badge ? ` — ${item.badge}` : ''}`}
           >
             <img className="public-gallery-tile-img" src={item.thumbnailUrl} alt="" loading="lazy" />
+            {item.badge && <span className="public-gallery-badge" data-testid="own-upload-badge">{item.badge}</span>}
             {/* A poster and a play mark, and no duration: none is served, so
                 none is invented. */}
             {item.isVideo && (

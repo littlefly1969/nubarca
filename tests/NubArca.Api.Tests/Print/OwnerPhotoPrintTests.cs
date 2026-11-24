@@ -21,7 +21,7 @@ namespace NubArca.Api.Tests.Print;
 /// endpoint, a real enrolled station, the real renderer and the agent's own
 /// download, so what is proven is what reaches the printer.
 /// </summary>
-public sealed class OwnerPhotoPrintTests : IDisposable
+public sealed partial class OwnerPhotoPrintTests : IDisposable
 {
     private readonly SqliteWebApplicationFactory _factory = new();
     public OwnerPhotoPrintTests() => _factory.EnsureDatabaseCreated();

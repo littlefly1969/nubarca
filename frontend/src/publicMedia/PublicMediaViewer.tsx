@@ -1,5 +1,6 @@
 import {
   useCallback, useEffect, useRef, useState,
+  type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { useI18n } from '../i18n';
@@ -51,6 +52,7 @@ export interface PublicMediaViewerProps {
    * (the print studio): the same choice the grid's round control makes.
    */
   selection?: PublicViewerSelection;
+  actions?: ReactNode;
 }
 
 export interface PublicViewerSelection {
@@ -72,7 +74,7 @@ type ShareState =
   | { kind: 'failed' };
 
 export function PublicMediaViewer({
-  item, label, downloadLabel, note, onClose, onPrevious, onNext, selection,
+  item, label, downloadLabel, note, onClose, onPrevious, onNext, selection, actions,
 }: PublicMediaViewerProps) {
   const { t } = useI18n();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -194,6 +196,7 @@ export function PublicMediaViewer({
           </>
         )}
         <div className="public-viewer-bar" data-kind={playable ? 'video' : 'image'}>
+          {actions}
           <button
             type="button"
             className="public-viewer-action"

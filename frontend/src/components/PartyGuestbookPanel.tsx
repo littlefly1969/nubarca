@@ -1,3 +1,4 @@
+import { Link } from 'react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ApiError,
@@ -173,6 +174,8 @@ export function PartyGuestbookPanel({
             {status.page.entries.map((entry) => (
               <li key={entry.id} className="party-guestbook-entry">
                 <PartyGuestbookMemoryCard memory={entry} testId={`party-guestbook-memory-${entry.id}`} />
+                {status.page.printUrl && <Link className="party-contribution-secondary"
+                  to={`${status.page.printUrl}?memory=${entry.id}`}>{t('photoEdit.printMemory')}</Link>}
               </li>
             ))}
           </ul>

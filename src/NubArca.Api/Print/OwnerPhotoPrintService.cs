@@ -173,7 +173,21 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
             : SheetFingerprint(layout, style, fileIds, placements, stationId, deviceId, paper, portrait,
                 caption, request.Brand, request.IncludeDate, request.IncludeDate ? request.DateLocale : null,
                 request.IncludeDate ? zone!.Id : null, subjectPoint, request.LogoAlbumId, captionFont, textLayout);
+        var photoAlbumId = origin?.AlbumId ?? request.PhotoAlbumId;
+        if (photoAlbumId is Guid albumId && (request.PhotoAlbumId is not null || requested.Any(p => p.PhotoTextVersion is not null || p.UseOriginal)))
+            fingerprint = Hash(fingerprint + "|album:" + albumId.ToString("N") + "|" + JsonSerializer.Serialize(requested.Select(p => new { p.UseOriginal, p.PhotoTextVersion })));
         if (await RepeatAsync(ownerUserId, keyHash, fingerprint, cancellationToken) is { } repeat) return repeat;
+        var photoTexts = new Dictionary<Guid, NubArca.Api.Party.AlbumPhotoTextDto>();
+        if (photoAlbumId is Guid textAlbumId)
+        {
+            if (!await _db.Albums.AnyAsync(a => a.Id == textAlbumId && a.OwnerUserId == ownerUserId, cancellationToken))
+                return Refuse(OwnerPhotoPrintErrors.InvalidSource);
+            photoTexts = await _db.AlbumItems.AsNoTracking().Where(i => i.AlbumId == textAlbumId && fileIds.Contains(i.FileItemId))
+                .ToDictionaryAsync(i => i.FileItemId, i => new NubArca.Api.Party.AlbumPhotoTextDto(i.PhotoText, i.PhotoTextLayout, i.PhotoTextVersion), cancellationToken);
+            if (fileIds.Any(id => !photoTexts.ContainsKey(id))) return Refuse(OwnerPhotoPrintErrors.InvalidSource);
+            if (requested.Any(p => !p.UseOriginal && p.PhotoTextVersion is long version && version != photoTexts[p.FileItemId!.Value].Version))
+                return Refuse(OwnerPhotoPrintErrors.PhotoChanged);
+        }
 
         // 3. The photographs: the caller's own, in their library, and photographs
         // by the Library's own rule — a legacy file with no metadata row
@@ -335,12 +349,16 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                 await ReturnUnlessAcceptedAsync();
                 return Refuse(OwnerPhotoPrintErrors.InvalidSource);
             }
+            var renderedPhotos = new List<byte[]>(fileIds.Count);
+            for (var i = 0; i < fileIds.Count; i++)
+                renderedPhotos.Add(await NubArca.Api.Party.AlbumPhotoText.RenderAsync(sources.Photos[i],
+                    requested[i].UseOriginal || requested[i].PhotoTextVersion is null ? null : photoTexts.GetValueOrDefault(fileIds[i]), cancellationToken));
             for (var i = 0; i < fileIds.Count; i++)
             {
                 if (shapes.ContainsKey(fileIds[i]) || placements[i].Zoom >= 1) continue;
                 // No stored shape: the framing is held to the photograph as it
                 // decodes, turned by its EXIF orientation like the print is.
-                var decoded = DisplayAspectOf(sources.Photos[i]!);
+                var decoded = DisplayAspectOf(renderedPhotos[i]);
                 if (decoded is null)
                 {
                     await ReturnUnlessAcceptedAsync();
@@ -364,16 +382,16 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
             {
                 artifact = joined
                     ? PrintArtifactParts.Pack(await RenderHalvesAsync(layout, style,
-                        [.. sources.Photos.Select(bytes => bytes!)], placements, photoPortrait,
+                        [.. renderedPhotos.Select(bytes => bytes!)], placements, photoPortrait,
                         caption, request.Brand, dateTexts, PrintCalibration.Of(device), cancellationToken, logo, captionFont, textLayout))
                     : style == PrintLayouts.FullBleed
                     ? await _renderer.RenderOwnerPhotoAsync(new OwnerPhotoComposition(
-                        sources.Photos[0]!, paper, portrait, placements[0], dateText, PrintCalibration.Of(device), caption, captionFont, textLayout),
+                        renderedPhotos[0], paper, portrait, placements[0], dateText, PrintCalibration.Of(device), caption, captionFont, textLayout),
                         cancellationToken)
                     : await _composer.RenderAsync(new PartyPrintComposition(
                         layout,
                         PartyPrintTheme.Pure,
-                        [.. sources.Photos.Select((bytes, i) => PartyPrintPhoto.Placed(bytes!, placements[i]))],
+                        [.. renderedPhotos.Select((bytes, i) => PartyPrintPhoto.Placed(bytes!, placements[i]))],
                         PartyName: string.Empty,
                         FooterText: null,
                         // The photographs' way up: the catalogue turns the sheet to it.
@@ -436,6 +454,8 @@ public sealed class OwnerPhotoPrintService : IOwnerPhotoPrintService
                         caption,
                         captionFont,
                         textLayout,
+                        photoAlbumId,
+                        photoVersions = requested.Select(p => new { p.FileItemId, p.UseOriginal, version = photoTexts.GetValueOrDefault(p.FileItemId!.Value)?.Version ?? 0 }),
                         brand = request.Brand,
                         logo = !request.Brand ? "none" : logo is null ? "nubarca" : "custom",
                         includeDate = request.IncludeDate,

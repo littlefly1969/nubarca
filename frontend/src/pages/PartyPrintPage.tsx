@@ -1,5 +1,10 @@
+import { GuestbookPrint } from '../print/GuestbookPrint';
+import { usePhotoVersions } from '../print/usePhotoVersions';
+import { DEFAULT_PHOTO_TEXT, type PhotoTextLayout } from '@nubarca/contracts';
+import { PhotoTextControls } from '../text/PhotoTextControls';
+import { PhotoTextOverlay } from '../text/PhotoTextOverlay';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
 import {
   ApiError,
   getPartyPrintManifest,
@@ -160,6 +165,7 @@ function refusalKey(err: unknown): MessageKey {
     case 'printer_unavailable': return 'partyPrint.error.printer';
     case 'render_failed': return 'partyPrint.error.render';
     case 'invalid_source': return 'partyPrint.error.source';
+    case 'photo_changed': return 'photoEdit.conflict';
     case 'paper_changed': return 'partyPrint.error.paperChanged';
     default: return 'partyPrint.error.generic';
   }
@@ -293,6 +299,8 @@ function OverlayBlock({ sheet, partyName, footerText, overlayText, overlayLogo, 
 }
 
 export function PartyPrintPage() {
+  const [search] = useSearchParams();
+  const memoryId = search.get('memory');
   const { token } = useParams<{ token: string }>();
   const { t, tn } = useI18n();
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
@@ -310,12 +318,15 @@ export function PartyPrintPage() {
     setOverlayText('white');
     setOverlayLogo('light');
     setChosenLogo(null);
+    setCaption(''); setTextLayout({ ...DEFAULT_PHOTO_TEXT });
   }, []);
   // The theme the server is sent: the overlay exists only for a single photograph.
   const themeFor = useCallback((layout: PrintLayout): PartyPrintTheme => (look === 'overlay'
     ? (layout === 'photo' ? 'overlay' : 'pure')
     : look), [look]);
   const [onlyMine, setOnlyMine] = useState(false);
+  const [caption, setCaption] = useState('');
+  const [textLayout, setTextLayout] = useState<PhotoTextLayout>({ ...DEFAULT_PHOTO_TEXT });
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<MessageKey | null>(null);
@@ -381,9 +392,10 @@ export function PartyPrintPage() {
     : defaultLogo(manifest?.logos);
   const customLogoUrl = manifest?.logos?.customUrl ?? null;
 
+  const versions = usePhotoVersions(useMemo(() => manifest?.photos ?? [], [manifest]));
   const photoById = useMemo(() => new Map(
-    (manifest?.photos ?? []).map((photo) => [photo.id, photo] as const),
-  ), [manifest]);
+    versions.photos.map((photo) => [photo.id, photo] as const),
+  ), [versions.photos]);
 
   // What the guest's own face search found, if they ran one on the hub. The
   // memo is intersected with THIS token's photographs, so a stale one from
@@ -422,7 +434,7 @@ export function PartyPrintPage() {
   const paper: PaperSize = manifest?.paperSize ?? '10x15';
   const printable = useMemo(() => manifest?.formats.filter((f) => f.enabled) ?? [], [manifest]);
   const anyLeft = printable.some((f) => leftFor(f) > 0);
-  const gallery = onlyMine && mine.length > 0 ? mine : (manifest?.photos ?? []);
+  const gallery = onlyMine && mine.length > 0 ? versions.photos.filter((photo) => mine.some((p) => p.id === photo.id)) : versions.photos;
 
   // Each product as offered — a format with a choice of how many photographs,
   // the twin strip (the same four twice, or eight), as each of them.
@@ -473,7 +485,8 @@ export function PartyPrintPage() {
         {
           product,
           theme,
-          slots: composition.slots,
+          slots: composition.slots.map((slot) => ({ ...slot, ...versions.source(slot.itemId) })),
+          ...(caption.trim() ? { caption: caption.trim(), textLayout } : {}),
           // Omitted when the guest left the default: the server follows the
           // photograph, which is what it did before this choice existed.
           ...(composition.orientation ? { orientation: composition.orientation } : {}),
@@ -490,7 +503,7 @@ export function PartyPrintPage() {
       resetLook();
     } catch (err: unknown) {
       const refusal = refusalKey(err);
-      if (refusal === 'partyPrint.error.paperChanged') {
+      if (refusal === 'partyPrint.error.paperChanged' || refusal === 'photoEdit.conflict') {
         // Another paper is in: what can be made has changed, so begin again
         // from the products the new paper offers, saying why.
         setResetSignal((n) => n + 1);
@@ -574,12 +587,19 @@ export function PartyPrintPage() {
     );
   }
 
+  if (memoryId && token) return <PrintShell title={phase.manifest.partyName}>
+    <GuestbookPrint key={memoryId} token={token} entryId={memoryId} manifest={phase.manifest} onRefresh={refreshManifest}
+      onAccepted={(accepted) => setSent({ accepted, state: 'preparing' })} />
+    <BackLink />
+  </PrintShell>;
+
   return (
     <PrintShell title={phase.manifest.partyName}>
       <PrintStudio
         paper={paper}
         formats={formats}
         gallery={gallery}
+        photoOptions={versions.controls}
         photoById={photoById}
         preselected={picked.length > 0 ? picked : undefined}
         // Offered only when the guest's own search actually matched
@@ -601,7 +621,8 @@ export function PartyPrintPage() {
         bandDark={(layout) => DARK_THEMES.includes(themeFor(layout))}
         paperColor={(layout) => PRINT_BAND[themeFor(layout)]}
         band={{
-          title: phase.manifest.partyName, line: phase.manifest.footerText, mark: null,
+          title: phase.manifest.partyName, line: textLayout.mode === 'below' && caption.trim()
+            ? [phase.manifest.footerText, caption.trim()].filter(Boolean).join(' · ') : phase.manifest.footerText, mark: null,
           brand: logo !== 'none',
           logoUrl: logo === 'custom' ? customLogoUrl : null,
         }}
@@ -617,7 +638,10 @@ export function PartyPrintPage() {
           />
         )}
         sheetData={{ 'data-overlay-text': overlayText, 'data-overlay-logo': overlayLogo, 'data-logo': logo }}
-        compositionKey={JSON.stringify([look, overlayText, overlayLogo, logo])}
+        photoWords={caption.trim() && textLayout.mode !== 'below' ? () =>
+          <PhotoTextOverlay text={caption.trim()} layout={textLayout} onChange={setTextLayout} /> : undefined}
+        canSubmit={caption.trim().length <= 40 && !/[\uD800-\uDFFF]/.test(caption)}
+        compositionKey={JSON.stringify([versions.key, caption, textLayout, look, overlayText, overlayLogo, logo])}
         submitError={submitError ? t(submitError) : null}
         submitting={submitting}
         resetSignal={resetSignal}
@@ -625,6 +649,15 @@ export function PartyPrintPage() {
         onSubmit={(composition) => { setFormatNotice(null); void submit(composition); }}
         options={(layout) => (
           <>
+            <fieldset className="party-print-choice">
+              <legend>{t('photoEdit.printText')}</legend>
+              <p>{t('photoEdit.printHelp')}</p>
+              <label>{t('ownerPrint.caption')}<input value={caption} maxLength={40} onChange={(e) => setCaption(e.target.value)} /></label>
+              <PhotoTextControls value={textLayout} onChange={(next) => {
+                setTextLayout(next);
+                if (next.mode === 'below' && look === 'overlay') setLook('pure');
+              }} />
+            </fieldset>
             <fieldset className="party-print-themes">
               <legend>{t('partyPrint.theme')}</legend>
               {(layout === 'photo' ? PHOTO_LOOKS : FRAMED_LOOKS).map((option) => (
@@ -634,7 +667,10 @@ export function PartyPrintPage() {
                     name="party-print-theme"
                     value={option}
                     checked={look === option || (option === 'pure' && look === 'overlay' && layout !== 'photo')}
-                    onChange={() => setLook(option)}
+                    onChange={() => {
+                      setLook(option);
+                      if (option === 'overlay' && textLayout.mode === 'below') setTextLayout({ ...textLayout, mode: 'overlay' });
+                    }}
                   />
                   <span>{t(LOOK_LABEL[option])}</span>
                 </label>

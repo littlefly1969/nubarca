@@ -214,7 +214,8 @@ public sealed class PartyPrintComposer
         if (composition.TextLayout is { Mode: not "below" })
         {
             var portrait = sheet.Height >= sheet.Width;
-            var style = composition.PopOutMask is not null ? PrintLayouts.PopOut : PrintLayouts.Framed;
+            var style = composition.PopOutMask is not null ? PrintLayouts.PopOut
+                : composition.Theme == PartyPrintTheme.Overlay ? PrintLayouts.FullBleed : PrintLayouts.Framed;
             var arranged = PrintLayouts.Arrange(composition.Product, style, composition.Paper, portrait);
             foreach (var slot in arranged.Slots)
                 PhotoTextRenderer.Draw(sheet, ToPixels(slot, sheet.Width, sheet.Height), composition.PhotoText,

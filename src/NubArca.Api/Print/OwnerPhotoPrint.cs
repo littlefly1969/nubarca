@@ -61,7 +61,7 @@ public sealed record OwnerPhotoPrintSubmitRequest(
     /// id. Absent (or the default): the face the band always used.
     /// </summary>
     string? CaptionFont = null,
-    PhotoTextLayout? TextLayout = null);
+    PhotoTextLayout? TextLayout = null, Guid? PhotoAlbumId = null);
 
 /// <summary>A touched point, normalized to the upright photograph: (0,0) top-left, (1,1) bottom-right.</summary>
 public sealed record OwnerPrintSubjectRequest(double X, double Y)
@@ -81,7 +81,8 @@ public sealed record OwnerPrintOrigin(Guid AlbumId)
 }
 
 /// <summary>One photograph of a print and how it is framed in its slot.</summary>
-public sealed record OwnerPrintPhotoRequest(Guid? FileItemId, PartyPrintPlacementRequest? Placement);
+public sealed record OwnerPrintPhotoRequest(Guid? FileItemId, PartyPrintPlacementRequest? Placement,
+    bool UseOriginal = false, long? PhotoTextVersion = null);
 
 /// <summary>
 /// The bounds on the one line an owner may write on their own print.
@@ -138,6 +139,7 @@ public static class OwnerPhotoPrintErrors
     public const string PrinterNotFound = "printer_not_found";
     public const string PrinterOffline = "printer_offline";
     public const string PaperChanged = "paper_changed";
+    public const string PhotoChanged = "photo_changed";
     public const string FormatUnsupported = "format_unsupported";
     public const string ShareExhausted = "share_exhausted";
     public const string ShareRevoked = "share_revoked";

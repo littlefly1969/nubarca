@@ -1,3 +1,4 @@
+import { AlbumPhotoTextEditor } from '../text/AlbumPhotoTextEditor';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
@@ -47,6 +48,7 @@ import { useAlbumContent } from './useAlbumContent';
 
 interface Props {
   albumId: string;
+  allowPhotoText?: boolean;
   onClose(): void;
   returnFocusRef?: React.RefObject<HTMLButtonElement | null>;
 }
@@ -61,10 +63,11 @@ const LOAD_AHEAD_ROWS = 10;
 type RowAction = 'set-cover' | 'clear-cover' | 'remove' | 'toggle';
 type FocusRequest = { albumItemId: string; action: RowAction } | 'notice';
 
-export function AlbumSharedContentPanel({ albumId, onClose, returnFocusRef }: Props) {
+export function AlbumSharedContentPanel({ albumId, onClose, returnFocusRef, allowPhotoText = false }: Props) {
   const { t, formatDate } = useI18n();
   const { invalidateAuth } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   // At most ONE row shows its actions; every other row has a single control.
   const [openRowId, setOpenRowId] = useState<string | null>(null);
@@ -225,6 +228,11 @@ export function AlbumSharedContentPanel({ albumId, onClose, returnFocusRef }: Pr
   function toggleRow(item: AlbumContentItem) {
     setOpenRowId((open) => (open === item.albumItemId ? null : item.albumItemId));
   }
+
+  if (editing) return <AlbumPhotoTextEditor
+    endpoint={`/api/albums/${albumId}/photos/${editing}/text`}
+    previewUrl={`/api/albums/${albumId}/photos/${editing}/preview`}
+    onClose={() => setEditing(null)} onSaved={() => { setEditing(null); content.reload(); }} />;
 
   return (
     <div
@@ -415,6 +423,10 @@ export function AlbumSharedContentPanel({ albumId, onClose, returnFocusRef }: Pr
                             </button>
                           )}
 
+                          {allowPhotoText && item.kind === 'image' && item.sourceState === 'available' && item.origin === 'owner' && (
+                            <button type="button" className="row-action" disabled={busy}
+                              onClick={() => setEditing(item.fileItemId)}>{t('photoEdit.title')}</button>
+                          )}
                           <button type="button" className="row-action" data-action="remove"
                             data-testid="album-content-remove"
                             disabled={busy}

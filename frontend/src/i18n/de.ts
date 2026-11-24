@@ -1,4 +1,5 @@
-import type { MessageKey } from './it';
+import type {
+ MessageKey } from './it';
 
 // German dictionary. Typed as Partial<Record<MessageKey, string>> against the
 // canonical Italian keys, exactly as English is: German can never introduce a
@@ -15,6 +16,26 @@ import type { MessageKey } from './it';
 // `{placeholder}` tokens and the `_one`/`_other` plural suffixes are part of
 // the contract and are never translated.
 const de: Partial<Record<MessageKey, string>> = {
+  "photoEdit.printMemory": "Erinnerung drucken",
+  "photoEdit.memoryPrintHelp": "Widmung, Unterschrift und Sprechblase bleiben wie veröffentlicht. Die Erinnerung wird vollständig und ohne Zuschnitt gedruckt.",
+  "photoEdit.memoryPreview": "Vorschau der zu druckenden Erinnerung",
+
+  "photoEdit.title": "Text und Sprechblase",
+  "photoEdit.ownUpload": "Von dir hochgeladen",
+  "photoEdit.sharedHelp": "Gespeicherte Änderungen erscheinen im Album und in der Diashow.",
+  "photoEdit.text": "Text (bis zu 300 Zeichen, ohne Emojis)",
+  "photoEdit.save": "Im Album speichern",
+  "photoEdit.remove": "Text und Sprechblase entfernen",
+  "photoEdit.loadError": "Bearbeitung konnte nicht geladen werden.",
+  "photoEdit.saveError": "Speichern fehlgeschlagen. Erneut versuchen.",
+  "photoEdit.conflict": "Das Foto wurde geändert. Vor dem Speichern neu laden.",
+  "photoEdit.printVersion": "Druckversion",
+  "photoEdit.original": "Original",
+  "photoEdit.decorated": "Mit Text oder Sprechblase",
+  "photoEdit.printText": "Text zum Ausdruck hinzufügen",
+  "photoEdit.printHelp": "Diese Ergänzungen gelten nur für deinen Ausdruck.",
+  "photoEdit.reload": "Neu laden",
+
   "lab.lithophanes": "Lithophanien",
   "perm.laboratoryLithophanes": "Labor — Lithophanien",
   "permDesc.laboratoryLithophanes": "Erstelle 3D-druckbare Kugeln aus deinen Fotos.",

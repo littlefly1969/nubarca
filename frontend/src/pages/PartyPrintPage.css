@@ -899,3 +899,5 @@
   outline: 3px solid var(--party-hub-focus);
   outline-offset: 2px;
 }
+
+.guestbook-print-preview { display: block; max-width: 100%; max-height: 65dvh; margin: 1rem auto; object-fit: contain; }

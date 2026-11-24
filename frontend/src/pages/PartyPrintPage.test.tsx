@@ -121,6 +121,28 @@ function lastPost(calls: { url: string; method: string; body: string | null }[])
 }
 
 describe('PartyPrintPage (public print studio)', () => {
+  it('selects the original or the shared bubble version, then adds a personal bubble only to the print', async () => {
+    const user = setup();
+    const mock = mount(manifest({ photos: [{ ...photo('f1'), hasPhotoText: true, photoTextVersion: 4 }, photo('f2')] }), {
+      [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
+    });
+    render(wrapper());
+    await chooseFormat(user, 'photo'); await pick(user, 1); await user.click(next());
+    await user.click(screen.getByRole('radio', { name: 'Originale' }));
+    expect(screen.getByTestId('party-print-crop').querySelector('img')!.getAttribute('src')).toContain('original=true');
+    await user.click(screen.getByRole('radio', { name: 'Con testo o fumetto' }));
+    expect(screen.getByTestId('party-print-crop').querySelector('img')!.getAttribute('src')).not.toContain('original=true');
+    await user.click(next());
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Il mio fumetto' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Posizione del testo' }), { target: { value: 'bubble' } });
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).toMatchObject({
+      caption: 'Il mio fumetto', textLayout: { mode: 'bubble' },
+      slots: [{ itemId: 'f1', useOriginal: false, photoTextVersion: 4 }],
+    }));
+    expect(mock.calls.filter((c) => c.method === 'PUT')).toHaveLength(0);
+  });
+
   // --- What is on offer ---------------------------------------------------
 
   it('offers each product with its OWN remaining budget, never a shared total', async () => {

@@ -63,3 +63,12 @@ test('a mixed append keeps working when the current item is a video', () => {
   assert.equal(remapIndexById(after, 'v1', 1), 1);
   assert.equal(after[1].mediaType, 'video');
 });
+
+
+test('a changed photo composition refreshes the same slideshow item without duplicating it', () => {
+  const before = [item('1'), item('2')];
+  const after = [{ ...before[0], previewUrl: before[0].previewUrl + '?v=2' }, before[1]];
+  assert.equal(sameItemIds(before, after), false);
+  assert.equal(remapIndexById(after, '1', 0), 0);
+  assert.equal(after.length, before.length);
+});

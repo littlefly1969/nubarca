@@ -1,4 +1,5 @@
-import type { MessageKey } from './it';
+import type {
+ MessageKey } from './it';
 
 // Spanish dictionary. Typed as Partial<Record<MessageKey, string>> against the
 // canonical Italian keys, exactly as English is: Spanish can never introduce a
@@ -15,6 +16,26 @@ import type { MessageKey } from './it';
 // `{placeholder}` tokens and the `_one`/`_other` plural suffixes are part of
 // the contract and are never translated.
 const es: Partial<Record<MessageKey, string>> = {
+  "photoEdit.printMemory": "Imprimir recuerdo",
+  "photoEdit.memoryPrintHelp": "La dedicatoria, la firma y el bocadillo conservan su versión publicada. El recuerdo se imprime completo, sin recortes.",
+  "photoEdit.memoryPreview": "Vista previa del recuerdo para imprimir",
+
+  "photoEdit.title": "Texto y bocadillo",
+  "photoEdit.ownUpload": "Subida por ti",
+  "photoEdit.sharedHelp": "Los cambios guardados aparecen en el álbum y el carrusel.",
+  "photoEdit.text": "Texto (máximo 300 caracteres, sin emojis)",
+  "photoEdit.save": "Guardar en el álbum",
+  "photoEdit.remove": "Quitar texto y bocadillo",
+  "photoEdit.loadError": "No se pudo cargar la edición.",
+  "photoEdit.saveError": "No se pudo guardar. Inténtalo de nuevo.",
+  "photoEdit.conflict": "La foto ha cambiado. Recarga antes de guardar.",
+  "photoEdit.printVersion": "Versión para imprimir",
+  "photoEdit.original": "Original",
+  "photoEdit.decorated": "Con texto o bocadillo",
+  "photoEdit.printText": "Añadir texto a esta impresión",
+  "photoEdit.printHelp": "Estos cambios solo se aplican a tu impresión.",
+  "photoEdit.reload": "Recargar",
+
   "lab.lithophanes": "Litofanías",
   "perm.laboratoryLithophanes": "Laboratorio — Litofanías",
   "permDesc.laboratoryLithophanes": "Crea esferas imprimibles en 3D con tus fotos.",

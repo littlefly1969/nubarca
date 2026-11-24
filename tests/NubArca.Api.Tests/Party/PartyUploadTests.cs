@@ -18,7 +18,7 @@ namespace NubArca.Api.Tests.Party;
 // upload token. Read/upload tokens are independent; disabling party (or upload)
 // refuses uploads immediately; uploads are image-only, owner-scoped, and only
 // ever surface publicly through the safe metadata-stripped derived media path.
-public sealed class PartyUploadTests : IDisposable
+public sealed partial class PartyUploadTests : IDisposable
 {
     private readonly SqliteWebApplicationFactory _factory = new();
 

@@ -1,3 +1,4 @@
+import type { PhotoTextLayout } from "@nubarca/contracts";
 import { api, ApiError } from './client';
 import type { OwnerPhotoPrintAccepted, OwnerPhotoPrintError } from './printStations';
 import type {
@@ -890,6 +891,8 @@ export interface PartyPrintFormat {
 
 /** A choosable photograph: safe derived URLs only, never an original. */
 export interface PartyPrintPhoto {
+  hasPhotoText?: boolean;
+  photoTextVersion?: number;
   id: string;
   thumbnailUrl: string;
   previewUrl: string;
@@ -914,9 +917,9 @@ export interface PartyPrintManifest {
  * studio sends; the four crop numbers are the older form the server still
  * accepts. Never both.
  */
-export type PartyPrintSlot =
+export type PartyPrintSlot = { useOriginal?: boolean; photoTextVersion?: number } & (
   | { itemId: string; placement: PartyPrintPlacement }
-  | { itemId: string; cropX: number; cropY: number; cropWidth: number; cropHeight: number };
+  | { itemId: string; cropX: number; cropY: number; cropWidth: number; cropHeight: number });
 
 export interface PartyPrintPlacement {
   centerX: number;
@@ -962,6 +965,9 @@ export function getPartyPrintManifest(
 export function submitPartyPrint(
   printToken: string,
   body: {
+    caption?: string;
+    textLayout?: PhotoTextLayout;
+    guestbookEntryId?: string;
     product: PartyPrintProduct;
     theme: PartyPrintTheme;
     slots: PartyPrintSlot[];
@@ -991,6 +997,8 @@ export function getPartyPrintStatus(
 }
 
 export interface PartyItem {
+  isOwnUpload?: boolean;
+  canEditPhotoText?: boolean;
   id: string;
   mediaType: 'image' | 'video';
   thumbnailUrl: string;
@@ -1946,4 +1954,15 @@ export function submitPartyMessage(
     `/api/party/${encodeURIComponent(uploadToken)}/messages`,
     { method: 'POST', json: message, signal },
   );
+}
+
+export interface AlbumPhotoText { text: string | null; layout: PhotoTextLayout | null; version: number }
+export function getPhotoText(endpoint: string, signal?: AbortSignal): Promise<AlbumPhotoText> {
+  return api<AlbumPhotoText>(endpoint, { signal });
+}
+export function savePhotoText(endpoint: string, body: { text: string | null; layout: PhotoTextLayout; expectedVersion: number }): Promise<AlbumPhotoText> {
+  return api<AlbumPhotoText>(endpoint, { method: 'PUT', json: body });
+}
+export function getAlbumPhotoTexts(albumId: string, signal?: AbortSignal): Promise<(AlbumPhotoText & { fileItemId: string })[]> {
+  return api(`/api/albums/${encodeURIComponent(albumId)}/photo-text`, { signal });
 }

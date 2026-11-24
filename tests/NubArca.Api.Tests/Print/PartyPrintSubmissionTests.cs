@@ -18,7 +18,7 @@ namespace NubArca.Api.Tests.Print;
 /// Submission is where budget, idempotency and source validation meet, and
 /// where a mistake becomes a sheet of paper nobody asked for.
 /// </summary>
-public sealed class PartyPrintSubmissionTests : IDisposable
+public sealed partial class PartyPrintSubmissionTests : IDisposable
 {
     private readonly SqliteWebApplicationFactory _factory = new();
     public PartyPrintSubmissionTests() => _factory.EnsureDatabaseCreated();

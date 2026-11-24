@@ -1,0 +1,9 @@
+.album-photo-editor { position: fixed; inset: 0; z-index: 1500; overflow: auto; background: #0a0f1a; color: #fff; padding: 1rem; }
+.album-photo-editor-shell { width: min(100%, 48rem); margin: auto; }
+.album-photo-editor-preview { position: relative; width: fit-content; max-width: 100%; margin: 1rem auto; line-height: 0; }
+.album-photo-editor-preview > img { display: block; max-width: 100%; max-height: 60dvh; }
+.album-photo-editor label { display: grid; gap: .4rem; }
+.album-photo-editor textarea { min-height: 5rem; font: inherit; }
+.album-photo-editor-actions { display: flex; flex-wrap: wrap; gap: .7rem; margin: 1rem 0; }
+.album-photo-editor button { min-height: 44px; padding: .6rem 1rem; }
+.public-gallery-badge { position: absolute; bottom: .6rem; left: .6rem; border-radius: .4rem; padding: .35rem .55rem; background: #0a0f1ae8; color: white; font: 600 .8rem/1.3 sans-serif; }

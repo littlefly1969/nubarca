@@ -24,6 +24,8 @@ public sealed class PartyPrintRequest
     public string IdempotencyKeyHash { get; set; } = string.Empty;
 
     /// <summary>Which product this key claimed, so a key cannot cross products.</summary>
+    public string? RequestFingerprint { get; set; }
+
     public string Product { get; set; } = PartyPrintProducts.Photo;
 
     /// <summary>The job the first request produced; a repeat is answered with it.</summary>

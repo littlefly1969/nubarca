@@ -53,4 +53,10 @@ public class AlbumItem
     // (Album.SortOldestFirst), FileItemId breaking ties. The column stays so a
     // previous application image still reads and writes a valid value.
     public int SortOrder { get; set; }
+
+    // Album-local decoration. The immutable original and the single membership
+    // stay intact; the guest book snapshots its own photograph independently.
+    public string? PhotoText { get; set; }
+    public NubArca.Api.Print.PhotoTextLayout? PhotoTextLayout { get; set; }
+    public long PhotoTextVersion { get; set; }
 }
