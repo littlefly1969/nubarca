@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Access;
 using NubArca.Api.Http;
@@ -11,8 +12,8 @@ public static class AlbumPhotoTextEndpoints
     public static void MapAlbumPhotoTextEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/albums/{albumId:guid}/photos/{fileId:guid}/{variant}", async (
-            Guid albumId, Guid fileId, string variant, HttpContext http, AppDbContext db,
-            NubArca.Api.Files.IFileThumbnailService thumbnails, NubArca.Api.Metadata.IImageMetadataStripper stripper, CancellationToken ct) =>
+            Guid albumId, Guid fileId, string variant, HttpContext http, [FromServices] AppDbContext db,
+            [FromServices] NubArca.Api.Files.IFileThumbnailService thumbnails, [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper, CancellationToken ct) =>
         {
             if (variant is not ("thumbnail" or "preview")) return Results.NotFound();
             var owner = http.GetCurrentUserId()!.Value;
@@ -21,8 +22,8 @@ public static class AlbumPhotoTextEndpoints
                 variant, http, thumbnails, stripper, ct);
         }).RequireAuthorization();
         app.MapGet("/api/party/{token}/photos/{fileId:guid}/text", async (
-            string token, Guid fileId, HttpContext http, AppDbContext db,
-            IPartyLinkService links, IPartyMediaService media, IPartyParticipantService participants, CancellationToken ct) =>
+            string token, Guid fileId, HttpContext http, [FromServices] AppDbContext db,
+            [FromServices] IPartyLinkService links, [FromServices] IPartyMediaService media, [FromServices] IPartyParticipantService participants, CancellationToken ct) =>
         {
             http.Response.Headers.CacheControl = "no-store";
             var access = await links.ResolvePublicAsync(token, ct);
@@ -37,8 +38,8 @@ public static class AlbumPhotoTextEndpoints
         }).RequireRateLimiting("party-public");
 
         app.MapPut("/api/party/{token}/photos/{fileId:guid}/text", async (
-            string token, Guid fileId, AlbumPhotoTextWrite write, HttpContext http, AppDbContext db,
-            IPartyLinkService links, IPartyMediaService media, IPartyParticipantService participants, CancellationToken ct) =>
+            string token, Guid fileId, [FromBody] AlbumPhotoTextWrite write, HttpContext http, [FromServices] AppDbContext db,
+            [FromServices] IPartyLinkService links, [FromServices] IPartyMediaService media, [FromServices] IPartyParticipantService participants, CancellationToken ct) =>
         {
             http.Response.Headers.CacheControl = "no-store";
             var access = await links.ResolvePublicAsync(token, ct);
@@ -53,7 +54,7 @@ public static class AlbumPhotoTextEndpoints
         }).RequireRateLimiting("party-upload");
 
         app.MapGet("/api/albums/{albumId:guid}/photo-text", async (
-            Guid albumId, HttpContext http, AppDbContext db, CancellationToken ct) =>
+            Guid albumId, HttpContext http, [FromServices] AppDbContext db, CancellationToken ct) =>
         {
             http.Response.Headers.CacheControl = "no-store";
             var owner = http.GetCurrentUserId()!.Value;
@@ -65,7 +66,7 @@ public static class AlbumPhotoTextEndpoints
         }).RequireAuthorization();
 
         app.MapGet("/api/albums/{albumId:guid}/photos/{fileId:guid}/text", async (
-            Guid albumId, Guid fileId, HttpContext http, AppDbContext db, CancellationToken ct) =>
+            Guid albumId, Guid fileId, HttpContext http, [FromServices] AppDbContext db, CancellationToken ct) =>
         {
             http.Response.Headers.CacheControl = "no-store";
             var owner = http.GetCurrentUserId()!.Value;
@@ -74,7 +75,7 @@ public static class AlbumPhotoTextEndpoints
         }).RequireAuthorization();
 
         app.MapPut("/api/albums/{albumId:guid}/photos/{fileId:guid}/text", async (
-            Guid albumId, Guid fileId, AlbumPhotoTextWrite write, HttpContext http, AppDbContext db, CancellationToken ct) =>
+            Guid albumId, Guid fileId, [FromBody] AlbumPhotoTextWrite write, HttpContext http, [FromServices] AppDbContext db, CancellationToken ct) =>
         {
             http.Response.Headers.CacheControl = "no-store";
             if (!await IsOwnedPhotoAsync(db, http.GetCurrentUserId()!.Value, albumId, fileId, ct)) return Results.NotFound();

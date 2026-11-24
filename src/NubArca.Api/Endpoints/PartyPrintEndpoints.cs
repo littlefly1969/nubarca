@@ -223,8 +223,8 @@ public static class PartyPrintEndpoints
         }).WithName("GetPartyPrintMedia").RequireRateLimiting(PartyPublicRateLimitPolicy);
 
         app.MapGet("/api/party/{printToken}/print/guestbook/{entryId:guid}/preview", async (
-            string printToken, Guid entryId, HttpContext http, IPartyPrintAccessResolver resolver,
-            IPartyParticipantService participants, GuestbookPrintSource memories, CancellationToken ct) =>
+            string printToken, Guid entryId, HttpContext http, [FromServices] IPartyPrintAccessResolver resolver,
+            [FromServices] IPartyParticipantService participants, [FromServices] GuestbookPrintSource memories, CancellationToken ct) =>
         {
             http.Response.Headers.CacheControl = "no-store";
             var access = await resolver.ResolveAsync(printToken, ct);
