@@ -45,6 +45,7 @@ function published(body: Record<string, unknown>, status = 'visible') {
       id: 'g-new',
       authorDisplayName: body.authorDisplayName,
       body: body.body,
+      textLayout: body.textLayout,
       createdAt: '2026-10-01T21:00:00Z',
       template: { key: body.templateKey, version: 1 },
       media: {
@@ -111,6 +112,25 @@ function lastPost(calls: FetchSpyEntry[]) {
 }
 
 describe('PartyGuestbookComposer (making a memory)', () => {
+  it('keeps a positioned bubble after publication and reload', async () => {
+    const user = userEvent.setup();
+    const spy = mock();
+    renderBook(); await openComposerAndChoose(user);
+    await write(user, 'Una festa bellissima', 'Ada');
+    await user.selectOptions(screen.getByLabelText('Posizione del testo'), 'bubble');
+    fireEvent.change(screen.getByTestId('photo-text-x'), { target: { value: '75' } });
+    fireEvent.change(screen.getByTestId('photo-text-y'), { target: { value: '25' } });
+    expect(screen.getByTestId('photo-text-overlay')).toHaveTextContent('Una festa bellissima');
+    await user.click(screen.getByTestId('guestbook-publish'));
+    await screen.findByTestId('guestbook-sent');
+    expect(lastPost(spy.calls)).toMatchObject({ textLayout: { mode: 'bubble', x: .75, y: .25 } });
+    expect(within(screen.getByTestId('guestbook-sent-memory')).getByTestId('photo-text-overlay')).toHaveTextContent('Ada');
+    cleanup(); renderBook();
+    const saved = await screen.findByTestId('photo-text-overlay');
+    expect(saved).toHaveClass('photo-text-overlay--bubble');
+    expect(parseFloat(saved.style.left)).toBeCloseTo(26.25);
+  });
+
   it('opens on the party’s photographs, loading first, from the photo-only chooser', async () => {
     let release: () => void = () => {};
     const arrived = new Promise<void>((resolve) => { release = resolve; });

@@ -341,6 +341,7 @@ export interface OwnerPhotoPrintRequest {
   caption?: string;
   /** The face the caption is written in (a text font id). Absent: the band's own face. */
   captionFont?: string;
+  textLayout?: import('@nubarca/contracts').PhotoTextLayout;
   /** The NubArca wordmark in a framed sheet's band. */
   brand?: boolean;
   /** With `brand`: this album's own logo signs the band in place of the NubArca wordmark. */

@@ -161,6 +161,17 @@ longitude, `BlendMm + 0.25 × height` away from the photo's edge. Their coverage
 mixes the wall toward the maximum thickness, so backlit they read dark. They are
 drawn into the persisted map, so preview, strips and STL agree.
 
+New editor drafts explicitly set `textLatitudeDegrees: 0` and
+`textLongitudeDegrees: 0`: the text block is centred on the equator at the front
+of the sphere, independent of the photograph. Latitude (−60° to +60°, positive
+upward) moves the block along the meridian; longitude (−180° to +180°, positive
+rightward in the front view) moves it around the sphere. Both apply to photo and
+words-only projects and use the same hanging rotation as the photo. The editor
+can reset both to zero. Check the processed preview for wrapping or clipping
+near the poles and opening, especially with large or long two-line text.
+Absent coordinates preserve the legacy `textPosition` placement described above;
+no existing project or artifact is rewritten.
+
 A create or preview request with `fileItemId: null` is a lithophane of words
 only: `text` is required, the background wall is the whole sphere and the words
 are centred on the equator facing longitude 0. Such a project stores

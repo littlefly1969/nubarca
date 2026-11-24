@@ -153,6 +153,7 @@ export function mintPartyDisplayGrant(signal?: AbortSignal): Promise<TvPartyDisp
 // memories only, in the book's own order; each photograph is a derived,
 // metadata-free preview on the television's own route.
 export interface TvGuestbookMemory {
+  textLayout?: import('../../../packages/contracts/src/photoText').PhotoTextLayout | null;
   id: string;
   authorDisplayName: string;
   // PLAIN TEXT with LF paragraphs, blank lines included. Rendered as text.

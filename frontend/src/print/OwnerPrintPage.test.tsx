@@ -389,6 +389,23 @@ describe('OwnerPrintPage', () => {
     expect(body).not.toHaveProperty('logoAlbumId');
   });
 
+  it('prints a movable bubble on a full bleed photo and sends its coordinates', async () => {
+    const user = userEvent.setup();
+    const mock = mount(`/print?album=${ALBUM}&files=f1`);
+    await user.click(await screen.findByTestId('party-print-format-photo'));
+    await user.click(next()); await user.click(next());
+    await user.selectOptions(screen.getByLabelText('Posizione del testo'), 'bubble');
+    await user.type(screen.getByTestId('owner-print-caption'), 'Auguri!');
+    fireEvent.change(screen.getByTestId('photo-text-x'), { target: { value: '80' } });
+    fireEvent.change(screen.getByTestId('photo-text-y'), { target: { value: '20' } });
+    const overlay = screen.getByTestId('photo-text-overlay');
+    expect(overlay).toHaveTextContent('Auguri!');
+    expect(overlay).toHaveClass('photo-text-overlay--bubble');
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    expect(lastPost(mock.calls)).toMatchObject({ style: 'fullBleed', caption: 'Auguri!', textLayout: { mode: 'bubble', x: .8, y: .2 } });
+  });
+
   it('sends four photographs in the order they were chosen, framed, with no orientation of their own', async () => {
     const user = userEvent.setup();
     const mock = mount(`/print?album=${ALBUM}&files=f3,f1,f4,f2`);

@@ -34,11 +34,7 @@ const FIELDS: { key: NumericField; min: number; max: number; step: number; label
 const SHAPE_FIELDS = new Set<keyof LithophaneSettings>([
   'diameterMm', 'openingMm', 'minThicknessMm', 'maxThicknessMm', 'backgroundThicknessMm', 'resolutionMm',
 ]);
-const TEXT_POSITIONS: { value: NonNullable<LithophaneSettings['textPosition']>; label: MessageKey }[] = [
-  { value: 'below', label: 'lithophane.textBelow' },
-  { value: 'above', label: 'lithophane.textAbove' },
-  { value: 'onPhoto', label: 'lithophane.textOnPhoto' },
-];
+
 
 export function LithophanesPage() {
   const { t, formatNumber } = useI18n();
@@ -229,11 +225,24 @@ export function LithophanesPage() {
               <input type="number" min={3} max={30} step={0.5} value={settings.textHeightMm ?? DEFAULT_LITHOPHANE_TEXT_HEIGHT}
                 onChange={(e) => { setSettings((old) => ({ ...old, textHeightMm: Number(e.target.value) })); setPreview(null); }} required />
             </label>
-            {!textOnly && <label>{t('lithophane.textPosition')}
-              <select value={settings.textPosition ?? 'below'} onChange={(e) => {
-                setSettings((old) => ({ ...old, textPosition: e.target.value as LithophaneSettings['textPosition'] })); setPreview(null);
-              }}>{TEXT_POSITIONS.map((p) => <option key={p.value} value={p.value}>{t(p.label)}</option>)}</select>
-            </label>}
+            <label>{t('lithophane.textLatitude')}
+              <input type="number" min={-60} max={60} step={1} value={settings.textLatitudeDegrees ?? 0}
+                data-testid="lithophane-text-latitude" onChange={(e) => {
+                  setSettings((old) => ({ ...old, textLatitudeDegrees: Number(e.target.value),
+                    textLongitudeDegrees: old.textLongitudeDegrees ?? 0 })); setPreview(null);
+                }} />
+            </label>
+            <label>{t('lithophane.textLongitude')}
+              <input type="number" min={-180} max={180} step={1} value={settings.textLongitudeDegrees ?? 0}
+                data-testid="lithophane-text-longitude" onChange={(e) => {
+                  setSettings((old) => ({ ...old, textLongitudeDegrees: Number(e.target.value),
+                    textLatitudeDegrees: old.textLatitudeDegrees ?? 0 })); setPreview(null);
+                }} />
+            </label>
+            <button type="button" className="btn btn-secondary" onClick={() => {
+              setSettings((old) => ({ ...old, textLatitudeDegrees: 0, textLongitudeDegrees: 0 })); setPreview(null);
+            }}>{t('lithophane.textCenter')}</button>
+            <p className="lithophane-hint">{t('lithophane.textOffsetHelp')}</p>
           </div>
         </fieldset>
         {!valid && !textMissing && (suggestedResolution !== null

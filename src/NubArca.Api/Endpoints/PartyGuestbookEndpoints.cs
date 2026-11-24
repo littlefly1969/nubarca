@@ -41,7 +41,8 @@ public static class PartyGuestbookEndpoints
         string? AuthorDisplayName,
         string? Body,
         string? TemplateKey,
-        GuestbookCropRequest? Crop);
+        GuestbookCropRequest? Crop,
+        NubArca.Api.Print.PhotoTextLayout? TextLayout = null);
 
     /// <summary>The framing: centre as fractions of the photograph, zoom from 1.</summary>
     public sealed record GuestbookCropRequest(double? CenterX, double? CenterY, double? Zoom);
@@ -197,7 +198,7 @@ public static class PartyGuestbookEndpoints
                     body.TemplateKey,
                     body.Crop?.CenterX,
                     body.Crop?.CenterY,
-                    body.Crop?.Zoom),
+                    body.Crop?.Zoom, body.TextLayout),
                 participantId,
                 cancellationToken);
 
@@ -254,6 +255,7 @@ public static class PartyGuestbookEndpoints
                         PartyGuestbookSubmissionError.PhotoNotImage => "guestbook_photo_not_image",
                         PartyGuestbookSubmissionError.InvalidTemplate => "guestbook_invalid_template",
                         PartyGuestbookSubmissionError.InvalidCrop => "guestbook_invalid_crop",
+                        PartyGuestbookSubmissionError.InvalidTextLayout => "guestbook_invalid_text_layout",
                         _ => "guestbook_invalid_body",
                     },
                     maxAuthorDisplayNameLength = PartyGuestbookLimits.MaxAuthorDisplayNameLength,

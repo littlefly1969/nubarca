@@ -292,6 +292,7 @@ interface SheetProps {
   bandDark: boolean;
   band: StudioBand;
   fullBleedWords?: (sheet: FullBleedSheet) => ReactNode;
+  photoWords?: () => ReactNode;
   sheetData?: Record<string, string>;
   chosen: string[];
   photoById: Map<string, StudioPhoto>;
@@ -360,6 +361,7 @@ function SheetPreview(props: SheetProps) {
             slotAspect={slotAspect} view={viewOf(id)}
             onAspect={(width, height) => onAspect(id, width, height)}
           />
+          {props.photoWords?.()}
         </div>
         {props.fullBleedWords?.({
           portrait, width: w, height: h,
@@ -400,6 +402,7 @@ function SheetPreview(props: SheetProps) {
             slotAspect={slotAspect} view={viewOf(id)}
             onAspect={(w, h) => onAspect(id, w, h)}
           />
+          {props.photoWords?.()}
         </div>
         {popOut && <PopOutLayer popOut={popOut} aspect={aspect} paper={paper} portrait={portrait} view={viewOf(id)} />}
         <div
@@ -454,6 +457,7 @@ function SheetPreview(props: SheetProps) {
                 slotAspect={aspect} view={viewOf(id)}
                 onAspect={(w, h) => onAspect(id, w, h)}
               />
+              {props.photoWords?.()}
               {style === 'fullBleed' && props.fullBleedWords?.({
                 portrait, width: halfWidth, height: halfHeight,
                 visible: visiblePhotoRect(placePhoto(aspectOf(id), aspect, viewOf(id))),
@@ -513,6 +517,7 @@ function SheetPreview(props: SheetProps) {
                 slotAspect={slotAspect} view={viewOf(id)}
                 onAspect={(w, h) => onAspect(id, w, h)}
               />
+              {props.photoWords?.()}
             </div>
           );
         })}
@@ -566,6 +571,7 @@ function SheetPreview(props: SheetProps) {
                   slotAspect={slotAspect} view={viewOf(id)}
                   onAspect={(w, h) => onAspect(id, w, h)}
                 />
+                {props.photoWords?.()}
               </div>
             );
           })}
@@ -612,6 +618,7 @@ export interface PrintStudioProps {
   paperColor: (layout: PrintLayout) => string;
   band: StudioBand;
   fullBleedWords?: (sheet: FullBleedSheet) => ReactNode;
+  photoWords?: () => ReactNode;
   /** Extra attributes for a full-bleed preview sheet. */
   sheetData?: Record<string, string>;
   /** The preview step's own choices (looks, words…) for the format being composed. */
@@ -1217,6 +1224,7 @@ export function PrintStudio(props: PrintStudioProps) {
             sheetTheme={props.sheetTheme(layout)}
             bandDark={props.bandDark(layout)}
             band={props.band}
+            photoWords={props.photoWords}
             fullBleedWords={props.fullBleedWords}
             sheetData={props.sheetData}
             chosen={chosen}

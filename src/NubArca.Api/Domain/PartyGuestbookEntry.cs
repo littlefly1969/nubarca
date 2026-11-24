@@ -84,6 +84,8 @@ public class PartyGuestbookEntry
     /// </summary>
     public string Body { get; set; } = string.Empty;
 
+    public NubArca.Api.Print.PhotoTextLayout? TextLayout { get; set; }
+
     /// <summary>
     /// THE MEMORY'S OWN REFERENCE to the photograph's original, content-
     /// addressed bytes. One reference per row, acquired at publication and

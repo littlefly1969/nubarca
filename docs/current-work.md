@@ -7,6 +7,22 @@ is built is described by `ARCHITECTURE.md`.
 
 ## Baseline
 
+- The PostgreSQL game/guestbook concurrency gate also exercises a deterministic
+  game winner across repeated rounds. Between races the test follows the full
+  reveal → start activity → vote → result → intermission sequence and verifies
+  that the slideshow owns the screen again. CI requires this regression to
+  execute and pass; a skipped or missing result fails the gate.
+- Browser TV end-to-end tests launch Chromium with an OS-assigned CDP port and
+  wait up to 45 seconds for its announced endpoint. Startup errors preserve
+  bounded stderr diagnostics and terminate failed processes. A real browser
+  restart retains the same display profile; startup lifecycle tests run in CI.
+- Owner print fixtures remain distinct through an EXIF identifier without
+  altering their pixels. Full-bleed corner assertions therefore measure the
+  renderer rather than random marks in the source photograph.
+- Direct AI startup preload checks both cancellation and a monotonic deadline
+  after native initialization and each compilation, and before declaring ready.
+  Delayed timer callbacks cannot make an overdue preload healthy.
+
 - Laboratory lithophanes (`/lab/lithophanes`): one owner photograph, optional words
   (or words alone, no photo) to a spherical STL; `lithophane.generate` uses the shared cooperative job engine. Photos
   arrive through *Add to → Lithophanes* (library, lists, albums) onto an
@@ -24,7 +40,17 @@ is built is described by `ARCHITECTURE.md`.
   BlobJanitor and print-artifact cleanup. Access requires `laboratory.access`
   plus `laboratory.lithophanes`, rechecked by workers. See [lithophanes.md](lithophanes.md).
 
-- Release: `0.4.14` (server and web)
+- Photo text: owner/share print and guestbook accept an optional `textLayout`
+  (`below`, `overlay`, `bubble`; normalized x/y and width/height, left/right tail).
+  Editors share numeric controls and drag/arrow-key positioning. Guestbook stores
+  the composition separately from the immutable photograph; web and native TV
+  render it. Missing layout preserves existing designs. Owner print fingerprints
+  include overlay geometry; calibration still applies after text rendering.
+- Lithophane words: new editor drafts start at explicit latitude/longitude 0°,
+  independently of the photo footprint, with ±60° vertical and ±180° horizontal
+  controls. Absent coordinates retain saved photo-relative text positions.
+
+- Release: `0.4.16` (server and web)
 - NubArca TV: `1.0.11`, `versionCode` 13, OTA runtime `nubarca-tv-native-12`
 - Backend: ASP.NET Core / .NET 10, EF Core, PostgreSQL 17
 - Frontend: React, TypeScript, Vite

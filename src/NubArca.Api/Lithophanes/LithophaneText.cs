@@ -39,7 +39,9 @@ public static class LithophaneText
         var heightMm = mask.Height / pxPerMm;
 
         var gap = LithophaneSettings.BlendMm + settings.TextHeight * 0.25;
-        var top = centred ? (photo.TopMm + photo.BottomMm - heightMm) / 2 : settings.TextPlacement switch
+        var top = settings.TextLatitudeDegrees is { } latitude
+            ? (90 - latitude) * Math.PI / 180 * grid.Radius - heightMm / 2
+            : centred ? (photo.TopMm + photo.BottomMm - heightMm) / 2 : settings.TextPlacement switch
         {
             "above" => photo.TopMm - gap - heightMm,
             "onPhoto" => photo.BottomMm - gap - heightMm,
@@ -56,7 +58,7 @@ public static class LithophaneText
             var ringMmPerDegree = mmPerRadian * Math.Sin(theta) * Math.PI / 180;
             for (var col = 0; col < grid.Columns; col++)
             {
-                var lon = grid.DesignLongitude(col, settings.Hanging) - photo.CenterLonDegrees;
+                var lon = grid.DesignLongitude(col, settings.Hanging) - (settings.TextLongitudeDegrees ?? photo.CenterLonDegrees);
                 lon = lon - 360 * Math.Round(lon / 360);
                 var x = (lon * ringMmPerDegree + widthMm / 2) * pxPerMm;
                 if (x < 0 || x > mask.Width - 1) continue;

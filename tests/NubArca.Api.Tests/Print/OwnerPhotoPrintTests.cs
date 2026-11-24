@@ -11,6 +11,7 @@ using NubArca.Api.Print;
 using NubArca.Api.Tests.Endpoints;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Metadata.Profiles.Exif;
 using SixLabors.ImageSharp.PixelFormats;
 
 namespace NubArca.Api.Tests.Print;
@@ -25,6 +26,31 @@ public sealed class OwnerPhotoPrintTests : IDisposable
     private readonly SqliteWebApplicationFactory _factory = new();
     public OwnerPhotoPrintTests() => _factory.EnsureDatabaseCreated();
     public void Dispose() => _factory.Dispose();
+
+    [Fact]
+    public async Task Bubble_is_in_the_printed_photo_and_moving_it_changes_idempotency()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var photo = await PhotoAsync(people.Owner);
+        var layout = new PhotoTextLayout("bubble", 1, 0);
+        object Request(PhotoTextLayout position) => new {
+            fileItemId = photo, printStationId = printer.StationId, printerDeviceId = printer.DeviceId,
+            expectedPaperSize = "10x15", orientation = "landscape", style = "fullBleed",
+            placement = new { centerX = .5, centerY = .5, zoom = 1 },
+            caption = "Auguri!", textLayout = position,
+        };
+        var key = Guid.NewGuid().ToString("N");
+        (await Submit(people.Owner, Request(layout), key)).EnsureSuccessStatusCode();
+        (await Submit(people.Owner, Request(layout), key)).EnsureSuccessStatusCode();
+        var changed = await Submit(people.Owner, Request(layout with { X = 0 }), key);
+        Assert.Equal(HttpStatusCode.Conflict, changed.StatusCode);
+        using var sheet = await PrintedSheetAsync(printer);
+        var white = sheet[(int)(sheet.Width * .94), (int)(sheet.Height * .03)];
+        Assert.True(white.R > 230 && white.G > 230 && white.B > 230);
+        var untouched = sheet[(int)(sheet.Width * .1), (int)(sheet.Height * .1)];
+        Assert.True(untouched.R > 150 && untouched.G < 60 && untouched.B < 60);
+    }
 
     private sealed record Printer(Guid StationId, Guid DeviceId, string Credential);
 
@@ -90,11 +116,36 @@ public sealed class OwnerPhotoPrintTests : IDisposable
         // Each photograph its own bytes: identical bytes are ONE blob, and a
         // test setting one photo's metadata would rewrite another's.
         using var image = new Image<Rgb24>(width, height, color ?? Red);
-        image[0, 0] = new Rgb24((byte)Random.Shared.Next(256), (byte)Random.Shared.Next(256), 0);
-        image[1, 0] = new Rgb24((byte)Random.Shared.Next(256), 0, (byte)Random.Shared.Next(256));
+        // Keep the pixels uniform, including the corners tested by full bleed
+        // printing. Random corner pixels survive decoding and JPEG ringing can
+        // turn a blue edge pale enough to look like unprinted paper.
+        image.Metadata.ExifProfile = new ExifProfile();
+        image.Metadata.ExifProfile.SetValue(ExifTag.ImageUniqueID, Guid.NewGuid().ToString("N"));
         using var stream = new MemoryStream();
         image.Save(stream, new JpegEncoder());
         return stream.ToArray();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Distinct_source_fixtures_preserve_their_colour_at_every_edge(bool blue)
+    {
+        var colour = blue ? Blue : Red;
+        var first = Jpeg(64, 40, colour);
+        var second = Jpeg(64, 40, colour);
+        Assert.False(first.SequenceEqual(second));
+        foreach (var bytes in new[] { first, second })
+        {
+            using var image = Image.Load<Rgb24>(bytes);
+            foreach (var (x, y) in new[] { (0, 0), (63, 0), (0, 39), (63, 39), (32, 20) })
+            {
+                var pixel = image[x, y];
+                Assert.InRange(Math.Abs(pixel.R - colour.R), 0, 3);
+                Assert.InRange(Math.Abs(pixel.G - colour.G), 0, 3);
+                Assert.InRange(Math.Abs(pixel.B - colour.B), 0, 3);
+            }
+        }
     }
 
     /// <summary>A photograph in the owner's library with the metadata a real one carries.</summary>

@@ -1,3 +1,4 @@
+import { PhotoTextOverlay } from '../components/PhotoTextOverlay';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AccessibilityInfo,
@@ -240,9 +241,11 @@ function MemoryOnStage({ memory }: { memory: TvGuestbookMemory }) {
             top: placement.top * box.height,
           }}
         />
+        {memory.textLayout && memory.textLayout.mode !== 'below' && <PhotoTextOverlay
+          layout={memory.textLayout} text={memory.body} author={memory.authorDisplayName} width={box.width} height={box.height} />}
       </View>
       {look.ornament}
-      <View
+      {(!memory.textLayout || memory.textLayout.mode === 'below') && <View
         style={[styles.column, look.column, {
           width: guestbookTvWordsWidth(stageW, box.width, density),
           height: guestbookTvWordsHeight(stageH, box.height, density),
@@ -267,7 +270,7 @@ function MemoryOnStage({ memory }: { memory: TvGuestbookMemory }) {
             </Text>
           </View>
         </View>
-      </View>
+      </View>}
     </Animated.View>
   );
 }

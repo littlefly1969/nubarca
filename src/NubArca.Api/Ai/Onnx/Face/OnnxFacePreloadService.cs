@@ -121,10 +121,21 @@ public sealed class OnnxFacePreloadService : BackgroundService
         var ct = timeoutCts.Token;
 
         var sw = Stopwatch.StartNew();
+        // CancelAfter dispatches through a timer. A synchronous native compile
+        // can return after the ceiling while a busy thread pool has not yet
+        // delivered cancellation. The monotonic deadline is authoritative too.
+        void ThrowIfExpired()
+        {
+            ct.ThrowIfCancellationRequested();
+            if (sw.Elapsed >= ceiling) throw new OperationCanceledException(ct);
+        }
+
         try
         {
+            ThrowIfExpired();
             _state.Advance(FacePreloadStates.NativeRuntimeInitializing);
             _factory.EnsureNativeProviderInitialized();
+            ThrowIfExpired();
 
             if (config is not null)
             {
@@ -136,7 +147,8 @@ public sealed class OnnxFacePreloadService : BackgroundService
                 var detectorOutputs = CompileAndRunSynthetic(
                     new OnnxModelSpec(OnnxModel.FaceDetector, detectorPath),
                     BuildSyntheticChw(config.DetectorInputSize),
-                    config.DetectorInputSize, ct, isDetector: true);
+                    config.DetectorInputSize, ThrowIfExpired, isDetector: true);
+                ThrowIfExpired();
 
                 _state.Advance(FacePreloadStates.FaceDetectorValidating);
                 if (!ValidateDetector(detectorOutputs, config, out var detReason))
@@ -151,7 +163,8 @@ public sealed class OnnxFacePreloadService : BackgroundService
                 var recognizerOutputs = CompileAndRunSynthetic(
                     new OnnxModelSpec(OnnxModel.FaceRecognizer, recognitionPath),
                     BuildSyntheticChw(config.RecognitionInputSize),
-                    config.RecognitionInputSize, ct, isDetector: false);
+                    config.RecognitionInputSize, ThrowIfExpired, isDetector: false);
+                ThrowIfExpired();
 
                 _state.Advance(FacePreloadStates.FaceRecognizerValidating);
                 if (!ValidateRecognizer(recognizerOutputs, config, out var recReason))
@@ -180,7 +193,8 @@ public sealed class OnnxFacePreloadService : BackgroundService
 
                 _state.Advance(FacePreloadStates.PhotoTextCompiling);
                 var textOutputs = CompileAndRunSyntheticText(
-                    new OnnxModelSpec(OnnxModel.PhotoText, textModelPath), photoConfig, ct);
+                    new OnnxModelSpec(OnnxModel.PhotoText, textModelPath), photoConfig, ThrowIfExpired);
+                ThrowIfExpired();
 
                 _state.Advance(FacePreloadStates.PhotoTextValidating);
                 if (!ValidatePhotoText(textOutputs, photoConfig, out var textReason))
@@ -191,6 +205,7 @@ public sealed class OnnxFacePreloadService : BackgroundService
                 }
             }
 
+            ThrowIfExpired();
             _state.Ready($"warm-in-{sw.ElapsedMilliseconds}ms");
             _logger.LogInformation(
                 "Direct model preload READY in {Ms}ms (face={Face} photoText={PhotoText}, device detector={DetDev} recognizer={RecDev} photoText={TextDev}).",
@@ -234,12 +249,12 @@ public sealed class OnnxFacePreloadService : BackgroundService
     // inputs (pad ids, all-attended mask — the production fixed-padding policy),
     // exactly the production input names/shape. Integrity only, never quality.
     private IReadOnlyList<OnnxOutputTensor> CompileAndRunSyntheticText(
-        OnnxModelSpec spec, OnnxImageModelConfig config, CancellationToken ct)
+        OnnxModelSpec spec, OnnxImageModelConfig config, Action checkDeadline)
     {
-        ct.ThrowIfCancellationRequested();
+        checkDeadline();
         using var lease = _factory.Acquire(spec); // compiles for the configured device
         var session = lease.Session;
-        ct.ThrowIfCancellationRequested();
+        checkDeadline();
         var ids = new long[config.TextSequenceLength]; // id 0 (pad) is always valid
         var mask = OnnxTextEmbedder.BuildFixedPaddingAttentionMask(config.TextSequenceLength);
         var inputs = new[]
@@ -330,12 +345,12 @@ public sealed class OnnxFacePreloadService : BackgroundService
     // on it. The lease shares the cached session, so the first REAL request reuses
     // it and no second compile occurs.
     private IReadOnlyList<OnnxOutputTensor> CompileAndRunSynthetic(
-        OnnxModelSpec spec, float[] chw, int size, CancellationToken ct, bool isDetector)
+        OnnxModelSpec spec, float[] chw, int size, Action checkDeadline, bool isDetector)
     {
-        ct.ThrowIfCancellationRequested();
+        checkDeadline();
         using var lease = _factory.Acquire(spec); // compiles for the configured device
         var session = lease.Session;
-        ct.ThrowIfCancellationRequested();
+        checkDeadline();
         var inputName = session.InputNames.First();
         var tensor = new DenseTensor<float>(chw, new[] { 1, 3, size, size });
         return session.Run(new[] { NamedOnnxValue.CreateFromTensor(inputName, tensor) });
