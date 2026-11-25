@@ -4,6 +4,11 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## 0.4.18 — 2026-11-25
+
+- Lithophane studio: adjustable soft shell texture, transparent-source coverage, 0.4 mm shell with internal fit, signed text angles, collapsible design controls, enlarged preview and separate project history.
+- Laboratory Cutout: independent permission and owner-private photo queue, shared speech-bubble editor, standard PNG ingestion and direct transfer of the saved file to Lithophanes.
+
 ## 0.4.17 — 2026-11-24
 
 - Party album photographs keep one membership and their immutable originals, with optional album-local text or a positioned speech bubble. Guests edit only their own uploads; the organizer edits any eligible album photograph. The guest gallery marks “Caricata da te” independently of edit privileges.

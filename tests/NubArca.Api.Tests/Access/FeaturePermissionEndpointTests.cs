@@ -37,6 +37,7 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
         { "/api/people/cluster-rebuild/00000000-0000-0000-0000-000000000000",
             Permissions.PeopleClusterRebuild },
         { "/api/plates/images", Permissions.LaboratoryPlates },
+        { "/api/lab/cutout/queue", Permissions.LaboratoryCutout },
         { "/api/private-vault", Permissions.PrivateVaultAccess },
         { "/api/uploads/staging/config", Permissions.CloudFunctionsAccess },
         // Party. The owner surface is nested under the album it is configured
@@ -102,7 +103,7 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
         // to store the child alone.
         string[] permissions = permissionKey switch
         {
-            Permissions.LaboratoryPlates =>
+            Permissions.LaboratoryPlates or Permissions.LaboratoryCutout =>
                 [Permissions.LaboratoryAccess, permissionKey],
             Permissions.PeopleClusterRebuild => [Permissions.PeopleAccess, permissionKey],
             Permissions.PartyContributions or Permissions.PartyGames
@@ -168,6 +169,18 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
             var response = await client.GetAsync(route);
             Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
+    }
+
+    [Fact]
+    public async Task Cutout_Laboratory_Is_Independent_Of_Ordinary_Cutout_And_Lithophanes()
+    {
+        var (_, client) = await _factory.CreatePermissionClientAsync("cutout-only@example.com",
+            Permissions.LaboratoryAccess, Permissions.LaboratoryCutout);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/lab/cutout/queue")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync("/api/lab/cutout/00000000-0000-0000-0000-000000000001/send", null)).StatusCode);
+        var (_, restricted) = await _factory.CreateRoleClientAsync(RoleKeys.Restricted, "cutout-restricted@example.com");
+        Assert.Equal(HttpStatusCode.OK, (await restricted.GetAsync("/api/subject-cutout")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await restricted.GetAsync("/api/lab/cutout/queue")).StatusCode);
     }
 
     [Fact]

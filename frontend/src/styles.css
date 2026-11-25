@@ -8979,3 +8979,16 @@ video.lightbox-image {
   gap: 0.6rem; margin: 0.75rem auto 0; padding: 0.5rem 0.75rem; max-width: 40rem; border-radius: 999px;
   background: var(--surface-raised); box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
 }
+
+/* Owner-private laboratory cutout workspace. */
+.lab-cutout-queue { display: grid; grid-template-columns: repeat(auto-fill,minmax(135px,1fr)); gap: .8rem; }
+.lab-cutout-queue article { min-width: 0; display: grid; gap: .35rem; }
+.lab-cutout-queue article > button:first-child { display: grid; gap: .4rem; overflow-wrap: anywhere; }
+.lab-cutout-queue img { width:100%; aspect-ratio: 1; object-fit: cover; border-radius: .5rem; }
+.lab-cutout-dialog { position: fixed; z-index: 100; }
+.lab-cutout-dialog .subject-cutout-panel { max-height: 94dvh; overflow-y: auto; }
+.lab-cutout-dialog .subject-cutout-stage img { max-height: 46dvh; max-width: 100%; }
+.lab-cutout-composition { position: relative; display: inline-block; max-width:100%; line-height: normal; }
+.lab-cutout-composition > img { display: block; }
+.lab-cutout-bubble summary { cursor: pointer; padding: .6rem 0; }
+.lab-cutout-bubble textarea { width: 100%; min-height: 3rem; }

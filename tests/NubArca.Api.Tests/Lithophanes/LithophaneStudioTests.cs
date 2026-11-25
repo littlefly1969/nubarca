@@ -139,6 +139,30 @@ public sealed class LithophaneStudioTests
     }
 
     [Fact]
+    public void Soft_Relief_And_Transparent_Photo_Keep_The_Background_And_Joint()
+    {
+        var s = Settings(40, 16) with { ResolutionMm = 0.5, PrintAnchor = false, InternalFit = true,
+            BackgroundThicknessMm = 0.4, MinThicknessMm = 0.4, UseSourceAlpha = true,
+            BackgroundTextureHeightMm = 0.15, BackgroundTextureGrainMm = 1.5 };
+        Assert.True(s.IsValid());
+        using var photo = new Image<Rgba32>(12, 12, new Rgba32(255, 0, 0, 0));
+        using var map = LithophaneImage.CreateMap(photo, s);
+        var g = new LithophaneGrid(s);
+        Assert.Equal(0, map[g.Columns / 2, g.TopRows].A);
+        var pixel = new La16(255, 0);
+        var wall = LithophaneSurface.Wall(s, g, pixel, g.TopRows, 0);
+        Assert.InRange(wall, 0.4, 0.55);
+        Assert.Equal(wall, LithophaneSurface.Wall(s, g, pixel, g.TopRows, g.Columns));
+        Assert.Equal(0.4, LithophaneSurface.Wall(s, g, pixel, g.Rows, 0));
+        Assert.Equal(s.MinThicknessMm, LithophaneSurface.Wall(s, g, new La16(255, 255), g.TopRows, 0));
+        using var full = new MemoryStream(); using var split = new MemoryStream();
+        LithophaneMesh.WriteStrip(full, s, map, 0, g.Rows);
+        LithophaneMesh.WriteStrip(split, s, map, 0, g.TopRows);
+        LithophaneMesh.WriteStrip(split, s, map, g.TopRows, g.Rows);
+        Assert.Equal(full.ToArray(), split.ToArray());
+    }
+
+    [Fact]
     public void Legacy_Settings_Omit_New_Fields_And_Invalid_Studio_Settings_Are_Rejected()
     {
         var old = new LithophaneSettings();

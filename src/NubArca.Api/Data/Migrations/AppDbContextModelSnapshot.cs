@@ -3513,6 +3513,26 @@ namespace NubArca.Api.Data.Migrations
                     b.ToTable("lithophane_queue_items", (string)null);
                 });
 
+            modelBuilder.Entity("NubArca.Api.Domain.SubjectCutoutQueueItem", b =>
+                {
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("FileItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AddedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("OwnerUserId", "FileItemId");
+
+                    b.HasIndex("FileItemId");
+
+                    b.HasIndex("OwnerUserId", "AddedAt");
+
+                    b.ToTable("subject_cutout_queue_items", (string)null);
+                });
+
             modelBuilder.Entity("NubArca.Api.Domain.LithophaneStrip", b =>
                 {
                     b.Property<Guid>("ProjectId")
@@ -8872,6 +8892,21 @@ namespace NubArca.Api.Data.Migrations
                         .WithMany()
                         .HasForeignKey("OwnerUserId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.SubjectCutoutQueueItem", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.FileItem", null)
+                        .WithMany()
+                        .HasForeignKey("FileItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("NubArca.Api.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

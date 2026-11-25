@@ -34,6 +34,7 @@ interface LabSection {
 
 export const LAB_SECTIONS: readonly LabSection[] = [
   { to: '/lab/plates', labelKey: 'lab.plates', permission: PERMISSIONS.laboratoryPlates },
+  { to: '/lab/cutout', labelKey: 'lab.cutout', permission: PERMISSIONS.laboratoryCutout },
   { to: '/lab/lithophanes', labelKey: 'lab.lithophanes', permission: PERMISSIONS.laboratoryLithophanes },
 ] as const;
 

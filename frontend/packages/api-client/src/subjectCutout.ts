@@ -1,3 +1,5 @@
+import type { PhotoTextLayout } from '@nubarca/contracts';
+import type { LithophaneQueueEntry, LithophaneQueueResult } from './lithophanes';
 import { ApiError, api } from './client';
 import type { FileSummary } from './folders';
 
@@ -120,4 +122,19 @@ function failureFrom(status: number, body: unknown): SubjectCutoutFailure {
   if (code === 'busy') return 'busy';
   if (code === 'unavailable') return 'unavailable';
   return 'failed';
+}
+
+export interface LaboratoryCutoutComposition { point: SubjectPoint | null; text: string | null; layout: PhotoTextLayout | null }
+export function listCutoutQueue(signal?: AbortSignal) { return api<LithophaneQueueEntry[]>('/api/lab/cutout/queue', { signal }); }
+export function addToCutoutQueue(fileItemIds: string[]) { return api<LithophaneQueueResult>('/api/lab/cutout/queue', { method: 'POST', json: { fileItemIds } }); }
+export function removeFromCutoutQueue(id: string) { return api<void>(`/api/lab/cutout/queue/${id}`, { method: 'DELETE' }); }
+export function sendCutoutToLithophanes(id: string) { return api<LithophaneQueueResult>(`/api/lab/cutout/${id}/send`, { method: 'POST' }); }
+export async function saveLaboratoryCutout(id: string, composition: LaboratoryCutoutComposition): Promise<FileSummary> {
+  try { return await api<FileSummary>(`/api/lab/cutout/${id}/save`, { method: 'POST', json: composition }); }
+  catch (e) { if (e instanceof ApiError) throw new SubjectCutoutError(failureFrom(e.status, e.body)); throw e; }
+}
+export async function renderLaboratoryCutout(id: string, composition: LaboratoryCutoutComposition): Promise<Blob> {
+  const r = await fetch(`/api/lab/cutout/${id}/render`, { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify(composition) });
+  if (!r.ok) throw new SubjectCutoutError(await failureOf(r));
+  return new Blob([await r.arrayBuffer()], { type: 'image/png' });
 }

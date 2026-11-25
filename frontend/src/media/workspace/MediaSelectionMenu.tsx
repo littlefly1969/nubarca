@@ -33,6 +33,7 @@ const TEST_IDS: Record<MediaSelectionActionId, string> = {
   album: 'media-sel-album',
   plates: 'media-sel-plates',
   lithophanes: 'media-sel-lithophanes',
+  cutout: 'media-sel-cutout',
   print: 'media-sel-print',
 };
 

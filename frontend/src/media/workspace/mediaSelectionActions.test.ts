@@ -58,7 +58,7 @@ describe('move-to destinations', () => {
 
 describe('add-to destinations', () => {
   it('offers Album, List and Plates for an all-photo selection with every permission', () => {
-    expect(ids(model([photo, photo]).addTo)).toEqual(['album', 'list', 'plates', 'lithophanes']);
+    expect(ids(model([photo, photo]).addTo)).toEqual(['album', 'list', 'plates', 'cutout', 'lithophanes']);
   });
 
   it('omits the Laboratory destination without laboratory access', () => {
@@ -75,6 +75,11 @@ describe('add-to destinations', () => {
     const lithophanesOnly = [PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryLithophanes];
     expect(ids(model([photo], lithophanesOnly).addTo)).toEqual(['album', 'list', 'lithophanes']);
     expect(ids(model([photo], [PERMISSIONS.laboratoryLithophanes]).addTo)).toEqual(['album', 'list']);
+  });
+
+  it('offers Cutout only with both laboratory permissions', () => {
+    expect(ids(model([photo], [PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryCutout]).addTo)).toEqual(['album', 'list', 'cutout']);
+    expect(ids(model([photo], [PERMISSIONS.laboratoryCutout]).addTo)).toEqual(['album', 'list']);
   });
 
   it('offers no photo-only destination for a video selection', () => {
@@ -120,7 +125,7 @@ describe('contextual actions', () => {
     expect(ids(list.contextual)).not.toContain('remove-from-album');
     // Every ordinary operation stays available from a list.
     expect(ids(list.moveTo)).toEqual(['personal', 'excluded', 'trash']);
-    expect(ids(list.addTo)).toEqual(['album', 'list', 'plates', 'lithophanes']);
+    expect(ids(list.addTo)).toEqual(['album', 'list', 'plates', 'cutout', 'lithophanes']);
     // …and a list action never leaks into the library or an album.
     expect(ids(model([photo]).contextual)).not.toContain('remove-from-list');
     expect(ids(model([photo], ALL, { source: 'album' }).contextual)).not.toContain('remove-from-list');

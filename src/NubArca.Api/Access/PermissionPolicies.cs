@@ -16,6 +16,7 @@ public static class PermissionPolicies
     // `laboratory.access` + `laboratory.plates` opens Plates while
     // `laboratory.plates` on its own opens nothing.
     public const string LaboratoryPlates = Prefix + "laboratory:plates+access";
+    public const string LaboratoryCutout = Prefix + "laboratory:cutout+access";
     public const string LaboratoryLithophanes = Prefix + "laboratory:lithophanes+access";
 
     // Rebuilding one's own face clusters requires People itself as well, on the
@@ -56,6 +57,12 @@ public static class PermissionPolicies
             policy.RequireAuthenticatedUser();
             policy.AddRequirements(new PermissionRequirement(
                 Permissions.LaboratoryAccess, Permissions.LaboratoryLithophanes));
+        });
+
+        options.AddPolicy(LaboratoryCutout, policy =>
+        {
+            policy.RequireAuthenticatedUser();
+            policy.AddRequirements(new PermissionRequirement(Permissions.LaboratoryAccess, Permissions.LaboratoryCutout));
         });
 
         options.AddPolicy(LaboratoryPlates, policy =>

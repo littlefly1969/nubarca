@@ -5,6 +5,7 @@ using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Files;
 using NubArca.Api.Uploads;
+using NubArca.Api.Print;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
@@ -276,13 +277,26 @@ public sealed class SubjectCutoutService : ISubjectMaskSource
         }
     }
 
+    public async Task<SubjectCutoutResult> ComposeAsync(Guid fileItemId, Guid ownerUserId, SubjectPoint? point,
+        string? text, PhotoTextLayout? layout, CancellationToken cancellationToken)
+    {
+        var result = await CreateAsync(fileItemId, ownerUserId, point, cancellationToken);
+        if (result.Status != SubjectCutoutStatus.Ok || string.IsNullOrWhiteSpace(text) || layout is null) return result;
+        var image = result.Image!;
+        using var canvas = Image.Load<Rgba32>(image.Png);
+        PhotoTextRenderer.Draw(canvas, new Rectangle(0, 0, canvas.Width, canvas.Height), text, layout);
+        using var png = new MemoryStream();
+        await canvas.SaveAsync(png, new PngEncoder { ColorType = PngColorType.RgbWithAlpha }, cancellationToken);
+        return result with { Image = image with { Png = png.ToArray() } };
+    }
+
     // Computes the cutout and files it as a new PNG in the photo's own folder,
     // through the one owner ingest (dedup, quota, audit, media pipeline). A name
     // already taken gets the usual " (2)" suffix. Ingest failures (quota, size)
     // propagate exactly as they do for an upload.
     public async Task<SubjectCutoutSaveResult> SaveAsync(
         Guid fileItemId, Guid ownerUserId, SubjectPoint? point, string? ipAddress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string? text = null, PhotoTextLayout? layout = null)
     {
         var source = await _db.FileItems.AsNoTracking()
             .Where(f => f.Id == fileItemId && f.OwnerUserId == ownerUserId && f.DeletedAt == null)
@@ -290,7 +304,7 @@ public sealed class SubjectCutoutService : ISubjectMaskSource
             .FirstOrDefaultAsync(cancellationToken);
         if (source is null) return new SubjectCutoutSaveResult(SubjectCutoutStatus.NotFound);
 
-        var result = await CreateAsync(fileItemId, ownerUserId, point, cancellationToken);
+        var result = await ComposeAsync(fileItemId, ownerUserId, point, text, layout, cancellationToken);
         if (result.Status != SubjectCutoutStatus.Ok) return new SubjectCutoutSaveResult(result.Status);
 
         using var content = new MemoryStream(result.Image!.Png, writable: false);

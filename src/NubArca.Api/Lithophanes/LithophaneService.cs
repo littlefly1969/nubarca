@@ -298,7 +298,7 @@ public sealed class LithophaneService(AppDbContext db, IJobQueue jobs, IDerivedB
         using (var light = LithophaneImage.Transmission(map, s)) await light.SaveAsPngAsync(stream, ct);
         var grid = new LithophaneGrid(s);
         var thinnest = Math.Min(s.MinThicknessMm, s.BackgroundWallMm);
-        var thickest = Math.Max(s.MaxThicknessMm, s.BackgroundWallMm);
+        var thickest = s.ThickestWallMm;
         var baseTransmission = Math.Clamp((thickest - (grid.BaseRadiusMm - s.OpeningMm / 2))
             / (thickest - thinnest), 0, 1);
         return new(Convert.ToBase64String(stream.GetBuffer(), 0, (int)stream.Length), grid.Columns, grid.Rows,

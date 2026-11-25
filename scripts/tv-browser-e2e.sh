@@ -82,7 +82,7 @@ export NUBARCA_E2E_PASSWORD="e2e-owner-password"
 
 echo "▶ Frontend"
 cd "$ROOT/frontend"
-npm run build --silent >/dev/null 2>&1
+npm run build --silent
 npx vite preview --port 4173 --strictPort >"$WORK/preview.log" 2>&1 &
 PREVIEW_PID=$!
 wait_for "the frontend" "http://localhost:4173/tv"

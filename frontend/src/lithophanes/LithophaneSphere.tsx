@@ -11,6 +11,8 @@ export function LithophaneSphere({ preview }: { preview: LithophanePreview }) {
   const [lit, setLit] = useState(true);
   const [failed, setFailed] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const drag = useRef<{ id: number; x: number; rotation: number } | null>(null);
 
   useEffect(() => {
     setPixels(null); setFailed(false);
@@ -37,8 +39,16 @@ export function LithophaneSphere({ preview }: { preview: LithophanePreview }) {
     ctx.putImageData(frame, 0, 0);
   }, [lit, pixels, preview, rotation, printing]);
 
-  return <figure className="lithophane-sphere">
-    <canvas ref={ref} width={360} height={360} role="img" aria-label={t('lithophane.sphere')} />
+  return <figure className={`lithophane-sphere${expanded ? ' lithophane-sphere-expanded' : ''}`}>
+    <button type="button" className="btn btn-secondary" aria-expanded={expanded} onClick={() => setExpanded((old) => !old)}>{t(expanded ? 'lithophane.previewShrink' : 'lithophane.previewExpand')}</button>
+    <canvas ref={ref} width={360} height={360} role="img" aria-label={t('lithophane.sphere')}
+      onPointerDown={(e) => { drag.current = { id: e.pointerId, x: e.clientX, rotation }; e.currentTarget.setPointerCapture(e.pointerId); }}
+      onPointerMove={(e) => { const start = drag.current; if (start?.id === e.pointerId) {
+        const angle = start.rotation + 360 * (e.clientX - start.x) / Math.max(1, e.currentTarget.clientWidth);
+        setRotation(((angle + 180) % 360 + 360) % 360 - 180);
+      } }}
+      onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}
+      onLostPointerCapture={() => { drag.current = null; }} />
     {failed && <p role="alert">{t('lithophane.previewUnavailable')}</p>}
     {preview.hanging && <label>{t('lithophane.useMode')}
       <select value={printing ? 'print' : 'use'} onChange={(e) => setPrinting(e.target.value === 'print')}>

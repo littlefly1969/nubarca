@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  createSubjectCutout, saveSubjectCutout, subjectPointOnPhoto, SubjectCutoutError,
-  type SubjectCutoutFailure, type SubjectCutoutRegion, type SubjectPoint,
+  createSubjectCutout, saveSubjectCutout, saveLaboratoryCutout, renderLaboratoryCutout, sendCutoutToLithophanes, subjectPointOnPhoto, SubjectCutoutError,
+  type FileSummary, type SubjectCutoutFailure, type SubjectCutoutRegion, type SubjectPoint,
 } from '@nubarca/api-client';
+import { DEFAULT_PHOTO_TEXT, type PhotoTextLayout } from '@nubarca/contracts';
+import { PhotoTextControls } from '../text/PhotoTextControls';
+import { PhotoTextOverlay } from '../text/PhotoTextOverlay';
 import { useI18n } from '../i18n';
 import type { MessageKey } from '../i18n/it';
 import { useSubjectCutoutSupport } from './useSubjectCutoutAvailable';
@@ -27,7 +30,7 @@ type Notice =
   | { kind: 'copied' }
   | { kind: 'copyFailed' }
   | { kind: 'saving' }
-  | { kind: 'saved'; name: string }
+  | { kind: 'saved' | 'sent' | 'sendFailed'; name: string }
   | { kind: 'saveFailed'; reason: SubjectCutoutFailure | null };
 
 const FAILURE_KEYS: Record<SubjectCutoutFailure, MessageKey> = {
@@ -43,15 +46,25 @@ export interface SubjectCutoutDialogProps {
   // The photo's file name, used for the downloaded PNG's name.
   fileName: string;
   onClose: () => void;
+  laboratory?: boolean;
+  canSendToLithophanes?: boolean;
 }
 
-export function SubjectCutoutDialog({ fileId, fileName, onClose }: SubjectCutoutDialogProps) {
+export function SubjectCutoutDialog({ fileId, fileName, onClose, laboratory = false, canSendToLithophanes = false }: SubjectCutoutDialogProps) {
   const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>({ kind: 'working' });
   const [notice, setNotice] = useState<Notice | null>(null);
   const [attempt, setAttempt] = useState(0);
   // The touched point on the photo, or null for every subject.
   const [point, setPoint] = useState<SubjectPoint | null>(null);
+  const [bubble, setBubble] = useState('');
+  const [layout, setLayout] = useState<PhotoTextLayout>({ ...DEFAULT_PHOTO_TEXT, mode: 'bubble' });
+  const [saved, setSaved] = useState<{ key: string; file: FileSummary } | null>(null);
+  const composition = { point, text: bubble.trim() || null, layout: bubble.trim() ? layout : null };
+  const key = JSON.stringify(composition);
+  const valid = bubble.length <= 300 && !/[\uD800-\uDFFF\u0000-\u0009\u000B-\u001F]/.test(bubble);
+  const decorated = laboratory && !!composition.text;
+  const saving = notice?.kind === 'saving';
   const { pointSelection } = useSubjectCutoutSupport(true);
   const dialogRef = useRef<HTMLDivElement | null>(null);
 
@@ -92,14 +105,14 @@ export function SubjectCutoutDialog({ fileId, fileName, onClose }: SubjectCutout
   const copy = useCallback(async () => {
     if (phase.kind !== 'ready') return;
     try {
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': phase.blob })]);
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': decorated ? renderLaboratoryCutout(fileId, composition) : phase.blob })]);
       setNotice({ kind: 'copied' });
     } catch {
       setNotice({ kind: 'copyFailed' });
     }
-  }, [phase]);
+  }, [phase, decorated, fileId, key]);
 
-  const canTap = pointSelection && phase.kind === 'ready' && phase.region !== null;
+  const canTap = !saving && pointSelection && phase.kind === 'ready' && phase.region !== null;
 
   const tap = useCallback((event: React.MouseEvent<HTMLImageElement>) => {
     if (!canTap || phase.kind !== 'ready' || phase.region === null) return;
@@ -109,20 +122,36 @@ export function SubjectCutoutDialog({ fileId, fileName, onClose }: SubjectCutout
       phase.region, (event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height));
   }, [canTap, phase]);
 
-  const save = useCallback(async () => {
+  async function save(send = false) {
+    if (saving || !valid) return;
     setNotice({ kind: 'saving' });
     try {
-      const saved = await saveSubjectCutout(fileId, point);
-      setNotice({ kind: 'saved', name: saved.name });
-    } catch (e) {
-      setNotice({ kind: 'saveFailed', reason: e instanceof SubjectCutoutError ? e.reason : null });
-    }
-  }, [fileId, point]);
+      const file = laboratory
+        ? saved?.key === key ? saved.file : await saveLaboratoryCutout(fileId, composition)
+        : await saveSubjectCutout(fileId, point);
+      if (laboratory) setSaved({ key, file });
+      if (send) {
+        try {
+          const r = await sendCutoutToLithophanes(file.id);
+          setNotice({ kind: r.added.includes(file.id) ? 'sent' : 'sendFailed', name: file.name });
+        } catch { setNotice({ kind: 'sendFailed', name: file.name }); }
+      } else setNotice({ kind: 'saved', name: file.name });
+    } catch (e) { setNotice({ kind: 'saveFailed', reason: e instanceof SubjectCutoutError ? e.reason : null }); }
+  }
+
+  async function download() {
+    try {
+      const blob = await renderLaboratoryCutout(fileId, composition);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = cutoutDownloadName(fileName); a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch { setNotice({ kind: 'saveFailed', reason: null }); }
+  }
 
   return (
     <div
       ref={dialogRef}
-      className="subject-cutout-dialog"
+      className={laboratory ? "subject-cutout-dialog lab-cutout-dialog" : "subject-cutout-dialog"}
       role="dialog"
       aria-modal="true"
       aria-label={t('subjectCutout.action')}
@@ -141,13 +170,13 @@ export function SubjectCutoutDialog({ fileId, fileName, onClose }: SubjectCutout
             <p className="subject-cutout-working" role="status">{t('subjectCutout.working')}</p>
           )}
           {phase.kind === 'ready' && (
-            <img
+            <div className="lab-cutout-composition"><img
               src={phase.url}
               alt={t('subjectCutout.previewAlt')}
               data-testid="subject-cutout-image"
               className={canTap ? 'subject-cutout-tappable' : undefined}
               onClick={canTap ? tap : undefined}
-            />
+            />{decorated && <PhotoTextOverlay text={bubble} layout={layout} onChange={saving ? undefined : v => { setLayout(v); setNotice(null); }} />}</div>
           )}
           {phase.kind === 'failed' && (
             <p className="subject-cutout-error" role="alert">
@@ -164,23 +193,33 @@ export function SubjectCutoutDialog({ fileId, fileName, onClose }: SubjectCutout
           </p>
         )}
 
+        {laboratory && phase.kind === 'ready' && <details className="lab-cutout-bubble">
+          <summary>{t('labCutout.bubble')}</summary>
+          <fieldset disabled={saving}>
+            <label>{t('labCutout.bubble')}<textarea maxLength={300} value={bubble} onChange={e => { setBubble(e.target.value); setNotice(null); }} /></label>
+            <PhotoTextControls value={layout} onChange={v => { setLayout(v); setNotice(null); }} allowBelow={false} />
+          </fieldset>
+          {!valid && <p role="alert">{t('labCutout.invalidText')}</p>}
+        </details>}
         <div className="subject-cutout-actions">
           {point !== null && (phase.kind !== 'working') && (
-            <button type="button" onClick={() => setPoint(null)}>{t('subjectCutout.allSubjects')}</button>
+            <button type="button" disabled={saving} onClick={() => setPoint(null)}>{t('subjectCutout.allSubjects')}</button>
           )}
           {phase.kind === 'ready' && (
             <>
               {canCopy && (
-                <button type="button" onClick={() => void copy()}>{t('subjectCutout.copy')}</button>
+                <button type="button" disabled={saving || !valid} onClick={() => void copy()}>{t('subjectCutout.copy')}</button>
               )}
-              <a href={phase.url} download={cutoutDownloadName(fileName)}>{t('common.download')}</a>
+              {decorated ? <button type="button" disabled={saving || !valid} onClick={() => void download()}>{t('common.download')}</button>
+                : <a href={phase.url} download={cutoutDownloadName(fileName)}>{t('common.download')}</a>}
               <button
                 type="button"
                 onClick={() => void save()}
-                disabled={notice?.kind === 'saving' || notice?.kind === 'saved'}
+                disabled={saving || !valid || (laboratory ? saved?.key === key : notice?.kind === 'saved')}
               >
                 {notice?.kind === 'saving' ? t('subjectCutout.saving') : t('subjectCutout.save')}
               </button>
+              {laboratory && canSendToLithophanes && <button type="button" disabled={saving || !valid || notice?.kind === 'sent'} onClick={() => void save(true)}>{t('labCutout.send')}</button>}
             </>
           )}
           {phase.kind === 'failed' && phase.reason !== 'notFound' && phase.reason !== 'unavailable'
@@ -206,6 +245,8 @@ function noticeText(
   switch (notice.kind) {
     case 'copied': return t('subjectCutout.copied');
     case 'copyFailed': return t('subjectCutout.copyFailed');
+    case 'sent': return t('labCutout.sent', { name: notice.name });
+    case 'sendFailed': return t('labCutout.sendFailed', { name: notice.name });
     case 'saved': return t('subjectCutout.saved', { name: notice.name });
     case 'saveFailed':
       return notice.reason === null || notice.reason === 'failed'

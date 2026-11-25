@@ -46,6 +46,9 @@ const PERMISSION_META: Record<string, PermissionPresentation> = {
     labelKey: 'perm.laboratoryLithophanes',
     descriptionKey: 'permDesc.laboratoryLithophanes',
   },
+  [PERMISSIONS.laboratoryCutout]: {
+    labelKey: 'perm.laboratoryCutout', descriptionKey: 'permDesc.laboratoryCutout',
+  },
   [PERMISSIONS.laboratoryPlates]: {
     labelKey: 'perm.laboratoryPlates',
     descriptionKey: 'permDesc.laboratoryPlates',

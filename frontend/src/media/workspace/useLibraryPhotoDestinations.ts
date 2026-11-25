@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { addPlateImagesFromGallery, addToLithophaneQueue } from '@nubarca/api-client';
+import { addPlateImagesFromGallery, addToLithophaneQueue, addToCutoutQueue } from '@nubarca/api-client';
 import { useI18n } from '../../i18n';
 import type { MediaPhotoDestination } from './MediaWorkspace';
 
@@ -37,5 +37,9 @@ export function useLibraryPhotoDestinations(): MediaPhotoDestination[] {
         }
       },
     },
+    { id: 'cutout', run: async (ids) => {
+      try { const r = await addToCutoutQueue(ids); return t('labCutout.added', { count: r.added.length, skipped: r.skipped.length }); }
+      catch { return t('labCutout.error'); }
+    } },
   ], [t]);
 }

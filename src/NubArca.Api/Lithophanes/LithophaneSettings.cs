@@ -51,6 +51,20 @@ public sealed record LithophaneSettings
     // existed, which keeps their background at the photo's thinnest wall.
     public double? BackgroundThicknessMm { get; init; }
 
+    // Opt-in keeps old projects and interrupted strips byte-compatible.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool UseSourceAlpha { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? BackgroundTextureHeightMm { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? BackgroundTextureGrainMm { get; init; }
+    [JsonIgnore]
+    public double TextureHeight => BackgroundTextureHeightMm ?? 0;
+    [JsonIgnore]
+    public double TextureGrain => BackgroundTextureGrainMm ?? 1.5;
+    [JsonIgnore]
+    public double ThickestWallMm => Math.Max(MaxThicknessMm, BackgroundWallMm + TextureHeight);
+
     // Words of the owner's own, drawn as the thickest wall so they read dark
     // against the light. Absent (null) in every project saved before text
     // existed and in every project without text; never written as null, so
@@ -117,7 +131,7 @@ public sealed record LithophaneSettings
         && Between(MaxThicknessMm, MinThicknessMm + 0.1, 5)
         && Between(OpeningMm, 4, DiameterMm * 0.65)
         && (!Hanging || (ExternalRelief && Between(OpeningMm, 16, DiameterMm * 0.65)
-            && BackgroundWallMm >= 0.8))
+            && (BackgroundWallMm >= 0.8 || InternalFit)))
         && (!InternalFit || (Hanging && !PrintAnchor))
         && (!PrintBrim || InternalFit)
         && Between(ResolutionMm, 0.15, 1)
@@ -126,6 +140,8 @@ public sealed record LithophaneSettings
         && Between(Brightness, -0.5, 0.5) && Between(Contrast, 0.25, 3) && Between(Gamma, 0.3, 3)
         && (FrameAspect is null || Between(FrameAspect.Value, 0.2, 5))
         && (PictureScale is null || (FrameAspect is not null && Between(PictureScale.Value, 0.2, 1)))
+        && Between(TextureHeight, 0, 0.4) && Between(TextureGrain, 0.8, 3)
+        && (TextureHeight == 0 || ExternalRelief)
         && TextIsValid()
         && new LithophaneGrid(this).TriangleCount <= MaxTriangles;
 
