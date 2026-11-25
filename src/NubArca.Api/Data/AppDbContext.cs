@@ -84,6 +84,7 @@ public class AppDbContext : DbContext
     public DbSet<LithophaneProject> LithophaneProjects => Set<LithophaneProject>();
     public DbSet<LithophaneStrip> LithophaneStrips => Set<LithophaneStrip>();
     public DbSet<LithophaneQueueItem> LithophaneQueueItems => Set<LithophaneQueueItem>();
+    public DbSet<SubjectCutoutQueueItem> SubjectCutoutQueueItems => Set<SubjectCutoutQueueItem>();
 
     public DbSet<PhotoExportSession> PhotoExportSessions => Set<PhotoExportSession>();
     public DbSet<PhotoExportEntry> PhotoExportEntries => Set<PhotoExportEntry>();

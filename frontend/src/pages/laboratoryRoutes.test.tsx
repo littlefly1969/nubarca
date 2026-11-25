@@ -48,6 +48,7 @@ function renderLab(entries: string[]) {
               <Route path="/lab" element={<LaboratoryPage />}>
                 <Route index element={<Navigate to={LAB_DEFAULT_ROUTE} replace />} />
                 <Route path="plates" element={<div>plates workspace</div>} />
+                <Route path="cutout" element={<div>cutout workspace</div>} />
                 <Route path="lithophanes" element={<div>lithophanes workspace</div>} />
               </Route>
               <Route path="/plates" element={<Navigate to="/lab/plates" replace />} />
@@ -68,7 +69,7 @@ function renderLab(entries: string[]) {
 
 describe('Laboratory workspace', () => {
   it('offers the Plates section', () => {
-    expect(LAB_SECTIONS.map((s) => s.to)).toEqual(['/lab/plates', '/lab/lithophanes']);
+    expect(LAB_SECTIONS.map((s) => s.to)).toEqual(['/lab/plates', '/lab/cutout', '/lab/lithophanes']);
     expect(LAB_DEFAULT_ROUTE).toBe('/lab/plates');
   });
 

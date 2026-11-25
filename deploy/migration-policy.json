@@ -296,6 +296,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Adds only nullable album photo text/layout and party print request fingerprint columns, plus a photo text version defaulted to zero. No backfill, new relations, constraints or blob changes. Previous application versions ignore the nullable fields and insert valid rows through the version default."
+    },
+    "20261125130000_AddSubjectCutoutQueue": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds only owner-private waiting references with cascading foreign keys. No existing files or data change. Down drops only the new queue."
     }
   }
 }

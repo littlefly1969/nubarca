@@ -5,6 +5,10 @@ using NubArca.Api.Audit;
 using NubArca.Api.Files;
 using NubArca.Api.Http;
 using NubArca.Api.Uploads;
+using NubArca.Api.Access;
+using NubArca.Api.Data;
+using NubArca.Api.Lithophanes;
+using NubArca.Api.Print;
 
 namespace NubArca.Api.Endpoints;
 
@@ -93,7 +97,58 @@ public static class SubjectCutoutEndpoints
             }
         }).WithName("SaveSubjectCutout").RequireAuthorization();
 
+        MapLaboratory(app);
         return app;
+    }
+
+    private static void MapLaboratory(IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/api/lab/cutout").RequireAuthorization(PermissionPolicies.LaboratoryCutout);
+        group.AddEndpointFilter(async (context, next) =>
+        {
+            context.HttpContext.Response.Headers.CacheControl = "no-store";
+            context.HttpContext.Response.Headers.XContentTypeOptions = "nosniff";
+            try { return await next(context); }
+            catch (LithophaneException ex) { return Results.BadRequest(new { code = ex.Message }); }
+        });
+        group.MapGet("/queue", async (HttpContext http, [FromServices] AppDbContext db, [FromServices] TimeProvider clock, CancellationToken ct) =>
+            Results.Ok(await new SubjectCutoutQueue(db, clock).ListAsync(http.GetCurrentUserId()!.Value, ct)));
+        group.MapPost("/queue", async ([FromBody] LithophaneQueueRequest request, HttpContext http, [FromServices] AppDbContext db, [FromServices] TimeProvider clock, CancellationToken ct) =>
+            Results.Ok(await new SubjectCutoutQueue(db, clock).AddAsync(http.GetCurrentUserId()!.Value, request.FileItemIds, ct)));
+        group.MapDelete("/queue/{id:guid}", async (Guid id, HttpContext http, [FromServices] AppDbContext db, [FromServices] TimeProvider clock, CancellationToken ct) =>
+            await new SubjectCutoutQueue(db, clock).RemoveAsync(http.GetCurrentUserId()!.Value, id, ct) ? Results.NoContent() : Results.NotFound());
+        group.MapPost("/{id:guid}/render", async (Guid id, HttpContext http, [FromBody] LaboratoryCutoutRequest? request,
+            [FromServices] SubjectCutoutService cutouts, CancellationToken ct) =>
+        {
+            if (!TryReadComposition(request, out var point)) return Results.BadRequest(new { code = "invalid_composition" });
+            var result = await cutouts.ComposeAsync(id, http.GetCurrentUserId()!.Value, point, request?.Text, request?.Layout, ct);
+            return result.Status == SubjectCutoutStatus.Ok ? Results.File(result.Image!.Png, "image/png") : Refusal(http, result.Status);
+        });
+        group.MapPost("/{id:guid}/save", async (Guid id, HttpContext http, [FromBody] LaboratoryCutoutRequest? request,
+            [FromServices] SubjectCutoutService cutouts, CancellationToken ct) =>
+        {
+            if (!TryReadComposition(request, out var point)) return Results.BadRequest(new { code = "invalid_composition" });
+            try
+            {
+                var saved = await cutouts.SaveAsync(id, http.GetCurrentUserId()!.Value, point, http.Connection.RemoteIpAddress?.ToString(), ct, request?.Text, request?.Layout);
+                if (saved.Status != SubjectCutoutStatus.Ok) return Refusal(http, saved.Status);
+                var f = saved.File!;
+                return Results.Created($"/api/files/{f.Id}/content", new FileSummary(f.Id, f.Name, f.MimeType, f.SizeBytes, f.CreatedAt, f.Width, f.Height));
+            }
+            catch (Exception ex) when (OwnerUploadHttp.TryMapFailure(ex, out var mapped)) { return mapped; }
+        });
+        group.MapPost("/{id:guid}/send", async (Guid id, HttpContext http, [FromServices] LithophaneService lithophanes, CancellationToken ct) =>
+            Results.Ok(await lithophanes.AddToQueueAsync(http.GetCurrentUserId()!.Value, [id], ct)))
+            .RequireAuthorization(PermissionPolicies.LaboratoryLithophanes);
+    }
+
+    private static bool TryReadComposition(LaboratoryCutoutRequest? request, out SubjectPoint? point)
+    {
+        if (!TryReadPoint(new SubjectCutoutRequest(request?.Point), out point)) return false;
+        if (string.IsNullOrWhiteSpace(request?.Text)) return true;
+        var text = request.Text;
+        return text.Length <= 300 && !text.Any(c => char.IsSurrogate(c) || (char.IsControl(c) && c != '\n'))
+            && request.Layout is { } layout && layout.IsValid() && layout.Mode != "below";
     }
 
     // No body, or no point: the whole subject. A point must lie on the photo.
@@ -142,3 +197,5 @@ public sealed record SubjectCutoutAvailability(bool Available, bool PointSelecti
 public sealed record SubjectCutoutRequest(SubjectCutoutPointDto? Point);
 
 public sealed record SubjectCutoutPointDto(float X, float Y);
+
+public sealed record LaboratoryCutoutRequest(SubjectCutoutPointDto? Point, string? Text, PhotoTextLayout? Layout);

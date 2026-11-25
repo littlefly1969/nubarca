@@ -7,6 +7,8 @@ is built is described by `ARCHITECTURE.md`.
 
 ## Baseline
 
+- Lithophanes support optional procedural soft background relief and alpha coverage, preserve legacy project defaults, and allow 0.4 mm walls with internal fit. The mobile-first editor separates design, source queue and history. Laboratory Cutout has its own permission and waiting references, reuses the photo text overlay, saves normal PNG files and transfers those files to the Lithophanes queue when both sections are authorized.
+
 - Party photo text belongs to one `AlbumItem`, never a second `FileItem` or a changed original blob. Uploader identity is the existing party browser participant; absent historical provenance grants no guest edit right. The organizer edits eligible own album photos, including moderated uploads, without publishing them. The public gallery labels only the viewer’s own uploads and exposes editor eligibility separately.
 - Shared decorations are rasterized before print framing; personal print text is drawn afterwards on the chosen slot. Party/owner/share studios choose original or decorated bytes, and quote decoration versions. Stale shared versions cost no paper; retry keys bind the whole personal composition. Web and native TV refresh changed rendition URLs while preserving photo identity and position.
 - Guestbook printing uses the book’s own visibility, moderation, blob, template, crop, dedication, signature and text layout. Its print preview is server-rendered from the fixed memory; the complete card is contained on the sheet, with no personal text editor or crop. It uses ordinary party photo budgets and jobs, references the memory in the render specification and adds no album or slideshow item.

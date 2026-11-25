@@ -37,6 +37,7 @@ import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { PeoplePage } from './pages/PeoplePage';
 import { PersonDetailPage } from './pages/PersonDetailPage';
 import { PlatesPage } from './pages/PlatesPage';
+import { CutoutPage } from './pages/CutoutPage';
 import { LithophanesPage } from './pages/LithophanesPage';
 import { LaboratoryIndexRedirect, LaboratoryPage } from './pages/LaboratoryPage';
 import { PrivateVaultPage } from './pages/PrivateVaultPage';
@@ -316,6 +317,7 @@ export function App() {
               <Route index element={<LaboratoryIndexRedirect />} />
               {/* A section needs the shell permission AND its own — the same
                   composite the server's Laboratory policies require. */}
+              <Route path="cutout" element={<PermissionRoute permissions={[PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryCutout]}><CutoutPage /></PermissionRoute>} />
               <Route
                 path="lithophanes"
                 element={
