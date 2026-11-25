@@ -29,6 +29,9 @@ export interface LithophaneSettings {
   gamma: number;
   /** Wall outside the photograph. Null only in projects saved before it existed (= minThicknessMm). */
   backgroundThicknessMm?: number | null;
+  useSourceAlpha?: boolean;
+  backgroundTextureHeightMm?: number | null;
+  backgroundTextureGrainMm?: number | null;
   /** The owner's words (one or two lines, \n between them), drawn as the thickest wall. Absent: none. */
   text?: string | null;
   /** A text font id (frontend/src/text/textFonts.ts). Absent: the default. */

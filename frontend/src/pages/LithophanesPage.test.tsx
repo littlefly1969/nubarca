@@ -23,7 +23,9 @@ const project: LithophaneSummary = {
 beforeEach(() => { vi.spyOn(window, 'confirm').mockReturnValue(true); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const mount = () => render(<MemoryRouter><AuthedWrapper><LithophanesPage /></AuthedWrapper></MemoryRouter>);
-async function choose() { fireEvent.click(await screen.findByRole('button', { name: 'Famiglia.png' })); }
+function openSource() { fireEvent.click(screen.getByRole('button', { name: /^Foto da trasformare/ })); }
+function openHistory() { fireEvent.click(screen.getByRole('button', { name: /^Le tue litofanie/ })); }
+async function choose() { openSource(); fireEvent.click(await screen.findByRole('button', { name: 'Famiglia.png' })); }
 
 describe('Laboratory lithophanes', () => {
   it('selects an existing photo, previews the exact settings and queues a generation', async () => {
@@ -38,7 +40,7 @@ describe('Laboratory lithophanes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Aggiorna anteprima' }));
     expect(await screen.findByRole('img', { name: 'Sfera di prova' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
-    expect(await screen.findByText('In coda')).toBeInTheDocument();
+    expect(await screen.findByText(/In coda/, { selector: '.lithophane-latest' })).toBeInTheDocument();
     const request = mock.calls.find((c) => c.url === '/api/lithophanes' && c.method === 'POST')!;
     expect(JSON.parse(request.body!)).toMatchObject({ fileItemId: photo.id, settings: { diameterMm: 90, backgroundThicknessMm: 0.8, baseCollar: true } });
     // The server ended the photo's wait when it accepted the generation.
@@ -61,7 +63,7 @@ describe('Laboratory lithophanes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Aggiorna anteprima' }));
     await screen.findByRole('img', { name: 'Sfera di prova' });
     fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
-    await screen.findByText('In coda');
+    await screen.findByText(/In coda/, { selector: '.lithophane-latest' });
     for (const url of ['/api/lithophanes/preview', '/api/lithophanes']) {
       const request = mock.calls.find((c) => c.url === url && c.method === 'POST')!;
       expect(JSON.parse(request.body!).settings.baseCollar).toBe(false);
@@ -78,12 +80,15 @@ describe('Laboratory lithophanes', () => {
     mount(); await choose();
     fireEvent.change(screen.getByLabelText('Testo (una o due righe)'), { target: { value: 'Buon\nNatale' } });
     fireEvent.click(screen.getByLabelText('Corsivo'));
+    fireEvent.change(screen.getByTestId('lithophane-text-latitude'), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: /Altezza dal centro.*−1°/ }));
+    expect(screen.getByTestId('lithophane-text-latitude')).toHaveValue(-1);
     fireEvent.change(screen.getByTestId('lithophane-text-latitude'), { target: { value: '25' } });
     fireEvent.change(screen.getByTestId('lithophane-text-longitude'), { target: { value: '-30' } });
     fireEvent.click(screen.getByRole('button', { name: 'Aggiorna anteprima' }));
     await screen.findByRole('img', { name: 'Sfera di prova' });
     fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
-    await screen.findByText('In coda');
+    await screen.findByText(/In coda/, { selector: '.lithophane-latest' });
     const previewRequest = mock.calls.find((c) => c.url === '/api/lithophanes/preview')!;
     const request = mock.calls.find((c) => c.url === '/api/lithophanes' && c.method === 'POST')!;
     const words = { text: 'Buon\nNatale', textFont: 'script', textHeightMm: 8, textLatitudeDegrees: 25, textLongitudeDegrees: -30 };
@@ -100,7 +105,7 @@ describe('Laboratory lithophanes', () => {
     mount(); await choose();
     fireEvent.click(screen.getByLabelText('Elegante'));
     fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
-    await screen.findByText('In coda');
+    await screen.findByText(/In coda/, { selector: '.lithophane-latest' });
     const settings = JSON.parse(mock.calls.find((c) => c.url === '/api/lithophanes' && c.method === 'POST')!.body!).settings;
     for (const key of ['text', 'textFont', 'textHeightMm', 'textPosition']) expect(settings).not.toHaveProperty(key);
   });
@@ -136,7 +141,7 @@ describe('Laboratory lithophanes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Aggiorna anteprima' }));
     await screen.findByRole('img', { name: 'Sfera di prova' });
     fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
-    await screen.findByText('In coda');
+    await screen.findByText(/In coda/, { selector: '.lithophane-latest' });
     const previewRequest = JSON.parse(mock.calls.find((c) => c.url === '/api/lithophanes/preview')!.body!);
     const request = JSON.parse(mock.calls.find((c) => c.url === '/api/lithophanes' && c.method === 'POST')!.body!);
     expect(previewRequest.fileItemId).toBeNull();
@@ -184,7 +189,7 @@ describe('Laboratory lithophanes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Aggiorna anteprima' }));
     await screen.findByRole('img', { name: 'Sfera di prova' });
     fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
-    await screen.findByText('In coda');
+    await screen.findByText(/In coda/, { selector: '.lithophane-latest' });
     const sent = mock.calls.filter((c) => c.method === 'POST').map((c) => JSON.parse(c.body!).settings);
     expect(sent).toHaveLength(2);
     expect(sent[0]).toEqual(sent[1]);
@@ -205,7 +210,7 @@ describe('Laboratory lithophanes', () => {
     expect(screen.queryByLabelText('Base verticale proporzionata al foro')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /parziale/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
-    await screen.findByText('In coda');
+    await screen.findByText(/In coda/, { selector: '.lithophane-latest' });
     expect(JSON.parse(mock.calls.find((c) => c.method === 'POST')!.body!).settings)
       .toMatchObject({ hanging: true, externalRelief: true, printAnchor: false, internalFit: true, printBrim: true, openingMm: 30 });
   });
@@ -221,7 +226,7 @@ describe('Laboratory lithophanes', () => {
     fireEvent.change(mode, { target: { value: 'hanging' } });
     fireEvent.click(screen.getByLabelText('Brim interno rimovibile su sfera e calotta'));
     fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
-    await screen.findByText('In coda');
+    await screen.findByText(/In coda/, { selector: '.lithophane-latest' });
     expect(JSON.parse(mock.calls.find((c) => c.method === 'POST')!.body!).settings)
       .toMatchObject({ internalFit: true, printBrim: false, printAnchor: false });
     fireEvent.change(mode, { target: { value: 'standing' } });
@@ -238,6 +243,7 @@ describe('Laboratory lithophanes', () => {
       'GET /api/lithophanes': () => jsonResponse({ items: [{ ...project, settings: { ...project.settings, hanging: true }, status: 'ready', downloadReady: true }], nextCursor: null }),
     });
     mount();
+    openHistory(); fireEvent.click(await screen.findByText('Famiglia.png'));
     expect(await screen.findByRole('link', { name: 'Scarica calotta STL' })).toHaveAttribute('href', '/api/lithophanes/project-1/cap');
   });
 
@@ -251,7 +257,10 @@ describe('Laboratory lithophanes', () => {
       'POST /api/lithophanes': () => jsonResponse(project, 201),
     });
     mount();
+    openHistory(); fireEvent.click(await screen.findByText('Famiglia.png'));
     fireEvent.click(await screen.findByRole('button', { name: 'Vedi anteprima' }));
+    await screen.findByRole('img', { name: 'Sfera di prova' });
+    fireEvent.click(screen.getByRole('button', { name: 'Riutilizza configurazione' }));
     const fit = await screen.findByLabelText('Innesto interno da 2 mm, senza piede svasato');
     expect(fit).not.toBeChecked();
     expect(screen.getByLabelText('Ancoraggio temporaneo da rimuovere')).toBeChecked();
@@ -275,7 +284,7 @@ describe('Laboratory lithophanes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
     await screen.findByText('Operazione non riuscita. Controlla i parametri e riprova.');
     fireEvent.click(screen.getByRole('button', { name: 'Genera STL' }));
-    await screen.findByText('In coda');
+    await screen.findByText(/In coda/, { selector: '.lithophane-latest' });
     const requests = mock.calls.filter((c) => c.url === '/api/lithophanes' && c.method === 'POST');
     expect(JSON.parse(requests[0].body!).requestId).toEqual(JSON.parse(requests[1].body!).requestId);
   });
@@ -290,7 +299,8 @@ describe('Laboratory lithophanes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Aggiorna anteprima' }));
     await screen.findByRole('img', { name: 'Sfera di prova' });
     fireEvent.change(screen.getByLabelText('Apertura inferiore per il LED (mm)'), { target: { value: '79' } });
-    expect(screen.queryByRole('img', { name: 'Sfera di prova' })).not.toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Sfera di prova' })).toBeInTheDocument();
+    expect(screen.getByText('Anteprima da aggiornare')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Genera STL' })).toBeDisabled();
     expect(screen.getByRole('alert')).toHaveTextContent('Controlla i valori');
   });
@@ -302,6 +312,7 @@ describe('Laboratory lithophanes', () => {
       'DELETE /api/lithophanes/project-1': () => new Response(null, { status: 204 }),
     });
     mount();
+    openHistory(); fireEvent.click(await screen.findByText('Famiglia.png'));
     expect(await screen.findByRole('link', { name: 'Scarica STL' })).toHaveAttribute('href', '/api/lithophanes/project-1/download');
     fireEvent.click(screen.getByRole('button', { name: 'Elimina' }));
     await waitFor(() => expect(screen.queryByRole('link', { name: 'Scarica STL' })).not.toBeInTheDocument());
@@ -316,7 +327,7 @@ describe('Laboratory lithophanes', () => {
     });
     mount();
     expect(screen.queryByRole('link', { name: 'Scarica STL' })).not.toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: 'Annulla generazione' }));
+    openHistory(); fireEvent.click(await screen.findByRole('button', { name: 'Annulla generazione' }));
     await screen.findByText('Annullamento in corso');
     expect(screen.queryByRole('button', { name: 'Annulla generazione' })).not.toBeInTheDocument();
   });
@@ -328,6 +339,7 @@ describe('Laboratory lithophanes', () => {
       'DELETE /api/lithophanes/queue/photo-2': () => new Response(null, { status: 204 }),
     });
     mount();
+    openSource();
     expect(await screen.findByRole('button', { name: 'Montagna.jpg' })).toBeInTheDocument();
     expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Togli Montagna.jpg dalle foto da trasformare' }));
@@ -344,6 +356,7 @@ describe('Laboratory lithophanes', () => {
     });
     mount();
     expect(await screen.findByText(/Nessuna foto in attesa/)).toBeInTheDocument();
+    openSource();
     expect(screen.getByRole('link', { name: 'Apri la Libreria' })).toHaveAttribute('href', '/media');
     expect(screen.getByRole('link', { name: 'Apri gli album' })).toHaveAttribute('href', '/albums');
   });

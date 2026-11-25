@@ -42,3 +42,31 @@
 .lithophane-crop-stage { width: 100%; margin-inline: auto; }
 .lithophane-crop-stage .photo-crop { width: 100%; border: 2px solid var(--accent-color, #7ba8ff); border-radius: .35rem; }
 .lithophane-crop-guide { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(to right, transparent 33%, rgb(255 255 255 / .4) 33.2%, transparent 33.5%, transparent 66%, rgb(255 255 255 / .4) 66.2%, transparent 66.5%), linear-gradient(to bottom, transparent 33%, rgb(255 255 255 / .4) 33.2%, transparent 33.5%, transparent 66%, rgb(255 255 255 / .4) 66.2%, transparent 66.5%); }
+
+/* One workspace, three focused views. The canvas stays near the controls. */
+.lithophane-views { display: flex; gap: .4rem; flex-wrap: wrap; margin-block: 1rem; }
+.lithophane-views button { flex: 1 1 auto; }
+.lithophane-views button[aria-pressed="true"] { border-color: var(--accent-color, #7ba8ff); font-weight: 700; }
+.lithophane-page [hidden] { display: none !important; }
+.lithophane-section { border: 1px solid var(--border-color, #636775); border-radius: .8rem; margin-block: .7rem; overflow: hidden; }
+.lithophane-section > summary, .lithophane-project > summary { padding: .9rem; cursor: pointer; font-weight: 600; overflow-wrap: anywhere; }
+.lithophane-section > fieldset { border: 0; padding: .8rem; }
+.lithophane-preview-pane { align-self: start; position: sticky; top: 1rem; min-width: 0; }
+.lithophane-preview-pane > button { width: 100%; margin-bottom: .6rem; }
+.lithophane-sphere canvas { touch-action: pan-y; cursor: grab; }
+.lithophane-sphere-expanded { position: fixed; inset: 0; z-index: 1000; overflow-y: auto; border-radius: 0; }
+.lithophane-sphere-expanded canvas { max-width: min(95vw, 65vh); }
+.lithophane-angle { display: grid; gap: .35rem; }
+.lithophane-angle-buttons { display: flex; gap: .4rem; }
+.lithophane-angle-buttons button { flex: 1; }
+.lithophane-history li { display: block; padding: 0; margin-block: .6rem; border: 1px solid var(--border-color, #636775); border-radius: .7rem; }
+.lithophane-project > :not(summary) { margin-inline: .8rem; }
+.lithophane-project summary > div { display: inline-block; vertical-align: middle; max-width: calc(100% - 1.5rem); }
+.lithophane-page .lithophane-actions { gap: .5rem; }
+@media (max-width: 740px) {
+  .lithophane-editor { display: flex; flex-direction: column; gap: .75rem; }
+  .lithophane-preview-pane { position: static; order: -1; width: 100%; }
+  .lithophane-editor form { width: 100%; }
+  .lithophane-page { padding: .5rem; }
+  .lithophane-views button { font-size: .85rem; }
+}

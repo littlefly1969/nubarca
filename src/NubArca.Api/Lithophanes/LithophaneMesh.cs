@@ -150,7 +150,7 @@ public static class LithophaneMesh
             {
                 var direction = row == 0 ? Vector3.UnitZ
                     : new Vector3((float)(sin * longitudeSin[col]), (float)(-sin * longitudeCos[col]), (float)cos);
-                var wall = settings.Thickness(map[col, row]);
+                var wall = LithophaneSurface.Wall(settings, grid, map[col, row], row, col);
                 outside[col] = direction * (float)(settings.ExternalRelief ? settings.InnerRadiusMm + wall : grid.Radius);
                 inside[col] = direction * (float)(settings.ExternalRelief ? settings.InnerRadiusMm : grid.Radius - wall);
                 if (settings.InternalFit && row > grid.TopRows)

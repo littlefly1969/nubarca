@@ -84,7 +84,9 @@ public static class LithophaneImage
                 var v = (lat - 90) / height + 0.5;
                 var x = Math.Clamp((u - placed.Left) / placed.Width, 0, 1);
                 var y = Math.Clamp((v - placed.Top) / placed.Height, 0, 1);
-                result[col, row] = new La16(Tone(photo, x, y, settings), coverage);
+                var tone = Tone(photo, x, y, settings, out var alpha);
+                if (settings.UseSourceAlpha) coverage = (byte)Math.Round(coverage * alpha);
+                result[col, row] = new La16(tone, coverage);
             }
         }
     }
@@ -95,25 +97,35 @@ public static class LithophaneImage
     public static Image<L8> Transmission(Image<La16> map, LithophaneSettings settings)
     {
         var thinnest = Math.Min(settings.MinThicknessMm, settings.BackgroundWallMm);
-        var thickest = Math.Max(settings.MaxThicknessMm, settings.BackgroundWallMm);
+        var thickest = settings.ThickestWallMm;
+        var grid = new LithophaneGrid(settings);
         var result = new Image<L8>(map.Width, map.Height);
         for (var row = 0; row < map.Height; row++)
             for (var col = 0; col < map.Width; col++)
             {
-                result[col, row] = new L8((byte)Math.Round(255 * (thickest - settings.Thickness(map[col, row])) / (thickest - thinnest)));
+                result[col, row] = new L8((byte)Math.Round(255 * (thickest - LithophaneSurface.Wall(settings, grid, map[col, row], row, col)) / (thickest - thinnest)));
             }
         return result;
     }
 
-    private static byte Tone(Image<Rgba32> photo, double x, double y, LithophaneSettings settings)
+    private static byte Tone(Image<Rgba32> photo, double x, double y, LithophaneSettings settings, out double alpha)
     {
         // Bilinear sampling avoids a nearest-neighbour stair pattern.
         var px = x * (photo.Width - 1); var py = y * (photo.Height - 1);
         var x0 = (int)px; var y0 = (int)py;
         var x1 = Math.Min(x0 + 1, photo.Width - 1); var y1 = Math.Min(y0 + 1, photo.Height - 1);
+        double Sample(Func<Rgba32, double> channel)
+        {
+            var topValue = channel(photo[x0, y0]) * (1 - px + x0) + channel(photo[x1, y0]) * (px - x0);
+            var bottomValue = channel(photo[x0, y1]) * (1 - px + x0) + channel(photo[x1, y1]) * (px - x0);
+            return topValue * (1 - py + y0) + bottomValue * (py - y0);
+        }
+        alpha = settings.UseSourceAlpha ? Math.Clamp(Sample(p => p.A / 255d), 0, 1) : 1;
         var top = Luminance(photo[x0, y0]) * (1 - px + x0) + Luminance(photo[x1, y0]) * (px - x0);
         var bottom = Luminance(photo[x0, y1]) * (1 - px + x0) + Luminance(photo[x1, y1]) * (px - x0);
-        var value = top * (1 - py + y0) + bottom * (py - y0);
+        var value = settings.UseSourceAlpha
+            ? (alpha > 1e-9 ? Sample(p => p.A / 255d * (0.2126 * p.R + 0.7152 * p.G + 0.0722 * p.B) / 255) / alpha : 1)
+            : top * (1 - py + y0) + bottom * (py - y0);
         value = Math.Clamp((value - 0.5) * settings.Contrast + 0.5 + settings.Brightness, 0, 1);
         return (byte)Math.Round(255 * Math.Pow(value, 1 / settings.Gamma));
     }

@@ -1,7 +1,7 @@
 import type { LithophaneSettings } from '@nubarca/api-client';
 
 export const DEFAULT_LITHOPHANE_SETTINGS: LithophaneSettings = {
-  textLatitudeDegrees: 0, textLongitudeDegrees: 0,
+  textLatitudeDegrees: 0, textLongitudeDegrees: 0, useSourceAlpha: true,
   diameterMm: 80, minThicknessMm: 0.8, maxThicknessMm: 2.8, openingMm: 20,
   baseCollar: true,
   externalRelief: true, hanging: false, printAnchor: false, frameAspect: 4 / 3, pictureScale: 0.8,
@@ -52,7 +52,7 @@ function withinBounds(s: LithophaneSettings): boolean {
     && (s.backgroundThicknessMm == null || between(s.backgroundThicknessMm, 0.4, 2))
     && between(s.maxThicknessMm, s.minThicknessMm + 0.1, 5) && between(s.openingMm, 4, s.diameterMm * 0.65)
     && (!s.hanging || (!!s.externalRelief && between(s.openingMm, 16, s.diameterMm * 0.65)
-      && (s.backgroundThicknessMm ?? s.minThicknessMm) >= 0.8))
+      && ((s.backgroundThicknessMm ?? s.minThicknessMm) >= 0.8 || !!s.internalFit)))
     && (!s.internalFit || (!!s.hanging && !s.printAnchor))
     && (!s.printBrim || !!s.internalFit)
     && (s.frameAspect == null || between(s.frameAspect, 0.2, 5))
@@ -63,6 +63,9 @@ function withinBounds(s: LithophaneSettings): boolean {
     && between(s.contrast, 0.25, 3) && between(s.gamma, 0.3, 3)
     && (s.textLatitudeDegrees == null || between(s.textLatitudeDegrees, -60, 60))
     && (s.textLongitudeDegrees == null || between(s.textLongitudeDegrees, -180, 180))
+    && between(s.backgroundTextureHeightMm ?? 0, 0, 0.4)
+    && between(s.backgroundTextureGrainMm ?? 1.5, 0.8, 3)
+    && (!(s.backgroundTextureHeightMm ?? 0) || !!s.externalRelief)
     && validLithophaneText(s.text) && (s.textHeightMm == null || between(s.textHeightMm, 3, 30));
 }
 

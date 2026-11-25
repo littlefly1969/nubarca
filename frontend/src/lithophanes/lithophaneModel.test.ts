@@ -103,3 +103,11 @@ describe('lithophane words', () => {
       .toEqual({ ...defaults, text: 'Ciao', textHeightMm: 8 });
   });
 });
+
+it('accepts a 0.4 mm suspended wall with an internal joint and bounds soft relief', () => {
+  const thin = { ...defaults, hanging: true, internalFit: true, openingMm: 30, minThicknessMm: 0.4, backgroundThicknessMm: 0.4 };
+  expect(validLithophaneSettings(thin)).toBe(true);
+  expect(validLithophaneSettings({ ...thin, internalFit: false })).toBe(false);
+  expect(validLithophaneSettings({ ...thin, backgroundTextureHeightMm: 0.15, backgroundTextureGrainMm: 1.5 })).toBe(true);
+  expect(validLithophaneSettings({ ...thin, backgroundTextureHeightMm: 0.5 })).toBe(false);
+});
