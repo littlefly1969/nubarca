@@ -370,7 +370,7 @@ export function LithophanesPage() {
       {loading && <p role="status">{t('common.loading')}</p>}
       {loadFailed && <button className="btn btn-secondary" onClick={() => setReload((v) => v + 1)}>{t('common.retry')}</button>}
       {!loading && !loadFailed && items.length === 0 && <p>{t('lithophane.empty')}</p>}
-      <ul>{items.map((item) => <li key={item.id}><details className="lithophane-project" open={activeLithophane(item.status)}><summary>
+      <ul>{items.map((item) => <li key={item.id}><details className="lithophane-project" open={activeLithophane(item.status) ? true : undefined}><summary>
         <div><strong>{item.name}</strong><p>{formatNumber(item.settings.diameterMm)} mm · {formatNumber(item.sizeBytes / 1_000_000, {
           minimumFractionDigits: 1, maximumFractionDigits: 1,
         })} MB</p>

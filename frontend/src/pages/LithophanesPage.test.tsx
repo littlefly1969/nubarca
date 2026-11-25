@@ -44,7 +44,7 @@ describe('Laboratory lithophanes', () => {
     const request = mock.calls.find((c) => c.url === '/api/lithophanes' && c.method === 'POST')!;
     expect(JSON.parse(request.body!)).toMatchObject({ fileItemId: photo.id, settings: { diameterMm: 90, backgroundThicknessMm: 0.8, baseCollar: true } });
     // The server ended the photo's wait when it accepted the generation.
-    expect(screen.queryByRole('button', { name: 'Famiglia.png' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Famiglia.png', hidden: true })).not.toBeInTheDocument();
     expect(JSON.parse(request.body!).requestId).toMatch(/^[a-f0-9-]{36}$/);
     expect(mock.calls.some((c) => /\/content|\/download/.test(c.url))).toBe(false);
   });
@@ -243,7 +243,7 @@ describe('Laboratory lithophanes', () => {
       'GET /api/lithophanes': () => jsonResponse({ items: [{ ...project, settings: { ...project.settings, hanging: true }, status: 'ready', downloadReady: true }], nextCursor: null }),
     });
     mount();
-    openHistory(); fireEvent.click(await screen.findByText('Famiglia.png'));
+    openHistory(); fireEvent.click(await screen.findByText('Famiglia.png', { selector: '.lithophane-project strong' }));
     expect(await screen.findByRole('link', { name: 'Scarica calotta STL' })).toHaveAttribute('href', '/api/lithophanes/project-1/cap');
   });
 
@@ -257,7 +257,7 @@ describe('Laboratory lithophanes', () => {
       'POST /api/lithophanes': () => jsonResponse(project, 201),
     });
     mount();
-    openHistory(); fireEvent.click(await screen.findByText('Famiglia.png'));
+    openHistory(); fireEvent.click(await screen.findByText('Famiglia.png', { selector: '.lithophane-project strong' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Vedi anteprima' }));
     await screen.findByRole('img', { name: 'Sfera di prova' });
     fireEvent.click(screen.getByRole('button', { name: 'Riutilizza configurazione' }));
@@ -312,7 +312,7 @@ describe('Laboratory lithophanes', () => {
       'DELETE /api/lithophanes/project-1': () => new Response(null, { status: 204 }),
     });
     mount();
-    openHistory(); fireEvent.click(await screen.findByText('Famiglia.png'));
+    openHistory(); fireEvent.click(await screen.findByText('Famiglia.png', { selector: '.lithophane-project strong' }));
     expect(await screen.findByRole('link', { name: 'Scarica STL' })).toHaveAttribute('href', '/api/lithophanes/project-1/download');
     fireEvent.click(screen.getByRole('button', { name: 'Elimina' }));
     await waitFor(() => expect(screen.queryByRole('link', { name: 'Scarica STL' })).not.toBeInTheDocument());
@@ -328,7 +328,7 @@ describe('Laboratory lithophanes', () => {
     mount();
     expect(screen.queryByRole('link', { name: 'Scarica STL' })).not.toBeInTheDocument();
     openHistory(); fireEvent.click(await screen.findByRole('button', { name: 'Annulla generazione' }));
-    await screen.findByText('Annullamento in corso');
+    await screen.findByText('Annullamento in corso', { selector: '.lithophane-project summary p' });
     expect(screen.queryByRole('button', { name: 'Annulla generazione' })).not.toBeInTheDocument();
   });
 
